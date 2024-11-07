@@ -88,7 +88,7 @@ working_dir = click.option(
     type=DIR_RW_E,
     required=False,
     default=None,
-    callback=lambda c, p, v: v if v else c.params["submission_dir"],
+    callback=lambda c, p, v: v or c.params.get("submission_dir"),
     help="Path to a working directory where intermediate files can be stored",
 )
 
@@ -100,15 +100,6 @@ config_file = click.option(
     required=True,
     default=DEFAULT_CONFIG_PATH,
     help="Path to config file",
-)
-
-encrypted_submission_dir = click.option(
-    "-s",
-    "--encrypted-submission-dir",
-    metavar="STRING",
-    type=DIR_R_E,
-    required=False,
-    help="Path to the encrypted submission directory containing both 'metadata/' and 'encrypted_files/' directories",
 )
 
 encrypted_files_dir = click.option(
@@ -211,9 +202,7 @@ def validate(
     worker_inst = Worker(
         working_dir=working_dir_path,
         files_dir=submission_dir_path / "files" if files_dir is None else files_dir,
-        metadata_dir=(
-            submission_dir_path / "metadata" if metadata_dir is None else metadata_dir
-        ),
+        metadata_dir=(metadata_dir or submission_dir_path / "metadata"),
         threads=threads,
     )
     worker_inst.validate()
@@ -271,7 +260,7 @@ def encrypt(  # noqa: PLR0913
 
 
 @cli.command()
-@encrypted_submission_dir
+@submission_dir
 @metadata_dir
 @encrypted_files_dir
 @working_dir
@@ -279,7 +268,7 @@ def encrypt(  # noqa: PLR0913
 @config_file
 @threads
 def decrypt(  # noqa: PLR0913
-    encrypted_submission_dir: str,
+    submission_dir: str,
     metadata_dir: str,
     encrypted_files_dir: str,
     working_dir: str,
@@ -299,23 +288,19 @@ def decrypt(  # noqa: PLR0913
 
     log.info("Starting encryption...")
 
-    working_dir_: Path = Path(working_dir)
-    encrypted_submission_dir_: Path = Path(encrypted_submission_dir)
+    working_dir_path: Path = Path(working_dir)
+    submission_dir_path: Path = Path(submission_dir)
 
     worker_inst = Worker(
-        working_dir=working_dir_,
+        working_dir=working_dir_path,
         files_dir=(
-            working_dir_ / "files"
+            working_dir_path / "files"
             if decrypted_files_dir is None
             else decrypted_files_dir
         ),
-        metadata_dir=(
-            encrypted_submission_dir_ / "metadata"
-            if metadata_dir is None
-            else metadata_dir
-        ),
+        metadata_dir=(metadata_dir or submission_dir_path / "metadata"),
         encrypted_files_dir=(
-            encrypted_submission_dir_ / "encrypted_files"
+            submission_dir_path / "encrypted_files"
             if encrypted_files_dir is None
             else encrypted_files_dir
         ),
@@ -327,14 +312,14 @@ def decrypt(  # noqa: PLR0913
 
 
 @cli.command()
-@encrypted_submission_dir
+@submission_dir
 @metadata_dir
 @encrypted_files_dir
 @working_dir
 @config_file
 @threads
 def upload(  # noqa: PLR0913
-    encrypted_submission_dir,
+    submission_dir,
     metadata_dir,
     encrypted_files_dir,
     working_dir,
@@ -342,8 +327,8 @@ def upload(  # noqa: PLR0913
     threads,
 ):
     """
-    Uploads a submission file to s3 using the provided configuration.
-    :param encrypted_submission_dir: The path to the encrypted submission directory.
+    Upload a submission file to s3 using the provided configuration.
+    :param submission_dir: The path to the encrypted submission directory.
     :param metadata_dir: The path to the metadata directory.
     :param encrypted_files_dir: The path to the encrypted files directory.
     :param working_dir: Path to a working directory where intermediate files can be stored
@@ -352,18 +337,14 @@ def upload(  # noqa: PLR0913
     config = read_config(config_file)
 
     log.info("Starting upload...")
-    working_dir = Path(working_dir)
-    encrypted_submission_dir = Path(encrypted_submission_dir)
+    working_dir_path = Path(working_dir)
+    submission_dir_path = Path(submission_dir)
 
     worker_inst = Worker(
-        working_dir=working_dir,
-        metadata_dir=(
-            encrypted_submission_dir / "metadata"
-            if metadata_dir is None
-            else metadata_dir
-        ),
+        working_dir=working_dir_path,
+        metadata_dir=(metadata_dir or submission_dir_path / "metadata"),
         encrypted_files_dir=(
-            encrypted_submission_dir / "encrypted_files"
+            submission_dir_path / "encrypted_files"
             if encrypted_files_dir is None
             else encrypted_files_dir
         ),
@@ -376,21 +357,21 @@ def upload(  # noqa: PLR0913
 
 @cli.command()
 @click.argument("submission_id", type=str)
-@encrypted_submission_dir
+@submission_dir
 @metadata_dir
 @encrypted_files_dir
 @config_file
 def download(
     submission_id,
-    encrypted_submission_dir,
+    submission_dir,
     metadata_dir,
     encrypted_files_dir,
     config_file,
 ):
     """
-    Downloads a submission file to s3 using the provided configuration.
+    Download a submission file from s3 using the provided configuration.
     :param submission_id: Submission id
-    :param encrypted_submission_dir: The path to the encrypted submission directory.
+    :param submission_dir: The path to the encrypted submission directory.
     :param metadata_dir: The path to the metadata directory.
     :param encrypted_files_dir: The path to the encrypted files directory.
     :param config_file: The path to the configuration file.
@@ -399,16 +380,16 @@ def download(
 
     log.info("Starting download...")
 
-    encrypted_submission_dir_path = Path(encrypted_submission_dir)
+    submission_dir_path = Path(submission_dir)
 
     worker_inst = Worker(
         metadata_dir=(
-            encrypted_submission_dir_path / submission_id / "metadata"
+            submission_dir_path / submission_id / "metadata"
             if metadata_dir is None
             else metadata_dir
         ),
         encrypted_files_dir=(
-            encrypted_submission_dir_path / submission_id / "files"
+            submission_dir_path / submission_id / "files"
             if encrypted_files_dir is None
             else encrypted_files_dir
         ),

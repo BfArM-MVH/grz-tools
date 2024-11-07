@@ -70,7 +70,7 @@ def test_encrypt_decrypt_submission(
     # then, decrypt the data again
     testargs = [
         "decrypt",
-        "--encrypted-submission-dir",
+        "--submission-dir",
         "tests/mock_files/submissions/valid_submission/",
         "--working-dir",
         str(working_dir_path),
@@ -107,7 +107,7 @@ def test_encrypt_decrypt_submission(
 def test_decrypt_submission(working_dir_path, temp_config_file_path):
     testargs = [
         "decrypt",
-        "--encrypted-submission-dir",
+        "--submission-dir",
         "tests/mock_files/submissions/valid_submission/",
         "--working-dir",
         str(working_dir_path),
@@ -140,7 +140,7 @@ def test_decrypt_submission(working_dir_path, temp_config_file_path):
 def test_upload_submission(working_dir_path, temp_config_file_path, remote_bucket):
     testargs = [
         "upload",
-        "--encrypted-submission-dir",
+        "--submission-dir",
         "tests/mock_files/submissions/valid_submission/",
         "--working-dir",
         str(working_dir_path),
