@@ -177,6 +177,7 @@ class Crypt4GH:
         input_path: str | PathLike,
         output_path: str | PathLike,
         public_keys: tuple[Crypt4GH.Key],
+        tqdm_kwargs: dict | None = None,
     ):
         """
         Encrypt the file, properly handling the Crypt4GH header.
@@ -204,6 +205,7 @@ class Crypt4GH:
                     unit_scale=True,
                     # unit_divisor=1024,  # make use of standard units e.g. KB, MB, etc.
                     miniters=1,
+                    **(tqdm_kwargs or {}),
                 ),
             ) as pbar_in_fd,
         ):
