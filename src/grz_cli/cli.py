@@ -9,6 +9,7 @@ from os import PathLike
 from pathlib import Path
 
 import click
+import platformdirs
 import yaml
 
 from .constants import PACKAGE_ROOT
@@ -17,6 +18,8 @@ from .models.config import ConfigModel
 from .worker import Worker
 
 log = logging.getLogger(PACKAGE_ROOT + ".cli")
+
+DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grz-cli")) / "config.yaml"
 
 # Aliases for path types for click options
 # Naming convention: {DIR,FILE}_{Read,Write}_{Exists,Create}
@@ -95,7 +98,7 @@ config_file = click.option(
     metavar="STRING",
     type=FILE_R_E,
     required=True,
-    default="~/.config/grz_cli/config.yaml",
+    default=DEFAULT_CONFIG_PATH,
     help="Path to config file",
 )
 

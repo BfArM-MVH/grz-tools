@@ -20,7 +20,8 @@ dependencies = [
     "jsonschema ~=4.23.0",
     "pyyaml ~=6.0.2",
     "tqdm ~=4.66.5",
-    "pydantic ~=2.9.2"
+    "pydantic ~=2.9.2",
+    "platformdirs ~=4.3.6",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

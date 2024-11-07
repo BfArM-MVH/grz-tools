@@ -1,7 +1,6 @@
 version = 1
 requires-python = ">=3.12"
 resolution-markers = [
-    "python_version < '0'",
     "python_full_version < '3.13'",
     "python_full_version >= '4.0'",
     "python_full_version >= '3.13' and python_full_version < '4.0'",
@@ -403,6 +402,7 @@ dependencies = [
     { name = "click" },
     { name = "crypt4gh" },
     { name = "jsonschema" },
+    { name = "platformdirs" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "tqdm" },
@@ -436,6 +436,7 @@ requires-dist = [
     { name = "jsonschema", specifier = "~=4.23.0" },
     { name = "moto", extras = ["s3"], marker = "extra == 'test'", specifier = "~=5.0.16" },
     { name = "numpy", marker = "extra == 'test'", specifier = "~=2.1.2" },
+    { name = "platformdirs", specifier = "~=4.3.6" },
     { name = "pydantic", specifier = "~=2.9.2" },
     { name = "pytest", marker = "extra == 'test'", specifier = "~=8.3.3" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = "~=5.0.0" },

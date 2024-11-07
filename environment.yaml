@@ -12,3 +12,4 @@ dependencies:
   - tqdm =4.66.5
   - jsonschema =4.23.0
   - pydantic =2.9.2
+  - platformdirs =4.3.6
