@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, override
 
 import boto3  # type: ignore[import-untyped]
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
-from boto3.s3.transfer import S3Transfer, TransferConfig
+from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config  # type: ignore[import-untyped]
 from tqdm.auto import tqdm
 
