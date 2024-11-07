@@ -75,7 +75,7 @@ class UploadWorker(metaclass=abc.ABCMeta):
 
 
 class S3BotoUploadWorker(UploadWorker):
-    """Implementation of an upload worker using boto3 for S3"""
+    """Implementation of an upload operations using boto3 for S3"""
 
     __log = log.getChild("S3BotoUploadWorker")
 

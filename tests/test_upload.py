@@ -37,7 +37,7 @@ def test_boto_upload(
     temp_upload_log_file_path,
     tmpdir_factory,
 ):
-    # create upload worker
+    # create upload operations
     upload_worker = S3BotoUploadWorker(
         config=config_model_without_endpoint_url,
         status_file_path=temp_upload_log_file_path,

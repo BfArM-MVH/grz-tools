@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class S3BotoDownloadWorker:
-    """Implementation of an upload worker using boto3 for S3"""
+    """Implementation of an upload operations using boto3 for S3"""
 
     __log = log.getChild("S3BotoDownloadWorker")
 
