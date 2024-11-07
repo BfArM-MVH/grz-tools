@@ -1,6 +1,7 @@
 """Module providing functions for encrypting submissions, including parallel encryption across files"""
 
 import logging
+import sys
 from collections.abc import Generator
 from functools import partial
 from pathlib import Path
@@ -32,6 +33,8 @@ def _parallel_encrypt(
         partial(_encrypt_item, public_keys), enumerate(files_to_encrypt)
     ):
         progress_logger.set_state(file_path, file_metadata, state=state)
+        if state["encryption_successful"] is False:
+            sys.exit(f"Encryption failed for {file_path}, exiting.")
 
 
 def _determine_files_to_encrypt(
