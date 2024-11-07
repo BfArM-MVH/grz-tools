@@ -13,6 +13,7 @@ from .file_operations import Crypt4GH, calculate_sha256
 from .models.config import Backend, ConfigModel
 from .models.v1_0_0.metadata import File as SubmissionFileMetadata
 from .models.v1_0_0.metadata import GrzSubmissionMetadata
+from .progress_logging import FileProgressLogger
 from .upload import S3BotoUploadWorker
 
 log = logging.getLogger(__name__)
@@ -259,51 +260,7 @@ class Submission:
             self.__log.error(f"Error preparing public keys: {e}")
             raise e
 
-        for file_path, file_metadata in self.files.items():
-            # encryption_successful = True
-            logged_state = progress_logger.get_state(file_path, file_metadata)
-            self.__log.debug("state for %s: %s", file_path, logged_state)
-
-            encrypted_file_path = (
-                encrypted_files_dir
-                / EncryptedSubmission.get_encrypted_file_path(file_metadata.file_path)
-            )
-            encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
-
-            if (
-                (logged_state is None)
-                or not logged_state.get("encryption_successful", False)
-                or not encrypted_file_path.is_file()
-            ):
-                self.__log.info(
-                    "Encrypting file: '%s' -> '%s'",
-                    str(file_path),
-                    str(encrypted_file_path),
-                )
-
-                try:
-                    Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
-
-                    self.__log.info(f"Encryption complete for {str(file_path)}. ")
-                    progress_logger.set_state(
-                        file_path, file_metadata, state={"encryption_successful": True}
-                    )
-                except Exception as e:
-                    self.__log.error("Encryption failed for '%s'", str(file_path))
-
-                    progress_logger.set_state(
-                        file_path,
-                        file_metadata,
-                        state={"encryption_successful": False, "error": str(e)},
-                    )
-
-                    raise e
-            else:
-                self.__log.info(
-                    "File '%s' already encrypted in '%s'",
-                    str(file_path),
-                    str(encrypted_file_path),
-                )
+        self._parallel_encrypt(public_keys, encrypted_files_dir, progress_logger)
 
         self.__log.info("File encryption completed.")
 
@@ -311,6 +268,83 @@ class Submission:
             metadata_dir=self.metadata_dir,
             encrypted_files_dir=encrypted_files_dir,
         )
+
+    def _parallel_encrypt(
+        self,
+        public_keys,
+        encrypted_files_dir: Path,
+        progress_logger: FileProgressLogger,
+    ):
+        type ProcessItem = tuple[Path, SubmissionFileMetadata, dict, logging.Logger]
+        type ProcessResult = tuple[Path, SubmissionFileMetadata, dict]
+
+        def determine_files_to_encrypt(
+            files: dict[Path, SubmissionFileMetadata],
+        ) -> Generator[ProcessItem, None, None]:
+            for file_path, file_metadata in files.items():
+                logged_state = progress_logger.get_state(file_path, file_metadata)
+                self.__log.debug("state for %s: %s", file_path, logged_state)
+
+                encrypted_file_path = (
+                    encrypted_files_dir
+                    / EncryptedSubmission.get_encrypted_file_path(
+                        file_metadata.file_path
+                    )
+                )
+                encrypted_file_path.parent.mkdir(
+                    mode=0o770, parents=True, exist_ok=True
+                )
+
+                if (
+                    (logged_state is None)
+                    or not logged_state.get("encryption_successful", False)
+                    or not encrypted_file_path.is_file()
+                ):
+                    yield file_path, file_metadata, logged_state, self.__log
+                else:
+                    self.__log.info(
+                        "File '%s' already encrypted in '%s'",
+                        str(file_path),
+                        str(encrypted_file_path),
+                    )
+
+        files_to_encrypt = determine_files_to_encrypt(self.files)
+
+        def _process(item: ProcessItem) -> Generator[ProcessResult, None, None]:
+            file_path, file_metadata, logged_state, logger = item
+            logger.debug("state for %s: %s", file_path, logged_state)
+            encrypted_file_path = (
+                encrypted_files_dir
+                / EncryptedSubmission.get_encrypted_file_path(file_metadata.file_path)
+            )
+            encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+
+            logger.info(
+                "Encrypting file: '%s' -> '%s'",
+                str(file_path),
+                str(encrypted_file_path),
+            )
+
+            try:
+                Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
+
+                logger.info(f"Encryption complete for {str(file_path)}. ")
+                yield file_path, file_metadata, {"encryption_successful": True}
+            except Exception as e:
+                logger.error("Encryption failed for '%s'", str(file_path))
+
+                yield (
+                    file_path,
+                    file_metadata,
+                    {"encryption_successful": False, "error": str(e)},
+                )
+
+                raise e
+
+        from tqdm.contrib.concurrent import process_map
+
+        for file_path, file_metadata, state in process_map(_process, files_to_encrypt):
+            progress_logger.set_state(file_path, file_metadata, state=state)
 
 
 class EncryptedSubmission:
