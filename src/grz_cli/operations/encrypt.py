@@ -93,9 +93,9 @@ def _encrypt_item(public_keys, item: tuple[int, ProcessItem]) -> ProcessResult:
 
         logger.info(f"Encryption complete for {str(file_path)}. ")
         return file_path, file_metadata, {"encryption_successful": True}
-    except Exception as e:
+    except (Exception, KeyboardInterrupt) as e:
         logger.error("Encryption failed for '%s'", str(file_path))
-
+        Path(encrypted_file_path).unlink()
         return (
             file_path,
             file_metadata,
