@@ -13,6 +13,7 @@ from .download import S3BotoDownloadWorker
 from .file_operations import Crypt4GH
 from .models.config import Backend, ConfigModel
 from .operations.encrypt import _parallel_encrypt
+from .operations.validate import validate_checksums
 from .progress_logging import FileProgressLogger
 from .submission import (
     EncryptedSubmission,
@@ -129,9 +130,15 @@ class Worker:
         if force:
             # delete the log file
             self.progress_file_checksum.unlink()
+
         self.__log.info("Starting checksum validation...")
+
         if errors := list(
-            submission.validate_checksums(progress_log_file=self.progress_file_checksum)
+            validate_checksums(
+                submission.files,
+                progress_log_file=self.progress_file_checksum,
+                logger=self.__log,
+            )
         ):
             error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
             self.__log.error(error_msg)

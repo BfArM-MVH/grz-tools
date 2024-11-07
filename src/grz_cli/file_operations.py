@@ -32,13 +32,19 @@ from tqdm.auto import tqdm
 log = logging.getLogger(__name__)
 
 
-def calculate_sha256(file_path: str | PathLike, chunk_size=2**16, progress=True) -> str:
+def calculate_sha256(
+    file_path: str | PathLike,
+    chunk_size=2**16,
+    progress=True,
+    tqdm_kwargs: dict | None = None,
+) -> str:
     """
     Calculate the sha256 value of a file in chunks
 
     :param file_path: path to the file
     :param chunk_size: Chunk size in bytes
     :param progress: Print progress
+    :param tqdm_kwargs: Additional keyword arguments for tqdm
     :return: calculated sha256 value of file_path
     """
     file_path = Path(file_path)
@@ -51,6 +57,7 @@ def calculate_sha256(file_path: str | PathLike, chunk_size=2**16, progress=True)
                 unit="B",
                 unit_scale=True,
                 desc=f"Calculating SHA256 {file_path.name}",
+                **(tqdm_kwargs or {}),
             ) as pbar:
                 while chunk := f.read(chunk_size):
                     sha256_hash.update(chunk)

@@ -152,64 +152,6 @@ class Submission:
 
         return retval
 
-    def validate_checksums(self, progress_log_file: str | PathLike) -> Generator[str]:
-        """
-        Validates the checksum of the files against the metadata and prints the errors.
-
-        :return: Generator of errors
-        """
-        from .progress_logging import FileProgressLogger
-
-        progress_logger = FileProgressLogger(log_file_path=progress_log_file)
-        # cleanup log file and keep only files listed here
-        progress_logger.cleanup(
-            keep=[
-                (file_path, file_metadata)
-                for file_path, file_metadata in self.files.items()
-            ]
-        )
-        # fields:
-        # - "errors": List[str]
-        # - "validation_passed": bool
-
-        for local_file_path, file_metadata in self.files.items():
-            logged_state = progress_logger.get_state(local_file_path, file_metadata)
-
-            # determine if we can skip the verification
-            if logged_state is None:
-                self.__log.debug("State for %s not calculated yet", local_file_path)
-            elif not logged_state.get("validation_passed", False):
-                errors = logged_state.get("errors", [])
-                yield from errors
-
-                # skip re-verification
-                continue
-            else:
-                self.__log.debug(
-                    "Validation for %s already passed, skipping...",
-                    str(local_file_path),
-                )
-
-                # skip re-verification
-                continue
-
-            self.__log.debug("Validating '%s'...", str(local_file_path))
-            # validate the file
-            errors = list(file_metadata.validate_data(local_file_path))
-            validation_passed = len(errors) == 0
-
-            # log state
-            progress_logger.set_state(
-                local_file_path,
-                file_metadata,
-                state={
-                    "errors": errors,
-                    "validation_passed": validation_passed,
-                },
-            )
-
-            yield from errors
-
 
 class EncryptedSubmission:
     """The encrypted counterpart to `Submission`. Handles encrypted submission data."""

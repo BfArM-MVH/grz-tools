@@ -8,9 +8,9 @@ from pathlib import Path
 
 from tqdm.contrib.concurrent import process_map
 
-from grz_cli.file_operations import Crypt4GH
-from grz_cli.progress_logging import FileProgressLogger
-from grz_cli.submission import EncryptedSubmission, Submission, SubmissionFileMetadata
+from ..file_operations import Crypt4GH
+from ..progress_logging import FileProgressLogger
+from ..submission import EncryptedSubmission, Submission, SubmissionFileMetadata
 
 type ProcessItem = tuple[Path, Path, SubmissionFileMetadata, dict, logging.Logger]
 type ProcessResult = tuple[Path, SubmissionFileMetadata, dict]

@@ -372,7 +372,9 @@ class File(StrictBaseModel):
     Indicates the read order for paired-end reads.
     """
 
-    def validate_data(self, local_file_path: Path) -> Generator[str]:
+    def validate_data(
+        self, local_file_path: Path, tqdm_kwargs: dict | None = None
+    ) -> Generator[str]:
         """
         Validates whether the provided file matches this metadata.
 
@@ -396,7 +398,9 @@ class File(StrictBaseModel):
 
         # Check if the checksum is correct
         if self.checksum_type == "sha256":
-            calculated_checksum = calculate_sha256(local_file_path)
+            calculated_checksum = calculate_sha256(
+                local_file_path, tqdm_kwargs=tqdm_kwargs
+            )
             if self.file_checksum != calculated_checksum:
                 yield (
                     f"{str(self.file_path)}: Checksum mismatch! "
