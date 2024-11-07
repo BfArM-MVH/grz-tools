@@ -84,7 +84,12 @@ class S3BotoUploadWorker(UploadWorker):
     MULTIPART_CHUNK_SIZE = 64 * 1024 * 1024  # 64 MB
     MAX_SINGLEPART_UPLOAD_SIZE = 5 * 1024 * 1024  # 5 MB
 
-    def __init__(self, config: ConfigModel, status_file_path: str | PathLike):
+    def __init__(
+        self,
+        config: ConfigModel,
+        status_file_path: str | PathLike,
+        threads: int | None = None,
+    ):
         """
         An upload manager for S3 storage
 
@@ -95,6 +100,7 @@ class S3BotoUploadWorker(UploadWorker):
 
         self._status_file_path = Path(status_file_path)
         self._config = config
+        self._threads = threads or multiprocessing.cpu_count()
 
         self._init_s3_client()
 
@@ -154,7 +160,6 @@ class S3BotoUploadWorker(UploadWorker):
         progress_bar = tqdm(
             total=file_size, unit="B", unit_scale=True, unit_divisor=1024
         )
-        self._threads = 1
 
         def _chunk_file(file_path: Path, chunk_size: int, queue: Queue):
             with open(file_path, "rb") as infile:

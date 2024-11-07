@@ -209,7 +209,9 @@ class Worker:
             raise NotImplementedError()
         else:
             upload_worker = S3BotoUploadWorker(
-                config, status_file_path=self.progress_file_upload
+                config,
+                status_file_path=self.progress_file_upload,
+                threads=self._threads,
             )
 
         encrypted_submission = self.parse_encrypted_submission()
