@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from grz_cli.parser import EncryptedSubmission, SubmissionMetadata
+from grz_cli.submission import EncryptedSubmission, SubmissionMetadata
 
 
 def test_submission_metadata(temp_metadata_file_path):

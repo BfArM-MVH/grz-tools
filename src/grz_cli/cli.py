@@ -14,7 +14,7 @@ import yaml
 from .constants import PACKAGE_ROOT
 from .logging_setup import add_filelogger
 from .models.config import ConfigModel
-from .parser import Worker
+from .worker import Worker
 
 log = logging.getLogger(PACKAGE_ROOT + ".cli")
 

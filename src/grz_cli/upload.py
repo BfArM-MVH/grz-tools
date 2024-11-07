@@ -19,7 +19,7 @@ from tqdm.auto import tqdm
 from .models.config import ConfigModel
 
 if TYPE_CHECKING:
-    from .parser import EncryptedSubmission
+    from .submission import EncryptedSubmission
 
 log = logging.getLogger(__name__)
 
