@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import abc
 import logging
+import multiprocessing
 from hashlib import sha256
+from multiprocessing import Pool, Queue
 from os import PathLike
 from os.path import getsize
 from pathlib import Path
@@ -79,7 +81,7 @@ class S3BotoUploadWorker(UploadWorker):
 
     __log = log.getChild("S3BotoUploadWorker")
 
-    MULTIPART_CHUNK_SIZE = 200 * 1024 * 1024  # 200 MB
+    MULTIPART_CHUNK_SIZE = 64 * 1024 * 1024  # 64 MB
     MAX_SINGLEPART_UPLOAD_SIZE = 5 * 1024 * 1024  # 5 MB
 
     def __init__(self, config: ConfigModel, status_file_path: str | PathLike):
@@ -132,7 +134,7 @@ class S3BotoUploadWorker(UploadWorker):
     #         f"already finished files before current upload: {self.__file_prefinished}"
     #     )
 
-    def _multipart_upload(self, local_file, s3_object_id):
+    def _multipart_upload(self, local_file, s3_object_id):  # noqa: C901
         """
         Upload the file in chunks to S3.
 
@@ -144,47 +146,110 @@ class S3BotoUploadWorker(UploadWorker):
             Bucket=self._config.s3_options.bucket, Key=s3_object_id
         )
         upload_id = multipart_upload["UploadId"]
-        parts = []
-        part_number = 1
 
         # Get the file size for progress bar
         file_size = getsize(local_file)
+
         # initialize progress bar
         progress_bar = tqdm(
             total=file_size, unit="B", unit_scale=True, unit_divisor=1024
         )
+        self._threads = 1
 
-        try:
-            # Initialize sha256 calculations
-            original_sha256 = sha256()
-
-            with open(local_file, "rb") as infile:
-                # Process the file in chunks
-                while chunk := infile.read(S3BotoUploadWorker.MULTIPART_CHUNK_SIZE):
-                    original_sha256.update(chunk)
-                    # Upload each chunk
-                    part = self._s3_client.upload_part(
-                        Bucket=self._config.s3_options.bucket,
-                        Key=s3_object_id,
-                        PartNumber=part_number,
-                        UploadId=upload_id,
-                        Body=chunk,
-                    )
-                    progress_bar.update(len(chunk))
-                    parts.append({"PartNumber": part_number, "ETag": part["ETag"]})
+        def _chunk_file(file_path: Path, chunk_size: int, queue: Queue):
+            with open(file_path, "rb") as infile:
+                part_number = 1
+                while True:
+                    chunk_data = infile.read(chunk_size)
+                    if not chunk_data:
+                        break
+                    queue.put((part_number, chunk_data))
                     part_number += 1
+            # Signal to workers that there's no more data
+            for _ in range(self._threads):
+                queue.put((None, None))
 
-            # Complete the multipart upload
+        def _upload_part(
+            bucket_name: str,
+            key: str,
+            part_number: int,
+            chunk_data: bytes,
+            upload_id: str,
+        ) -> dict | None:
+            try:
+                response = self._s3_client.upload_part(
+                    Bucket=bucket_name,
+                    Key=key,
+                    PartNumber=part_number,
+                    UploadId=upload_id,
+                    Body=chunk_data,
+                )
+                return {"PartNumber": part_number, "ETag": response["ETag"]}
+            except Exception as e:
+                print(f"Error uploading part {part_number}: {e}")
+                return None
+
+        def _upload_part_worker(  # noqa: PLR0913
+            queue: Queue,
+            progress_bar,
+            bucket_name: str,
+            key: str,
+            upload_id: str,
+            parts: list,
+        ):
+            while True:
+                part_number, chunk_data = queue.get()
+                if part_number is None:  # Exit signal
+                    break
+
+                result = _upload_part(
+                    bucket_name, key, part_number, chunk_data, upload_id
+                )
+                if result:
+                    parts.append(result)
+                    progress_bar.update(len(chunk_data))
+
+        # Initialize sha256 calculations
+        original_sha256 = sha256()
+
+        chunk_size = S3BotoUploadWorker.MULTIPART_CHUNK_SIZE
+
+        # TODO upper limit for queue size / number of parts in queue to avoid memory issues
+        queue = Queue(maxsize=self._threads * 4)
+
+        manager = multiprocessing.Manager()
+        parts = manager.list()
+
+        worker_config = (
+            queue,
+            progress_bar,
+            self._config.s3_options.bucket,
+            s3_object_id,
+            upload_id,
+            parts,
+        )
+        with Pool(
+            self._threads,
+            _upload_part_worker,
+            worker_config,
+        ) as pool:
+            # Read and enqueue chunks
+            _chunk_file(local_file, chunk_size, queue)
+
+            pool.close()
+            pool.join()
+
+        # Complete the multipart upload
+        try:
+            log.info("Completing multipart upload...")
             self._s3_client.complete_multipart_upload(
                 Bucket=self._config.s3_options.bucket,
                 Key=s3_object_id,
                 UploadId=upload_id,
-                MultipartUpload={"Parts": parts},
+                MultipartUpload={"Parts": list(parts)},
             )
-            progress_bar.close()  # close progress bar
-            return original_sha256.hexdigest()
-
         except Exception as e:
+            # TODO check whether this is the correct way to handle this
             for i in format_exc().split("\n"):
                 log.error(i)
             self._s3_client.abort_multipart_upload(
@@ -193,6 +258,9 @@ class S3BotoUploadWorker(UploadWorker):
                 UploadId=upload_id,
             )
             raise e
+
+        progress_bar.close()  # close progress bar
+        return original_sha256.hexdigest()
 
     def _upload(self, local_file, s3_object_id):
         """
