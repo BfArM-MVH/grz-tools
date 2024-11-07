@@ -29,13 +29,14 @@ class Worker:
 
     __log = log.getChild("Worker")
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         working_dir: str | PathLike | None = None,
         metadata_dir: str | PathLike | None = None,
         files_dir: str | PathLike | None = None,
         encrypted_files_dir: str | PathLike | None = None,
         log_dir: str | PathLike | None = None,
+        threads: int | None = None,
     ):
         """
         Initialize the operations object.
@@ -47,6 +48,7 @@ class Worker:
         :param log_dir: Path to the log directory
         """
         self.working_dir = Path(working_dir) if working_dir is not None else Path.cwd()
+        self._threads = threads
 
         self.__log.debug("Working directory: %s", self.working_dir)
 
@@ -138,6 +140,7 @@ class Worker:
                 submission.files,
                 progress_log_file=self.progress_file_checksum,
                 logger=self.__log,
+                threads=self._threads,
             )
         ):
             error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
@@ -280,7 +283,13 @@ class Worker:
             logger.error(f"Error preparing public keys: {e}")
             raise e
 
-        _parallel_encrypt(submission, public_keys, encrypted_files_dir, progress_logger)
+        _parallel_encrypt(
+            submission,
+            public_keys,
+            encrypted_files_dir,
+            progress_logger,
+            threads=self._threads,
+        )
 
         logger.info("File encryption completed.")
 

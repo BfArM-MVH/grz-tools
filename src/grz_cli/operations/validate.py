@@ -16,7 +16,10 @@ type ProcessResult = tuple[Path, SubmissionFileMetadata, dict]
 
 
 def validate_checksums(
-    files, progress_log_file: str | PathLike, logger: logging.Logger
+    files,
+    progress_log_file: str | PathLike,
+    logger: logging.Logger,
+    threads: int | None = None,
 ) -> Generator[str, None, None]:
     """
     Validates the checksum of the files against the metadata and prints the errors.
@@ -28,14 +31,14 @@ def validate_checksums(
     progress_logger.cleanup(
         keep=[(file_path, file_metadata) for file_path, file_metadata in files.items()]
     )
-    yield from _parallel_validate(files, progress_logger, logger)
+    yield from _parallel_validate(files, progress_logger, logger, threads)
 
 
-def _parallel_validate(files, progress_logger, logger) -> list[str]:
+def _parallel_validate(files, progress_logger, logger, threads) -> list[str]:
     files_to_validate = _determine_files_to_validate(files, progress_logger, logger)
 
     for file_path, file_metadata, state in process_map(
-        _validate_item, enumerate(files_to_validate)
+        _validate_item, enumerate(files_to_validate), max_workers=threads
     ):
         progress_logger.set_state(file_path, file_metadata, state=state)
         if state["validation_passed"] is False:

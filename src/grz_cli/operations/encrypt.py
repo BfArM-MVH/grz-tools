@@ -16,11 +16,12 @@ type ProcessItem = tuple[Path, Path, SubmissionFileMetadata, dict, logging.Logge
 type ProcessResult = tuple[Path, SubmissionFileMetadata, dict]
 
 
-def _parallel_encrypt(
+def _parallel_encrypt(  # noqa: PLR0913
     submission: Submission,
     public_keys,
     encrypted_files_dir: Path,
     progress_logger: FileProgressLogger,
+    threads: int | None = None,
     logger: logging.Logger = logging.getLogger(__name__),
 ):
     files_to_encrypt = list(
@@ -30,7 +31,9 @@ def _parallel_encrypt(
     )
 
     for file_path, file_metadata, state in process_map(
-        partial(_encrypt_item, public_keys), enumerate(files_to_encrypt)
+        partial(_encrypt_item, public_keys),
+        enumerate(files_to_encrypt),
+        max_workers=threads,
     ):
         progress_logger.set_state(file_path, file_metadata, state=state)
         if state["encryption_successful"] is False:

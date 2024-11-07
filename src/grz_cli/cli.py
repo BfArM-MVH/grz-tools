@@ -128,6 +128,13 @@ decrypted_files_dir = click.option(
     help="Path to a directory where the decrypted files can be stored",
 )
 
+threads = click.option(
+    "--threads",
+    default=None,
+    type=int,
+    help="Number of threads to use for parallel operations",
+)
+
 
 class OrderedGroup(click.Group):
     """
@@ -181,7 +188,14 @@ def cli(log_file: str | None = None, log_level: str = "INFO"):
 @metadata_dir
 @files_dir
 @working_dir
-def validate(submission_dir: str, metadata_dir: str, files_dir: str, working_dir: str):
+@threads
+def validate(
+    submission_dir: str,
+    metadata_dir: str,
+    files_dir: str,
+    working_dir: str,
+    threads: int | None,
+):
     """
     Validates the sha256 checksum of the sequence data files. This command must be executed
     before the encryption and upload can start.
@@ -197,6 +211,7 @@ def validate(submission_dir: str, metadata_dir: str, files_dir: str, working_dir
         metadata_dir=(
             submission_dir_path / "metadata" if metadata_dir is None else metadata_dir
         ),
+        threads=threads,
     )
     worker_inst.validate()
 
@@ -210,6 +225,7 @@ def validate(submission_dir: str, metadata_dir: str, files_dir: str, working_dir
 @working_dir
 @encrypted_files_dir
 @config_file
+@threads
 def encrypt(  # noqa: PLR0913
     submission_dir,
     working_dir,
@@ -217,6 +233,7 @@ def encrypt(  # noqa: PLR0913
     files_dir,
     encrypted_files_dir,
     config_file,
+    threads,
 ):
     """
     Encrypt a submission using the GRZ public key.
@@ -241,6 +258,7 @@ def encrypt(  # noqa: PLR0913
         metadata_dir=(
             submission_dir / "metadata" if metadata_dir is None else metadata_dir
         ),
+        threads=threads,
     )
     worker_inst.encrypt(
         grz_pubkey_path, submitter_private_key_path=submitter_privkey_path
@@ -256,6 +274,7 @@ def encrypt(  # noqa: PLR0913
 @working_dir
 @decrypted_files_dir
 @config_file
+@threads
 def decrypt(  # noqa: PLR0913
     encrypted_submission_dir: str,
     metadata_dir: str,
@@ -263,6 +282,7 @@ def decrypt(  # noqa: PLR0913
     working_dir: str,
     decrypted_files_dir: str,
     config_file: str,
+    threads: int | None,
 ):
     """
     Decrypt a submission using the GRZ private key.
@@ -296,6 +316,7 @@ def decrypt(  # noqa: PLR0913
             if encrypted_files_dir is None
             else encrypted_files_dir
         ),
+        threads=threads,
     )
     worker_inst.decrypt(grz_privkey_path)
 
@@ -308,12 +329,14 @@ def decrypt(  # noqa: PLR0913
 @encrypted_files_dir
 @working_dir
 @config_file
-def upload(
+@threads
+def upload(  # noqa: PLR0913
     encrypted_submission_dir,
     metadata_dir,
     encrypted_files_dir,
     working_dir,
     config_file,
+    threads,
 ):
     """
     Uploads a submission file to s3 using the provided configuration.
@@ -341,6 +364,7 @@ def upload(
             if encrypted_files_dir is None
             else encrypted_files_dir
         ),
+        threads=threads,
     )
     worker_inst.upload(config)
 
