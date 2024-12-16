@@ -45,7 +45,7 @@ jobs:
         run: uv run tox -e mypy
 
       - name: Run tests
-        run: uv run tox -e py3.12
+        run: uv run tox -e py${{ matrix.python-version }}
 
   build:
     runs-on: ubuntu-latest

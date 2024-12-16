@@ -149,7 +149,7 @@ convention = "pep257"
 
 [tool.tox]
 requires = ["tox>=4.23"]
-env_list = ["format-check", "lints", "mypy", "3.12"]
+env_list = ["format-check", "lints", "mypy", "3.12", "3.13"]
 allowlist_externals = ["pytest", "ruff"]
 isolated_build = true
 
