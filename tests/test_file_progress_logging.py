@@ -154,9 +154,7 @@ def test_get_index(mocker, logger, temp_data_file_path):
     assert index == (str(temp_data_file_path), 1234567890.0, 1234)
 
 
-def test_read_existing_log(
-    temp_log_file_path, temp_data_file_path, temp_data_file_metadata
-):
+def test_read_existing_log(temp_log_file_path, temp_data_file_path, temp_data_file_metadata):
     """Test that file states are correctly read from an existing json log."""
     # Manually write a row to the log file
     with open(temp_log_file_path, "w", newline="") as fd:

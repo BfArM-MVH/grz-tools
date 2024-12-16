@@ -55,12 +55,12 @@
           "genomicDataCenterId": {
             "type": "string",
             "description": "ID of the genomic data center in the format GRZXXXnnn.",
-            "pattern": "^(GRZ|KDK)[A-Z0-9]{3}[0-9]{3}$"
+            "pattern": "^(GRZ)[A-Z0-9]{3}[0-9]{3}$"
           },
           "clinicalDataNodeId": {
             "type": "string",
-            "description": "ID of the genomic data center in the format KDKXXXnnn.",
-            "pattern": "^(GRZ|KDK)[A-Z0-9]{3}[0-9]{3}$"
+            "description": "ID of the clinical data node in the format KDKXXXnnn.",
+            "pattern": "^(KDK)[A-Z0-9]{3}[0-9]{3}$"
           },
           "genomicStudyType": {
             "type": "string",
@@ -325,10 +325,13 @@
                     "description": "Library type",
                     "enum": [
                       "panel",
+                      "panel_lr",
                       "wes",
+                      "wes_lr",
                       "wgs",
                       "wgs_lr",
                       "wxs",
+                      "wxs_lr",
                       "other",
                       "unknown"
                     ]
@@ -410,7 +413,7 @@
                       "bioinformaticsPipelineName",
                       "bioinformaticsPipelineVersion",
                       "referenceGenome",
-                      "percentBasesQ30",
+                      "percentBasesAboveQualityThreshold",
                       "meanDepthOfCoverage",
                       "minCoverage",
                       "targetedRegionsAboveMinCoverage",
@@ -432,11 +435,23 @@
                         "type": "string",
                         "description": "Reference genome used"
                       },
-                      "percentBasesQ30": {
-                        "type": "number",
-                        "description": "Percentage of bases with Q30 or higher",
-                        "minimum": 0,
-                        "maximum": 100
+                      "percentBasesAboveQualityThreshold": {
+                        "type": "object",
+                        "description": "Percentage of bases with a specified minimum quality threshold",
+                        "properties": {
+                          "minimumQuality": {
+                            "type": "number",
+                            "description": "The minimum quality score threshold",
+                            "minimum": 0
+                          },
+                          "percent": {
+                            "type": "number",
+                            "description": "Percentage of bases that meet or exceed the minimum quality score",
+                            "minimum": 0,
+                            "maximum": 100
+                          }
+                        },
+                        "required": ["minimumQuality", "percent"]
                       },
                       "meanDepthOfCoverage": {
                         "type": "number",
@@ -557,4 +572,3 @@
       }
     }
   }
-  

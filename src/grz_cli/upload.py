@@ -99,10 +99,7 @@ class S3BotoUploadWorker(UploadWorker):
 
         # configure proxies if proxy_url is defined
         proxy_url = empty_str_to_none(self._config.s3_options.proxy_url)
-        if proxy_url is not None:
-            config = Boto3Config(proxies={"http": proxy_url, "https": proxy_url})
-        else:
-            config = None
+        config = Boto3Config(proxies={"http": proxy_url, "https": proxy_url}) if proxy_url is not None else None
 
         # Initialize S3 client for uploading
         self._s3_client: boto3.session.Session.client = boto3_client(
@@ -133,9 +130,7 @@ class S3BotoUploadWorker(UploadWorker):
             if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
             else MULTIPART_CHUNKSIZE
         )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {filesize/chunksize} chunks"
-        )
+        self.__log.debug(f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {filesize/chunksize} chunks")
 
         config = TransferConfig(
             multipart_threshold=MULTIPART_THRESHOLD,
@@ -144,9 +139,7 @@ class S3BotoUploadWorker(UploadWorker):
         )
 
         transfer = S3Transfer(self._s3_client, config)
-        progress_bar = tqdm(
-            total=filesize, unit="B", unit_scale=True, unit_divisor=1024
-        )
+        progress_bar = tqdm(total=filesize, unit="B", unit_scale=True, unit_divisor=1024)
         transfer.upload_file(
             local_file_path,
             self._config.s3_options.bucket,
@@ -161,9 +154,7 @@ class S3BotoUploadWorker(UploadWorker):
         :param encrypted_submission: The encrypted submission to upload
         """
         progress_logger = FileProgressLogger[UploadState](self._status_file_path)
-        metadata_file_path, metadata_s3_object_id = (
-            encrypted_submission.get_metadata_file_path_and_object_id()
-        )
+        metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id
 
@@ -177,9 +168,7 @@ class S3BotoUploadWorker(UploadWorker):
 
             s3_object_id = files_to_upload[file_path]
 
-            if (logged_state is None) or not logged_state.get(
-                "upload_successful", False
-            ):
+            if (logged_state is None) or not logged_state.get("upload_successful", False):
                 self.__log.info(
                     "Uploading file: '%s' -> '%s'",
                     str(file_path),
@@ -236,11 +225,7 @@ class S3BotoUploadWorker(UploadWorker):
     def _list_keys(self, bucket_name, prefix="/", delimiter="/", start_after=""):
         s3_paginator = self._s3_client.get_paginator("list_objects_v2")
         prefix = prefix.lstrip(delimiter)
-        start_after = (
-            (start_after or prefix) if prefix.endswith(delimiter) else start_after
-        )
-        for page in s3_paginator.paginate(
-            Bucket=bucket_name, Prefix=prefix, StartAfter=start_after
-        ):
+        start_after = (start_after or prefix) if prefix.endswith(delimiter) else start_after
+        for page in s3_paginator.paginate(Bucket=bucket_name, Prefix=prefix, StartAfter=start_after):
             for content in page.get("Contents", ()):
                 yield content["Key"]

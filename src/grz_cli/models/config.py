@@ -97,22 +97,14 @@ class ConfigModel(StrictBaseModel):
     @field_validator("grz_public_key")
     @classmethod
     def check_grz_public_key(cls, v):
-        if (
-            v is not None
-            and "BEGIN CRYPT4GH PUBLIC KEY" not in v
-            and "END CRYPT4GH PUBLIC KEY" not in v
-        ):
+        if v is not None and "BEGIN CRYPT4GH PUBLIC KEY" not in v and "END CRYPT4GH PUBLIC KEY" not in v:
             raise ValueError("Invalid public key format")
         return v
 
     @model_validator(mode="after")
     def validate_grz_public_key(self) -> Self:
         if self.grz_public_key is None and self.grz_public_key_path is None:
-            raise ValueError(
-                "Either grz_public_key or grz_public_key_path must be set."
-            )
+            raise ValueError("Either grz_public_key or grz_public_key_path must be set.")
         if self.grz_public_key is not None and self.grz_public_key_path is not None:
-            raise ValueError(
-                "Only one of grz_public_key or grz_public_key_path must be set."
-            )
+            raise ValueError("Only one of grz_public_key or grz_public_key_path must be set.")
         return self

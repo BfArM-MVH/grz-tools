@@ -29,9 +29,7 @@ def is_gzipped(file_path: str | PathLike) -> bool:
 
 
 @contextmanager
-def open_fastq(
-    file_path: str | PathLike, progress=True
-) -> Generator[TextIO, None, None]:
+def open_fastq(file_path: str | PathLike, progress=True) -> Generator[TextIO, None, None]:
     """
     Open a FASTQ file, handling both regular and gzipped formats.
 
@@ -103,9 +101,7 @@ def validate_fastq_file(fastq_file: str | PathLike) -> tuple[int, set[int], list
 
     # Check if the number of lines in a FASTQ file is a multiple of 4.
     if num_lines % 4 != 0:
-        errors.append(
-            f"{fastq_file}: Number of lines is not a multiple of 4! Found {num_lines} lines."
-        )
+        errors.append(f"{fastq_file}: Number of lines is not a multiple of 4! Found {num_lines} lines.")
     else:
         log.debug("%s: %s lines", fastq_file, num_lines)
 
@@ -132,9 +128,7 @@ def validate_single_end_reads(fastq_file: str | PathLike) -> Generator[str]:
     yield from errors
 
 
-def validate_paired_end_reads(
-    fastq_file1: str | PathLike, fastq_file2: str | PathLike
-) -> Generator[str]:
+def validate_paired_end_reads(fastq_file1: str | PathLike, fastq_file2: str | PathLike) -> Generator[str]:
     """
     Validate two paired-end FASTQ files.
 

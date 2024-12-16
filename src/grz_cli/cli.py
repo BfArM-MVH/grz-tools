@@ -48,9 +48,7 @@ DIR_RW_C = click.Path(
     writable=True,
     resolve_path=True,
 )
-FILE_R_E = click.Path(
-    exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True
-)
+FILE_R_E = click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True)
 
 submission_dir = click.option(
     "--submission-dir",

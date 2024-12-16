@@ -74,10 +74,7 @@ class S3BotoDownloadWorker:
 
         # configure proxies if proxy_url is defined
         proxy_url = empty_str_to_none(self._config.s3_options.proxy_url)
-        if proxy_url is not None:
-            config = Boto3Config(proxies={"http": proxy_url, "https": proxy_url})
-        else:
-            config = None
+        config = Boto3Config(proxies={"http": proxy_url, "https": proxy_url}) if proxy_url is not None else None
 
         # Initialize S3 client for uploading
         self._s3_client: boto3.session.Session.client = boto3_client(
@@ -149,9 +146,7 @@ class S3BotoDownloadWorker:
             if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
             else MULTIPART_CHUNKSIZE
         )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {filesize/chunksize} chunks"
-        )
+        self.__log.debug(f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {filesize/chunksize} chunks")
 
         config = TransferConfig(
             multipart_threshold=MULTIPART_THRESHOLD,
@@ -160,9 +155,7 @@ class S3BotoDownloadWorker:
         )
 
         transfer = S3Transfer(self._s3_client, config)
-        progress_bar = tqdm(
-            total=filesize, unit="B", unit_scale=True, unit_divisor=1024
-        )
+        progress_bar = tqdm(total=filesize, unit="B", unit_scale=True, unit_divisor=1024)
         transfer.download_file(
             self._config.s3_options.bucket,
             s3_object_id,
@@ -192,15 +185,11 @@ class S3BotoDownloadWorker:
                     file_path = Path(file_key).relative_to(encrypted_files_key_prefix)
                     full_path = encrypted_submission.encrypted_files_dir / file_path
                     if full_path not in encrypted_submission.encrypted_files:
-                        raise DownloadError(
-                            f"File {file_path} not listed in metadata.json"
-                        )
+                        raise DownloadError(f"File {file_path} not listed in metadata.json")
                     file_metadata = encrypted_submission.encrypted_files[full_path]
                     logged_state = progress_logger.get_state(full_path, file_metadata)
 
-                    if (logged_state is None) or not logged_state.get(
-                        "download_successful", False
-                    ):
+                    if (logged_state is None) or not logged_state.get("download_successful", False):
                         self.__log.info(
                             "Download file: '%s' -> '%s'",
                             file_key,
@@ -208,9 +197,7 @@ class S3BotoDownloadWorker:
                         )
 
                         try:
-                            full_path.parent.mkdir(
-                                mode=0o770, parents=True, exist_ok=True
-                            )
+                            full_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
                             self.download_file(str(full_path), file_key, file["Size"])
 
                             self.__log.info(f"Download complete for {str(full_path)}. ")
@@ -225,9 +212,7 @@ class S3BotoDownloadWorker:
                             progress_logger.set_state(
                                 full_path,
                                 file_metadata,
-                                state=DownloadState(
-                                    download_successful=False, errors=[str(e)]
-                                ),
+                                state=DownloadState(download_successful=False, errors=[str(e)]),
                             )
 
                             raise e

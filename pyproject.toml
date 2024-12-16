@@ -76,7 +76,7 @@ exclude = [
     "dist",
     "out"
 ]
-line-length = 88
+line-length = 120
 src = [
     "src",
     "tests"
@@ -188,3 +188,7 @@ python_version = "3.12"
 plugins = "pydantic.mypy"
 packages = "src"
 
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]

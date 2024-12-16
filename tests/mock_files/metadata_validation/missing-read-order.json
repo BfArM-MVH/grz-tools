@@ -51,7 +51,10 @@
             "bioinformaticsPipelineName": "In-House Pipeline",
             "referenceGenome": "GRCh38",
             "bioinformaticsPipelineVersion": "2e70912",
-            "percentBasesQ30": 95.4,
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 30,
+              "percent": 95.4
+            },
             "meanDepthOfCoverage": 92.4,
             "minCoverage": 25.4,
             "targetedRegionsAboveMinCoverage": 0.96,

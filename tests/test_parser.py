@@ -6,14 +6,10 @@ import pytest
 
 from grz_cli.parser import EncryptedSubmission, SubmissionMetadata
 
-metadata_missing_read_order = (
-    "tests/mock_files/metadata_validation/missing-read-order.json"
-)
+metadata_missing_read_order = "tests/mock_files/metadata_validation/missing-read-order.json"
 metadata_missing_vcf_file = "tests/mock_files/metadata_validation/missing-vcf-file.json"
 metadata_missing_fastq_r2 = "tests/mock_files/metadata_validation/missing-fastq-r2.json"
-metadata_no_target_regions = (
-    "tests/mock_files/metadata_validation/missing-target-regions.json"
-)
+metadata_no_target_regions = "tests/mock_files/metadata_validation/missing-target-regions.json"
 
 
 def test_submission_metadata(temp_metadata_file_path):

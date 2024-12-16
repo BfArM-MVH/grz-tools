@@ -32,12 +32,8 @@ def test_validate_submission(
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
-    shutil.copytree(
-        submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True
-    )
-    shutil.copytree(
-        submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True
-    )
+    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
     testargs = [
         "validate",
@@ -66,12 +62,8 @@ def test_encrypt_decrypt_submission(
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
-    shutil.copytree(
-        submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True
-    )
-    shutil.copytree(
-        submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True
-    )
+    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
     # first, encrypt the data
     testargs = [
@@ -124,9 +116,7 @@ def test_decrypt_submission(working_dir_path, temp_config_file_path):
         working_dir_path / "encrypted_files",
         dirs_exist_ok=True,
     )
-    shutil.copytree(
-        submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True
-    )
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
     testargs = [
         "decrypt",
@@ -171,15 +161,9 @@ def are_dir_trees_equal(dir1, dir2):
         False otherwise.
     """
     dirs_cmp = filecmp.dircmp(dir1, dir2)
-    if (
-        len(dirs_cmp.left_only) > 0
-        or len(dirs_cmp.right_only) > 0
-        or len(dirs_cmp.funny_files) > 0
-    ):
+    if len(dirs_cmp.left_only) > 0 or len(dirs_cmp.right_only) > 0 or len(dirs_cmp.funny_files) > 0:
         return False
-    (_, mismatch, errors) = filecmp.cmpfiles(
-        dir1, dir2, dirs_cmp.common_files, shallow=False
-    )
+    (_, mismatch, errors) = filecmp.cmpfiles(dir1, dir2, dirs_cmp.common_files, shallow=False)
     if len(mismatch) > 0 or len(errors) > 0:
         return False
     for common_dir in dirs_cmp.common_dirs:
@@ -206,9 +190,7 @@ def test_upload_download_submission(
         working_dir_path / "encrypted_files",
         dirs_exist_ok=True,
     )
-    shutil.copytree(
-        submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True
-    )
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
     # upload encrypted submission
     testargs = [

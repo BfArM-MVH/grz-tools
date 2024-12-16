@@ -16,12 +16,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Generator
 from datetime import date
 from enum import StrEnum
+from importlib.resources import files
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
 from pydantic import (
     BaseModel,
@@ -105,17 +107,15 @@ class Submission(StrictBaseModel):
 
     genomic_data_center_id: Annotated[
         str,
-        StringConstraints(pattern=r"^(GRZ|KDK)[A-Z0-9]{3}[0-9]{3}$"),
+        StringConstraints(pattern=r"^(GRZ)[A-Z0-9]{3}[0-9]{3}$"),
     ]
     """
     ID of the genomic data center in the format GRZXXXnnn.
     """
 
-    clinical_data_node_id: Annotated[
-        str, StringConstraints(pattern=r"^(GRZ|KDK)[A-Z0-9]{3}[0-9]{3}$")
-    ]
+    clinical_data_node_id: Annotated[str, StringConstraints(pattern=r"^(KDK)[A-Z0-9]{3}[0-9]{3}$")]
     """
-    ID of the genomic data center in the format KDKXXXnnn.
+    ID of the clinical data node in the format KDKXXXnnn.
     """
 
     genomic_study_type: GenomicStudyType
@@ -262,10 +262,13 @@ class LibraryType(StrEnum):
     """
 
     panel = "panel"
+    panel_lr = "panel_lr"
     wes = "wes"
+    wes_lr = "wes_lr"
     wgs = "wgs"
     wgs_lr = "wgs_lr"
     wxs = "wxs"
+    wxs_lr = "wxs_lr"
     other = "other"
     unknown = "unknown"
 
@@ -433,6 +436,16 @@ class File(StrictBaseModel):
         return self.file_path + ".c4gh"
 
 
+class PercentBasesAboveQualityThreshold(StrictBaseModel):
+    """Percentage of bases with a specified minimum quality threshold"""
+
+    minimum_quality: Annotated[float, Field(strict=True, ge=0.0)]
+    """The minimum quality score threshold"""
+
+    percent: Annotated[float, Field(strict=True, ge=0.0, le=100.0)]
+    """Percentage of bases that meet or exceed the minimum quality score"""
+
+
 class SequenceData(StrictBaseModel):
     bioinformatics_pipeline_name: str
     """
@@ -449,9 +462,9 @@ class SequenceData(StrictBaseModel):
     Reference genome used
     """
 
-    percent_bases_q30: Annotated[float, Field(strict=True, ge=0.0, le=100.0)]
+    percent_bases_above_quality_threshold: PercentBasesAboveQualityThreshold
     """
-    Percentage of bases with Q30 or higher
+    Percentage of bases with a specified minimum quality threshold
     """
 
     mean_depth_of_coverage: Annotated[float, Field(strict=True, ge=0.0)]
@@ -464,9 +477,7 @@ class SequenceData(StrictBaseModel):
     Minimum coverage
     """
 
-    targeted_regions_above_min_coverage: Annotated[
-        float, Field(strict=True, ge=0.0, le=1.0)
-    ]
+    targeted_regions_above_min_coverage: Annotated[float, Field(strict=True, ge=0.0, le=1.0)]
     """
     Fraction of targeted regions that are above minimum coverage
     """
@@ -590,9 +601,7 @@ class LabDatum(StrictBaseModel):
     The sequencing layout, aka the end type of sequencing.
     """
 
-    tumor_cell_count: Annotated[
-        float | None, Field(alias="tumorCellCount", ge=0.0, le=100.0)
-    ] = None
+    tumor_cell_count: Annotated[float | None, Field(alias="tumorCellCount", ge=0.0, le=100.0)] = None
     """
     Tumor cell count in %
     """
@@ -606,6 +615,15 @@ class LabDatum(StrictBaseModel):
     """
     Sequence data generated from the wet lab experiment.
     """
+
+    @model_validator(mode="after")
+    def validate_sequencing_setup(self) -> Self:
+        if self.library_type in {LibraryType.wxs, LibraryType.wxs_lr} and self.sequence_type != SequenceType.rna:
+            raise ValueError(
+                f"Error in lab datum '{self.lab_data_name}': "
+                f"WXS requires RNA sequencing, but got '{self.sequence_type}'."
+            )
+        return self
 
 
 class Donor(StrictBaseModel):
@@ -698,12 +716,17 @@ class Donor(StrictBaseModel):
         def contains_bed_files(sequence_data: SequenceData) -> bool:
             return any(f.file_type == FileType.bed for f in sequence_data.files)
 
-        lib_type = {LibraryType.panel, LibraryType.wes}
+        lib_types = {
+            LibraryType.panel,
+            LibraryType.wes,
+            LibraryType.wxs,
+            LibraryType.panel_lr,
+            LibraryType.wes_lr,
+            LibraryType.wxs_lr,
+        }
 
         for lab_datum in self.lab_data:
-            if lab_datum.library_type in lib_type and not contains_bed_files(
-                lab_datum.sequence_data
-            ):
+            if lab_datum.library_type in lib_types and not contains_bed_files(lab_datum.sequence_data):
                 raise ValueError(
                     f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.case_id}'."
                 )
@@ -751,12 +774,8 @@ class Donor(StrictBaseModel):
                         )
 
                 # check if there is an equal number of R1 and R2 files
-                r1_fastq_files = [
-                    i for i in fastq_files if i.read_order == ReadOrder.r1
-                ]
-                r2_fastq_files = [
-                    i for i in fastq_files if i.read_order == ReadOrder.r2
-                ]
+                r1_fastq_files = [i for i in fastq_files if i.read_order == ReadOrder.r1]
+                r2_fastq_files = [i for i in fastq_files if i.read_order == ReadOrder.r2]
 
                 if len(r1_fastq_files) != len(r2_fastq_files):
                     raise ValueError(
@@ -790,60 +809,92 @@ class GrzSubmissionMetadata(StrictBaseModel):
             case GenomicStudyType.single:
                 # Check if the submission has at least one donor
                 if not self.donors:
-                    raise ValueError(
-                        "At least one donor is required for a single study."
-                    )
+                    raise ValueError("At least one donor is required for a single study.")
             case GenomicStudyType.duo:
                 # Check if the submission has at least two donors
                 if len(self.donors) < 2:
-                    raise ValueError(
-                        "At least two donors are required for a duo study."
-                    )
+                    raise ValueError("At least two donors are required for a duo study.")
             case GenomicStudyType.trio:
                 # Check if the submission has at least three donors
                 if len(self.donors) < 3:
-                    raise ValueError(
-                        "At least three donors are required for a trio study."
-                    )
+                    raise ValueError("At least three donors are required for a trio study.")
 
         return self
 
     @model_validator(mode="after")
-    def validate_minimum_mean_coverage(self):
+    def validate_thresholds(self):
         """
         Check if the submission meets the minimum mean coverage requirements.
         """
-        thresholds_somatic = {
-            (LibraryType.panel, SequenceSubtype.somatic): 500,
-            (LibraryType.wes, SequenceSubtype.somatic): 250,
-            (LibraryType.wes, SequenceSubtype.germline): 100,
-            (LibraryType.wgs, SequenceSubtype.somatic): 80,
-            (LibraryType.wgs, SequenceSubtype.germline): 40,
-        }
-        thresholds_rare_disease = {(LibraryType.wgs, SequenceSubtype.germline): 30}
-
-        study_subtype = self.submission.genomic_study_subtype
-        thresholds = (
-            thresholds_rare_disease
-            if study_subtype == GenomicStudySubtype.germline_only
-            else thresholds_somatic
-        )
+        threshold_definitions = _load_thresholds()
 
         for donor in self.donors:
             for lab_datum in donor.lab_data:
-                threshold = thresholds.get(
-                    (lab_datum.library_type, lab_datum.sequence_subtype)
+                key = (
+                    self.submission.genomic_study_subtype,
+                    lab_datum.library_type,
+                    lab_datum.sequence_subtype,
                 )
-                if threshold is None:
-                    log.warning(
-                        f"Threshold for {lab_datum.library_type} - {lab_datum.sequence_subtype} not found!"
-                    )
+                thresholds = threshold_definitions.get(key)
+                if thresholds is None:
+                    log.warning(f"Thresholds for {key} not found! Skipping.")
+                    continue
 
-                sequence_data = lab_datum.sequence_data
-                if sequence_data.mean_depth_of_coverage < threshold:
-                    raise ValueError(
-                        f"Mean depth of coverage for donor '{donor.case_id}', lab datum '{lab_datum.lab_data_name}' "
-                        f"below threshold ({threshold}): {sequence_data.mean_depth_of_coverage}"
-                    )
+                _check_thresholds(donor, lab_datum, thresholds)
 
         return self
+
+
+def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):
+    sequence_data = lab_datum.sequence_data
+    case_id = donor.case_id
+    lab_data_name = lab_datum.lab_data_name
+
+    mean_depth_of_coverage_t = thresholds.get("meanDepthOfCoverage")
+    mean_depth_of_coverage_v = sequence_data.mean_depth_of_coverage
+    if mean_depth_of_coverage_t and mean_depth_of_coverage_v < mean_depth_of_coverage_t:
+        raise ValueError(
+            f"Mean depth of coverage for donor '{case_id}', lab datum '{lab_data_name}' "
+            f"below threshold: {mean_depth_of_coverage_v} < {mean_depth_of_coverage_t}"
+        )
+
+    read_length_t = thresholds.get("readLength")
+    read_length_v = sequence_data.read_length
+    if read_length_t and read_length_v < read_length_t:
+        raise ValueError(
+            f"Read length for donor '{case_id}', lab datum '{lab_data_name}' "
+            f"below threshold: {read_length_v} < {read_length_t}"
+        )
+
+    if t := thresholds.get("targetedRegionsAboveMinCoverage"):
+        min_coverage_t = t.get("minCoverage")
+        min_coverage_v = sequence_data.min_coverage
+
+        fraction_above_t = t.get("fractionAbove")
+        fraction_above_v = sequence_data.targeted_regions_above_min_coverage
+
+        if min_coverage_t and min_coverage_v < min_coverage_t:
+            raise ValueError(
+                f"Minimum coverage for donor '{case_id}', lab datum '{lab_data_name}' "
+                f"below threshold: {min_coverage_v} < {min_coverage_t}"
+            )
+        if fraction_above_t and fraction_above_v < fraction_above_t:
+            raise ValueError(
+                f"Fraction of targeted regions above minimum coverage for donor '{case_id}', "
+                f"lab datum '{lab_data_name}' below threshold: "
+                f"{fraction_above_v} < {fraction_above_t}"
+            )
+
+
+type Thresholds = dict[tuple[str, str, str], dict[str, Any]]
+
+
+def _load_thresholds() -> Thresholds:
+    threshold_definitions = json.load(
+        files("grz_cli").joinpath("resources", "thresholds.json").open("r", encoding="utf-8")
+    )
+    threshold_definitions = {
+        (d["genomicStudySubtype"], d["libraryType"], d["sequenceSubtype"]): d["thresholds"]
+        for d in threshold_definitions
+    }
+    return threshold_definitions

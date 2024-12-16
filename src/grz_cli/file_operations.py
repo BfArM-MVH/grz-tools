@@ -69,9 +69,7 @@ def calculate_md5(file_path, chunk_size=2**16, progress=True) -> str:
     md5_hash = hashlib.md5()  # noqa: S324
     with open(file_path, "rb") as f:
         if progress and (total_size > chunk_size):
-            with tqdm(
-                total=total_size, unit="B", unit_scale=True, desc="Calculating MD5"
-            ) as pbar:
+            with tqdm(total=total_size, unit="B", unit_scale=True, desc="Calculating MD5") as pbar:
                 while chunk := f.read(chunk_size):
                     md5_hash.update(chunk)
                     pbar.update(len(chunk))
@@ -117,9 +115,7 @@ def read_multiple_json(input: TextIO, buffer_size=65536, max_buffer_size=1342177
         raise ValueError("Remaining data is not empty. Is there invalid JSON?")
 
 
-def is_relative_subdirectory(
-    relative_path: str | PathLike, root_directory: str | PathLike
-) -> bool:
+def is_relative_subdirectory(relative_path: str | PathLike, root_directory: str | PathLike) -> bool:
     """
     Check if the target path is a subdirectory of the root path
     using os.path.commonpath() without checking the file system.
@@ -223,9 +219,7 @@ class Crypt4GH:
         if passphrase:
             passphrase_callback = lambda: passphrase
         else:
-            passphrase_callback = partial(
-                getpass, prompt=f"Passphrase for {seckey_path}: "
-            )
+            passphrase_callback = partial(getpass, prompt=f"Passphrase for {seckey_path}: ")
 
         return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
 
@@ -254,9 +248,7 @@ class Crypt4GH:
             ) as pbar_in_fd,
         ):
             crypt4gh.lib.decrypt(
-                keys=[
-                    (0, private_key, None)
-                ],  # list of (method, privkey, recipient_pubkey=None),
+                keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
                 infile=pbar_in_fd,
                 outfile=out_fd,
             )

@@ -82,9 +82,7 @@ def temp_small_file_sha256sum():
     return "78858035d88f0c66d27984789ddd8fa8a8fc633cf7689ac2b4b1e2e7b37ee3be"
 
 
-def create_large_file(
-    content: str | bytes, output_file: str | PathLike, target_size: int
-) -> int:
+def create_large_file(content: str | bytes, output_file: str | PathLike, target_size: int) -> int:
     """
     Write some content repeatedly to a file until some target size is reached.
 
@@ -195,9 +193,7 @@ def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
         metadata = json.load(fd)
 
     # insert large file
-    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = str(
-        temp_large_file_path
-    )
+    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = str(temp_large_file_path)
 
     metadata_file_path = temp_data_dir_path / "metadata.json"
     with open(metadata_file_path, "w") as fd:
@@ -207,9 +203,7 @@ def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
 
 
 @pytest.fixture
-def config_content(
-    crypt4gh_grz_public_key_file_path, crypt4gh_grz_private_key_file_path
-):
+def config_content(crypt4gh_grz_public_key_file_path, crypt4gh_grz_private_key_file_path):
     return {
         "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
         "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
@@ -237,9 +231,7 @@ def temp_config_file_path(config_content, temp_data_dir_path) -> Path:
 
 
 @pytest.fixture
-def crypt4gh_grz_public_keys(
-    crypt4gh_grz_public_key_file_path, crypt4gh_submitter_private_key_file_path
-):
+def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitter_private_key_file_path):
     keys = Crypt4GH.prepare_c4gh_keys(
         recipient_key_file_path=crypt4gh_grz_public_key_file_path,
         sender_private_key=crypt4gh_submitter_private_key_file_path,
@@ -287,8 +279,6 @@ def encrypted_files_dir() -> Path:
 
 
 @pytest.fixture
-def encrypted_submission(
-    submission_metadata_dir, encrypted_files_dir
-) -> EncryptedSubmission:
+def encrypted_submission(submission_metadata_dir, encrypted_files_dir) -> EncryptedSubmission:
     submission = EncryptedSubmission(submission_metadata_dir, encrypted_files_dir)
     return submission

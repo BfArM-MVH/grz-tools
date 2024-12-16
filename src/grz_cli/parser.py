@@ -67,7 +67,7 @@ class SubmissionMetadata:
             raise e
 
     @property
-    def index_case_id(self) -> str:
+    def transaction_id(self) -> str:
         """
         The index case ID of this submission
         """
@@ -90,9 +90,7 @@ class SubmissionMetadata:
                 for file_data in lab_data.sequence_data.files:
                     file_path = Path(file_data.file_path)
                     if file_path.is_symlink():
-                        raise ValueError(
-                            f"Provided path is a symlink which is not accepted: {file_path}"
-                        )
+                        raise ValueError(f"Provided path is a symlink which is not accepted: {file_path}")
                     else:
                         submission_files[file_path] = file_data
 
@@ -170,16 +168,9 @@ class Submission:
 
         :return: Generator of errors
         """
-        progress_logger = FileProgressLogger[ValidationState](
-            log_file_path=progress_log_file
-        )
+        progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
         # cleanup log file and keep only files listed here
-        progress_logger.cleanup(
-            keep=[
-                (file_path, file_metadata)
-                for file_path, file_metadata in self.files.items()
-            ]
-        )
+        progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
         # fields:
         # - "errors": List[str]
         # - "validation_passed": bool
@@ -204,9 +195,7 @@ class Submission:
             if logged_state:
                 yield from logged_state["errors"]
 
-    def validate_sequencing_data(
-        self, progress_log_file: str | PathLike
-    ) -> Generator[str]:
+    def validate_sequencing_data(self, progress_log_file: str | PathLike) -> Generator[str]:
         """
         Quick-validates sequencing data linked in this submission.
 
@@ -214,16 +203,9 @@ class Submission:
         """
         from .progress_logging import FileProgressLogger
 
-        progress_logger = FileProgressLogger[ValidationState](
-            log_file_path=progress_log_file
-        )
+        progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
         # cleanup log file and keep only files listed here
-        progress_logger.cleanup(
-            keep=[
-                (file_path, file_metadata)
-                for file_path, file_metadata in self.files.items()
-            ]
-        )
+        progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
         # fields:
         # - "errors": List[str]
         # - "validation_passed": bool
@@ -239,19 +221,11 @@ class Submission:
                 fastq_files = find_fastq_files(sequence_data)
 
                 match sequencing_layout:
-                    case (
-                        SequencingLayout.single_end
-                        | SequencingLayout.reverse
-                        | SequencingLayout.other
-                    ):
-                        yield from self._validate_single_end(
-                            fastq_files, progress_logger
-                        )
+                    case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
+                        yield from self._validate_single_end(fastq_files, progress_logger)
 
                     case SequencingLayout.paired_end:
-                        yield from self._validate_paired_end(
-                            fastq_files, progress_logger
-                        )
+                        yield from self._validate_paired_end(fastq_files, progress_logger)
 
     def _validate_single_end(
         self,
@@ -307,11 +281,7 @@ class Submission:
                     local_fastq_r2_path,
                     fastq_r2,
                 )
-                if (
-                    logged_state_r1 is None
-                    or logged_state_r2 is None
-                    or logged_state_r1 != logged_state_r2
-                ):
+                if logged_state_r1 is None or logged_state_r2 is None or logged_state_r1 != logged_state_r2:
                     # calculate state
                     errors = list(
                         validate_paired_end_reads(
@@ -376,9 +346,7 @@ class Submission:
 
         from .progress_logging import FileProgressLogger
 
-        progress_logger = FileProgressLogger[EncryptionState](
-            log_file_path=progress_log_file
-        )
+        progress_logger = FileProgressLogger[EncryptionState](log_file_path=progress_log_file)
 
         try:
             public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
@@ -391,9 +359,8 @@ class Submission:
             logged_state = progress_logger.get_state(file_path, file_metadata)
             self.__log.debug("state for %s: %s", file_path, logged_state)
 
-            encrypted_file_path = (
-                encrypted_files_dir
-                / EncryptedSubmission.get_encrypted_file_path(file_metadata.file_path)
+            encrypted_file_path = encrypted_files_dir / EncryptedSubmission.get_encrypted_file_path(
+                file_metadata.file_path
             )
             encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
@@ -423,9 +390,7 @@ class Submission:
                     progress_logger.set_state(
                         file_path,
                         file_metadata,
-                        state=EncryptionState(
-                            encryption_successful=False, errors=[str(e)]
-                        ),
+                        state=EncryptionState(encryption_successful=False, errors=[str(e)]),
                     )
 
                     raise e
@@ -449,9 +414,7 @@ class EncryptedSubmission:
 
     __log = log.getChild("EncryptedSubmission")
 
-    def __init__(
-        self, metadata_dir: str | PathLike, encrypted_files_dir: str | PathLike
-    ):
+    def __init__(self, metadata_dir: str | PathLike, encrypted_files_dir: str | PathLike):
         """
         Initialize the encrypted submission object.
 
@@ -472,9 +435,7 @@ class EncryptedSubmission:
         """
         retval = {}
         for file_path, file_metadata in self.metadata.files.items():
-            encrypted_file_path = self.get_encrypted_file_path(
-                self.encrypted_files_dir / file_path
-            )
+            encrypted_file_path = self.get_encrypted_file_path(self.encrypted_files_dir / file_path)
 
             retval[encrypted_file_path] = file_metadata
 
@@ -485,9 +446,7 @@ class EncryptedSubmission:
         :return: tuple with the `local_file_path` and s3_object_id of the metadata file
         """
         return Path(self.metadata.file_path), str(
-            Path(self.metadata.index_case_id)
-            / "metadata"
-            / self.metadata.file_path.name
+            Path(self.metadata.transaction_id) / "metadata" / self.metadata.file_path.name
         )
 
     def get_encrypted_files_and_object_id(self) -> dict[Path, str]:
@@ -497,9 +456,7 @@ class EncryptedSubmission:
         retval = {}
         for local_file_path, file_metadata in self.encrypted_files.items():
             retval[local_file_path] = str(
-                Path(self.metadata.index_case_id)
-                / "files"
-                / self.get_encrypted_file_path(file_metadata.file_path)
+                Path(self.metadata.transaction_id) / "files" / self.get_encrypted_file_path(file_metadata.file_path)
             )
         return retval
 
@@ -546,9 +503,7 @@ class EncryptedSubmission:
 
         from .progress_logging import FileProgressLogger
 
-        progress_logger = FileProgressLogger[DecryptionState](
-            log_file_path=progress_log_file
-        )
+        progress_logger = FileProgressLogger[DecryptionState](log_file_path=progress_log_file)
 
         try:
             private_key = Crypt4GH.retrieve_private_key(recipient_private_key_path)
@@ -562,9 +517,7 @@ class EncryptedSubmission:
 
             decrypted_file_path = files_dir / file_metadata.file_path
             if not decrypted_file_path.parent.is_dir():
-                decrypted_file_path.parent.mkdir(
-                    mode=0o770, parents=True, exist_ok=False
-                )
+                decrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=False)
 
             if (
                 (logged_state is None)
@@ -578,29 +531,21 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    Crypt4GH.decrypt_file(
-                        encrypted_file_path, decrypted_file_path, private_key
-                    )
+                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
 
-                    self.__log.info(
-                        f"Decryption complete for {str(encrypted_file_path)}. "
-                    )
+                    self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(
                         encrypted_file_path,
                         file_metadata,
                         state=DecryptionState(decryption_successful=True),
                     )
                 except Exception as e:
-                    self.__log.error(
-                        "Decryption failed for '%s'", str(encrypted_file_path)
-                    )
+                    self.__log.error("Decryption failed for '%s'", str(encrypted_file_path))
 
                     progress_logger.set_state(
                         encrypted_file_path,
                         file_metadata,
-                        state=DecryptionState(
-                            decryption_successful=False, errors=[str(e)]
-                        ),
+                        state=DecryptionState(decryption_successful=False, errors=[str(e)]),
                     )
 
                     raise e
@@ -659,9 +604,7 @@ class Worker:
         self.__log.debug("Files directory: %s", self.files_dir)
 
         # encrypted files dir
-        self.encrypted_files_dir = (
-            Path(encrypted_files_dir) if encrypted_files_dir is not None else Path()
-        )
+        self.encrypted_files_dir = Path(encrypted_files_dir) if encrypted_files_dir is not None else Path()
 
         self.__log.info("Encrypted files directory: %s", self.encrypted_files_dir)
 
@@ -674,12 +617,8 @@ class Worker:
             self.__log.debug("Creating log directory...")
             self.log_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
-        self.progress_file_checksum_validation = (
-            self.log_dir / "progress_checksum_validation.cjson"
-        )
-        self.progress_file_sequencing_data_validation = (
-            self.log_dir / "progress_sequencing_data_validation.cjson"
-        )
+        self.progress_file_checksum_validation = self.log_dir / "progress_checksum_validation.cjson"
+        self.progress_file_sequencing_data_validation = self.log_dir / "progress_sequencing_data_validation.cjson"
         self.progress_file_encrypt = self.log_dir / "progress_encrypt.cjson"
         self.progress_file_decrypt = self.log_dir / "progress_decrypt.cjson"
         self.progress_file_upload = self.log_dir / "progress_upload.cjson"
@@ -728,11 +667,7 @@ class Worker:
             self.progress_file_checksum_validation.unlink()
 
         self.__log.info("Starting checksum validation...")
-        if errors := list(
-            submission.validate_checksums(
-                progress_log_file=self.progress_file_checksum_validation
-            )
-        ):
+        if errors := list(submission.validate_checksums(progress_log_file=self.progress_file_checksum_validation)):
             error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
             self.__log.error(error_msg)
 
@@ -742,13 +677,9 @@ class Worker:
 
         self.__log.info("Starting sequencing data validation...")
         if errors := list(
-            submission.validate_sequencing_data(
-                progress_log_file=self.progress_file_sequencing_data_validation
-            )
+            submission.validate_sequencing_data(progress_log_file=self.progress_file_sequencing_data_validation)
         ):
-            error_msg = "\n".join(
-                ["Sequencing data validation failed! Errors:", *errors]
-            )
+            error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
             self.__log.error(error_msg)
 
             raise SubmissionValidationError(error_msg)
@@ -783,9 +714,7 @@ class Worker:
 
         return encrypted_submission
 
-    def decrypt(
-        self, recipient_private_key_path: str | PathLike, force=False
-    ) -> Submission:
+    def decrypt(self, recipient_private_key_path: str | PathLike, force=False) -> Submission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
         :param recipient_public_key_path: Path to the public key file of the recipient.
@@ -812,9 +741,7 @@ class Worker:
         Upload an encrypted submission
 
         """
-        upload_worker = S3BotoUploadWorker(
-            config, status_file_path=self.progress_file_upload
-        )
+        upload_worker = S3BotoUploadWorker(config, status_file_path=self.progress_file_upload)
 
         encrypted_submission = self.parse_encrypted_submission()
 
@@ -824,19 +751,13 @@ class Worker:
         """
         Download an encrypted submission
         """
-        download_worker = S3BotoDownloadWorker(
-            config, status_file_path=self.progress_file_upload
-        )
+        download_worker = S3BotoDownloadWorker(config, status_file_path=self.progress_file_upload)
 
         self.__log.info("Preparing output directories...")
-        download_worker.prepare_download(
-            self.metadata_dir, self.encrypted_files_dir, self.log_dir
-        )
+        download_worker.prepare_download(self.metadata_dir, self.encrypted_files_dir, self.log_dir)
 
         self.__log.info("Downloading metadata...")
-        download_worker.download_metadata(
-            submission_id, self.metadata_dir, metadata_file_name="metadata.json"
-        )
+        download_worker.download_metadata(submission_id, self.metadata_dir, metadata_file_name="metadata.json")
 
         self.__log.info("Downloading encrypted files...")
         download_worker.download(

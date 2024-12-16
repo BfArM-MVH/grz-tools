@@ -50,34 +50,22 @@ def test_boto_upload(
     local_tmpdir = tmpdir_factory.mktemp("redownload")
     local_tmpdir_path = Path(local_tmpdir.strpath)
 
-    download_file(
-        remote_bucket, "small_test_file.bed", local_tmpdir_path / "small_test_file.bed"
-    )
+    download_file(remote_bucket, "small_test_file.bed", local_tmpdir_path / "small_test_file.bed")
     download_file(
         remote_bucket,
         "large_test_file.fastq",
         local_tmpdir_path / "large_test_file.fastq",
     )
 
-    assert (
-        calculate_sha256(local_tmpdir_path / "small_test_file.bed")
-        == temp_small_file_sha256sum
-    )
-    assert (
-        calculate_sha256(local_tmpdir_path / "large_test_file.fastq")
-        == temp_fastq_file_sha256sum
-    )
+    assert calculate_sha256(local_tmpdir_path / "small_test_file.bed") == temp_small_file_sha256sum
+    assert calculate_sha256(local_tmpdir_path / "large_test_file.fastq") == temp_fastq_file_sha256sum
 
 
 def test__gather_files_to_upload(encrypted_submission):
-    metadata_file_path, metadata_s3_object_id = (
-        encrypted_submission.get_metadata_file_path_and_object_id()
-    )
+    metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
     gathered_files = encrypted_submission.get_encrypted_files_and_object_id()
     gathered_files[metadata_file_path] = metadata_s3_object_id
-    gathered_files = sorted(
-        [(str(key), str(value)) for key, value in gathered_files.items()]
-    )
+    gathered_files = sorted([(str(key), str(value)) for key, value in gathered_files.items()])
 
     expected_files = [
         (

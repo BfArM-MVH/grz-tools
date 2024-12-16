@@ -75,15 +75,11 @@ def test_crypt4gh_encrypt_file(
     tmp_encrypted_file = tmp_dir / "temp_file.c4gh"
     tmp_decrypted_file = tmp_dir / "temp_file"
 
-    Crypt4GH.encrypt_file(
-        temp_small_file_path, tmp_encrypted_file, crypt4gh_grz_public_keys
-    )
+    Crypt4GH.encrypt_file(temp_small_file_path, tmp_encrypted_file, crypt4gh_grz_public_keys)
 
     private_key = Crypt4GH.retrieve_private_key(crypt4gh_grz_private_key_file_path)
 
-    Crypt4GH.decrypt_file(
-        tmp_encrypted_file, tmp_decrypted_file, private_key=private_key
-    )
+    Crypt4GH.decrypt_file(tmp_encrypted_file, tmp_decrypted_file, private_key=private_key)
 
     import filecmp
 
