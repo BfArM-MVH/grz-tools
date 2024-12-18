@@ -398,7 +398,7 @@ wheels = [
 
 [[package]]
 name = "grz-cli"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
@@ -431,6 +431,21 @@ dev = [
     { name = "types-pyyaml" },
     { name = "types-tqdm" },
 ]
+lint = [
+    { name = "mypy" },
+    { name = "pydantic" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+    { name = "types-tqdm" },
+]
+test = [
+    { name = "moto", extra = ["s3"] },
+    { name = "numpy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-sugar" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -459,6 +474,21 @@ dev = [
     { name = "tox", specifier = ">=4.23.2" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20240917" },
     { name = "types-tqdm", specifier = ">=4.66.0.20240417" },
+]
+lint = [
+    { name = "mypy" },
+    { name = "pydantic" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+    { name = "types-tqdm" },
+]
+test = [
+    { name = "moto", extras = ["s3"] },
+    { name = "numpy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-sugar" },
 ]
 
 [[package]]
