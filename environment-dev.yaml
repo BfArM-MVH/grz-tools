@@ -21,6 +21,6 @@ dependencies:
   - moto >=5.0.16,<6
   - numpy >=2.1.2,<3
   - mypy >=1.13.0,<2
-  - tox >=4.23.2,<5
+  # - tox >=4.23.2,<5  # install via `uv tool install tox --with tox-uv` instead
   - ruff >=0.8.1,<1
   - uv >=0.5.5,<1

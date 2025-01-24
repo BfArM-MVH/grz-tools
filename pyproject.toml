@@ -154,21 +154,25 @@ allowlist_externals = ["pytest", "ruff"]
 isolated_build = true
 
 [tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
 description = "run unit tests"
 dependency_groups = ["test"]
 commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
 
 [tool.tox.env."format-check"]
+runner = "uv-venv-lock-runner"
 skip_install = true
 dependency_groups = ["lint"]
 commands = [["ruff", "format", "--check"]]
 
 [tool.tox.env."lints"]
+runner = "uv-venv-lock-runner"
 skip_install = true
 dependency_groups = ["lint"]
 commands = [["ruff", "check"]]
 
 [tool.tox.env."mypy"]
+runner = "uv-venv-lock-runner"
 skip_install = false
 dependency_groups = ["lint"]
 commands = [["mypy"]]
@@ -179,6 +183,7 @@ dev-dependencies = [
     "mypy>=1.13.0",
     "ruff>=0.8.1",
     "tox>=4.23.2",
+    "tox-uv>=1.20.1",
     "types-pyyaml>=6.0.12.20240917",
     "types-tqdm>=4.66.0.20240417",
 ]
