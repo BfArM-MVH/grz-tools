@@ -1,4 +1,4 @@
-# An example using multi-stage image builds to create a final image without uv.
+# A multi-stage image build for grz-cli, based on the `uv` example multi-stage Dockerfile.
 
 # First, build the application in the `/app` directory.
 # See `Dockerfile` for details.
