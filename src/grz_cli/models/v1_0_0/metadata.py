@@ -853,6 +853,21 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
+    def check_for_tumor_cell_count(self):
+        """
+        Check if oncology samples have tumor cell counts.
+        """
+        for donor in self.donors:
+            case_id = donor.case_id
+            for lab_datum in donor.lab_data:
+                if lab_datum.sequence_subtype == SequenceSubtype.somatic and lab_datum.tumor_cell_count is None:
+                    raise ValueError(
+                        f"Missing tumor cell count for donor '{case_id}', lab datum '{lab_datum.lab_data_name}'!"
+                    )
+
+        return self
+
+    @model_validator(mode="after")
     def validate_thresholds(self):
         """
         Check if the submission meets the minimum mean coverage requirements.
