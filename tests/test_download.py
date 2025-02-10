@@ -67,6 +67,6 @@ def test_boto_download(
 
     # Further assertions can be made here as necessary
     assert calculate_sha256(files_dir / "large_test_file.fastq") == temp_fastq_file_sha256sum, "Fastq SHA256 mismatch."
-    assert (
-        calculate_sha256(files_dir / "small_test_file.txt") == temp_small_file_sha256sum
-    ), "Text file SHA256 mismatch."
+    assert calculate_sha256(files_dir / "small_test_file.txt") == temp_small_file_sha256sum, (
+        "Text file SHA256 mismatch."
+    )

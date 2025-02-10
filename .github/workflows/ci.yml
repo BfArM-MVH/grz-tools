@@ -33,7 +33,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install the project
-        run: uv sync --all-extras --dev
+        run: uv sync --all-extras --dev --locked
 
       - name: Check formatting
         run: uv run tox -e format-check
