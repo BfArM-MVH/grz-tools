@@ -114,6 +114,12 @@
           "enrichmentKitDescription": "TruSeq RNA Access Library Prep Kit v2.0",
           "barcode": "GGTACTA",
           "sequencingLayout": "paired-end",
+          "tumorCellCount": [
+            {
+              "count": 80,
+              "method": "Bioinformatics"
+            }
+          ],
           "sequenceData": {
             "bioinformaticsPipelineName": "In-House Pipeline",
             "referenceGenome": "GRCh38",

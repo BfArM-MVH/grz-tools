@@ -316,7 +316,7 @@ class TumorCellCount(StrictBaseModel):
     Tuple of tumor cell counts and how they were determined.
     """
 
-    count: Annotated[float, Field(alias="tumorCellCount", ge=0.0, le=100.0)]
+    count: Annotated[float, Field(ge=0.0, le=100.0)]
     """
     Tumor cell count in %
     """
