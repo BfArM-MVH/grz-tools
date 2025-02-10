@@ -858,7 +858,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         Check if the submission contains lab data with the same name within one donor.
         """
         for donor in self.donors:
-            case_id = donor.case_id
+            case_id = donor.tan_g
             lab_data_names = set()
             for lab_datum in donor.lab_data:
                 if lab_datum.lab_data_name in lab_data_names:
