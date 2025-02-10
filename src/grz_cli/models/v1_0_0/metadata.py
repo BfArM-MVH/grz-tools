@@ -736,7 +736,7 @@ class Donor(StrictBaseModel):
     @model_validator(mode="after")
     def validate_vcf_file_exists(self):
         """
-        check if there is a VCF file
+        Check if there is a VCF file
         """
 
         def contains_vcf_files(sequence_data: SequenceData) -> bool:
@@ -753,7 +753,7 @@ class Donor(StrictBaseModel):
     @model_validator(mode="after")
     def validate_fastq_file_exists(self):
         """
-        check if there is a FASTQ file
+        Check if there is a FASTQ file
         """
 
         def get_fastq_files(sequence_data: SequenceData):
