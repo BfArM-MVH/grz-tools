@@ -146,7 +146,7 @@ class S3BotoDownloadWorker:
             if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
             else MULTIPART_CHUNKSIZE
         )
-        self.__log.debug(f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {filesize/chunksize} chunks")
+        self.__log.debug(f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {filesize / chunksize} chunks")
 
         config = TransferConfig(
             multipart_threshold=MULTIPART_THRESHOLD,
