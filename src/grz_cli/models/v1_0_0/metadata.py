@@ -858,7 +858,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         Check if oncology samples have tumor cell counts.
         """
         for donor in self.donors:
-            case_id = donor.case_id
+            case_id = donor.tan_g
             for lab_datum in donor.lab_data:
                 if lab_datum.sequence_subtype == SequenceSubtype.somatic and lab_datum.tumor_cell_count is None:
                     raise ValueError(
