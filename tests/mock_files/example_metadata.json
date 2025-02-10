@@ -3,7 +3,7 @@
     "submissionDate": "2024-07-15",
     "submissionType": "initial",
     "submitterId": "260914050",
-    "tanG": "aaaaaaaa00000000aaaaaaaa00000000",
+    "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
     "genomicDataCenterId": "GRZK00007",
     "clinicalDataNodeId": "KDKK00007",
     "labName": "Institute für Humangenetik am Klinikum rechts der Isar",
@@ -12,8 +12,8 @@
   },
   "donors": [
     {
-      "caseId": "aaaaaaaa00000000aaaaaaaa00000000",
-      "sex": "female",
+      "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+      "gender": "female",
       "relation": "self",
       "mvConsentDate": "2024-07-05",
       "mvConsentPresentedDate": "2024-07-05",
@@ -161,8 +161,8 @@
       ]
     },
     {
-      "caseId": "aaaaaaaa00000000aaaaaaaa00000002",
-      "sex": "male",
+      "tanG": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111",
+      "gender": "male",
       "relation": "father",
       "mvConsentDate": "2024-07-15",
       "mvConsentPresentedDate": "2024-07-15",

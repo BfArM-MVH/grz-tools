@@ -4,7 +4,7 @@
     "submissionType": "initial",
     "submitterId": "260914050",
     "labName": "Institute für Humangenetik am Klinikum rechts der Isar",
-    "tanG": "aaaaaaaa00000000aaaaaaaa00000000",
+    "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
     "genomicDataCenterId": "GRZK00007",
     "clinicalDataNodeId": "KDKK00007",
     "genomicStudyType": "duo",
@@ -12,8 +12,8 @@
   },
   "donors": [
     {
-      "caseId": "aaaaaaaa00000000aaaaaaaa00000000",
-      "sex": "female",
+      "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+      "gender": "female",
       "relation": "self",
       "mvConsentDate": "2024-07-05",
       "mvConsentPresentedDate": "2024-07-05",
@@ -82,21 +82,21 @@
                 "fileSizeInBytes": 235
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
                 "fileSizeInBytes": 165912,
                 "readOrder": "R1"
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
                 "fileSizeInBytes": 165806,
                 "readOrder": "R2"
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf",
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf",
                 "fileType": "vcf",
                 "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
                 "fileSizeInBytes": 1065
@@ -163,21 +163,21 @@
                 "fileSizeInBytes": 235
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
                 "fileSizeInBytes": 165912,
                 "readOrder": "R1"
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
                 "fileSizeInBytes": 165806,
                 "readOrder": "R2"
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf",
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf",
                 "fileType": "vcf",
                 "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
                 "fileSizeInBytes": 1065
@@ -189,8 +189,8 @@
       ]
     },
     {
-      "caseId": "aaaaaaaa00000000aaaaaaaa00000002",
-      "sex": "male",
+      "tanG": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111",
+      "gender": "male",
       "relation": "father",
       "mvConsentDate": "2024-07-15",
       "mvConsentPresentedDate": "2024-07-15",
@@ -259,21 +259,21 @@
                 "fileSizeInBytes": 235
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.read1.fastq.gz",
+                "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
                 "fileSizeInBytes": 165912,
                 "readOrder": "R1"
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.read2.fastq.gz",
+                "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
                 "fileSizeInBytes": 165806,
                 "readOrder": "R2"
               },
               {
-                "filePath": "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.vcf",
+                "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf",
                 "fileType": "vcf",
                 "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
                 "fileSizeInBytes": 1065
