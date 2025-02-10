@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import typing
 from collections.abc import Generator
 from datetime import date
 from enum import StrEnum
@@ -881,7 +882,8 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
         return
     case_id = donor.tan_g
     lab_data_name = lab_datum.lab_data_name
-    sequence_data = lab_datum.sequence_data
+    # mypy cannot reason about the `has_sequence_data` check
+    sequence_data = typing.cast(SequenceData, lab_datum.sequence_data)
 
     mean_depth_of_coverage_t = thresholds.get("meanDepthOfCoverage")
     mean_depth_of_coverage_v = sequence_data.mean_depth_of_coverage
