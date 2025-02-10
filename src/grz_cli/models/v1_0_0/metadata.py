@@ -875,15 +875,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
 
 def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):
-    sequence_data = lab_datum.sequence_data
-    if not sequence_data:
-        log.warning(
-            f"No sequence data found for lab datum '{lab_datum.lab_data_name}' in donor '{donor.tan_g}'. "
-            "Is this a submission without sequence data? Skipping thresholds check."
-        )
+    if not lab_datum.has_sequence_data():
+        # Skip if no sequence data is present; warning issues in the validator `warn_empty_sequence_data` of `Donor`.
         return
     case_id = donor.tan_g
     lab_data_name = lab_datum.lab_data_name
+    sequence_data = lab_datum.sequence_data
 
     mean_depth_of_coverage_t = thresholds.get("meanDepthOfCoverage")
     mean_depth_of_coverage_v = sequence_data.mean_depth_of_coverage
