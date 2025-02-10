@@ -744,6 +744,7 @@ class Donor(StrictBaseModel):
                     f"No sequence data found for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'. "
                     "Is this a submission without sequence data?"
                 )
+        return self
 
     @model_validator(mode="after")
     def validate_target_bed_files_exist(self):
