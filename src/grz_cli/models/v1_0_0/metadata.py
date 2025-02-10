@@ -792,13 +792,7 @@ class Donor(StrictBaseModel):
             fastq_files = lab_datum.sequence_data.list_files(FileType.fastq)
 
             if len(fastq_files) == 0:
-                if lab_datum.sequence_data is not None:
-                    raise ValueError("No FASTQ file found!")
-                else:
-                    log.warning(
-                        f"No sequence data found for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'. "
-                        "Is this a submission without sequence data?"
-                    )
+                raise ValueError("No FASTQ file found!")
             elif lab_datum.sequencing_layout == SequencingLayout.paired_end:
                 # check if read order is specified
                 for i in fastq_files:
