@@ -868,6 +868,22 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
+    def check_duplicate_lab_data_names(self):
+        """
+        Check if the submission contains lab data with the same name within one donor.
+        """
+        for donor in self.donors:
+            case_id = donor.tan_g
+            lab_data_names = set()
+            for lab_datum in donor.lab_data:
+                if lab_datum.lab_data_name in lab_data_names:
+                    raise ValueError(f"Duplicate lab datum '{lab_datum.lab_data_name}' in donor '{case_id}'")
+                else:
+                    lab_data_names.add(lab_datum.lab_data_name)
+
+        return self
+
+    @model_validator(mode="after")
     def validate_thresholds(self):
         """
         Check if the submission meets the minimum mean coverage requirements.
