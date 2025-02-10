@@ -522,6 +522,12 @@ class SequenceData(StrictBaseModel):
     List of files generated and required in this analysis.
     """
 
+    def contains_files(self, file_type: FileType) -> bool:
+        return any(f.file_type == file_type for f in self.files)
+
+    def list_files(self, file_type: FileType) -> list[File]:
+        return [f for f in self.files if f.file_type == file_type]
+
 
 class LabDatum(StrictBaseModel):
     lab_data_name: str
@@ -631,6 +637,9 @@ class LabDatum(StrictBaseModel):
     Sequence data generated from the wet lab experiment.
     """
 
+    def has_sequence_data(self) -> bool:
+        return self.sequence_data is not None
+
     @model_validator(mode="after")
     def validate_sequencing_setup(self) -> Self:
         if self.library_type in {LibraryType.wxs, LibraryType.wxs_lr} and self.sequence_type != SequenceType.rna:
@@ -728,14 +737,19 @@ class Donor(StrictBaseModel):
     """
 
     @model_validator(mode="after")
+    def warn_empty_sequence_data(self):
+        for lab_datum in self.lab_data:
+            if not lab_datum.has_sequence_data():
+                log.warning(
+                    f"No sequence data found for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'. "
+                    "Is this a submission without sequence data?"
+                )
+
+    @model_validator(mode="after")
     def validate_target_bed_files_exist(self):
         """
         Check if the submission has the required bed files for panel sequencing.
         """
-
-        def contains_bed_files(sequence_data: SequenceData | None) -> bool:
-            return sequence_data is not None and any(f.file_type == FileType.bed for f in sequence_data.files)
-
         lib_types = {
             LibraryType.panel,
             LibraryType.wes,
@@ -746,7 +760,11 @@ class Donor(StrictBaseModel):
         }
 
         for lab_datum in self.lab_data:
-            if lab_datum.library_type in lib_types and not contains_bed_files(lab_datum.sequence_data):
+            if (
+                lab_datum.has_sequence_data()
+                and lab_datum.library_type in lib_types
+                and not lab_datum.sequence_data.contains_files(FileType.bed)
+            ):
                 raise ValueError(f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'.")
 
         return self
@@ -756,12 +774,8 @@ class Donor(StrictBaseModel):
         """
         Check if there is a VCF file
         """
-
-        def contains_vcf_files(sequence_data: SequenceData | None) -> bool:
-            return sequence_data is not None and any(f.file_type == FileType.vcf for f in sequence_data.files)
-
         for lab_datum in self.lab_data:
-            if not contains_vcf_files(lab_datum.sequence_data):
+            if lab_datum.has_sequence_data() and not lab_datum.sequence_data.contains_files(FileType.vcf):
                 raise ValueError(f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'.")
 
         return self
@@ -771,12 +785,11 @@ class Donor(StrictBaseModel):
         """
         Check if there is a FASTQ file
         """
-
-        def get_fastq_files(sequence_data: SequenceData | None) -> list[File]:
-            return [f for f in sequence_data.files if f.file_type == FileType.fastq] if sequence_data else []
-
         for lab_datum in self.lab_data:
-            fastq_files = get_fastq_files(lab_datum.sequence_data)
+            if not lab_datum.has_sequence_data():
+                # Skip if no sequence data is present
+                continue
+            fastq_files = lab_datum.sequence_data.list_files(FileType.fastq)
 
             if len(fastq_files) == 0:
                 if lab_datum.sequence_data is not None:
