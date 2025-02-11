@@ -901,16 +901,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 if thresholds is None:
                     allowed_combinations = sorted(list(threshold_definitions.keys()))
                     allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations])
-                    info = dict(
-                        zip(
-                            (
-                                "submission.genomic_study_subtype",
-                                "lab_datum.library_type",
-                                "lab_datum.sequence_subtype",
-                            ),
-                            key,
-                        )
+                    names = (
+                        "submission.genomic_study_subtype",
+                        "lab_datum.library_type",
+                        "lab_datum.sequence_subtype",
                     )
+                    info = dict(zip(names, key, strict=True))
                     log.warning(
                         f"No thresholds for the specified combination {info} found (donor {donor.tan_g})!\n"
                         f"Valid combinations:\n{allowed_combinations}.\n"
