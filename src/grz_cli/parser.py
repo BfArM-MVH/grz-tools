@@ -66,7 +66,7 @@ class SubmissionMetadata:
                     metadata_model = GrzSubmissionMetadata(**metadata)
                 except ValidationError as ve:
                     cls.__log.error("Invalid metadata format in metadata file: %s", file_path)
-                    raise SystemExit(ve)
+                    raise SystemExit(ve) from ve
                 return metadata_model
         except json.JSONDecodeError as e:
             cls.__log.error("Invalid JSON format in metadata file: %s", file_path)
