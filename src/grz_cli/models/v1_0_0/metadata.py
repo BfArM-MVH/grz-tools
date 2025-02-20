@@ -902,9 +902,9 @@ class GrzSubmissionMetadata(StrictBaseModel):
                     allowed_combinations = sorted(list(threshold_definitions.keys()))
                     allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations])
                     names = (
-                        "submission.genomic_study_subtype",
-                        "lab_datum.library_type",
-                        "lab_datum.sequence_subtype",
+                        "submission.genomicStudySubtype",
+                        "labData.libraryType",
+                        "labData.sequenceSubtype",
                     )
                     info = dict(zip(names, key, strict=True))
                     log.warning(
