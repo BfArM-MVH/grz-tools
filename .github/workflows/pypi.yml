@@ -16,7 +16,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           # Install a specific version of uv and enable caching.
-          version: "0.5.29"
+          version: "0.6.3"
           enable-cache: true
 
       - name: Set up Python
