@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import typing
 from collections.abc import Generator
 from datetime import date
 from enum import StrEnum
@@ -90,9 +91,9 @@ class Submission(StrictBaseModel):
     The options are: 'initial' for first submission, 'followup' is for followup submissions, 'addition' for additional submission, 'correction' for correction
     """
 
-    tan_g: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{32}$")]
+    tan_g: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
     """
-    The VNg of the genomic data of the patient that will be reimbursed --> a unique 32-byte hex ID.
+    The VNg of the genomic data of the patient that will be reimbursed --> a unique 32-length byte code represented in a hex string of length 64.
     """
 
     local_case_id: str | None = None
@@ -134,9 +135,9 @@ class Submission(StrictBaseModel):
     """
 
 
-class Sex(StrEnum):
+class Gender(StrEnum):
     """
-    Sex of the donor.
+    Gender of the donor.
     """
 
     male = "male"
@@ -156,6 +157,7 @@ class Relation(StrEnum):
     sister = "sister"
     child = "child"
     self = "self"
+    other = "other"
 
 
 class MvConsentScope(StrictBaseModel):
@@ -284,6 +286,7 @@ class EnrichmentKitManufacturer(StrEnum):
     neb = "NEB"
     other = "other"
     unknown = "unknown"
+    none = "none"
 
 
 class SequencingLayout(StrEnum):
@@ -306,6 +309,22 @@ class TumorCellCountMethod(StrEnum):
     bioinformatics = "Bioinformatics"
     other = "other"
     unknown = "unknown"
+
+
+class TumorCellCount(StrictBaseModel):
+    """
+    Tuple of tumor cell counts and how they were determined.
+    """
+
+    count: Annotated[float, Field(ge=0.0, le=100.0)]
+    """
+    Tumor cell count in %
+    """
+
+    method: TumorCellCountMethod
+    """
+    Method used to determine cell count.
+    """
 
 
 class CallerUsedItem(StrictBaseModel):
@@ -443,7 +462,9 @@ class PercentBasesAboveQualityThreshold(StrictBaseModel):
     """The minimum quality score threshold"""
 
     percent: Annotated[float, Field(strict=True, ge=0.0, le=100.0)]
-    """Percentage of bases that meet or exceed the minimum quality score"""
+    """
+    Percentage of bases with a specified minimum quality threshold, according to https://www.bfarm.de/SharedDocs/Downloads/DE/Forschung/modellvorhaben-genomsequenzierung/Qs-durch-GRZ.pdf?__blob=publicationFile
+    """
 
 
 class SequenceData(StrictBaseModel):
@@ -501,6 +522,12 @@ class SequenceData(StrictBaseModel):
     """
     List of files generated and required in this analysis.
     """
+
+    def contains_files(self, file_type: FileType) -> bool:
+        return any(f.file_type == file_type for f in self.files)
+
+    def list_files(self, file_type: FileType) -> list[File]:
+        return [f for f in self.files if f.file_type == file_type]
 
 
 class LabDatum(StrictBaseModel):
@@ -601,20 +628,18 @@ class LabDatum(StrictBaseModel):
     The sequencing layout, aka the end type of sequencing.
     """
 
-    tumor_cell_count: Annotated[float | None, Field(alias="tumorCellCount", ge=0.0, le=100.0)] = None
+    tumor_cell_count: list[TumorCellCount] | None = None
     """
-    Tumor cell count in %
-    """
-
-    tumor_cell_count_method: TumorCellCountMethod | None = None
-    """
-    Method used to determine cell count.
+    Tuple of tumor cell counts and how they were determined.
     """
 
-    sequence_data: SequenceData
+    sequence_data: SequenceData | None = None
     """
     Sequence data generated from the wet lab experiment.
     """
+
+    def has_sequence_data(self) -> bool:
+        return self.sequence_data is not None
 
     @model_validator(mode="after")
     def validate_sequencing_setup(self) -> Self:
@@ -627,14 +652,19 @@ class LabDatum(StrictBaseModel):
 
 
 class Donor(StrictBaseModel):
-    case_id: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{32}$")]
+    tan_g: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
     """
-    The VNg of the genomic data of the donor --> a unique 32-byte hex ID.
+    The VNg of the genomic data of the donor --> a unique 32-length byte code represented in a hex string of length 64.
     """
 
-    sex: Sex
+    local_case_id: str | None = None
     """
-    Sex of the donor.
+    A local case identifier for synchronizing locally
+    """
+
+    gender: Gender
+    """
+    Gender of the donor.
     """
 
     relation: Relation
@@ -708,14 +738,20 @@ class Donor(StrictBaseModel):
     """
 
     @model_validator(mode="after")
+    def warn_empty_sequence_data(self):
+        for lab_datum in self.lab_data:
+            if not lab_datum.has_sequence_data():
+                log.warning(
+                    f"No sequence data found for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'. "
+                    "Is this a submission without sequence data?"
+                )
+        return self
+
+    @model_validator(mode="after")
     def validate_target_bed_files_exist(self):
         """
         Check if the submission has the required bed files for panel sequencing.
         """
-
-        def contains_bed_files(sequence_data: SequenceData) -> bool:
-            return any(f.file_type == FileType.bed for f in sequence_data.files)
-
         lib_types = {
             LibraryType.panel,
             LibraryType.wes,
@@ -726,41 +762,36 @@ class Donor(StrictBaseModel):
         }
 
         for lab_datum in self.lab_data:
-            if lab_datum.library_type in lib_types and not contains_bed_files(lab_datum.sequence_data):
-                raise ValueError(
-                    f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.case_id}'."
-                )
+            if (
+                lab_datum.has_sequence_data()
+                and lab_datum.library_type in lib_types
+                and not lab_datum.sequence_data.contains_files(FileType.bed)
+            ):
+                raise ValueError(f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'.")
 
         return self
 
     @model_validator(mode="after")
     def validate_vcf_file_exists(self):
         """
-        check if there is a VCF file
+        Check if there is a VCF file
         """
-
-        def contains_vcf_files(sequence_data: SequenceData) -> bool:
-            return any(f.file_type == FileType.vcf for f in sequence_data.files)
-
         for lab_datum in self.lab_data:
-            if not contains_vcf_files(lab_datum.sequence_data):
-                raise ValueError(
-                    f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.case_id}'."
-                )
+            if lab_datum.has_sequence_data() and not lab_datum.sequence_data.contains_files(FileType.vcf):
+                raise ValueError(f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'.")
 
         return self
 
     @model_validator(mode="after")
     def validate_fastq_file_exists(self):
         """
-        check if there is a FASTQ file
+        Check if there is a FASTQ file
         """
-
-        def get_fastq_files(sequence_data: SequenceData):
-            return [f for f in sequence_data.files if f.file_type == FileType.fastq]
-
         for lab_datum in self.lab_data:
-            fastq_files = get_fastq_files(lab_datum.sequence_data)
+            if not lab_datum.has_sequence_data():
+                # Skip if no sequence data is present
+                continue
+            fastq_files = lab_datum.sequence_data.list_files(FileType.fastq)
 
             if len(fastq_files) == 0:
                 raise ValueError("No FASTQ file found!")
@@ -769,7 +800,7 @@ class Donor(StrictBaseModel):
                 for i in fastq_files:
                     if i.read_order is None:
                         raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.case_id}': "
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
                             f"No read order specified for FASTQ file '{i.file_path}'!"
                         )
 
@@ -779,7 +810,7 @@ class Donor(StrictBaseModel):
 
                 if len(r1_fastq_files) != len(r2_fastq_files):
                     raise ValueError(
-                        f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.case_id}': "
+                        f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
                         f"Paired end sequencing layout but number of R1 FASTQ files ({len(r1_fastq_files)})"
                         f" differs from number of R2 FASTQ files ({len(r2_fastq_files)})!"
                     )
@@ -822,6 +853,37 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
+    def check_for_tumor_cell_count(self):
+        """
+        Check if oncology samples have tumor cell counts.
+        """
+        for donor in self.donors:
+            case_id = donor.tan_g
+            for lab_datum in donor.lab_data:
+                if lab_datum.sequence_subtype == SequenceSubtype.somatic and lab_datum.tumor_cell_count is None:
+                    raise ValueError(
+                        f"Missing tumor cell count for donor '{case_id}', lab datum '{lab_datum.lab_data_name}'!"
+                    )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_duplicate_lab_data_names(self):
+        """
+        Check if the submission contains lab data with the same name within one donor.
+        """
+        for donor in self.donors:
+            case_id = donor.tan_g
+            lab_data_names = set()
+            for lab_datum in donor.lab_data:
+                if lab_datum.lab_data_name in lab_data_names:
+                    raise ValueError(f"Duplicate lab datum '{lab_datum.lab_data_name}' in donor '{case_id}'")
+                else:
+                    lab_data_names.add(lab_datum.lab_data_name)
+
+        return self
+
+    @model_validator(mode="after")
     def validate_thresholds(self):
         """
         Check if the submission meets the minimum mean coverage requirements.
@@ -837,7 +899,20 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 )
                 thresholds = threshold_definitions.get(key)
                 if thresholds is None:
-                    log.warning(f"Thresholds for {key} not found! Skipping.")
+                    allowed_combinations = sorted(list(threshold_definitions.keys()))
+                    allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations])
+                    names = (
+                        "submission.genomicStudySubtype",
+                        "labData.libraryType",
+                        "labData.sequenceSubtype",
+                    )
+                    info = dict(zip(names, key, strict=True))
+                    log.warning(
+                        f"No thresholds for the specified combination {info} found (donor {donor.tan_g})!\n"
+                        f"Valid combinations:\n{allowed_combinations}.\n"
+                        f"See https://www.bfarm.de/SharedDocs/Downloads/DE/Forschung/modellvorhaben-genomsequenzierung/Qs-durch-GRZ.pdf?__blob=publicationFile for more details.\n"
+                        f"Skipping threshold validation."
+                    )
                     continue
 
                 _check_thresholds(donor, lab_datum, thresholds)
@@ -846,9 +921,13 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
 
 def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):
-    sequence_data = lab_datum.sequence_data
-    case_id = donor.case_id
+    if not lab_datum.has_sequence_data():
+        # Skip if no sequence data is present; warning issues in the validator `warn_empty_sequence_data` of `Donor`.
+        return
+    case_id = donor.tan_g
     lab_data_name = lab_datum.lab_data_name
+    # mypy cannot reason about the `has_sequence_data` check
+    sequence_data = typing.cast(SequenceData, lab_datum.sequence_data)
 
     mean_depth_of_coverage_t = thresholds.get("meanDepthOfCoverage")
     mean_depth_of_coverage_v = sequence_data.mean_depth_of_coverage

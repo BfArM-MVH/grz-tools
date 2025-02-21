@@ -95,12 +95,12 @@ def test_encrypt_decrypt_submission(
 
     # compare if the files are equal
     for file in [
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.read2.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
+        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
+        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
     ]:
         expected_checksum = calculate_sha256(submission_dir / "files" / file)
         observed_checksum = calculate_sha256(working_dir_path / "files" / file)
@@ -132,15 +132,15 @@ def test_decrypt_submission(working_dir_path, temp_config_file_path):
 
     # compare if the files are equal
     for file in [
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf",
-        "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000002_blood_normal.vcf",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
+        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf",
+        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
+        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
+        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf",
         "target_regions.bed",
     ]:
         expected_checksum = calculate_sha256(submission_dir / "files" / file)
@@ -183,7 +183,7 @@ def test_upload_download_submission(
     remote_bucket,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    transaction_id = "aaaaaaaa00000000aaaaaaaa00000000"
+    transaction_id = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
 
     shutil.copytree(
         submission_dir / "encrypted_files",

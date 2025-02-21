@@ -134,7 +134,7 @@ def generate_random_fastq(file_path: str | PathLike, target_size: int) -> int:
             qual = "".join(np.random.choice(quality_scores, bases_per_read))
 
             # FASTQ entry format
-            entry = f"@SEQ_ID_{np.random.randint(1, 10 ** 6)}\n{seq}\n+\n{qual}\n"
+            entry = f"@SEQ_ID_{np.random.randint(1, 10**6)}\n{seq}\n+\n{qual}\n"
 
             actual_bytes_written = fastq_file.write(entry)
             total_bytes_written += actual_bytes_written

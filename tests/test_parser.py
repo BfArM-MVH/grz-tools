@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from grz_cli.parser import EncryptedSubmission, SubmissionMetadata
 
@@ -22,16 +23,17 @@ def test_submission_metadata(temp_metadata_file_path):
 
 
 def test_submission_metadata_fails():
-    with pytest.raises(ValueError, match="No read order specified for FASTQ file"):
+    error_types = (ValueError, ValidationError, SystemExit)
+    with pytest.raises(error_types, match="No read order specified for FASTQ file"):
         SubmissionMetadata(metadata_missing_read_order)
 
-    with pytest.raises(ValueError, match="BED file missing for lab datum"):
+    with pytest.raises(error_types, match="BED file missing for lab datum"):
         SubmissionMetadata(metadata_no_target_regions)
 
-    with pytest.raises(ValueError, match="VCF file missing for lab datum"):
+    with pytest.raises(error_types, match="VCF file missing for lab datum"):
         SubmissionMetadata(metadata_missing_vcf_file)
 
-    with pytest.raises(ValueError, match="Paired end sequencing layout but number of"):
+    with pytest.raises(error_types, match="Paired end sequencing layout but number of"):
         SubmissionMetadata(metadata_missing_fastq_r2)
 
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.4](https://github.com/BfArM-MVH/grz-cli/compare/v0.1.3...v0.1.4) (2025-02-21)
+
+
+### Bug Fixes
+
+* Add check for duplicate lab data names ([#8](https://github.com/BfArM-MVH/grz-cli/issues/8)) ([ca6fc5d](https://github.com/BfArM-MVH/grz-cli/commit/ca6fc5d3ce679f3e063ec4aa2050703600a94d0c))
+* Check if oncology samples have tumor cell counts. ([#7](https://github.com/BfArM-MVH/grz-cli/issues/7)) ([9341d9f](https://github.com/BfArM-MVH/grz-cli/commit/9341d9f30a3ad114d881452710f08c84fa9789ab))
+* Update metadata schema ([#9](https://github.com/BfArM-MVH/grz-cli/issues/9)) ([7ca7ab0](https://github.com/BfArM-MVH/grz-cli/commit/7ca7ab0a31289706bba9217a05ba75e401d34840))
+
 ## 0.1.3 (2024-12-16)
 
 

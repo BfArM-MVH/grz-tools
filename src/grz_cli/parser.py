@@ -9,6 +9,8 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .download import S3BotoDownloadWorker
 from .fastq_validation import validate_paired_end_reads, validate_single_end_reads
 from .file_operations import Crypt4GH, calculate_sha256
@@ -60,7 +62,11 @@ class SubmissionMetadata:
         try:
             with open(file_path, encoding="utf-8") as jsonfile:
                 metadata = json.load(jsonfile)
-                metadata_model = GrzSubmissionMetadata(**metadata)
+                try:
+                    metadata_model = GrzSubmissionMetadata(**metadata)
+                except ValidationError as ve:
+                    cls.__log.error("Invalid metadata format in metadata file: %s", file_path)
+                    raise SystemExit(ve) from ve
                 return metadata_model
         except json.JSONDecodeError as e:
             cls.__log.error("Invalid JSON format in metadata file: %s", file_path)
