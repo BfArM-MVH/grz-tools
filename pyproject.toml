@@ -197,3 +197,6 @@ packages = "src"
 addopts = [
     "--import-mode=importlib",
 ]
+
+[tool.setuptools]
+license-files = []
