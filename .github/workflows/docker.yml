@@ -57,7 +57,7 @@ jobs:
           docker load --input /tmp/grz-cli.tar
           docker image ls -a
       - name: Test command line
-        run: docker run grz-cli:latest --help
+        run: docker run grz-cli:latest grz-cli --help
 
   publish:
     name: "publish image"
