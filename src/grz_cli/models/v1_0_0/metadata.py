@@ -23,6 +23,7 @@ from collections.abc import Generator
 from datetime import date
 from enum import StrEnum
 from importlib.resources import files
+from itertools import groupby
 from pathlib import Path
 from typing import Annotated, Any, Self
 
@@ -804,16 +805,40 @@ class Donor(StrictBaseModel):
                             f"No read order specified for FASTQ file '{i.file_path}'!"
                         )
 
-                # check if there is an equal number of R1 and R2 files
-                r1_fastq_files = [i for i in fastq_files if i.read_order == ReadOrder.r1]
-                r2_fastq_files = [i for i in fastq_files if i.read_order == ReadOrder.r2]
+                key = lambda f: (f.flowcell_id, f.lane_id)
+                fastq_files.sort(key=key)
+                for _key, group in groupby(fastq_files, key):
+                    flowcell_id = _key[0]
+                    lane_id = _key[1]
+                    files = list(group)
 
-                if len(r1_fastq_files) != len(r2_fastq_files):
-                    raise ValueError(
-                        f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
-                        f"Paired end sequencing layout but number of R1 FASTQ files ({len(r1_fastq_files)})"
-                        f" differs from number of R2 FASTQ files ({len(r2_fastq_files)})!"
-                    )
+                    # separate R1 and R2 files
+                    fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
+                    fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
+
+                    # check that there are exactly one R1 and on R2 file present
+                    if len(fastq_r1_files) > 1:
+                        raise ValueError(
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Paired end sequencing layout but multiple R1 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
+                        )
+                    elif len(fastq_r1_files) < 1:
+                        raise ValueError(
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Paired end sequencing layout but missing R1 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
+                        )
+
+                    if len(fastq_r2_files) > 1:
+                        raise ValueError(
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Paired end sequencing layout but multiple R2 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
+                        )
+                    elif len(fastq_r2_files) < 1:
+                        raise ValueError(
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Paired end sequencing layout but missing R2 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
+                        )
+
         return self
 
 
