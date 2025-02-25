@@ -784,7 +784,7 @@ class Donor(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_fastq_file_exists(self):
+    def validate_fastq_file_exists(self):  # noqa: C901
         """
         Check if there is a FASTQ file
         """
