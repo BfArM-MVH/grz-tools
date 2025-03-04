@@ -203,11 +203,13 @@ def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
 
 
 @pytest.fixture
-def config_content(crypt4gh_grz_public_key_file_path, crypt4gh_grz_private_key_file_path):
+def config_content(
+    crypt4gh_grz_public_key_file_path, crypt4gh_grz_private_key_file_path, crypt4gh_submitter_private_key_file_path
+):
     return {
         "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
         "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
-        "submitter_private_key_path": str(crypt4gh_grz_public_key_file_path),
+        "submitter_private_key_path": str(crypt4gh_submitter_private_key_file_path),
         "s3_options": {
             "endpoint_url": "https://s3.amazonaws.com",
             "bucket": "testing",
