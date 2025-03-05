@@ -11,6 +11,7 @@ metadata_missing_read_order = "tests/mock_files/metadata_validation/missing-read
 metadata_missing_vcf_file = "tests/mock_files/metadata_validation/missing-vcf-file.json"
 metadata_missing_fastq_r2 = "tests/mock_files/metadata_validation/missing-fastq-r2.json"
 metadata_no_target_regions = "tests/mock_files/metadata_validation/missing-target-regions.json"
+metadata_incompatible_reference_genomes = "tests/mock_files/metadata_validation/incompatible-reference-genomes.json"
 
 
 def test_submission_metadata(temp_metadata_file_path):
@@ -35,6 +36,9 @@ def test_submission_metadata_fails():
 
     with pytest.raises(error_types, match="Paired end sequencing layout but missing R2 file for flowcell id"):
         SubmissionMetadata(metadata_missing_fastq_r2)
+
+    with pytest.raises(error_types, match="Incompatible reference genomes found"):
+        SubmissionMetadata(metadata_incompatible_reference_genomes)
 
 
 def test_encrypted_submission():

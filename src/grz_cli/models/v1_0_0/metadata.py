@@ -944,6 +944,23 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         return self
 
+    @model_validator(mode="after")
+    def validate_reference_genome_compatibility(self):
+        reference_genomes = {
+            (donor.tan_g, lab_datum.lab_data_name): lab_datum.sequence_data.reference_genome
+            for donor in self.donors
+            for lab_datum in donor.lab_data
+        }
+        unique_reference_genomes = set(reference_genomes.values())
+        if len(unique_reference_genomes) > 1:
+            raise ValueError(
+                f"Incompatible reference genomes found: {unique_reference_genomes}.\n"
+                f"Reference genomes must be consistent within a submission.\n"
+                f"Reference genomes: {reference_genomes}"
+            )
+
+        return self
+
 
 def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):
     if not lab_datum.has_sequence_data():
