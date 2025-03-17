@@ -769,7 +769,7 @@ class Donor(StrictBaseModel):
         for lab_datum in self.lab_data:
             if not lab_datum.has_sequence_data():
                 log.warning(
-                    f"No sequence data found for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'. "
+                    f"No sequence data found for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'. "
                     "Is this a submission without sequence data?"
                 )
         return self
@@ -794,7 +794,7 @@ class Donor(StrictBaseModel):
                 and lab_datum.library_type in lib_types
                 and not lab_datum.sequence_data.contains_files(FileType.bed)
             ):
-                raise ValueError(f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'.")
+                raise ValueError(f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'.")
 
         return self
 
@@ -805,7 +805,7 @@ class Donor(StrictBaseModel):
         """
         for lab_datum in self.lab_data:
             if lab_datum.has_sequence_data() and not lab_datum.sequence_data.contains_files(FileType.vcf):
-                raise ValueError(f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.tan_g}'.")
+                raise ValueError(f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'.")
 
         return self
 
@@ -827,7 +827,7 @@ class Donor(StrictBaseModel):
                 for i in fastq_files:
                     if i.read_order is None:
                         raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
                             f"No read order specified for FASTQ file '{i.file_path}'!"
                         )
 
@@ -845,23 +845,23 @@ class Donor(StrictBaseModel):
                     # check that there are exactly one R1 and on R2 file present
                     if len(fastq_r1_files) > 1:
                         raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
                             f"Paired end sequencing layout but multiple R1 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
                         )
                     elif len(fastq_r1_files) < 1:
                         raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
                             f"Paired end sequencing layout but missing R1 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
                         )
 
                     if len(fastq_r2_files) > 1:
                         raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
                             f"Paired end sequencing layout but multiple R2 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
                         )
                     elif len(fastq_r2_files) < 1:
                         raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.tan_g}': "
+                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
                             f"Paired end sequencing layout but missing R2 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
                         )
 
