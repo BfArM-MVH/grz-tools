@@ -196,9 +196,9 @@ class MvConsentScopeDomain(StrEnum):
     Scope of consent or revocation.
     """
 
-    mvSequencing = "mvSequencing"
-    reIdentification = "reIdentification"
-    caseIdentification = "caseIdentification"
+    mv_sequencing = "mvSequencing"
+    re_identification = "reIdentification"
+    case_identification = "caseIdentification"
 
 
 class MvConsentScope(StrictBaseModel):
