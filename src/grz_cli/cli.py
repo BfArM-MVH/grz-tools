@@ -230,7 +230,7 @@ def decrypt(
         log.error("GRZ private key path is required for decryption.")
         sys.exit(1)
 
-    log.info("Starting encryption...")
+    log.info("Starting decryption...")
 
     submission_dir = Path(submission_dir)
 
