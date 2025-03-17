@@ -178,7 +178,7 @@ class Relation(StrEnum):
     brother = "brother"
     sister = "sister"
     child = "child"
-    index = "index"
+    index_ = "index"
     other = "other"
 
 
