@@ -794,7 +794,9 @@ class Donor(StrictBaseModel):
                 and lab_datum.library_type in lib_types
                 and not lab_datum.sequence_data.contains_files(FileType.bed)
             ):
-                raise ValueError(f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'.")
+                raise ValueError(
+                    f"BED file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'."
+                )
 
         return self
 
@@ -805,7 +807,9 @@ class Donor(StrictBaseModel):
         """
         for lab_datum in self.lab_data:
             if lab_datum.has_sequence_data() and not lab_datum.sequence_data.contains_files(FileType.vcf):
-                raise ValueError(f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'.")
+                raise ValueError(
+                    f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'."
+                )
 
         return self
 
@@ -909,11 +913,11 @@ class GrzSubmissionMetadata(StrictBaseModel):
         Check if oncology samples have tumor cell counts.
         """
         for donor in self.donors:
-            case_id = donor.tan_g
+            pseudonym = donor.donor_pseudonym
             for lab_datum in donor.lab_data:
                 if lab_datum.sequence_subtype == SequenceSubtype.somatic and lab_datum.tumor_cell_count is None:
                     raise ValueError(
-                        f"Missing tumor cell count for donor '{case_id}', lab datum '{lab_datum.lab_data_name}'!"
+                        f"Missing tumor cell count for donor '{pseudonym}', lab datum '{lab_datum.lab_data_name}'!"
                     )
 
         return self
@@ -924,11 +928,11 @@ class GrzSubmissionMetadata(StrictBaseModel):
         Check if the submission contains lab data with the same name within one donor.
         """
         for donor in self.donors:
-            case_id = donor.tan_g
+            pseudonym = donor.donor_pseudonym
             lab_data_names = set()
             for lab_datum in donor.lab_data:
                 if lab_datum.lab_data_name in lab_data_names:
-                    raise ValueError(f"Duplicate lab datum '{lab_datum.lab_data_name}' in donor '{case_id}'")
+                    raise ValueError(f"Duplicate lab datum '{lab_datum.lab_data_name}' in donor '{pseudonym}'")
                 else:
                     lab_data_names.add(lab_datum.lab_data_name)
 
@@ -959,7 +963,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
                     )
                     info = dict(zip(names, key, strict=True))
                     log.warning(
-                        f"No thresholds for the specified combination {info} found (donor {donor.tan_g})!\n"
+                        f"No thresholds for the specified combination {info} found (donor {donor.donor_pseudonym})!\n"
                         f"Valid combinations:\n{allowed_combinations}.\n"
                         f"See https://www.bfarm.de/SharedDocs/Downloads/DE/Forschung/modellvorhaben-genomsequenzierung/Qs-durch-GRZ.pdf?__blob=publicationFile for more details.\n"
                         f"Skipping threshold validation."
@@ -973,7 +977,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
     @model_validator(mode="after")
     def validate_reference_genome_compatibility(self):
         reference_genomes = {
-            (donor.tan_g, lab_datum.lab_data_name): lab_datum.sequence_data.reference_genome
+            (donor.donor_pseudonym, lab_datum.lab_data_name): lab_datum.sequence_data.reference_genome
             for donor in self.donors
             for lab_datum in donor.lab_data
         }
@@ -992,7 +996,7 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
     if not lab_datum.has_sequence_data():
         # Skip if no sequence data is present; warning issues in the validator `warn_empty_sequence_data` of `Donor`.
         return
-    case_id = donor.tan_g
+    pseudonym = donor.donor_pseudonym
     lab_data_name = lab_datum.lab_data_name
     # mypy cannot reason about the `has_sequence_data` check
     sequence_data = typing.cast(SequenceData, lab_datum.sequence_data)
@@ -1001,17 +1005,18 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
     mean_depth_of_coverage_v = sequence_data.mean_depth_of_coverage
     if mean_depth_of_coverage_t and mean_depth_of_coverage_v < mean_depth_of_coverage_t:
         raise ValueError(
-            f"Mean depth of coverage for donor '{case_id}', lab datum '{lab_data_name}' "
+            f"Mean depth of coverage for donor '{pseudonym}', lab datum '{lab_data_name}' "
             f"below threshold: {mean_depth_of_coverage_v} < {mean_depth_of_coverage_t}"
         )
 
     read_length_t = thresholds.get("readLength")
-    read_length_v = sequence_data.read_length
-    if read_length_t and read_length_v < read_length_t:
-        raise ValueError(
-            f"Read length for donor '{case_id}', lab datum '{lab_data_name}' "
-            f"below threshold: {read_length_v} < {read_length_t}"
-        )
+    for f in sequence_data.list_files(FileType.fastq) + sequence_data.list_files(FileType.bam):
+        read_length_v = f.read_length
+        if read_length_t and read_length_v < read_length_t:
+            raise ValueError(
+                f"Read length for donor '{pseudonym}', lab datum '{lab_data_name}' "
+                f"below threshold: {read_length_v} < {read_length_t}"
+            )
 
     if t := thresholds.get("targetedRegionsAboveMinCoverage"):
         min_coverage_t = t.get("minCoverage")
@@ -1022,12 +1027,12 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
 
         if min_coverage_t and min_coverage_v < min_coverage_t:
             raise ValueError(
-                f"Minimum coverage for donor '{case_id}', lab datum '{lab_data_name}' "
+                f"Minimum coverage for donor '{pseudonym}', lab datum '{lab_data_name}' "
                 f"below threshold: {min_coverage_v} < {min_coverage_t}"
             )
         if fraction_above_t and fraction_above_v < fraction_above_t:
             raise ValueError(
-                f"Fraction of targeted regions above minimum coverage for donor '{case_id}', "
+                f"Fraction of targeted regions above minimum coverage for donor '{pseudonym}', "
                 f"lab datum '{lab_data_name}' below threshold: "
                 f"{fraction_above_v} < {fraction_above_t}"
             )
