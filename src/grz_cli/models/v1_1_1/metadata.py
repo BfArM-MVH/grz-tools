@@ -241,6 +241,12 @@ class MvConsent(StrictBaseModel):
     Modules of the consent to MV: must have at least a permit of mvSequencing
     """
 
+    @model_validator(mode="after")
+    def ensure_mv_sequencing_scope_is_present(self):
+        if not any(scope.domain == MvConsentScopeDomain.mv_sequencing for scope in self.scope):
+            raise ValueError("MV sequencing scope is missing in the MV consent.")
+        return self
+
 
 class ResearchConsentSchemaVersion(StrEnum):
     v_2025_0_1 = "2025.0.1"
