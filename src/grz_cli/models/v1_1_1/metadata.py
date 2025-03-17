@@ -243,8 +243,11 @@ class MvConsent(StrictBaseModel):
 
     @model_validator(mode="after")
     def ensure_mv_sequencing_scope_is_present(self):
-        if not any(scope.domain == MvConsentScopeDomain.mv_sequencing for scope in self.scope):
-            raise ValueError("MV sequencing scope is missing in the MV consent.")
+        if not any(
+            scope.domain == MvConsentScopeDomain.mv_sequencing and scope.type_ == MvConsentScopeType.permit
+            for scope in self.scope
+        ):
+            raise ValueError("Must have at least a permit of mvSequencing")
         return self
 
 
