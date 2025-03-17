@@ -222,6 +222,53 @@ class MvConsentScope(StrictBaseModel):
     """
 
 
+class MvConsent(StrictBaseModel):
+    presentation_date: date | None = None
+    """
+    Date of delivery. Date (in ISO 8601 format YYYY-MM-DD) on which the Model Project Declaration of Participation 
+    was presented to the patient, unless identical to the date of signature
+    """
+
+    version: str
+    """
+    Version of the declaration of participation. 
+    Name and version of the declaration of participation in the MV GenomSeq, e.g.: 
+    'Patient Info TE Consent MVGenomSeq vers01'
+    """
+
+    scope: list[MvConsentScope]
+    """
+    Modules of the consent to MV: must have at least a permit of mvSequencing
+    """
+
+
+class ResearchConsentSchemaVersion(StrEnum):
+    v_2025_0_1 = "2025.0.1"
+
+
+class ResearchConsent(StrictBaseModel):
+    """
+    Research consents. Multiple declarations of consent are possible! Must be assigned to the respective data sets.
+    """
+
+    schema_version: ResearchConsentSchemaVersion
+    """
+    Schema version of de.medizininformatikinitiative.kerndatensatz.consent
+    """
+
+    presentation_date: date | None = None
+    """
+    Date of the delivery of the research consent in ISO 8601 format (YYYY-MM-DD)
+    """
+
+    scope: object
+    """
+    Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
+    See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
+    'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
+    """
+
+
 class TissueOntology(StrictBaseModel):
     name: str
     """
@@ -684,53 +731,6 @@ class LabDatum(StrictBaseModel):
                 f"WXS requires RNA sequencing, but got '{self.sequence_type}'."
             )
         return self
-
-
-class MvConsent(StrictBaseModel):
-    presentation_date: date | None = None
-    """
-    Date of delivery. Date (in ISO 8601 format YYYY-MM-DD) on which the Model Project Declaration of Participation 
-    was presented to the patient, unless identical to the date of signature
-    """
-
-    version: str
-    """
-    Version of the declaration of participation. 
-    Name and version of the declaration of participation in the MV GenomSeq, e.g.: 
-    'Patient Info TE Consent MVGenomSeq vers01'
-    """
-
-    scope: list[MvConsentScope]
-    """
-    Modules of the consent to MV: must have at least a permit of mvSequencing
-    """
-
-
-class ResearchConsentSchemaVersion(StrEnum):
-    v_2025_0_1 = "2025.0.1"
-
-
-class ResearchConsent(StrictBaseModel):
-    """
-    Research consents. Multiple declarations of consent are possible! Must be assigned to the respective data sets.
-    """
-
-    schema_version: ResearchConsentSchemaVersion
-    """
-    Schema version of de.medizininformatikinitiative.kerndatensatz.consent
-    """
-
-    presentation_date: date | None = None
-    """
-    Date of the delivery of the research consent in ISO 8601 format (YYYY-MM-DD)
-    """
-
-    scope: object
-    """
-    Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
-    See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
-    'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
-    """
 
 
 class Donor(StrictBaseModel):
