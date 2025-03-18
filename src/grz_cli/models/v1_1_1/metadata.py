@@ -886,6 +886,10 @@ class GrzSubmissionMetadata(StrictBaseModel):
     General metadata schema for submissions to the GRZ
     """
 
+    schema_: Annotated[str, Field(alias="$schema")] = (
+        "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json"
+    )
+
     submission: Submission
 
     donors: list[Donor]
