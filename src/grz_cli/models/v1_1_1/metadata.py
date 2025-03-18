@@ -108,7 +108,7 @@ class Submission(StrictBaseModel):
     The VNg of the genomic data of the index patient that will be reimbursed --> a unique 32-length byte code represented in a hex string of length 64.
     """
 
-    local_case_id: str | None = None
+    local_case_id: str
     """
     A local case identifier for synchronizing locally
     """
