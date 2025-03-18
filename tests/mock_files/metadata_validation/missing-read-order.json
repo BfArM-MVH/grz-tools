@@ -1,28 +1,54 @@
 {
+  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json",
   "submission": {
     "submissionDate": "2024-07-15",
     "submissionType": "initial",
     "submitterId": "260914050",
     "labName": "Institute für Humangenetik am Klinikum rechts der Isar",
     "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+    "localCaseId": "missing-read-order",
     "genomicDataCenterId": "GRZK00007",
     "clinicalDataNodeId": "KDKK00007",
     "genomicStudyType": "single",
-    "genomicStudySubtype": "tumor-only"
+    "genomicStudySubtype": "tumor-only",
+    "coverageType": "GKV",
+    "diseaseType": "oncological"
   },
   "donors": [
     {
-      "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+      "donorPseudonym": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
       "gender": "female",
-      "relation": "self",
-      "mvConsentDate": "2024-07-05",
-      "mvConsentPresentedDate": "2024-07-05",
-      "mvConsentVersion": "1.7.1b",
-      "mvConsentScope": {
-        "consentMvSequencing": true,
-        "consentCaseIdentification": true,
-        "consentReIdentification": true
+      "relation": "index",
+      "mvConsent": {
+        "presentationDate": "2024-07-15",
+        "version": "1.7.1b",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "mvSequencing"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "reIdentification"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "caseIdentification"
+          }
+        ]
       },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2024-07-15",
+          "scope": {
+            "FOO": "BAR"
+          }
+        }
+      ],
       "labData": [
         {
           "labDataName": "Blut DNA normal",
@@ -58,7 +84,6 @@
             "meanDepthOfCoverage": 92.4,
             "minCoverage": 25.4,
             "targetedRegionsAboveMinCoverage": 0.96,
-            "readLength": 150,
             "nonCodingVariants": true,
             "callerUsed": [
               {
@@ -85,13 +110,15 @@
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
-                "fileSizeInBytes": 165912
+                "fileSizeInBytes": 165912,
+                "readLength": 150
               },
               {
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
                 "fileType": "fastq",
                 "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
-                "fileSizeInBytes": 165806
+                "fileSizeInBytes": 165806,
+                "readLength": 150
               },
               {
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf",

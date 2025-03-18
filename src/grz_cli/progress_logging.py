@@ -10,7 +10,7 @@ from os import PathLike
 from pathlib import Path
 
 from .file_operations import read_multiple_json
-from .models.v1_0_0.metadata import File as SubmissionFileMetadata
+from .models.v1_1_1.metadata import File as SubmissionFileMetadata
 from .states import State
 
 Index = tuple[str, float, int]

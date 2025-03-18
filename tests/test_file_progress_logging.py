@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from grz_cli.file_operations import read_multiple_json
-from grz_cli.models.v1_0_0.metadata import File as SubmissionFileMetadata
+from grz_cli.models.v1_1_1.metadata import File as SubmissionFileMetadata
 from grz_cli.progress_logging import FileProgressLogger
 
 

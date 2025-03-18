@@ -1,28 +1,54 @@
 {
+  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json",
   "submission": {
     "submissionDate": "2024-07-15",
     "submissionType": "initial",
     "submitterId": "260914050",
     "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+    "localCaseId": "example_metadata",
     "genomicDataCenterId": "GRZK00007",
     "clinicalDataNodeId": "KDKK00007",
     "labName": "Institute für Humangenetik am Klinikum rechts der Isar",
     "genomicStudyType": "duo",
-    "genomicStudySubtype": "tumor+germline"
+    "genomicStudySubtype": "tumor+germline",
+    "coverageType": "GKV",
+    "diseaseType": "oncological"
   },
   "donors": [
     {
-      "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+      "donorPseudonym": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
       "gender": "female",
-      "relation": "self",
-      "mvConsentDate": "2024-07-05",
-      "mvConsentPresentedDate": "2024-07-05",
-      "mvConsentVersion": "1.7.1b",
-      "mvConsentScope": {
-        "consentMvSequencing": true,
-        "consentCaseIdentification": true,
-        "consentReIdentification": true
+      "relation": "index",
+      "mvConsent": {
+        "presentationDate": "2024-07-15",
+        "version": "1.7.1b",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "mvSequencing"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "reIdentification"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "caseIdentification"
+          }
+        ]
       },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2024-07-15",
+          "scope": {
+            "FOO": "BAR"
+          }
+        }
+      ],
       "labData": [
         {
           "labDataName": "Blut DNA normal",
@@ -58,7 +84,6 @@
             "meanDepthOfCoverage": 102.4,
             "minCoverage": 25.4,
             "targetedRegionsAboveMinCoverage": 0.96,
-            "readLength": 150,
             "nonCodingVariants": true,
             "callerUsed": [
               {
@@ -85,7 +110,8 @@
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000000.bam",
                 "fileType": "bam",
                 "fileChecksum": "0358a9852adc88c77e7321ddfb07caf2e9911986a90ff76816be142f6f38122d",
-                "fileSizeInBytes": 116993
+                "fileSizeInBytes": 116993,
+                "readLength": 150
               }
             ]
           },
@@ -117,7 +143,7 @@
           "tumorCellCount": [
             {
               "count": 80,
-              "method": "Bioinformatics"
+              "method": "bioinformatics"
             }
           ],
           "sequenceData": {
@@ -131,7 +157,6 @@
             "meanDepthOfCoverage": 252.4,
             "minCoverage": 25.4,
             "targetedRegionsAboveMinCoverage": 0.96,
-            "readLength": 150,
             "nonCodingVariants": true,
             "callerUsed": [
               {
@@ -158,7 +183,8 @@
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000001.bam",
                 "fileType": "bam",
                 "fileChecksum": "0358a9852adc88c77e7321ddfb07caf2e9911986a90ff76816be142f6f38122d",
-                "fileSizeInBytes": 116642
+                "fileSizeInBytes": 116642,
+                "readLength": 150
               }
             ]
           },
@@ -167,17 +193,39 @@
       ]
     },
     {
-      "tanG": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111",
+      "donorPseudonym": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111",
       "gender": "male",
       "relation": "father",
-      "mvConsentDate": "2024-07-15",
-      "mvConsentPresentedDate": "2024-07-15",
-      "mvConsentVersion": "1.7.1b",
-      "mvConsentScope": {
-        "consentMvSequencing": true,
-        "consentCaseIdentification": true,
-        "consentReIdentification": true
+      "mvConsent": {
+        "presentationDate": "2024-07-15",
+        "version": "1.7.1b",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "mvSequencing"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "reIdentification"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "caseIdentification"
+          }
+        ]
       },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2024-07-15",
+          "scope": {
+            "FOO": "BAR"
+          }
+        }
+      ],
       "labData": [
         {
           "labDataName": "Blut DNA normal",
@@ -213,7 +261,6 @@
             "meanDepthOfCoverage": 102.4,
             "minCoverage": 25.4,
             "targetedRegionsAboveMinCoverage": 0.96,
-            "readLength": 150,
             "nonCodingVariants": true,
             "callerUsed": [
               {
@@ -240,7 +287,8 @@
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000002.bam",
                 "fileType": "bam",
                 "fileChecksum": "b3213e180f6003cee93668aa7d01366046f9b7a04907a6566ab52bd3059c2ce2",
-                "fileSizeInBytes": 116314
+                "fileSizeInBytes": 116314,
+                "readLength": 150
               }
             ]
           },

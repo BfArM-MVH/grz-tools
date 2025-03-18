@@ -15,7 +15,7 @@ from .download import S3BotoDownloadWorker
 from .fastq_validation import validate_paired_end_reads, validate_single_end_reads
 from .file_operations import Crypt4GH, calculate_sha256
 from .models.config import ConfigModel
-from .models.v1_0_0.metadata import (
+from .models.v1_1_1.metadata import (
     File,
     FileType,
     GrzSubmissionMetadata,
@@ -23,7 +23,7 @@ from .models.v1_0_0.metadata import (
     SequenceData,
     SequencingLayout,
 )
-from .models.v1_0_0.metadata import File as SubmissionFileMetadata
+from .models.v1_1_1.metadata import File as SubmissionFileMetadata
 from .progress_logging import FileProgressLogger
 from .states import DecryptionState, EncryptionState, ValidationState
 from .upload import S3BotoUploadWorker
