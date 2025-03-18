@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.1.4...v0.2.0) (2025-03-18)
+
+
+### Features
+
+* Update metadata model to v1.1.1 ([#35](https://github.com/BfArM-MVH/grz-cli/issues/35)) ([eda8899](https://github.com/BfArM-MVH/grz-cli/commit/eda88993e13c62240fde8f4ea56dc7ea7c5a96e6))
+
+
+### Bug Fixes
+
+* `grz-cli --version` should report correct version ([#37](https://github.com/BfArM-MVH/grz-cli/issues/37)) ([a185e42](https://github.com/BfArM-MVH/grz-cli/commit/a185e42fc8f577598db2cdd4a007e816b6856ea8))
+* decryption log message should read "decryption", not "encryption" ([#36](https://github.com/BfArM-MVH/grz-cli/issues/36)) ([70708dd](https://github.com/BfArM-MVH/grz-cli/commit/70708dd65bd342bedb27e6f5cb3f521b276bcf01))
+* Ensure exact R1/R2 mappings in paired end sequencing submissions ([#22](https://github.com/BfArM-MVH/grz-cli/issues/22)) ([cdc3f9a](https://github.com/BfArM-MVH/grz-cli/commit/cdc3f9a1968950a45c20a35e39d4be504635c9c4))
+* ensure reference genomes are consistent ([#26](https://github.com/BfArM-MVH/grz-cli/issues/26)) ([849c6b2](https://github.com/BfArM-MVH/grz-cli/commit/849c6b25d8a92b0d68be45c7ba31348b1f937681))
+
 ## [0.1.4](https://github.com/BfArM-MVH/grz-cli/compare/v0.1.3...v0.1.4) (2025-02-21)
 
 

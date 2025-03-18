@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grz-cli"
-version = "0.1.4"
+version = "0.2.0"
 description = "Tool for validation, encryption and upload of MV submissions to GDCs."
 readme = "README.md"
 license = { text = "MIT" }
