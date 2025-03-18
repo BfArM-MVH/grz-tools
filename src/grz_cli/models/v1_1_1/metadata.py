@@ -22,6 +22,8 @@ from pydantic.alias_generators import to_camel
 
 from grz_cli.file_operations import calculate_sha256  # type: ignore
 
+SCHEMA_URL = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json"
+
 log = logging.getLogger(__name__)
 
 
@@ -886,9 +888,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
     General metadata schema for submissions to the GRZ
     """
 
-    schema_: Annotated[str, Field(alias="$schema")] = (
-        "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json"
-    )
+    schema_: Annotated[str, Field(alias="$schema")] = SCHEMA_URL
 
     submission: Submission
 
@@ -896,6 +896,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
     """
     List of donors including the index patient.
     """
+
+    @model_validator(mode="after")
+    def check_schema(self):
+        if self.schema_ != SCHEMA_URL:
+            log.warning(f"Unknown GRZ metadata schema URL: {self.schema_}")
+        return self
 
     @model_validator(mode="after")
     def validate_donor_count(self):
