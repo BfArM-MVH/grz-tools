@@ -9,13 +9,8 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from .download import S3BotoDownloadWorker
-from .fastq_validation import validate_paired_end_reads, validate_single_end_reads
-from .file_operations import Crypt4GH, calculate_sha256
-from .models.config import ConfigModel
-from .models.v1_1_1.metadata import (
+from grz_pydantic_models.v1_1_1.metadata import (
+    ChecksumType,
     File,
     FileType,
     GrzSubmissionMetadata,
@@ -23,7 +18,13 @@ from .models.v1_1_1.metadata import (
     SequenceData,
     SequencingLayout,
 )
-from .models.v1_1_1.metadata import File as SubmissionFileMetadata
+from grz_pydantic_models.v1_1_1.metadata import File as SubmissionFileMetadata
+from pydantic import ValidationError
+
+from .download import S3BotoDownloadWorker
+from .fastq_validation import validate_paired_end_reads, validate_single_end_reads
+from .file_operations import Crypt4GH, calculate_sha256
+from .models.config import ConfigModel
 from .progress_logging import FileProgressLogger
 from .states import DecryptionState, EncryptionState, ValidationState
 from .upload import S3BotoUploadWorker
@@ -168,6 +169,51 @@ class Submission:
 
         return retval
 
+    @staticmethod
+    def validate_file_data(metadata: File, local_file_path: Path) -> Generator[str]:
+        """
+        Validates whether the provided file matches this metadata.
+
+        :param metadata: Metadata model object
+        :param local_file_path: Path to the actual file (resolved if symlinked)
+        :return: Generator of errors
+        """
+        # Resolve file path
+        local_file_path = local_file_path.resolve()
+
+        # Check if path exists
+        if not local_file_path.exists():
+            yield f"{str(metadata.file_path)} does not exist!"
+            # Return here as following tests cannot work
+            return
+
+        # Check if path is a file
+        if not local_file_path.is_file():
+            yield f"{str(metadata.file_path)} is not a file!"
+            # Return here as following tests cannot work
+            return
+
+        # Check if the checksum is correct
+        if metadata.checksum_type == "sha256":
+            calculated_checksum = calculate_sha256(local_file_path)
+            if metadata.file_checksum != calculated_checksum:
+                yield (
+                    f"{str(metadata.file_path)}: Checksum mismatch! "
+                    f"Expected: '{metadata.file_checksum}', calculated: '{calculated_checksum}'."
+                )
+        else:
+            yield (
+                f"{str(metadata.file_path)}: Unsupported checksum type: {metadata.checksum_type}. "
+                f"Supported types: {[e.value for e in ChecksumType]}"
+            )
+
+        # Check file size
+        if metadata.file_size_in_bytes != local_file_path.stat().st_size:
+            yield (
+                f"{str(metadata.file_path)}: File size mismatch! "
+                f"Expected: '{metadata.file_size_in_bytes}', observed: '{local_file_path.stat().st_size}'."
+            )
+
     def validate_checksums(self, progress_log_file: str | PathLike) -> Generator[str]:
         """
         Validates the checksum of the files against the metadata and prints the errors.
@@ -185,7 +231,7 @@ class Submission:
             self.__log.debug("Validating '%s'...", str(local_file_path))
 
             # validate the file
-            errors = list(file_metadata.validate_data(local_file_path))
+            errors = list(self.validate_file_data(file_metadata, local_file_path))
             validation_passed = len(errors) == 0
 
             # return log state

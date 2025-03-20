@@ -24,6 +24,7 @@ dependencies = [
     "tqdm >=4.66.5,<5",
     "pydantic >=2.9.2,<2.10",
     "platformdirs >=4.3.6,<5",
+    "grz-pydantic-models"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -192,6 +193,10 @@ dev-dependencies = [
 python_version = "3.12"
 plugins = "pydantic.mypy"
 packages = "src"
+
+[[tool.mypy.overrides]]
+module = ["grz_pydantic_models.*"]
+follow_untyped_imports = true
 
 [tool.pytest.ini_options]
 addopts = [
