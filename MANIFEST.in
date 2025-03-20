@@ -1,2 +1,3 @@
-include src/grz_cli/resources/grz-schema.json
+graft src
 include src/grz_cli/resources/thresholds.json
+include LICENSE
