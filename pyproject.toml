@@ -4,7 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grz-cli"
-version = "0.2.0"
 description = "Tool for validation, encryption and upload of MV submissions to GDCs."
 readme = "README.md"
 license = { text = "MIT" }
@@ -15,6 +14,7 @@ authors = [
     { name = "Till Hartmann", email = "till.hartmann@bih-charite.de" },
     { name = "Thomas Sell", email = "thomas.sell@bih-charite.de" },
 ]
+dynamic = ["version"]
 dependencies = [
     "boto3 >=1.35.39,<2",
     "click >=8.1.7,<9",
@@ -33,6 +33,10 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 keywords = ["GRZ", "GDC", "S3"]
+
+
+[tool.setuptools.dynamic]
+version = { attr = "grz_cli.__version__" }
 
 [project.urls]
 "Homepage" = "https://codebase.helmholtz.cloud/grz-mv-genomseq/grz-cli"

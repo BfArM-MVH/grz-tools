@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -369,12 +370,12 @@ wheels = [
 
 [[package]]
 name = "grz-cli"
-version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
     { name = "crypt4gh" },
+    { name = "grz-pydantic-models" },
     { name = "jsonschema" },
     { name = "platformdirs" },
     { name = "pydantic" },
@@ -424,6 +425,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.35.39,<2" },
     { name = "click", specifier = ">=8.1.7,<9" },
     { name = "crypt4gh", specifier = ">=1.7,<2" },
+    { name = "grz-pydantic-models" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
     { name = "moto", extras = ["s3"], marker = "extra == 'test'", specifier = ">=5.0.16,<6" },
     { name = "numpy", marker = "extra == 'test'", specifier = ">=2.1.2,<3" },
@@ -437,6 +439,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'test'", specifier = ">=0.9.6,<1" },
     { name = "tqdm", specifier = ">=4.66.5,<5" },
 ]
+provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -462,6 +465,18 @@ test = [
     { name = "pytest-cov" },
     { name = "pytest-mock" },
     { name = "pytest-sugar" },
+]
+
+[[package]]
+name = "grz-pydantic-models"
+version = "1.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/27/51/cfb1ec939813180f4a9fa96384cbd14483067e56a48664347813939319f7/grz_pydantic_models-1.1.1.tar.gz", hash = "sha256:305248092dac6b0f58e1347dec9c20338c25299a6d110a766c40e51b1ede3dd6", size = 17103 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/d4/723aa141d7f220b58ba056ff30b266056b2d965b796cf17889435bcf6f61/grz_pydantic_models-1.1.1-py3-none-any.whl", hash = "sha256:9160bde311463ff7f4f79d267239d11a98a914344daaf6fddeb1aacec0d3488d", size = 9582 },
 ]
 
 [[package]]
