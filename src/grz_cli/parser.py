@@ -21,6 +21,7 @@ from grz_pydantic_models.submission.metadata.v1 import (
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
+from .bam_validation import validate_bam
 from .download import S3BotoDownloadWorker
 from .fastq_validation import validate_paired_end_reads, validate_single_end_reads
 from .file_operations import Crypt4GH, calculate_sha256
@@ -265,12 +266,16 @@ class Submission:
         def find_fastq_files(sequence_data: SequenceData) -> list[File]:
             return [f for f in sequence_data.files if f.file_type == FileType.fastq]
 
+        def find_bam_files(sequence_data: SequenceData) -> list[File]:
+            return [f for f in sequence_data.files if f.file_type == FileType.bam]
+
         for donor in self.metadata.content.donors:
             for lab_data in donor.lab_data:
                 sequencing_layout = lab_data.sequencing_layout
                 sequence_data = lab_data.sequence_data
                 # find all FASTQ files
                 fastq_files = find_fastq_files(sequence_data)
+                bam_files = find_bam_files(sequence_data)
 
                 match sequencing_layout:
                     case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
@@ -278,6 +283,35 @@ class Submission:
 
                     case SequencingLayout.paired_end:
                         yield from self._validate_paired_end(fastq_files, progress_logger)
+
+                yield from self._validate_bams(bam_files, progress_logger)
+
+    def _validate_bams(
+        self,
+        bam_files: list[File],
+        progress_logger: FileProgressLogger[ValidationState],
+    ) -> Generator[str, None, None]:
+        def validate_file(local_file_path, _file_metadata) -> ValidationState:
+            self.__log.debug("Validating '%s'...", str(local_file_path))
+
+            # validate the file
+            errors = list(validate_bam(local_file_path))
+            validation_passed = len(errors) == 0
+
+            # return log state
+            return ValidationState(
+                errors=errors,
+                validation_passed=validation_passed,
+            )
+
+        for bam_file in bam_files:
+            logged_state = progress_logger.get_state(
+                self.files_dir / bam_file.file_path,
+                bam_file,
+                default=validate_file,  # validate the file if the state was not calculated yet
+            )
+            if logged_state:
+                yield from logged_state["errors"]
 
     def _validate_single_end(
         self,

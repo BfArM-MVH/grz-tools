@@ -379,6 +379,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "platformdirs" },
     { name = "pydantic" },
+    { name = "pysam" },
     { name = "pyyaml" },
     { name = "tqdm" },
 ]
@@ -431,6 +432,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'test'", specifier = ">=2.1.2,<3" },
     { name = "platformdirs", specifier = ">=4.3.6,<5" },
     { name = "pydantic", specifier = ">=2.9.2,<2.10" },
+    { name = "pysam", specifier = "==0.23.*" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3,<9" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5.0.0,<6" },
     { name = "pytest-mock", marker = "extra == 'test'", specifier = ">=3.14.0,<4" },
@@ -832,6 +834,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7e/66/fdc17e94486836eda4ba7113c0db9ac7e2f4eea1b968ee09de2fe75e391b/pyproject_api-1.9.0.tar.gz", hash = "sha256:7e8a9854b2dfb49454fae421cb86af43efbb2b2454e5646ffb7623540321ae6e", size = 22714 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b0/1d/92b7c765df46f454889d9610292b0ccab15362be3119b9a624458455e8d5/pyproject_api-1.9.0-py3-none-any.whl", hash = "sha256:326df9d68dea22d9d98b5243c46e3ca3161b07a1b9b18e213d1e24fd0e605766", size = 13131 },
+]
+
+[[package]]
+name = "pysam"
+version = "0.23.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f7/ca/88ea596efed2900b830aa36f705742aa192b52ffa0c47577f9aa88e45ab0/pysam-0.23.0.tar.gz", hash = "sha256:81488b3c7e0efc614395e21acde8bdb21c7adafea31736e733173ac7afac0c3e", size = 4845119 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/11/36e4c12b25443e246a5adae67ecd74d4a779bc915019fdb1085f8ee01bf8/pysam-0.23.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:5a795db60b648902d1886faf9d3575dbd3f199736fda27504b8237b684b74710", size = 8602134 },
+    { url = "https://files.pythonhosted.org/packages/ed/16/d1083f3513763d97a5da3316ccc30deab3ebc95a462b4efd52e80e90fb7a/pysam-0.23.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e454f282f6ace01c5c293e3f1bc4bb2ee844f6d5b8686bffe7e02d7e0089a73e", size = 8275527 },
+    { url = "https://files.pythonhosted.org/packages/6e/27/0b8fd3d605d5529d51c05fed206b41f6a1846029a1578a42c5c75edf7636/pysam-0.23.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:4f1b976bff84b99acb90276f396e7853359a8ea3a2a5fbcb69f3ceed4027761d", size = 25337952 },
+    { url = "https://files.pythonhosted.org/packages/bd/06/5c9ed34ec048e51e115cd1b3cf9d9c258e3c75b3105b42db11c0282536a3/pysam-0.23.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:4fd54bae72a832317aab23ad45970f9091ac2c7c233c5a6826941095fbd7f103", size = 26084141 },
+    { url = "https://files.pythonhosted.org/packages/9f/fd/436f45b36f6aff381ca53f28206d00b529ae6450de167833844864a73d4d/pysam-0.23.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:b13eb322ad3726b214df3fe54249af5d91bfca6e4a64abe9f293348edae397e8", size = 8584746 },
+    { url = "https://files.pythonhosted.org/packages/ff/61/98073f02fab565ff18088e629cca5cd45a3c7afd65cbfd6dad55156de99f/pysam-0.23.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:41272520d47a428c4d17441eab88d7c5b1ad609ba729cc0cd96960b8a8589e93", size = 8260116 },
+    { url = "https://files.pythonhosted.org/packages/b2/ef/ed08833247f1d110a5686da2d6e8f1507cc6dbc7075d21e0a0d542ab748a/pysam-0.23.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:e0426928e676e5d9f8320cd09741be905f90be5c7133f3ad386c7d1be84930ff", size = 25287097 },
+    { url = "https://files.pythonhosted.org/packages/c7/9d/0e6a147211de3d16d0b2ccbeb3d4e5fb572870a82c22d9ae16c3cbc1398f/pysam-0.23.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:1631c173363475c409352d9bf3ad96e7ff851ba903e5b979f55330f0b41d9b5d", size = 26039167 },
 ]
 
 [[package]]

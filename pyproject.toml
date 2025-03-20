@@ -24,7 +24,8 @@ dependencies = [
     "tqdm >=4.66.5,<5",
     "pydantic >=2.9.2,<2.10",
     "platformdirs >=4.3.6,<5",
-    "grz-pydantic-models >=1.2.1"
+    "grz-pydantic-models >=1.2.1",
+    "pysam ==0.23.*"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
