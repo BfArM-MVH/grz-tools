@@ -11,6 +11,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import click
+import grz_pydantic_models
 import platformdirs
 import yaml
 
@@ -108,7 +109,11 @@ class OrderedGroup(click.Group):
     cls=OrderedGroup,
     help="Validate, encrypt, decrypt and upload submissions to a GRZ/GDC.",
 )
-@click.version_option(version=importlib.metadata.version("grz-cli"), prog_name="grz-cli")
+@click.version_option(
+    version=importlib.metadata.version("grz-cli"),
+    prog_name="grz-cli",
+    message=f"%(prog)s v%(version)s (metadata schema versions: {', '.join(grz_pydantic_models.get_supported_versions())})",
+)
 @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
 @click.option(
     "--log-level",

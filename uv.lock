@@ -425,7 +425,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.35.39,<2" },
     { name = "click", specifier = ">=8.1.7,<9" },
     { name = "crypt4gh", specifier = ">=1.7,<2" },
-    { name = "grz-pydantic-models" },
+    { name = "grz-pydantic-models", specifier = ">=1.2.0" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
     { name = "moto", extras = ["s3"], marker = "extra == 'test'", specifier = ">=5.0.16,<6" },
     { name = "numpy", marker = "extra == 'test'", specifier = ">=2.1.2,<3" },
@@ -469,14 +469,14 @@ test = [
 
 [[package]]
 name = "grz-pydantic-models"
-version = "1.1.1"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/27/51/cfb1ec939813180f4a9fa96384cbd14483067e56a48664347813939319f7/grz_pydantic_models-1.1.1.tar.gz", hash = "sha256:305248092dac6b0f58e1347dec9c20338c25299a6d110a766c40e51b1ede3dd6", size = 17103 }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/48/a68cea0ff1f8c8fd115addb897798387bae8a62c547299d63cb68e3aa960/grz_pydantic_models-1.2.0.tar.gz", hash = "sha256:86db230d14dbbc17a0956a4efecbe755548865de409dbc54bf23507eac203172", size = 17182 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/d4/723aa141d7f220b58ba056ff30b266056b2d965b796cf17889435bcf6f61/grz_pydantic_models-1.1.1-py3-none-any.whl", hash = "sha256:9160bde311463ff7f4f79d267239d11a98a914344daaf6fddeb1aacec0d3488d", size = 9582 },
+    { url = "https://files.pythonhosted.org/packages/eb/b3/fc0909ac3d84156f8406d9362fb0a671b6e9dbac1a41600c26c4982b9ebb/grz_pydantic_models-1.2.0-py3-none-any.whl", hash = "sha256:715e548d09151e3885559e6294ea07f468fb7acfa2fbdfb42351bda7a6ac0512", size = 9640 },
 ]
 
 [[package]]
