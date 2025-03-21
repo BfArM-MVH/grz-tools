@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.2.0...v0.3.0) (2025-03-21)
+
+
+### Features
+
+* report supported metadata schema versions with cli version ([#49](https://github.com/BfArM-MVH/grz-cli/issues/49)) ([07d861e](https://github.com/BfArM-MVH/grz-cli/commit/07d861e32302632ca55a7f5cb5ebbfb05d4a2649))
+
+
+### Bug Fixes
+
+* use metadata model from grz-pydantic-models ([#41](https://github.com/BfArM-MVH/grz-cli/issues/41)) ([5f2944e](https://github.com/BfArM-MVH/grz-cli/commit/5f2944e7892820a9ba4e629633f8a50df4cb2a01))
+
 ## [0.2.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.1.4...v0.2.0) (2025-03-18)
 
 
