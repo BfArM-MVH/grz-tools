@@ -9,7 +9,7 @@ from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 
-from grz_pydantic_models.v1_1_1.metadata import File as SubmissionFileMetadata
+from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 
 from .file_operations import read_multiple_json
 from .states import State

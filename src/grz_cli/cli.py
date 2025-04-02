@@ -11,7 +11,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import click
-import grz_pydantic_models
+import grz_pydantic_models.submission.metadata
 import platformdirs
 import yaml
 
@@ -112,7 +112,7 @@ class OrderedGroup(click.Group):
 @click.version_option(
     version=importlib.metadata.version("grz-cli"),
     prog_name="grz-cli",
-    message=f"%(prog)s v%(version)s (metadata schema versions: {', '.join(grz_pydantic_models.get_supported_versions())})",
+    message=f"%(prog)s v%(version)s (metadata schema versions: {', '.join(grz_pydantic_models.submission.metadata.get_supported_versions())})",
 )
 @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
 @click.option(

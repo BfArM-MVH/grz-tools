@@ -9,7 +9,7 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
-from grz_pydantic_models.v1_1_1.metadata import (
+from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
     File,
     FileType,
@@ -18,7 +18,7 @@ from grz_pydantic_models.v1_1_1.metadata import (
     SequenceData,
     SequencingLayout,
 )
-from grz_pydantic_models.v1_1_1.metadata import File as SubmissionFileMetadata
+from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
 from .download import S3BotoDownloadWorker
