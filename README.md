@@ -223,6 +223,8 @@ Option is for the usage at a GDC/GRZ.
 
 ## Testing
 
+Please note that binary files used for testing are managed with [Git LFS](https://git-lfs.com), which will be needed to clone them locally with the git repository.
+
 To run the tests, navigate to the root directory of your project and invoke `pytest`.
 Alternatively, install `uv` and `tox` and run `uv run tox`.
 

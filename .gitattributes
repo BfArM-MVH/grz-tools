@@ -1,0 +1,4 @@
+# binary files to be kept in LFS
+*.gz filter=lfs diff=lfs merge=lfs -text
+*.c4gh filter=lfs diff=lfs merge=lfs -text
+*.bam filter=lfs diff=lfs merge=lfs -text
