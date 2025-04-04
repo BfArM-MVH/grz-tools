@@ -1,3 +1,2 @@
 graft src
-include src/grz_cli/resources/thresholds.json
 include LICENSE
