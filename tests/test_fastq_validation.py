@@ -21,7 +21,7 @@ def test_single_end_inconsistent_read_length():
         )
     )
     assert len(errors) == 1
-    assert "Inconsistent read lengths" in errors[0]
+    assert "Read length mismatch" in errors[0]
 
 
 # Test case 3: Paired end, differing line numbers

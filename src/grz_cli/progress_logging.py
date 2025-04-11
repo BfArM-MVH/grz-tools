@@ -105,7 +105,8 @@ class FileProgressLogger[T: State]:
         :param file_path: The file path to query for the state.
         :param file_metadata: The metadata of the file to query for the state.
         :param default: Default state to use if the file does not exist.
-            Can be a Callable that takes the file path and the file metadata as input and returns some state.
+            Can be a Callable that takes the file path and the file metadata as input and returns some state:
+            `Callable[[Path, SubmissionFileMetadata], T]`.
 
             The default state gets automatically saved as the state for this file in case there is no stored state.
         :return: A dictionary representing the file's state, or None if the file's state isn't logged.

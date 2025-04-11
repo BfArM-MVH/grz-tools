@@ -318,11 +318,11 @@ class Submission:
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
     ) -> Generator[str, None, None]:
-        def validate_file(local_file_path, _file_metadata) -> ValidationState:
+        def validate_file(local_file_path, file_metadata: SubmissionFileMetadata) -> ValidationState:
             self.__log.debug("Validating '%s'...", str(local_file_path))
 
             # validate the file
-            errors = list(validate_single_end_reads(local_file_path))
+            errors = list(validate_single_end_reads(local_file_path, expected_read_length=file_metadata.read_length))
             validation_passed = len(errors) == 0
 
             # return log state
@@ -373,6 +373,7 @@ class Submission:
                         validate_paired_end_reads(
                             local_fastq_r1_path,  # fastq R1
                             local_fastq_r2_path,  # fastq R2
+                            expected_read_length=fastq_r1.read_length,  # fastq R1 and R2 should have the same read length
                         )
                     )
                     validation_passed = len(errors) == 0
