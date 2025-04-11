@@ -67,6 +67,24 @@ class S3Options(StrictBaseModel):
     The proxy URL for S3 operations (optional).
     """
 
+    request_checksum_calculation: str | None = None
+    """
+    Whether to calculate checksums for S3 request payloads (optional).
+    Valid values are:
+
+    * ``when_supported`` -- When set, a checksum will be calculated for
+      all request payloads of operations modeled with the ``httpChecksum``
+      trait where ``requestChecksumRequired`` is ``true`` or a
+      ``requestAlgorithmMember`` is modeled.
+
+    * ``when_required`` -- When set, a checksum will only be calculated
+      for request payloads of operations modeled with the ``httpChecksum``
+      trait where ``requestChecksumRequired`` is ``true`` or where a
+      ``requestAlgorithmMember`` is modeled and supplied.
+
+    Defaults to None.
+    """
+
 
 FilePath = Annotated[Path, AfterValidator(lambda v: v.expanduser()), PathType("file")]
 

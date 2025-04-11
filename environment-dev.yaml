@@ -5,7 +5,7 @@ channels:
   - nodefaults
 dependencies:
   - python >=3.12
-  - boto3 >=1.35.39,<2
+  - boto3 >=1.36,<2
   - pyyaml >=6.0.2,<7
   - click >=8.1.7,<9
   - python-crypt4gh >=1.7,<2
