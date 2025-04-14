@@ -183,7 +183,6 @@ def test_upload_download_submission(
     remote_bucket,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    transaction_id = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
 
     shutil.copytree(
         submission_dir / "encrypted_files",
@@ -200,7 +199,7 @@ def test_upload_download_submission(
         "--config-file",
         temp_config_file_path,
     ]
-    runner = CliRunner()
+    runner = CliRunner(mix_stderr=False)
     with mock.patch(
         "grz_cli.models.config.S3Options.__getattr__",
         lambda self, name: None if name == "endpoint_url" else AttributeError,
@@ -208,6 +207,9 @@ def test_upload_download_submission(
         result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
+    assert len(result.output) != 0, result.stderr
+
+    submission_id = result.output.strip()
 
     # download
     download_dir = tmpdir_factory.mktemp("submission_download")
@@ -217,7 +219,7 @@ def test_upload_download_submission(
     testargs = [
         "download",
         "--submission-id",
-        transaction_id,
+        submission_id,
         "--output-dir",
         str(download_dir_path),
         "--config-file",

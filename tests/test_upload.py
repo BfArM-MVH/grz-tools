@@ -62,6 +62,7 @@ def test_boto_upload(
 
 
 def test__gather_files_to_upload(encrypted_submission):
+    submission_id = encrypted_submission.submission_id
     metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
     gathered_files = encrypted_submission.get_encrypted_files_and_object_id()
     gathered_files[metadata_file_path] = metadata_s3_object_id
@@ -70,47 +71,47 @@ def test__gather_files_to_upload(encrypted_submission):
     expected_files = [
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/target_regions.bed.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/target_regions.bed.c4gh",
+            f"{submission_id}/files/target_regions.bed.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz.c4gh",
+            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz.c4gh",
+            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf.c4gh",
+            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz.c4gh",
+            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz.c4gh",
+            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf.c4gh",
+            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz.c4gh",
+            f"{submission_id}/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz.c4gh",
+            f"{submission_id}/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/encrypted_files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf.c4gh",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf.c4gh",
+            f"{submission_id}/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/metadata/metadata.json",
-            "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000/metadata/metadata.json",
+            f"{submission_id}/metadata/metadata.json",
         ),
     ]
     expected_files = sorted(expected_files)

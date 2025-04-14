@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Generator
@@ -528,13 +529,26 @@ class EncryptedSubmission:
 
         return retval
 
+    _submission_id: str | None = None
+
+    @property
+    def submission_id(self) -> str:
+        """ID to refer to an individual submission to a GRZ"""
+        if self._submission_id is None:
+            # generate a submission ID once
+            submitter_id = self.metadata.content.submission.submitter_id
+            submission_date = self.metadata.content.submission.submission_date
+            # use first 8 characters of SHA256 hash of transaction ID to virtually prevent collisions
+            suffix = hashlib.sha256(self.metadata.transaction_id.encode("utf-8")).hexdigest()[:8]
+            self._submission_id = f"{submitter_id}_{submission_date}_{suffix}"
+
+        return self._submission_id
+
     def get_metadata_file_path_and_object_id(self) -> tuple[Path, str]:
         """
         :return: tuple with the `local_file_path` and s3_object_id of the metadata file
         """
-        return Path(self.metadata.file_path), str(
-            Path(self.metadata.transaction_id) / "metadata" / self.metadata.file_path.name
-        )
+        return Path(self.metadata.file_path), str(Path(self.submission_id) / "metadata" / self.metadata.file_path.name)
 
     def get_encrypted_files_and_object_id(self) -> dict[Path, str]:
         """
@@ -543,7 +557,7 @@ class EncryptedSubmission:
         retval = {}
         for local_file_path, file_metadata in self.encrypted_files.items():
             retval[local_file_path] = str(
-                Path(self.metadata.transaction_id) / "files" / self.get_encrypted_file_path(file_metadata.file_path)
+                Path(self.submission_id) / "files" / self.get_encrypted_file_path(file_metadata.file_path)
             )
         return retval
 
@@ -823,16 +837,17 @@ class Worker:
 
         return submission
 
-    def upload(self, config: ConfigModel):
+    def upload(self, config: ConfigModel) -> str:
         """
-        Upload an encrypted submission
-
+        Upload an encrypted submission and return the generated submission ID
         """
         upload_worker = S3BotoUploadWorker(config, status_file_path=self.progress_file_upload)
 
         encrypted_submission = self.parse_encrypted_submission()
 
         upload_worker.upload(encrypted_submission)
+
+        return encrypted_submission.submission_id
 
     def download(self, config: ConfigModel, submission_id: str):
         """

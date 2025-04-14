@@ -82,7 +82,7 @@ submission_id = click.option(
     required=True,
     type=str,
     metavar="STRING",
-    help="S3 submission prefix (corresponds to the tanG of a submission)",
+    help="S3 submission ID",
 )
 
 output_dir = click.option(
@@ -275,7 +275,8 @@ def upload(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-    worker_inst.upload(config)
+    # output the generated submission ID
+    print(worker_inst.upload(config))
 
     log.info("Upload finished!")
 
