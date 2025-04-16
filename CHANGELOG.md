@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.3.0...v0.4.0) (2025-04-16)
+
+
+### Features
+
+* add BAM file validation (enables long read submissions)
+* fail fast during FASTQ validation
+* S3 support for special backends
+* generate a submission ID as upload target folder
+
 ## [0.3.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.2.0...v0.3.0) (2025-03-21)
 
 
