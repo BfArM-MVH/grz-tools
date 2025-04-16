@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "grz-cli"
 description = "Tool for validation, encryption and upload of MV submissions to GDCs."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     { name = "Koray Kirli", email = "koraykirli@gmail.com" },
     { name = "Mathias Lesche", email = "mathias.lesche@tu-dresden.de" },
@@ -29,7 +29,6 @@ dependencies = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
 requires-python = ">=3.12"
@@ -207,6 +206,3 @@ follow_untyped_imports = true
 addopts = [
     "--import-mode=importlib",
 ]
-
-[tool.setuptools]
-license-files = []
