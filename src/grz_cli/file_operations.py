@@ -24,7 +24,7 @@ import crypt4gh.lib  # type: ignore[import-untyped]
 from nacl.public import PrivateKey
 from tqdm.auto import tqdm
 
-from grz_cli.constants import TQDM_SMOOTHING
+from .constants import TQDM_SMOOTHING
 
 log = logging.getLogger(__name__)
 
