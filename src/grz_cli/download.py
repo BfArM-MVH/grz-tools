@@ -16,6 +16,7 @@ from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-
 from botocore.config import Config as Boto3Config  # type: ignore[import-untyped]
 from tqdm.auto import tqdm
 
+from .constants import TQDM_SMOOTHING
 from .models.config import ConfigModel
 from .progress_logging import FileProgressLogger
 from .states import DownloadState
@@ -158,7 +159,7 @@ class S3BotoDownloadWorker:
         )
 
         transfer = S3Transfer(self._s3_client, config)
-        progress_bar = tqdm(total=filesize, unit="B", unit_scale=True, unit_divisor=1024)
+        progress_bar = tqdm(total=filesize, unit="B", unit_scale=True, unit_divisor=1024, smoothing=TQDM_SMOOTHING)
         transfer.download_file(
             self._config.s3_options.bucket,
             s3_object_id,
