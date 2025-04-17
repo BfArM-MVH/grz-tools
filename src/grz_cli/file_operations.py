@@ -24,6 +24,8 @@ import crypt4gh.lib  # type: ignore[import-untyped]
 from nacl.public import PrivateKey
 from tqdm.auto import tqdm
 
+from .constants import TQDM_SMOOTHING
+
 log = logging.getLogger(__name__)
 
 
@@ -69,7 +71,9 @@ def calculate_md5(file_path, chunk_size=2**16, progress=True) -> str:
     md5_hash = hashlib.md5()  # noqa: S324
     with open(file_path, "rb") as f:
         if progress and (total_size > chunk_size):
-            with tqdm(total=total_size, unit="B", unit_scale=True, desc="Calculating MD5") as pbar:
+            with tqdm(
+                total=total_size, unit="B", unit_scale=True, desc="Calculating MD5", smoothing=TQDM_SMOOTHING
+            ) as pbar:
                 while chunk := f.read(chunk_size):
                     md5_hash.update(chunk)
                     pbar.update(len(chunk))
@@ -195,6 +199,7 @@ class Crypt4GH:
                     unit_scale=True,
                     # unit_divisor=1024,  # make use of standard units e.g. KB, MB, etc.
                     miniters=1,
+                    smoothing=TQDM_SMOOTHING,
                 ),
             ) as pbar_in_fd,
         ):

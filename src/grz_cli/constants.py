@@ -34,3 +34,5 @@ LOGGING_CONFIG = {
         },
     },
 }
+
+TQDM_SMOOTHING: float = 0.0001
