@@ -326,7 +326,7 @@ def download(
 @click.pass_context
 def submit(ctx, submission_dir, config_file, threads):
     """
-    Sequentially invoke validate, encrypt and upload on a single submission.
+    Validate, encrypt, and then upload.
     """
     click.echo("Starting submission process...")
     ctx.invoke(validate, submission_dir=submission_dir)
