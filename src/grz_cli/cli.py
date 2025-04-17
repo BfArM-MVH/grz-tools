@@ -319,6 +319,22 @@ def download(
     log.info("Download finished!")
 
 
+@cli.command("submit")
+@submission_dir
+@config_file
+@threads
+@click.pass_context
+def submit(ctx, submission_dir, config_file, threads):
+    """
+    Sequentially invoke validate, encrypt and upload on a single submission.
+    """
+    click.echo("Starting submission process...")
+    ctx.invoke(validate, submission_dir=submission_dir)
+    ctx.invoke(encrypt, submission_dir=submission_dir, config_file=config_file)
+    ctx.invoke(upload, submission_dir=submission_dir, config_file=config_file, threads=threads)
+    click.echo("Submission finished!")
+
+
 def read_config(config_path: str | PathLike) -> ConfigModel:
     """Reads the configuration file and validates it against the schema."""
     with open(config_path, encoding="utf-8") as f:
