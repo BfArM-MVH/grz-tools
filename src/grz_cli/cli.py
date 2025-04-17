@@ -327,6 +327,11 @@ def download(
 def submit(ctx, submission_dir, config_file, threads):
     """
     Validate, encrypt, and then upload.
+
+    This is a convenience command that performs the following steps in order:
+    1. Validate the submission
+    2. Encrypt the submission
+    3. Upload the encrypted submission
     """
     click.echo("Starting submission process...")
     ctx.invoke(validate, submission_dir=submission_dir)
