@@ -18,6 +18,7 @@ s3_options:
   bucket: 'your-s3-bucket-name'
   access_key: 'your-s3-bucket-key'
   secret: 'your-s3-bucket-secret'
+  #request_checksum_calculation: "when_required"  # necessary on some S3 backends
 
 ## optional parameters
 # region_name: 'your-s3-region-name'
