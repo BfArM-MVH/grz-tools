@@ -42,10 +42,11 @@ def test_validate_submission(
     ]
 
     runner = CliRunner()
-    result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
+    cli = grz_cli.cli.build_cli()
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     # check if re-validation is skipped
-    result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     # test if command has correctly checked for:
     # - mismatched md5sums
@@ -74,8 +75,11 @@ def test_encrypt_decrypt_submission(
         temp_config_file_path,
     ]
 
-    runner = CliRunner()
-    result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
+    # for some reason, passing `env={…}` to CliRunner is not enough, so setting os.environ here as well.
+    os.environ["GRZ_MODE"] = "true"
+    runner = CliRunner(env={"GRZ_MODE": "true"})
+    cli = grz_cli.cli.build_cli()
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
 
@@ -89,7 +93,7 @@ def test_encrypt_decrypt_submission(
     ]
 
     runner = CliRunner()
-    result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
 
@@ -125,8 +129,9 @@ def test_decrypt_submission(working_dir_path, temp_config_file_path):
         "--config-file",
         temp_config_file_path,
     ]
-    runner = CliRunner()
-    result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
+    runner = CliRunner(env={"GRZ_MODE": "true"})
+    cli = grz_cli.cli.build_cli()
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
 
@@ -199,12 +204,13 @@ def test_upload_download_submission(
         "--config-file",
         temp_config_file_path,
     ]
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner(mix_stderr=False, env={"GRZ_MODE": "true"})
     with mock.patch(
         "grz_cli.models.config.S3Options.__getattr__",
         lambda self, name: None if name == "endpoint_url" else AttributeError,
     ):
-        result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
+        cli = grz_cli.cli.build_cli()
+        result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
     assert len(result.output) != 0, result.stderr
@@ -225,9 +231,9 @@ def test_upload_download_submission(
         "--config-file",
         temp_config_file_path,
     ]
-    runner = CliRunner()
-
-    result = runner.invoke(grz_cli.cli.cli, testargs, catch_exceptions=False)
+    runner = CliRunner(env={"GRZ_MODE": "true"})
+    cli = grz_cli.cli.build_cli()
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
 
