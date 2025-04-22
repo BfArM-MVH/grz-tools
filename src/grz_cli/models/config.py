@@ -85,6 +85,11 @@ class S3Options(StrictBaseModel):
     Defaults to None.
     """
 
+    multipart_chunksize: int = 256 * 1024**2
+    """
+    The size of the chunks to use for multipart uploads in bytes.
+    """
+
 
 FilePath = Annotated[Path, AfterValidator(lambda v: v.expanduser()), PathType("file")]
 

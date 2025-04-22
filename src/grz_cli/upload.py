@@ -24,7 +24,6 @@ from .progress_logging import FileProgressLogger
 from .states import UploadState
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
-MULTIPART_CHUNKSIZE = 256 * 1024**2  # 256MiB (boto 3 default is 8MiB)
 MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
@@ -128,11 +127,12 @@ class S3BotoUploadWorker(UploadWorker):
         self.__log.info(f"Uploading {local_file_path} to {s3_object_id}...")
 
         filesize = getsize(local_file_path)
+        multipart_chunksize = self._config.s3_options.multipart_chunksize
 
         chunksize = (
             math.ceil(filesize / MULTIPART_MAX_CHUNKS)
-            if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
-            else MULTIPART_CHUNKSIZE
+            if filesize / multipart_chunksize > MULTIPART_MAX_CHUNKS
+            else multipart_chunksize
         )
         self.__log.debug(
             f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunk(s)"
@@ -142,6 +142,7 @@ class S3BotoUploadWorker(UploadWorker):
             multipart_threshold=MULTIPART_THRESHOLD,
             multipart_chunksize=chunksize,
             max_concurrency=self._threads,
+            use_threads=self._threads > 1,
         )
 
         transfer = S3Transfer(self._s3_client, config)
