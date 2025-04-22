@@ -24,7 +24,7 @@ from .progress_logging import FileProgressLogger
 from .states import UploadState
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
-MULTIPART_CHUNKSIZE = 32 * 8 * 1024**2  # 256MiB (boto 3 default is 8MiB)
+MULTIPART_CHUNKSIZE = 256 * 1024**2  # 256MiB (boto 3 default is 8MiB)
 MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
