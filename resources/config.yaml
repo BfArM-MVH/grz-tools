@@ -19,6 +19,7 @@ s3_options:
   access_key: 'your-s3-bucket-key'
   secret: 'your-s3-bucket-secret'
   # request_checksum_calculation: "when_required"  # necessary on some S3 backends
+  # multipart_chunksize: 268435456  # in bytes, 256MiB
 
 ## optional parameters
 # region_name: 'your-s3-region-name'
