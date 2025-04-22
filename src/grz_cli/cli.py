@@ -5,6 +5,7 @@ CLI module for handling command-line interface operations.
 import importlib
 import logging
 import logging.config
+import os
 import sys
 from os import PathLike, sched_getaffinity
 from pathlib import Path
@@ -93,6 +94,14 @@ output_dir = click.option(
     default=None,
     help="Path to the target submission output directory",
 )
+
+
+def read_config(config_path: str | PathLike) -> ConfigModel:
+    """Reads the configuration file and validates it against the schema."""
+    with open(config_path, encoding="utf-8") as f:
+        config = ConfigModel(**yaml.safe_load(f))
+
+    return config
 
 
 class OrderedGroup(click.Group):
@@ -219,40 +228,6 @@ def encrypt(
 @cli.command()
 @submission_dir
 @config_file
-def decrypt(
-    submission_dir,
-    config_file,
-):
-    """
-    Decrypt a submission.
-
-    Decrypting a submission requires the _private_ key of the original recipient.
-    """
-    config = read_config(config_file)
-
-    grz_privkey_path = config.grz_private_key_path
-    if not grz_privkey_path:
-        log.error("GRZ private key path is required for decryption.")
-        sys.exit(1)
-
-    log.info("Starting decryption...")
-
-    submission_dir = Path(submission_dir)
-
-    worker_inst = Worker(
-        metadata_dir=submission_dir / "metadata",
-        files_dir=submission_dir / "files",
-        log_dir=submission_dir / "logs",
-        encrypted_files_dir=submission_dir / "encrypted_files",
-    )
-    worker_inst.decrypt(grz_privkey_path)
-
-    log.info("Encryption successful!")
-
-
-@cli.command()
-@submission_dir
-@config_file
 @threads
 def upload(
     submission_dir,
@@ -281,7 +256,28 @@ def upload(
     log.info("Upload finished!")
 
 
-@cli.command()
+@cli.command("submit")
+@submission_dir
+@config_file
+@threads
+@click.pass_context
+def submit(ctx, submission_dir, config_file, threads):
+    """
+    Validate, encrypt, and then upload.
+
+    This is a convenience command that performs the following steps in order:
+    1. Validate the submission
+    2. Encrypt the submission
+    3. Upload the encrypted submission
+    """
+    click.echo("Starting submission process...")
+    ctx.invoke(validate, submission_dir=submission_dir)
+    ctx.invoke(encrypt, submission_dir=submission_dir, config_file=config_file)
+    ctx.invoke(upload, submission_dir=submission_dir, config_file=config_file, threads=threads)
+    click.echo("Submission finished!")
+
+
+@click.command()
 @submission_id
 @output_dir
 @config_file
@@ -319,34 +315,52 @@ def download(
     log.info("Download finished!")
 
 
-@cli.command("submit")
+@click.command()
 @submission_dir
 @config_file
-@threads
-@click.pass_context
-def submit(ctx, submission_dir, config_file, threads):
+def decrypt(
+    submission_dir,
+    config_file,
+):
     """
-    Validate, encrypt, and then upload.
+    Decrypt a submission.
 
-    This is a convenience command that performs the following steps in order:
-    1. Validate the submission
-    2. Encrypt the submission
-    3. Upload the encrypted submission
+    Decrypting a submission requires the _private_ key of the original recipient.
     """
-    click.echo("Starting submission process...")
-    ctx.invoke(validate, submission_dir=submission_dir)
-    ctx.invoke(encrypt, submission_dir=submission_dir, config_file=config_file)
-    ctx.invoke(upload, submission_dir=submission_dir, config_file=config_file, threads=threads)
-    click.echo("Submission finished!")
+    config = read_config(config_file)
+
+    grz_privkey_path = config.grz_private_key_path
+    if not grz_privkey_path:
+        log.error("GRZ private key path is required for decryption.")
+        sys.exit(1)
+
+    log.info("Starting decryption...")
+
+    submission_dir = Path(submission_dir)
+
+    worker_inst = Worker(
+        metadata_dir=submission_dir / "metadata",
+        files_dir=submission_dir / "files",
+        log_dir=submission_dir / "logs",
+        encrypted_files_dir=submission_dir / "encrypted_files",
+    )
+    worker_inst.decrypt(grz_privkey_path)
+
+    log.info("Encryption successful!")
 
 
-def read_config(config_path: str | PathLike) -> ConfigModel:
-    """Reads the configuration file and validates it against the schema."""
-    with open(config_path, encoding="utf-8") as f:
-        config = ConfigModel(**yaml.safe_load(f))
+def main():
+    """
+    Main entry point.
 
-    return config
+    If env GRZ_MODE is True, true or 1, expose additional grz-internal commands.
+    """
+    grz_mode = os.environ.get("GRZ_MODE", "false").lower() in {"true", "1"}
+    if grz_mode:
+        cli.add_command(download)
+        cli.add_command(decrypt)
+    cli()
 
 
 if __name__ == "__main__":
-    cli()
+    main()

@@ -42,7 +42,7 @@ version = { attr = "grz_cli.__version__" }
 "Homepage" = "https://codebase.helmholtz.cloud/grz-mv-genomseq/grz-cli"
 
 [project.scripts]
-grz-cli = "grz_cli.cli:cli"
+grz-cli = "grz_cli.cli:main"
 
 [project.optional-dependencies]
 test = [
