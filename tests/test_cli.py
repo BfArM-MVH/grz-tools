@@ -75,10 +75,8 @@ def test_encrypt_decrypt_submission(
         temp_config_file_path,
     ]
 
-    # for some reason, passing `env={…}` to CliRunner is not enough, so setting os.environ here as well.
-    os.environ["GRZ_MODE"] = "true"
-    runner = CliRunner(env={"GRZ_MODE": "true"})
-    cli = grz_cli.cli.build_cli()
+    runner = CliRunner()
+    cli = grz_cli.cli.build_cli(grz_mode=True)
     result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
@@ -129,8 +127,8 @@ def test_decrypt_submission(working_dir_path, temp_config_file_path):
         "--config-file",
         temp_config_file_path,
     ]
-    runner = CliRunner(env={"GRZ_MODE": "true"})
-    cli = grz_cli.cli.build_cli()
+    runner = CliRunner()
+    cli = grz_cli.cli.build_cli(grz_mode=True)
     result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
@@ -204,12 +202,12 @@ def test_upload_download_submission(
         "--config-file",
         temp_config_file_path,
     ]
-    runner = CliRunner(mix_stderr=False, env={"GRZ_MODE": "true"})
+    runner = CliRunner(mix_stderr=False)
     with mock.patch(
         "grz_cli.models.config.S3Options.__getattr__",
         lambda self, name: None if name == "endpoint_url" else AttributeError,
     ):
-        cli = grz_cli.cli.build_cli()
+        cli = grz_cli.cli.build_cli(grz_mode=True)
         result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
@@ -231,8 +229,8 @@ def test_upload_download_submission(
         "--config-file",
         temp_config_file_path,
     ]
-    runner = CliRunner(env={"GRZ_MODE": "true"})
-    cli = grz_cli.cli.build_cli()
+    runner = CliRunner()
+    cli = grz_cli.cli.build_cli(grz_mode=True)
     result = runner.invoke(cli, testargs, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output

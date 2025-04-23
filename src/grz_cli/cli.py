@@ -308,11 +308,10 @@ def decrypt(
     log.info("Encryption successful!")
 
 
-def build_cli():
+def build_cli(grz_mode=False):
     """
     Factory for building the CLI application.
     """
-    grz_mode = os.environ.get("GRZ_MODE", "false").lower() in {"true", "1"}
 
     @click.group(
         cls=OrderedGroup,
@@ -370,7 +369,9 @@ def main():
     """
     Main entry point for the CLI application.
     """
-    cli = build_cli()
+    grz_mode = os.environ.get("GRZ_MODE", "false").lower() in {"true", "yes", "1"}
+
+    cli = build_cli(grz_mode=grz_mode)
     cli()
 
 
