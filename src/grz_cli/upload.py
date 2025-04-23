@@ -124,6 +124,25 @@ class S3BotoUploadWorker(UploadWorker):
             callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
         )
 
+    def _remote_id_exists(self, s3_object_id: str) -> bool:
+        """
+        Determine if a remote ID already exists
+        :param s3_object_id: Remote S3 object ID under which the file should be stored
+        """
+        exists = True
+        try:
+            self._s3_client.head_object(Bucket=self._config.s3_options.bucket, Key=s3_object_id)
+        except self._s3_client.exceptions.NoSuchKey:
+            exists = False
+        except botocore.exceptions.ClientError as error:
+            if error.response["Error"]["Code"] in {"403", "404"}:
+                # backend can return forbidden instead if user has no ListBucket permission
+                exists = False
+            else:
+                raise error
+
+        return exists
+
     @override
     def upload(self, encrypted_submission: EncryptedSubmission):
         """
@@ -132,6 +151,10 @@ class S3BotoUploadWorker(UploadWorker):
         """
         progress_logger = FileProgressLogger[UploadState](self._status_file_path)
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+
+        if self._remote_id_exists(metadata_s3_object_id):
+            raise UploadError("Submission already uploaded. Corrections, additions, and followups require a new tanG.")
+
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id
 
