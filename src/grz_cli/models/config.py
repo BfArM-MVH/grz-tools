@@ -21,6 +21,13 @@ class StrictBaseModel(BaseModel):
     )
 
 
+class InternalOptions(StrictBaseModel):
+    inboxes: list[str] | None = None
+    """
+    Names of all inbox buckets to scan for automatic submission discovery and download.
+    """
+
+
 class S3Options(StrictBaseModel):
     endpoint_url: AnyHttpUrl
     """
@@ -116,6 +123,7 @@ class ConfigModel(StrictBaseModel):
     """
 
     s3_options: S3Options
+    internal: InternalOptions | None = None
 
     @field_validator("grz_public_key")
     @classmethod

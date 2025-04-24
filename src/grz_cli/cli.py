@@ -17,6 +17,7 @@ import platformdirs
 import yaml
 
 from .constants import PACKAGE_ROOT
+from .download import get_next_submission_id
 from .logging_setup import add_filelogger
 from .models.config import ConfigModel
 from .parser import Worker
@@ -83,7 +84,7 @@ submission_id = click.option(
     required=True,
     type=str,
     metavar="STRING",
-    help="S3 submission ID",
+    help="S3 submission ID (or 'auto' to pick the oldest complete submission)",
 )
 
 output_dir = click.option(
@@ -241,7 +242,9 @@ def submit(ctx, submission_dir, config_file, threads):
 @output_dir
 @config_file
 @threads
+@click.pass_context
 def download(
+    ctx,
     submission_id,
     output_dir,
     config_file,
@@ -257,7 +260,18 @@ def download(
 
     log.info("Starting download...")
 
-    submission_dir_path = Path(output_dir)
+    if submission_id == "auto":
+        log.info("Scanning inboxes for oldest complete submission...")
+        next_submission_id = get_next_submission_id(config)
+        if next_submission_id is None:
+            ctx.fail("No submissions detected in any inbox.")
+        else:
+            submission_id = next_submission_id
+        log.info(f"Downloading submission {submission_id}")
+        submission_dir_path = Path(output_dir) / submission_id
+    else:
+        submission_dir_path = Path(output_dir)
+
     if not submission_dir_path.is_dir():
         log.debug("Creating submission directory %s", submission_dir_path)
         submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
