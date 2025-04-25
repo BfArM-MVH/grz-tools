@@ -1,16 +1,20 @@
-"""Module for uploading encrypted submissions to a remote storage"""
+"""Module for downloading encrypted submissions to local storage"""
 
 from __future__ import annotations
 
+import datetime
+import itertools
 import logging
 import math
 import re
+from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import botocore.handlers  # type: ignore[import-untyped]
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
+from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from .constants import TQDM_SMOOTHING
@@ -196,3 +200,42 @@ class S3BotoDownloadWorker:
                             file_key,
                             str(full_path),
                         )
+
+
+class SubmissionInboxState(BaseModel):
+    """A summary of the state of a submission in an inbox"""
+
+    submission_id: str
+    complete: bool
+    oldest_upload: datetime.datetime
+    newest_upload: datetime.datetime
+
+
+def query_submissions(config: ConfigModel) -> list[SubmissionInboxState]:
+    """Queries the state of all submissions in the configured bucket."""
+    s3_client = init_s3_client(config)
+    paginator = s3_client.get_paginator("list_objects_v2")
+
+    objects = itertools.chain.from_iterable(
+        page["Contents"] for page in paginator.paginate(Bucket=config.s3_options.bucket)
+    )
+    objects_sorted = sorted(objects, key=itemgetter("Key"))
+    submission2objects = {
+        key: tuple(group) for key, group in itertools.groupby(objects_sorted, key=lambda o: o["Key"].split("/")[0])
+    }
+
+    submissions = []
+    for submission_id, submission_objects in submission2objects.items():
+        submission_objects_sorted = sorted(submission_objects, key=itemgetter("LastModified"))
+        oldest_object = submission_objects_sorted[0]
+        newest_object = submission_objects_sorted[-1]
+        is_complete = len(list(filter(lambda o: o["Key"].endswith("/metadata.json"), submission_objects))) == 1
+        submission = SubmissionInboxState(
+            submission_id=submission_id,
+            complete=is_complete,
+            oldest_upload=oldest_object["LastModified"],
+            newest_upload=newest_object["LastModified"],
+        )
+        submissions.append(submission)
+
+    return sorted(submissions, key=attrgetter("oldest_upload"))

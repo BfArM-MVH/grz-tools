@@ -3,6 +3,7 @@ CLI module for handling command-line interface operations.
 """
 
 import importlib
+import json
 import logging
 import logging.config
 import os
@@ -14,9 +15,13 @@ from tempfile import NamedTemporaryFile
 import click
 import grz_pydantic_models.submission.metadata
 import platformdirs
+import rich.console
+import rich.table
 import yaml
+from pydantic_core import to_jsonable_python
 
 from .constants import PACKAGE_ROOT
+from .download import query_submissions
 from .logging_setup import add_filelogger
 from .models.config import ConfigModel
 from .parser import Worker
@@ -94,6 +99,8 @@ output_dir = click.option(
     default=None,
     help="Path to the target submission output directory",
 )
+
+output_json = click.option("--json", "output_json", is_flag=True, help="Output JSON for machine-readability.")
 
 
 def read_config(config_path: str | PathLike) -> ConfigModel:
@@ -275,6 +282,39 @@ def download(
 
 
 @click.command()
+@config_file
+@output_json
+def list_submissions(config_file, output_json):
+    """
+    List submissions within an inbox from oldest to newest.
+    """
+    config = read_config(config_file)
+    submissions = query_submissions(config)
+
+    if output_json:
+        json.dump(to_jsonable_python(submissions), sys.stdout)
+    else:
+        console = rich.console.Console()
+        table = rich.table.Table()
+        table.add_column("ID", no_wrap=True)
+        table.add_column("Status", no_wrap=True)
+        table.add_column("Oldest Upload", overflow="fold")
+        table.add_column("Newest Upload", overflow="fold")
+        for submission in submissions:
+            status_text = rich.text.Text(
+                "Complete" if submission.complete else "Incomplete",
+                style="green" if submission.complete else "yellow",
+            )
+            table.add_row(
+                submission.submission_id,
+                status_text,
+                submission.oldest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                submission.newest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        console.print(table)
+
+
+@click.command()
 @submission_dir
 @config_file
 def decrypt(
@@ -359,6 +399,7 @@ def build_cli(grz_mode=False):
     cli.add_command(submit)
 
     if grz_mode:
+        cli.add_command(list_submissions, name="list")
         cli.add_command(download)
         cli.add_command(decrypt)
 
