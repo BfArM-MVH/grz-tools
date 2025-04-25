@@ -9,17 +9,15 @@ from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import boto3  # type: ignore[import-untyped]
 import botocore.handlers  # type: ignore[import-untyped]
-from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
-from botocore.config import Config as Boto3Config  # type: ignore[import-untyped]
 from tqdm.auto import tqdm
 
 from .constants import TQDM_SMOOTHING
 from .models.config import ConfigModel
 from .progress_logging import FileProgressLogger
 from .states import DownloadState
+from .transfer import init_s3_client
 
 MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
 MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
@@ -63,35 +61,7 @@ class S3BotoDownloadWorker:
         self._config = config
         self._threads = threads
 
-        self._init_s3_client()
-
-    def _init_s3_client(self):
-        # if user specifies empty strings, this might be an issue
-        def empty_str_to_none(string: str | None) -> str | None:
-            if string == "" or string is None:
-                return None
-            else:
-                return string
-
-        # configure proxies if proxy_url is defined
-        proxy_url = self._config.s3_options.proxy_url
-        config = Boto3Config(
-            proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
-            request_checksum_calculation=self._config.s3_options.request_checksum_calculation,
-        )
-
-        # Initialize S3 client for uploading
-        self._s3_client: boto3.session.Session.client = boto3_client(
-            service_name="s3",
-            region_name=empty_str_to_none(self._config.s3_options.region_name),
-            api_version=empty_str_to_none(self._config.s3_options.api_version),
-            use_ssl=self._config.s3_options.use_ssl,
-            endpoint_url=empty_str_to_none(str(self._config.s3_options.endpoint_url)),
-            aws_access_key_id=empty_str_to_none(self._config.s3_options.access_key),
-            aws_secret_access_key=empty_str_to_none(self._config.s3_options.secret),
-            aws_session_token=empty_str_to_none(self._config.s3_options.session_token),
-            config=config,
-        )
+        self._s3_client = init_s3_client(config)
 
     def prepare_download(
         self,
