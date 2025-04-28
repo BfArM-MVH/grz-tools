@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-from grz_cli.file_operations import read_multiple_json
+from grz_cli.utils.io import read_multiple_json
 
 
 # Basic JSON objects (single-line JSON objects)

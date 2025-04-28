@@ -1,11 +1,11 @@
-"""Utility functions for the GRZ CLI."""
+"""Configuration utilities for the GRZ CLI."""
 
 import logging
 from os import PathLike
 
 import yaml
 
-from .models.config import ConfigModel
+from ..models.config import ConfigModel
 
 log = logging.getLogger(__name__)
 

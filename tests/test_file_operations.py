@@ -4,12 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from grz_cli.file_operations import (
-    Crypt4GH,
-    calculate_md5,
-    calculate_sha256,
-    is_relative_subdirectory,
-)
+from grz_cli.utils.checksums import calculate_sha256
+from grz_cli.utils.crypt import Crypt4GH
+from grz_cli.utils.paths import is_relative_subdirectory
 
 
 def test_calculate_sha256(temp_small_file_path: str, temp_small_file_sha256sum):
@@ -17,13 +14,6 @@ def test_calculate_sha256(temp_small_file_path: str, temp_small_file_sha256sum):
     assert isinstance(sha256, str)
     assert len(sha256) == 64  # sha256 hash is 64 characters long
     assert sha256 == temp_small_file_sha256sum
-
-
-def test_calculate_md5(temp_small_file_path: str, temp_small_file_md5sum):
-    md5 = calculate_md5(temp_small_file_path)
-    assert isinstance(md5, str)
-    assert len(md5) == 32  # MD5 hash is 32 characters long
-    assert md5 == temp_small_file_md5sum
 
 
 def test_prepare_c4gh_keys(crypt4gh_grz_public_key_file_path: str):

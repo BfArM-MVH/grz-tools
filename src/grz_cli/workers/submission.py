@@ -22,9 +22,9 @@ from grz_pydantic_models.submission.metadata.v1 import (
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
-from ..file_operations import Crypt4GH, calculate_sha256
-from ..progress_logging import FileProgressLogger
-from ..states import DecryptionState, EncryptionState, ValidationState
+from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
+from ..utils.checksums import calculate_sha256
+from ..utils.crypt import Crypt4GH
 from ..validation.bam import validate_bam
 from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
@@ -252,7 +252,7 @@ class Submission:
 
         :return: Generator of errors
         """
-        from ..progress_logging import FileProgressLogger
+        from ..progress import FileProgressLogger
 
         progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
         # cleanup log file and keep only files listed here
@@ -429,7 +429,7 @@ class Submission:
             )
             encrypted_files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
-        from ..progress_logging import FileProgressLogger
+        from ..progress import FileProgressLogger
 
         progress_logger = FileProgressLogger[EncryptionState](log_file_path=progress_log_file)
 
@@ -599,7 +599,7 @@ class EncryptedSubmission:
             )
             files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
-        from ..progress_logging import FileProgressLogger
+        from ..progress import FileProgressLogger
 
         progress_logger = FileProgressLogger[DecryptionState](log_file_path=progress_log_file)
 

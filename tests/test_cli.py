@@ -11,7 +11,7 @@ from click.testing import CliRunner
 from moto import mock_aws
 
 import grz_cli.cli
-from grz_cli.file_operations import calculate_sha256
+from grz_cli.utils.checksums import calculate_sha256
 
 
 @pytest.fixture

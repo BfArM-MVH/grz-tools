@@ -14,7 +14,7 @@ from typing import TextIO
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_SMOOTHING
-from ..file_operations import TqdmIOWrapper
+from ..utils.io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
 

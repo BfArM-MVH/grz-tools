@@ -19,8 +19,7 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_SMOOTHING
 from ..models.config import ConfigModel
-from ..progress_logging import FileProgressLogger
-from ..states import DownloadState
+from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
 
 MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default

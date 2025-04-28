@@ -12,8 +12,8 @@ import pytest
 import yaml
 from moto import mock_aws
 
-from grz_cli.file_operations import Crypt4GH
 from grz_cli.models.config import ConfigModel
+from grz_cli.utils.crypt import Crypt4GH
 from grz_cli.workers.submission import EncryptedSubmission, SubmissionMetadata
 
 config_path = "tests/mock_files/mock_config.yaml"
