@@ -1,5 +1,5 @@
 """
-Common methods for transfering data to and from GRZ buckets.
+Common methods for transferring data to and from GRZ buckets.
 """
 
 import boto3  # type: ignore[import-untyped]

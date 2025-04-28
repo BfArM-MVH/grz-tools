@@ -22,11 +22,11 @@ from grz_pydantic_models.submission.metadata.v1 import (
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
-from ..bam_validation import validate_bam
-from ..fastq_validation import validate_paired_end_reads, validate_single_end_reads
 from ..file_operations import Crypt4GH, calculate_sha256
 from ..progress_logging import FileProgressLogger
 from ..states import DecryptionState, EncryptionState, ValidationState
+from ..validation.bam import validate_bam
+from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
 log = logging.getLogger(__name__)
 
