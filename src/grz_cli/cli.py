@@ -42,6 +42,12 @@ DIR_R_E = click.Path(
     writable=False,
     resolve_path=True,
 )
+DIR_R = click.Path(
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
 DIR_RW_E = click.Path(
     exists=True,
     file_okay=False,
@@ -351,7 +357,13 @@ def decrypt(
 
 
 @click.command()
-@submission_dir
+@click.option(
+    "--submission-dir",
+    metavar="PATH",
+    type=DIR_R,
+    required=True,
+    help="Path to the submission directory containing 'metadata/', 'files/', 'encrypted_files/' and 'logs/' directories",
+)
 @submission_id
 @config_file
 @click.option("--yes-i-really-mean-it", is_flag=True)
@@ -363,8 +375,12 @@ def clean(submission_dir, submission_id, config_file, yes_i_really_mean_it: bool
         "Are you SURE you want to delete the submission from disk and inbox?", default=False, show_default=True
     ):
         log.info(f"Deleting {submission_dir} …")
-        shutil.rmtree(submission_dir)
-        log.info(f"Deleted {submission_dir}.")
+        submission_dir = Path(submission_dir)
+        if submission_dir.exists():
+            shutil.rmtree(submission_dir)
+            log.info(f"Deleted {submission_dir}.")
+        else:
+            log.info(f"No such directory: {submission_dir}. Skipping.")
 
         prefix = submission_id  # or `Path(submission_dir).name`
         prefix = prefix + "/" if not prefix.endswith("/") else prefix
