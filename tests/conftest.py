@@ -14,7 +14,7 @@ from moto import mock_aws
 
 from grz_cli.file_operations import Crypt4GH
 from grz_cli.models.config import ConfigModel
-from grz_cli.parser import EncryptedSubmission, SubmissionMetadata
+from grz_cli.workers.submission import EncryptedSubmission, SubmissionMetadata
 
 config_path = "tests/mock_files/mock_config.yaml"
 small_file_input_path = "tests/mock_files/mock_small_input_file.bed"
