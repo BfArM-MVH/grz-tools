@@ -16,8 +16,8 @@ grz_public_key: |2
 s3_options:
   endpoint_url: 'https://your-s3-url'
   bucket: 'your-s3-bucket-name'
-  access_key: 'your-s3-bucket-key'
-  secret: 'your-s3-bucket-secret'
+  access_key: 'your-s3-bucket-key'  # read from AWS_ACCESS_KEY_ID envvar if not provided
+  secret: 'your-s3-bucket-secret'  # read from AWS_SECRET_ACCESS_KEY envvar if not provided
   # request_checksum_calculation: "when_required"  # necessary on some S3 backends
   # multipart_chunksize: 268435456  # in bytes, 256MiB
 

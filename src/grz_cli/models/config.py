@@ -32,14 +32,16 @@ class S3Options(StrictBaseModel):
     The name of the S3 bucket.
     """
 
-    access_key: str
+    access_key: str | None = None
     """
     The access key for the S3 bucket.
+    If undefined, it is read from the AWS_ACCESS_KEY_ID environment variable.
     """
 
-    secret: str
+    secret: str | None = None
     """
     The secret key for the S3 bucket.
+    If undefined, it is read from the AWS_SECRET_ACCESS_KEY environment variable.
     """
 
     session_token: str | None = None
