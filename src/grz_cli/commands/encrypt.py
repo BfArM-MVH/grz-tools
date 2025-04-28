@@ -6,33 +6,16 @@ from tempfile import NamedTemporaryFile
 
 import click
 
+from ..utils import read_config
 from ..workers.worker import Worker
+from .common import config_file, submission_dir
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@click.option(
-    "--submission-dir",
-    metavar="PATH",
-    type=click.Path(
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        writable=False,
-        resolve_path=True,
-    ),
-    required=True,
-    help="Path to the submission directory containing 'metadata/', 'files/', 'encrypted_files/' and 'logs/' directories",
-)
-@click.option(
-    "--config-file",
-    metavar="STRING",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
-    required=False,
-    help="Path to config file",
-)
+@submission_dir
+@config_file
 def encrypt(
     submission_dir,
     config_file,
@@ -43,8 +26,6 @@ def encrypt(
     Encryption is done with the recipient's public key.
     Sub-folders 'encrypted_files' and 'logs' are created within the submission directory.
     """
-    from ..utils import read_config
-
     config = read_config(config_file)
 
     submitter_privkey_path = config.submitter_private_key_path

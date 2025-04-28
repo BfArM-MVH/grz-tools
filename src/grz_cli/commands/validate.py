@@ -6,25 +6,13 @@ from pathlib import Path
 import click
 
 from ..workers.worker import Worker
+from .common import submission_dir
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@click.option(
-    "--submission-dir",
-    metavar="PATH",
-    type=click.Path(
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        writable=False,
-        resolve_path=True,
-    ),
-    required=True,
-    help="Path to the submission directory containing 'metadata/', 'files/', 'encrypted_files/' and 'logs/' directories",
-)
+@submission_dir
 def validate(submission_dir):
     """
     Validate the submission.

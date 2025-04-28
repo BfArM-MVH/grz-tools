@@ -1,53 +1,22 @@
 """Command for downloading a submission."""
 
 import logging
-from os import sched_getaffinity
 from pathlib import Path
 
 import click
 
+from ..utils import read_config
 from ..workers.worker import Worker
+from .common import config_file, output_dir, submission_id, threads
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@click.option(
-    "--submission-id",
-    required=True,
-    type=str,
-    metavar="STRING",
-    help="S3 submission ID",
-)
-@click.option(
-    "--output-dir",
-    metavar="PATH",
-    type=click.Path(
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        writable=True,
-        resolve_path=True,
-    ),
-    required=True,
-    default=None,
-    help="Path to the target submission output directory",
-)
-@click.option(
-    "--config-file",
-    metavar="STRING",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
-    required=False,
-    help="Path to config file",
-)
-@click.option(
-    "--threads",
-    default=min(len(sched_getaffinity(0)), 4),
-    type=int,
-    show_default=True,
-    help="Number of threads to use for parallel operations",
-)
+@submission_id
+@output_dir
+@config_file
+@threads
 def download(
     submission_id,
     output_dir,
@@ -60,8 +29,6 @@ def download(
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    from ..utils import read_config
-
     config = read_config(config_file)
 
     log.info("Starting download...")
