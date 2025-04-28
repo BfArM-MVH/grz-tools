@@ -52,7 +52,7 @@ def init_s3_resource(config: ConfigModel) -> boto3.resources.base.ServiceResourc
     s3_resource = boto3.resource(
         service_name="s3",
         region_name=_empty_str_to_none(config.s3_options.region_name),
-        api_version=_empty_str_to_none(config.s3_options.api_version),  # Often not needed for resource
+        api_version=_empty_str_to_none(config.s3_options.api_version),
         use_ssl=config.s3_options.use_ssl,
         endpoint_url=_empty_str_to_none(str(config.s3_options.endpoint_url)),
         aws_access_key_id=_empty_str_to_none(config.s3_options.access_key),
