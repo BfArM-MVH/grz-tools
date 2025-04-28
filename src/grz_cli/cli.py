@@ -377,6 +377,7 @@ def clean(submission_dir, submission_id, config_file, yes_i_really_mean_it: bool
         responses = bucket.objects.filter(Prefix=prefix).delete()
         if not responses:
             log.info(f"No objects with prefix {prefix} in bucket {bucket_name} found for deletion.")
+            sys.exit(0)
 
         successfully_deleted_keys = []
         errors_encountered = []
