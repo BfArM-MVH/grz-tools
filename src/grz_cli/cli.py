@@ -7,6 +7,7 @@ import json
 import logging
 import logging.config
 import os
+import shutil
 import sys
 from os import PathLike, sched_getaffinity
 from pathlib import Path
@@ -25,6 +26,7 @@ from .download import query_submissions
 from .logging_setup import add_filelogger
 from .models.config import ConfigModel
 from .parser import Worker
+from .transfer import init_s3_resource
 
 log = logging.getLogger(PACKAGE_ROOT + ".cli")
 
@@ -348,6 +350,68 @@ def decrypt(
     log.info("Encryption successful!")
 
 
+@click.command()
+@submission_dir
+@submission_id
+@config_file
+@click.option("--yes-i-really-mean-it", is_flag=True)
+def clean(submission_dir, submission_id, config_file, yes_i_really_mean_it: bool):
+    """
+    Remove all local files and all keys of a submission.
+    """
+    if yes_i_really_mean_it or click.confirm(
+        "Are you SURE you want to delete the submission from disk and inbox?", default=False, show_default=True
+    ):
+        log.info(f"Deleting {submission_dir} …")
+        shutil.rmtree(submission_dir)
+        log.info(f"Deleted {submission_dir}.")
+
+        prefix = submission_id  # or `Path(submission_dir).name`
+        prefix = prefix + "/" if not prefix.endswith("/") else prefix
+        config = read_config(config_file)
+        resource = init_s3_resource(config)
+        bucket_name = config.s3_options.bucket
+        bucket = resource.Bucket(bucket_name)
+        log.info(f"Deleting {prefix} from {bucket_name} …")
+
+        responses = bucket.objects.filter(Prefix=prefix).delete()
+        if not responses:
+            log.info(f"No objects with prefix {prefix} in bucket {bucket_name} found for deletion.")
+
+        successfully_deleted_keys = []
+        errors_encountered = []
+        objects_found = 0
+
+        # responses is a list of dicts reporting the result of the deletion API call
+        # because the API does things in batches
+        for response in responses:
+            deleted_batch = response.get("Deleted", [])
+            for deleted_obj in deleted_batch:
+                key = deleted_obj.get("Key")
+                if key:
+                    successfully_deleted_keys.append(key)
+
+            errors_batch = response.get("Errors", [])
+            for error_obj in errors_batch:
+                errors_encountered.append(
+                    {
+                        "Key": error_obj.get("Key", "N/A"),
+                        "Code": error_obj.get("Code", "N/A"),
+                        "Message": error_obj.get("Message", "N/A"),
+                    }
+                )
+
+            objects_found += len(deleted_batch) + len(errors_batch)
+
+        log.info(f"Total objects attempted to delete: {objects_found}")
+        log.info(f"Successfully deleted: {len(successfully_deleted_keys)} objects.")
+        log.info(f"Failed to delete: {len(errors_encountered)} objects.")
+
+        for error in errors_encountered:
+            log.error(f"  - Key: {error['Key']}, Code: {error['Code']}, Message: {error['Message']}")
+        log.info(f"Deleted {prefix} from {bucket_name}.")
+
+
 def build_cli(grz_mode=False):
     """
     Factory for building the CLI application.
@@ -402,6 +466,7 @@ def build_cli(grz_mode=False):
         cli.add_command(list_submissions, name="list")
         cli.add_command(download)
         cli.add_command(decrypt)
+        cli.add_command(clean)
 
     return cli
 
