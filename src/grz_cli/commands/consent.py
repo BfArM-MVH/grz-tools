@@ -61,6 +61,8 @@ def _check_nested_provisions(provisions):
             for code in provision.get("code"):
                 # TODO check system code as well
                 # TODO check permit period start and end as well
-                if code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
-                    return True
+                for coding in code.get("coding"):
+                    code_ = coding.get("code")
+                    if code_ == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
+                        return True
     return False
