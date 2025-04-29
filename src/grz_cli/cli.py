@@ -371,7 +371,7 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):
         default=False,
         show_default=True,
     ):
-        prefix = submission_id  # or `Path(submission_dir).name`
+        prefix = submission_id
         prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
         resource = init_s3_resource(config)
