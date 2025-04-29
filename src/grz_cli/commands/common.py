@@ -81,3 +81,5 @@ output_dir = click.option(
 )
 
 output_json = click.option("--json", "output_json", is_flag=True, help="Output JSON for machine-readability.")
+
+force = click.option("--force/--no-force", help="Overwrite files and ignore cached results (dangerous!)")

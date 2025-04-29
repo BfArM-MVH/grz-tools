@@ -106,8 +106,9 @@ class Worker:
             self.__log.info("Metadata validation successful!")
 
         if force:
-            # delete the log file
+            # delete the log files
             self.progress_file_checksum_validation.unlink()
+            self.progress_file_sequencing_data_validation.unlink()
 
         self.__log.info("Starting checksum validation...")
         if errors := list(submission.validate_checksums(progress_log_file=self.progress_file_checksum_validation)):
@@ -133,7 +134,7 @@ class Worker:
         self,
         recipient_public_key_path: str | PathLike,
         submitter_private_key_path: str | PathLike | None = None,
-        force=False,
+        force: bool = False,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
@@ -157,7 +158,7 @@ class Worker:
 
         return encrypted_submission
 
-    def decrypt(self, recipient_private_key_path: str | PathLike, force=False) -> Submission:
+    def decrypt(self, recipient_private_key_path: str | PathLike, force: bool = False) -> Submission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
         :param recipient_public_key_path: Path to the public key file of the recipient.
@@ -193,11 +194,15 @@ class Worker:
 
         return encrypted_submission.submission_id
 
-    def download(self, config: ConfigModel, submission_id: str):
+    def download(self, config: ConfigModel, submission_id: str, force: bool = False):
         """
         Download an encrypted submission
         """
-        download_worker = S3BotoDownloadWorker(config, status_file_path=self.progress_file_upload)
+        if force:
+            # delete the log file
+            self.progress_file_download.unlink()
+
+        download_worker = S3BotoDownloadWorker(config, status_file_path=self.progress_file_download)
 
         self.__log.info("Preparing output directories...")
         download_worker.prepare_download(self.metadata_dir, self.encrypted_files_dir, self.log_dir)
@@ -206,7 +211,4 @@ class Worker:
         download_worker.download_metadata(submission_id, self.metadata_dir, metadata_file_name="metadata.json")
 
         self.__log.info("Downloading encrypted files...")
-        download_worker.download(
-            submission_id,
-            EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir),
-        )
+        download_worker.download(submission_id, EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir))

@@ -8,7 +8,7 @@ import click
 
 from ..utils.config import read_config
 from ..workers.worker import Worker
-from .common import config_file, submission_dir
+from .common import config_file, force, submission_dir
 
 log = logging.getLogger(__name__)
 
@@ -16,10 +16,8 @@ log = logging.getLogger(__name__)
 @click.command()
 @submission_dir
 @config_file
-def encrypt(
-    submission_dir,
-    config_file,
-):
+@force
+def encrypt(submission_dir, config_file, force):
     """
     Encrypt a submission.
 
@@ -46,14 +44,8 @@ def encrypt(
         with NamedTemporaryFile("w") as f:
             f.write(config.grz_public_key)
             f.flush()
-            worker_inst.encrypt(
-                f.name,
-                submitter_private_key_path=submitter_privkey_path,
-            )
+            worker_inst.encrypt(f.name, submitter_private_key_path=submitter_privkey_path, force=force)
     else:
-        worker_inst.encrypt(
-            config.grz_public_key_path,
-            submitter_private_key_path=submitter_privkey_path,
-        )
+        worker_inst.encrypt(config.grz_public_key_path, submitter_private_key_path=submitter_privkey_path, force=force)
 
     log.info("Encryption successful!")

@@ -6,14 +6,15 @@ from pathlib import Path
 import click
 
 from ..workers.worker import Worker
-from .common import submission_dir
+from .common import force, submission_dir
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
 @submission_dir
-def validate(submission_dir):
+@force
+def validate(submission_dir, force):
     """
     Validate the submission.
 
@@ -30,6 +31,6 @@ def validate(submission_dir):
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
     )
-    worker_inst.validate()
+    worker_inst.validate(force=force)
 
     log.info("Validation finished!")

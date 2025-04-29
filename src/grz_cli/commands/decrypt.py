@@ -8,7 +8,7 @@ import click
 
 from ..utils.config import read_config
 from ..workers.worker import Worker
-from .common import config_file, submission_dir
+from .common import config_file, force, submission_dir
 
 log = logging.getLogger(__name__)
 
@@ -16,10 +16,8 @@ log = logging.getLogger(__name__)
 @click.command()
 @submission_dir
 @config_file
-def decrypt(
-    submission_dir,
-    config_file,
-):
+@force
+def decrypt(submission_dir, config_file, force):
     """
     Decrypt a submission.
 
@@ -42,6 +40,6 @@ def decrypt(
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
     )
-    worker_inst.decrypt(grz_privkey_path)
+    worker_inst.decrypt(grz_privkey_path, force=force)
 
     log.info("Decryption successful!")

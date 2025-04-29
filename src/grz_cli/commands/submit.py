@@ -10,15 +10,16 @@ from .validate import validate
 
 log = logging.getLogger(__name__)
 
-from .common import config_file, submission_dir, threads
+from .common import config_file, force, submission_dir, threads
 
 
 @click.command("submit")
 @submission_dir
 @config_file
 @threads
+@force
 @click.pass_context
-def submit(ctx, submission_dir, config_file, threads):
+def submit(ctx, submission_dir, config_file, threads, force):
     """
     Validate, encrypt, and then upload.
 
@@ -28,7 +29,7 @@ def submit(ctx, submission_dir, config_file, threads):
     3. Upload the encrypted submission
     """
     click.echo("Starting submission process...")
-    ctx.invoke(validate, submission_dir=submission_dir)
-    ctx.invoke(encrypt, submission_dir=submission_dir, config_file=config_file)
+    ctx.invoke(validate, submission_dir=submission_dir, force=force)
+    ctx.invoke(encrypt, submission_dir=submission_dir, config_file=config_file, force=force)
     ctx.invoke(upload, submission_dir=submission_dir, config_file=config_file, threads=threads)
     click.echo("Submission finished!")

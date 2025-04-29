@@ -7,7 +7,7 @@ import click
 
 from ..utils.config import read_config
 from ..workers.worker import Worker
-from .common import config_file, output_dir, submission_id, threads
+from .common import config_file, force, output_dir, submission_id, threads
 
 log = logging.getLogger(__name__)
 
@@ -17,12 +17,8 @@ log = logging.getLogger(__name__)
 @output_dir
 @config_file
 @threads
-def download(
-    submission_id,
-    output_dir,
-    config_file,
-    threads,
-):
+@force
+def download(submission_id, output_dir, config_file, threads, force):
     """
     Download a submission from a GRZ.
 
@@ -45,6 +41,6 @@ def download(
         encrypted_files_dir=submission_dir_path / "encrypted_files",
         threads=threads,
     )
-    worker_inst.download(config, submission_id)
+    worker_inst.download(config, submission_id, force=force)
 
     log.info("Download finished!")
