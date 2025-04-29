@@ -380,8 +380,7 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):
 
         responses = bucket.objects.filter(Prefix=prefix).delete()
         if not responses:
-            log.info(f"No objects with prefix {prefix} in bucket {bucket_name} found for deletion.")
-            sys.exit(0)
+            raise ValueError(f"No objects with prefix {prefix} in bucket {bucket_name} found for deletion.")
 
         successfully_deleted_keys = []
         errors_encountered = []
@@ -414,6 +413,12 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):
 
         for error in errors_encountered:
             log.error(f"  - Key: {error['Key']}, Code: {error['Code']}, Message: {error['Message']}")
+
+        if errors_encountered:
+            raise ValueError(
+                f"Errors encountered while deleting objects from bucket {bucket_name}. See log for details."
+            )
+
         log.info(f"Deleted {prefix} from {bucket_name}.")
 
 
