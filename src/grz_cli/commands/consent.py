@@ -37,9 +37,6 @@ def consent(submission_dir):
             if isinstance(mii_consent, str):
                 mii_consent = json.loads(mii_consent)
 
-            if (schema_version := mii_consent.get("schemaVersion")) != "2025.0.1":
-                sys.exit(f"Unsupported schemaVersion '{schema_version}'")
-
             if top_level_provision := mii_consent.get("provision"):
                 if top_level_provision.get("type") != FHIR_PROVISION_DENY:
                     sys.exit(
