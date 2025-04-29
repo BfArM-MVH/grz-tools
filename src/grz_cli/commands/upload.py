@@ -9,7 +9,7 @@ from ..workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
-from ..utils import read_config
+from ..utils.config import read_config
 from .common import config_file, submission_dir, threads
 
 

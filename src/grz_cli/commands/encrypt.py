@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 
 import click
 
-from ..utils import read_config
+from ..utils.config import read_config
 from ..workers.worker import Worker
 from .common import config_file, submission_dir
 

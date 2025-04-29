@@ -10,7 +10,7 @@ import rich.table
 import rich.text
 from pydantic_core import to_jsonable_python
 
-from ..utils import read_config
+from ..utils.config import read_config
 from ..workers.download import query_submissions
 from .common import config_file, output_json
 

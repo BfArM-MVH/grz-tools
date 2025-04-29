@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from ..utils import read_config
+from ..utils.config import read_config
 from ..workers.worker import Worker
 from .common import config_file, output_dir, submission_id, threads
 
