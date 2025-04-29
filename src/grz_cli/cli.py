@@ -7,7 +7,6 @@ import json
 import logging
 import logging.config
 import os
-import shutil
 import sys
 from os import PathLike, sched_getaffinity
 from pathlib import Path
@@ -357,36 +356,25 @@ def decrypt(
 
 
 @click.command()
-@click.option(
-    "--submission-dir",
-    metavar="PATH",
-    type=DIR_R,
-    required=True,
-    help="Path to the submission directory containing 'metadata/', 'files/', 'encrypted_files/' and 'logs/' directories",
-)
 @submission_id
 @config_file
 @click.option("--yes-i-really-mean-it", is_flag=True)
-def clean(submission_dir, submission_id, config_file, yes_i_really_mean_it: bool):
+def clean(submission_id, config_file, yes_i_really_mean_it: bool):
     """
     Remove all local files and all keys of a submission.
     """
-    if yes_i_really_mean_it or click.confirm(
-        "Are you SURE you want to delete the submission from disk and inbox?", default=False, show_default=True
-    ):
-        log.info(f"Deleting {submission_dir} …")
-        submission_dir = Path(submission_dir)
-        if submission_dir.exists():
-            shutil.rmtree(submission_dir)
-            log.info(f"Deleted {submission_dir}.")
-        else:
-            log.info(f"No such directory: {submission_dir}. Skipping.")
+    config = read_config(config_file)
+    bucket_name = config.s3_options.bucket
 
+    if yes_i_really_mean_it or click.confirm(
+        f"Are you SURE you want to delete the submission from the inbox bucket ({bucket_name})?",
+        default=False,
+        show_default=True,
+    ):
         prefix = submission_id  # or `Path(submission_dir).name`
         prefix = prefix + "/" if not prefix.endswith("/") else prefix
-        config = read_config(config_file)
+
         resource = init_s3_resource(config)
-        bucket_name = config.s3_options.bucket
         bucket = resource.Bucket(bucket_name)
         log.info(f"Deleting {prefix} from {bucket_name} …")
 
