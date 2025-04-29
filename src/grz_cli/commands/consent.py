@@ -11,7 +11,7 @@ from .common import config_file, submission_dir
 
 log = logging.getLogger(__name__)
 
-mdat_wissenschaftlich_nutzen_eu_dsgvo_niveau = "2.16.840.1.113883.3.1937.777.24.5.3.8"
+MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
 FHIR_PROVISION_PERMIT = "permit"
 FHIR_PROVISION_DENY = "deny"
 
@@ -60,6 +60,6 @@ def _check_nested_provisions(provisions):
             for code in provision.get("codes"):
                 # TODO check system code as well
                 # TODO check permit period start and end as well
-                if code == mdat_wissenschaftlich_nutzen_eu_dsgvo_niveau:
+                if code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
                     return True
     return False
