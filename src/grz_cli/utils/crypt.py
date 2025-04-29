@@ -1,4 +1,4 @@
-"""Cryptography utilities."""
+"""Utilities for handling crypt4gh keys, encryption and decryption"""
 
 import io
 import logging

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.4.0...v0.5.0) (2025-04-28)
+
+
+### Features
+
+* add 'list' command to list inbox submissions ([dbc4f6d](https://github.com/BfArM-MVH/grz-cli/commit/dbc4f6d300c6604e822bdfacc0e75cc8409d925d))
+* block fully-uploaded submissions from being reuploaded ([#83](https://github.com/BfArM-MVH/grz-cli/issues/83)) ([bc82a30](https://github.com/BfArM-MVH/grz-cli/commit/bc82a303509f11e270c8d1e729047f76d0f2e29a))
+* fallback to environment for S3 credentials ([#88](https://github.com/BfArM-MVH/grz-cli/issues/88)) ([637d95a](https://github.com/BfArM-MVH/grz-cli/commit/637d95acc1dcd2d970684d0642fdf4c8ce9dfff8))
+* introduce `submit` subcommand for sequentially running validate, encrypt and upload ([#69](https://github.com/BfArM-MVH/grz-cli/issues/69)) ([6235a4c](https://github.com/BfArM-MVH/grz-cli/commit/6235a4cae5a485c01f2eb28f67289d1874aa8183))
+* introduce grz-mode for internal use ([#74](https://github.com/BfArM-MVH/grz-cli/issues/74)) ([1b836d7](https://github.com/BfArM-MVH/grz-cli/commit/1b836d700259663e603d36a79fe48bb225a7dca5))
+
+
+### Performance Improvements
+
+* Increase minimum chunksize ([#72](https://github.com/BfArM-MVH/grz-cli/issues/72)) ([10dfec9](https://github.com/BfArM-MVH/grz-cli/commit/10dfec9369b907e2eef1a603c07793491c9e64f1))
+
+
+### Documentation
+
+* add new S3 option to example config ([#71](https://github.com/BfArM-MVH/grz-cli/issues/71)) ([4eeff53](https://github.com/BfArM-MVH/grz-cli/commit/4eeff5332a4d9a8b44886b00a2795eb403d591f4))
+
 ## [0.4.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.3.0...v0.4.0) (2025-04-16)
 
 
