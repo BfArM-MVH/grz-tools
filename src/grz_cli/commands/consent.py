@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 from pathlib import Path
 
 import click
@@ -36,9 +37,13 @@ def consent(submission_dir):
             mii_consent = research_consent.scope
             if isinstance(mii_consent, str):
                 mii_consent = json.loads(mii_consent)
+
+            if (schema_version := mii_consent.get("schemaVersion")) != "2025.0.1":
+                sys.exit(f"Unsupported schemaVersion '{schema_version}'")
+
             if top_level_provision := mii_consent.get("provision"):
-                if not top_level_provision.get("type") == FHIR_PROVISION_DENY:
-                    raise ValueError(
+                if top_level_provision.get("type") != FHIR_PROVISION_DENY:
+                    sys.exit(
                         f"Top level provision type must be deny, not {top_level_provision.get('type')}. "
                         f"(Opt-in via nested provisions)"
                     )
