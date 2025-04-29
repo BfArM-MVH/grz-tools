@@ -78,7 +78,6 @@ def build_cli(grz_mode=False):
 
         log.debug("Logging setup complete.")
 
-    # Add commands
     cli.add_command(validate)
     cli.add_command(encrypt)
     cli.add_command(upload)
