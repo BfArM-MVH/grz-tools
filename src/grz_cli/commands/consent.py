@@ -58,7 +58,7 @@ def consent(submission_dir):
 def _check_nested_provisions(provisions):
     for provision in provisions:
         if provision.get("type") == FHIR_PROVISION_PERMIT:
-            for code in provision.get("codes"):
+            for code in provision.get("code"):
                 # TODO check system code as well
                 # TODO check permit period start and end as well
                 if code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
