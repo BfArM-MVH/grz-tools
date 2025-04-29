@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from moto import mock_aws
 
-from grz_cli.download import S3BotoDownloadWorker
-from grz_cli.file_operations import calculate_sha256
+from grz_cli.utils.checksums import calculate_sha256
+from grz_cli.workers.download import S3BotoDownloadWorker
 
 
 @pytest.fixture(scope="module")

@@ -15,17 +15,16 @@ import botocore.handlers  # type: ignore[import-untyped]
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from tqdm.auto import tqdm
 
-from .constants import TQDM_SMOOTHING
-from .models.config import ConfigModel
-from .progress_logging import FileProgressLogger
-from .states import UploadState
-from .transfer import init_s3_client
+from ..constants import TQDM_SMOOTHING
+from ..models.config import ConfigModel
+from ..progress import FileProgressLogger, UploadState
+from ..transfer import init_s3_client
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
 MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
-    from .parser import EncryptedSubmission
+    from .submission import EncryptedSubmission
 
 log = logging.getLogger(__name__)
 

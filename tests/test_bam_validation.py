@@ -2,7 +2,7 @@
 
 import importlib.resources
 
-from grz_cli.bam_validation import validate_bam
+from grz_cli.validation.bam import validate_bam
 
 from . import resources
 
