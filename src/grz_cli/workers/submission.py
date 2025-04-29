@@ -30,6 +30,11 @@ from ..validation.fastq import validate_paired_end_reads, validate_single_end_re
 
 log = logging.getLogger(__name__)
 
+S3_MAX_KEY_LENGTH = 1024
+# length of uploaded prefix before LE-specified filepath
+# e.g. len("123456789_2025-04-01_a70eb6ce/files/") == 36
+UPLOADED_FILE_PREFIX_LENGTH = 36
+
 
 class SubmissionMetadata:
     """Class for reading and validating submission metadata"""
@@ -115,6 +120,8 @@ class SubmissionMetadata:
                 for file_data in lab_data.sequence_data.files:
                     # check if file is already registered
                     file_path = Path(file_data.file_path)
+                    if len(str(file_path)) > (S3_MAX_KEY_LENGTH - UPLOADED_FILE_PREFIX_LENGTH):
+                        yield f"{file_data.file_path}: File path is too long for the inbox!"
                     if other_metadata := submission_files.get(file_path):
                         # check if metadata matches
                         if file_data != other_metadata:
