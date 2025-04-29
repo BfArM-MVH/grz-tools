@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from ..workers.submission import SubmissionMetadata
-from .common import config_file, submission_dir
+from .common import submission_dir
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,6 @@ FHIR_PROVISION_DENY = "deny"
 
 @click.command()
 @submission_dir
-@config_file
 def consent(submission_dir):
     """
     Check if a submission is consented for research.
