@@ -361,7 +361,7 @@ def decrypt(
 @click.option("--yes-i-really-mean-it", is_flag=True)
 def clean(submission_id, config_file, yes_i_really_mean_it: bool):
     """
-    Remove all local files and all keys of a submission.
+    Remove all files of a submission from the S3 inbox.
     """
     config = read_config(config_file)
     bucket_name = config.s3_options.bucket
