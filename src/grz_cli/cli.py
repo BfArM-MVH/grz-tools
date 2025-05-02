@@ -2,10 +2,10 @@
 CLI module for handling command-line interface operations.
 """
 
-import importlib
 import logging
 import logging.config
 import os
+from importlib.metadata import version
 
 import click
 import grz_pydantic_models.submission.metadata
@@ -44,7 +44,7 @@ def build_cli(grz_mode=False):
         help="Validate, encrypt, decrypt and upload submissions to a GRZ/GDC.",
     )
     @click.version_option(
-        version=importlib.metadata.version("grz-cli"),
+        version=version("grz-cli"),
         prog_name="grz-cli",
         message=f"%(prog)s v%(version)s (metadata schema versions: {', '.join(grz_pydantic_models.submission.metadata.get_supported_versions())})",
     )
