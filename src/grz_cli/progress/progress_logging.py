@@ -9,6 +9,7 @@ from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 
+# pyrefly: ignore
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 
 from ..utils.io import read_multiple_json

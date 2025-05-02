@@ -113,7 +113,7 @@ class Crypt4GH:
         return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
 
     @staticmethod
-    def decrypt_file(input_path, output_path, private_key: bytes):
+    def decrypt_file(input_path: Path, output_path: Path, private_key: bytes):
         """
         Decrypt a file using the provided private key
         :param input_path: Path to the encrypted file

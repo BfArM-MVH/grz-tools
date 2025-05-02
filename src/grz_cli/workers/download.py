@@ -218,14 +218,14 @@ def query_submissions(config: ConfigModel) -> list[SubmissionInboxState]:
     objects = itertools.chain.from_iterable(
         page["Contents"] for page in paginator.paginate(Bucket=config.s3_options.bucket)
     )
-    objects_sorted = sorted(objects, key=itemgetter("Key"))
+    objects_sorted = sorted(objects, key=itemgetter("Key"))  # pyrefly: ignore
     submission2objects = {
         key: tuple(group) for key, group in itertools.groupby(objects_sorted, key=lambda o: o["Key"].split("/")[0])
     }
 
     submissions = []
     for submission_id, submission_objects in submission2objects.items():
-        submission_objects_sorted = sorted(submission_objects, key=itemgetter("LastModified"))
+        submission_objects_sorted = sorted(submission_objects, key=itemgetter("LastModified"))  # pyrefly: ignore
         oldest_object = submission_objects_sorted[0]
         newest_object = submission_objects_sorted[-1]
         is_complete = len(list(filter(lambda o: o["Key"].endswith("/metadata.json"), submission_objects))) == 1
@@ -237,4 +237,4 @@ def query_submissions(config: ConfigModel) -> list[SubmissionInboxState]:
         )
         submissions.append(submission)
 
-    return sorted(submissions, key=attrgetter("oldest_upload"))
+    return sorted(submissions, key=attrgetter("oldest_upload"))  # pyrefly: ignore

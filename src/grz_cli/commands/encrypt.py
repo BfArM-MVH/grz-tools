@@ -1,6 +1,7 @@
 """Command for encrypting a submission."""
 
 import logging
+import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -46,6 +47,9 @@ def encrypt(submission_dir, config_file, force):
             f.flush()
             worker_inst.encrypt(f.name, submitter_private_key_path=submitter_privkey_path, force=force)
     else:
+        # This case cannot occur here, but an explicit check is needed for type-checking.
+        if config.grz_public_key_path is None:
+            sys.exit("GRZ public key path is required for encryption.")
         worker_inst.encrypt(config.grz_public_key_path, submitter_private_key_path=submitter_privkey_path, force=force)
 
     log.info("Encryption successful!")

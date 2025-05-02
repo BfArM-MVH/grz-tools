@@ -10,6 +10,7 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
+# pyrefly: ignore
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
     File,
@@ -19,6 +20,8 @@ from grz_pydantic_models.submission.metadata.v1 import (
     SequenceData,
     SequencingLayout,
 )
+
+# pyrefly: ignore
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
@@ -53,7 +56,7 @@ class SubmissionMetadata:
         self.content = self._read_metadata(self.file_path)
         self._checksum = calculate_sha256(self.file_path, progress=False)
 
-        self._files = None
+        self._files: dict | None = None
 
     @classmethod
     def _read_metadata(cls, file_path: Path) -> GrzSubmissionMetadata:
