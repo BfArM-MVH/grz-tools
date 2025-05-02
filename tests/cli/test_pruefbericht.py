@@ -1,0 +1,204 @@
+"""
+Tests for the Prüfbericht submission functionality.
+"""
+
+import datetime
+import importlib.resources
+import json
+
+import click.testing
+import pytest
+import responses
+
+import grz_cli
+
+from .. import mock_files
+
+
+@pytest.fixture
+def requests_mock(assert_all_requests_are_fired: bool = False):
+    with responses.RequestsMock(assert_all_requests_are_fired=assert_all_requests_are_fired) as rsps:
+        yield rsps
+
+
+@pytest.fixture
+def bfarm_auth_api(requests_mock):
+    """Fakes the endpoint responsible for granting temporary access tokens."""
+    requests_mock.post(
+        "https://bfarm.localhost/token",
+        match=[
+            responses.matchers.header_matcher({"Content-Type": "application/x-www-form-urlencoded"}),
+            responses.matchers.urlencoded_params_matcher(
+                {"grant_type": "client_credentials", "client_id": "pytest", "client_secret": "pysecret"}
+            ),
+        ],
+        json={
+            "access_token": "my_token",
+            "expires_in": 300,
+            "refresh_expires_in": 0,
+            "token_type": "Bearer",
+            "not-before-policy": 0,
+            "scope": "profile email",
+        },
+    )
+    yield requests_mock
+
+
+@pytest.fixture
+def bfarm_submit_api(requests_mock):
+    """Fakes the Prüfbericht submission endpoint."""
+    requests_mock.post(
+        "https://bfarm.localhost/api/upload",
+        match=[
+            responses.matchers.header_matcher({"Authorization": "bearer my_token"}),
+            responses.matchers.json_params_matcher(
+                {
+                    "SubmittedCase": {
+                        "submissionDate": "2024-07-15",
+                        "submissionType": "initial",
+                        "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+                        "submitterId": "260914050",
+                        "dataNodeId": "GRZK00007",
+                        "diseaseType": "oncological",
+                        "dataCategory": "genomic",
+                        "libraryType": "wes",
+                        "coverageType": "GKV",
+                        "dataQualityCheckPassed": True,
+                    }
+                }
+            ),
+        ],
+    )
+    requests_mock.post(
+        "https://bfarm.localhost/api/upload",
+        match=[
+            responses.matchers.header_matcher({"Authorization": "bearer expired_token"}),
+            responses.matchers.json_params_matcher(
+                {
+                    "SubmittedCase": {
+                        "submissionDate": "2024-07-15",
+                        "submissionType": "initial",
+                        "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+                        "submitterId": "260914050",
+                        "dataNodeId": "GRZK00007",
+                        "diseaseType": "oncological",
+                        "dataCategory": "genomic",
+                        "libraryType": "wes",
+                        "coverageType": "GKV",
+                        "dataQualityCheckPassed": True,
+                    }
+                }
+            ),
+        ],
+        status=403,
+    )
+    yield requests_mock
+
+
+def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_config_file_path):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_config_file_path,
+            "--submission-dir",
+            str(submission_dir),
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grz_cli.cli.build_cli(grz_mode=True)
+        result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+
+
+def test_valid_submission_with_json_output(bfarm_auth_api, bfarm_submit_api, temp_config_file_path):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_config_file_path,
+            "--submission-dir",
+            str(submission_dir),
+            "--json",
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grz_cli.cli.build_cli(grz_mode=True)
+        result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+
+    output = json.loads(result.output)
+    datetime.datetime.fromisoformat(output["expires"])
+    assert output["token"] == "my_token"
+
+
+def test_valid_submission_with_token(bfarm_submit_api, temp_config_file_path):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_config_file_path,
+            "--submission-dir",
+            str(submission_dir),
+            "--token",
+            "my_token",
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grz_cli.cli.build_cli(grz_mode=True)
+        result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+
+
+def test_valid_submission_with_expired_token(bfarm_auth_api, bfarm_submit_api, temp_config_file_path):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_config_file_path,
+            "--submission-dir",
+            str(submission_dir),
+            "--token",
+            "expired_token",
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grz_cli.cli.build_cli(grz_mode=True)
+        result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output

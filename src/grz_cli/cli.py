@@ -15,6 +15,7 @@ from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.encrypt import encrypt
 from .commands.list_submissions import list_submissions
+from .commands.pruefbericht import pruefbericht
 from .commands.submit import submit
 from .commands.upload import upload
 from .commands.validate import validate
@@ -88,6 +89,7 @@ def build_cli(grz_mode=False):
         cli.add_command(list_submissions, name="list")
         cli.add_command(download)
         cli.add_command(decrypt)
+        cli.add_command(pruefbericht)
         cli.add_command(clean)
 
     return cli
