@@ -22,6 +22,6 @@ dependencies:
   - numpy >=2.1.2,<3
   # - tox >=4.23.2,<5  # install via `uv tool install tox --with tox-uv` instead
   - ruff >=0.9.6,<1
-  - uv >=0.5.5,<1
+  - uv =0.7
   - pip:
     - pyrefly >=0.13.0,<0.14.0
