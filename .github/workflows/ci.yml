@@ -46,8 +46,8 @@ jobs:
       - name: Linting
         run: uv run tox -e lints
 
-      - name: Run mypy
-        run: uv run tox -e mypy
+      - name: Run pyrefly
+        run: uv run tox -e pyrefly
 
       - name: Run tests
         run: uv run tox -e py${{ matrix.python-version }}
