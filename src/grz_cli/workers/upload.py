@@ -11,7 +11,7 @@ from os.path import getsize
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-import botocore.handlers  # type: ignore[import-untyped]
+import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from tqdm.auto import tqdm
 

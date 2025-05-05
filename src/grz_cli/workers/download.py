@@ -12,7 +12,7 @@ from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import botocore.handlers  # type: ignore[import-untyped]
+import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from pydantic import BaseModel
 from tqdm.auto import tqdm
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 # see discussion: https://github.com/boto/boto3/discussions/4251 to accept bucket names with ":" in the name
-botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")  # type: ignore[import-untyped]
+botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")
 
 
 class DownloadError(Exception):

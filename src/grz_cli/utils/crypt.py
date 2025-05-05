@@ -10,9 +10,9 @@ from os import PathLike
 from os.path import getsize
 from pathlib import Path
 
-import crypt4gh.header  # type: ignore[import-untyped]
-import crypt4gh.keys  # type: ignore[import-untyped]
-import crypt4gh.lib  # type: ignore[import-untyped]
+import crypt4gh.header
+import crypt4gh.keys
+import crypt4gh.lib
 from nacl.public import PrivateKey
 from tqdm.auto import tqdm
 

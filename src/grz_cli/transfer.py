@@ -2,7 +2,7 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
-import boto3  # type: ignore[import-untyped]
+import boto3
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config  # type: ignore[import-untyped]
 
