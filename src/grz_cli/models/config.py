@@ -7,10 +7,14 @@ from pydantic import (
     AnyUrl,
     BaseModel,
     ConfigDict,
+    UrlConstraints,
     field_validator,
     model_validator,
 )
 from pydantic.types import PathType
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+FilePath = Annotated[Path, AfterValidator(lambda v: v.expanduser()), PathType("file")]
 
 
 class StrictBaseModel(BaseModel):
@@ -18,6 +22,12 @@ class StrictBaseModel(BaseModel):
         extra="forbid",
         validate_assignment=True,
         use_enum_values=True,
+    )
+
+
+class StrictBaseSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="forbid", validate_assignment=True, use_enum_values=True, env_nested_delimiter="__"
     )
 
 
@@ -93,10 +103,33 @@ class S3Options(StrictBaseModel):
     """
 
 
-FilePath = Annotated[Path, AfterValidator(lambda v: v.expanduser()), PathType("file")]
+class PruefberichtConfig(StrictBaseModel):
+    authorization_url: Annotated[AnyHttpUrl, UrlConstraints(allowed_schemes=["https"], host_required=True)] | None = (
+        None
+    )
+    """
+    URL from which to request a new Prüfbericht submission token
+    """
+
+    client_id: str | None = None
+    """
+    Client ID used to obtain new Prüfbericht submission tokens
+    """
+
+    client_secret: str | None = None
+    """
+    Client secret used to obtain new Prüfbericht submission tokens
+    """
+
+    api_base_url: Annotated[AnyHttpUrl, UrlConstraints(allowed_schemes=["https"], host_required=True)] | None = None
+    """
+    Base URL to BfArM Submission (Prüfbericht) API
+    """
 
 
-class ConfigModel(StrictBaseModel):
+class ConfigModel(StrictBaseSettings):
+    model_config = SettingsConfigDict(env_prefix="grz_")
+
     grz_public_key: str | None = None
     """
     The public key of the recipient (the associated GRZ).
@@ -118,6 +151,8 @@ class ConfigModel(StrictBaseModel):
     """
 
     s3_options: S3Options
+
+    pruefbericht: PruefberichtConfig = PruefberichtConfig()
 
     @field_validator("grz_public_key")
     @classmethod
