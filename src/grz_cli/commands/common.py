@@ -20,14 +20,6 @@ DIR_R_E = click.Path(
     writable=False,
     resolve_path=True,
 )
-DIR_RW_E = click.Path(
-    exists=True,
-    file_okay=False,
-    dir_okay=True,
-    readable=True,
-    writable=True,
-    resolve_path=True,
-)
 DIR_RW_C = click.Path(
     exists=False,
     file_okay=False,
@@ -74,7 +66,7 @@ submission_id = click.option(
 output_dir = click.option(
     "--output-dir",
     metavar="PATH",
-    type=DIR_RW_E,
+    type=DIR_RW_C,
     required=True,
     default=None,
     help="Path to the target submission output directory",
