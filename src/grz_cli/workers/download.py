@@ -216,7 +216,7 @@ def query_submissions(config: ConfigModel) -> list[SubmissionInboxState]:
     paginator = s3_client.get_paginator("list_objects_v2")
 
     objects = itertools.chain.from_iterable(
-        page["Contents"] for page in paginator.paginate(Bucket=config.s3_options.bucket)
+        page["Contents"] for page in paginator.paginate(Bucket=config.s3_options.bucket) if "Contents" in page
     )
     objects_sorted = sorted(objects, key=itemgetter("Key"))  # pyrefly: ignore
     submission2objects = {
