@@ -510,7 +510,9 @@ class EncryptedSubmission:
 
     __log = log.getChild("EncryptedSubmission")
 
-    def __init__(self, metadata_dir: str | PathLike, encrypted_files_dir: str | PathLike):
+    def __init__(
+        self, metadata_dir: str | PathLike, encrypted_files_dir: str | PathLike, log_dir: str | PathLike | None = None
+    ):
         """
         Initialize the encrypted submission object.
 
@@ -519,6 +521,7 @@ class EncryptedSubmission:
         """
         self.metadata_dir = Path(metadata_dir)
         self.encrypted_files_dir = Path(encrypted_files_dir)
+        self.log_dir = Path(log_dir) if log_dir is not None else None
 
         self.metadata = SubmissionMetadata(self.metadata_dir / "metadata.json")
 
@@ -567,6 +570,21 @@ class EncryptedSubmission:
             retval[local_file_path] = str(
                 Path(self.submission_id) / "files" / self.get_encrypted_file_path(file_metadata.file_path)
             )
+        return retval
+
+    def get_log_files_and_object_id(self) -> dict[Path, str]:
+        """
+        :return Dictionary of `local_file_path` -> s3_object_id
+        """
+        retval = {}
+        if self.log_dir is not None:
+            log_dir = self.log_dir
+            for dirpath, _dirnames, filenames in log_dir.walk():
+                for filename in filenames:
+                    local_file_path = dirpath / filename
+                    retval[local_file_path] = str(
+                        Path(self.submission_id) / "logs" / local_file_path.relative_to(log_dir)
+                    )
         return retval
 
     @staticmethod

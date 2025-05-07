@@ -82,8 +82,7 @@ class Worker:
         Reads the submission metadata and returns an EncryptedSubmission instance
         """
         encrypted_submission = EncryptedSubmission(
-            metadata_dir=self.metadata_dir,
-            encrypted_files_dir=str(self.encrypted_files_dir),
+            metadata_dir=self.metadata_dir, encrypted_files_dir=str(self.encrypted_files_dir), log_dir=self.log_dir
         )
         return encrypted_submission
 
@@ -193,6 +192,18 @@ class Worker:
         upload_worker.upload(encrypted_submission)
 
         return encrypted_submission.submission_id
+
+    def archive(self, config: ConfigModel):
+        """
+        Archive an encrypted submission at a GRZ.
+        """
+        from .upload import S3BotoUploadWorker
+
+        upload_worker = S3BotoUploadWorker(config, status_file_path=self.progress_file_upload)
+
+        encrypted_submission = self.parse_encrypted_submission()
+
+        upload_worker.upload(encrypted_submission, with_logs=True)
 
     def download(self, config: ConfigModel, submission_id: str, force: bool = False):
         """
