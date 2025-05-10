@@ -285,12 +285,13 @@ class Submission:
                 fastq_files = find_fastq_files(sequence_data)
                 bam_files = find_bam_files(sequence_data)
 
-                match sequencing_layout:
-                    case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
-                        yield from self._validate_single_end(fastq_files, progress_logger)
+                if not lab_data.library_type.endswith("_lr"):
+                    match sequencing_layout:
+                        case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
+                            yield from self._validate_single_end(fastq_files, progress_logger)
 
-                    case SequencingLayout.paired_end:
-                        yield from self._validate_paired_end(fastq_files, progress_logger)
+                        case SequencingLayout.paired_end:
+                            yield from self._validate_paired_end(fastq_files, progress_logger)
 
                 yield from self._validate_bams(bam_files, progress_logger)
 
