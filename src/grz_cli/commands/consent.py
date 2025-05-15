@@ -36,16 +36,18 @@ def consent(submission_dir, output_json, show_details):
     metadata = SubmissionMetadata(Path(submission_dir) / "metadata" / "metadata.json").content
 
     consents = _gather_consent_information(metadata)
+    overall_consent = _submission_has_research_consent(consents)
 
     if not show_details:
-        if output_json:
-            click.echo(json.dumps(all(consents.values())))
-        else:
-            click.echo(str(all(consents.values())).lower())
+        click.echo(json.dumps(overall_consent) if output_json else str(overall_consent).lower())
     elif output_json:
         json.dump(consents, sys.stdout)
     else:
         _print_rich_table(consents)
+
+
+def _submission_has_research_consent(consents):
+    return all(consents.values())
 
 
 def _print_rich_table(consents: dict[str, bool]):
