@@ -6,9 +6,12 @@ import sys
 from pathlib import Path
 
 import click
+import rich.console
+import rich.table
+import rich.text
 
 from ..workers.submission import SubmissionMetadata
-from .common import submission_dir
+from .common import output_json, show_details, submission_dir
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +22,9 @@ FHIR_PROVISION_DENY = "deny"
 
 @click.command()
 @submission_dir
-def consent(submission_dir):
+@output_json
+@show_details
+def consent(submission_dir, output_json, show_details):
     """
     Check if a submission is consented for research.
 
@@ -29,10 +34,43 @@ def consent(submission_dir):
     """
     metadata = SubmissionMetadata(Path(submission_dir) / "metadata" / "metadata.json").content
 
+    consents = _gather_consent_information(metadata)
+
+    if not show_details:
+        if output_json:
+            click.echo(json.dumps(all(consents.values())))
+        else:
+            click.echo(str(all(consents.values())).lower())
+    elif output_json:
+        json.dump(consents, sys.stdout)
+    else:
+        _print_rich_table(consents)
+
+
+def _print_rich_table(consents):
+    console = rich.console.Console()
+    table = rich.table.Table()
+    table.add_column("Donor", no_wrap=True)
+    table.add_column("Consent Type", no_wrap=True)
+    table.add_column("Consent State", no_wrap=True)
+    for donor_pseudonym, consent_value in consents.items():
+        status_text = rich.text.Text(
+            "True" if consent_value else "False",
+            style="green" if consent_value else "red",
+        )
+        table.add_row(
+            donor_pseudonym,
+            "research consent",
+            status_text,
+        )
+    console.print(table)
+
+
+def _gather_consent_information(metadata):
     consents = {donor.donor_pseudonym: False for donor in metadata.donors}
     for donor in metadata.donors:
         for research_consent in donor.research_consents:
-            # TODO rename scope
+            # TODO rename scope to resource
             mii_consent = research_consent.scope
             if isinstance(mii_consent, str):
                 mii_consent = json.loads(mii_consent)
@@ -49,10 +87,7 @@ def consent(submission_dir):
             else:
                 consents[donor.donor_pseudonym] = False
 
-    if all(consents.values()):
-        click.echo("true")
-    else:
-        click.echo("false")
+    return consents
 
 
 def _check_nested_provisions(provisions):
