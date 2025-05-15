@@ -106,6 +106,10 @@ pip upgrade grz-cli
 ```
 
 
+#### Docker
+Docker images are available via biocontainers at [https://biocontainers.pro/tools/grz-cli](https://biocontainers.pro/tools/grz-cli).
+
+
 ### Development setup
 For development purposes, you can clone the repository and install the package in editable mode:
 
