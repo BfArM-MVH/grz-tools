@@ -260,3 +260,12 @@ def test_consent_submission(working_dir_path):
     cli = grz_cli.cli.build_cli(grz_mode=True)
     result = runner.invoke(cli, testargs, catch_exceptions=False)
     assert result.stdout.strip() == "true"
+
+    testargs += ["--json", "--details"]
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
+    assert result.stdout.strip() == (
+        "{"
+        '"aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000": true, '
+        '"bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111": true'
+        "}"
+    )
