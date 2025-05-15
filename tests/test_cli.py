@@ -243,3 +243,20 @@ def test_upload_download_submission(
         working_dir_path / "metadata",
         download_dir_path / "metadata",
     ), "Metadata is different!"
+
+
+def test_consent_submission(working_dir_path):
+    submission_dir = Path("tests/mock_files/submissions/valid_submission")
+
+    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+
+    testargs = [
+        "consent",
+        "--submission-dir",
+        str(submission_dir),
+    ]
+    runner = CliRunner()
+    cli = grz_cli.cli.build_cli(grz_mode=True)
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
+    assert result.stdout.strip() == "true"
