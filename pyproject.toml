@@ -189,7 +189,7 @@ commands = [["pyrefly", "check"]]
 [tool.uv]
 dev-dependencies = [
     "datamodel-code-generator>=0.26.2",
-    "pyrefly>=0.13.0,<0.14.0",
+    "pyrefly>=0.16.0,<0.17.0",
     "ruff>=0.9.6",
     "tox>=4.23.2",
     "tox-uv>=1.20.1",
@@ -200,7 +200,6 @@ dev-dependencies = [
 [tool.pyrefly]
 project_includes = ["src"]
 python_version = "3.12.0"
-sub_configs = []
 use_untyped_imports = false
 ignore_missing_source = false
 
