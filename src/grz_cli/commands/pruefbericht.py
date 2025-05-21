@@ -159,7 +159,7 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token):
     try:
         _submit_pruefbericht(base_url=str(config.pruefbericht.api_base_url), token=token, pruefbericht=pruefbericht)
     except requests.HTTPError as error:
-        if error.response.status_code == requests.codes.forbidden:
+        if error.response.status_code == requests.codes.unauthorized:
             # get a new token and try again
             token, expiry = _get_new_token(
                 auth_url=str(config.pruefbericht.authorization_url),
