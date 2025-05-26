@@ -52,7 +52,7 @@ def _get_new_token(auth_url: str, client_id: str, client_secret: str) -> tuple[s
 
 
 def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
-    log.info("Submitting Prüfbericht")
+    log.info("Submitting Prüfbericht...")
 
     response = requests.post(
         base_url.rstrip("/") + "/upload",
@@ -62,7 +62,7 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
     )
 
     if response.status_code != requests.codes.ok:
-        log.error("There was a problem submitting the Prüfbericht")
+        log.warning("There was a problem submitting the Prüfbericht.")
         response.raise_for_status()
 
 
@@ -159,8 +159,9 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token):
     try:
         _submit_pruefbericht(base_url=str(config.pruefbericht.api_base_url), token=token, pruefbericht=pruefbericht)
     except requests.HTTPError as error:
-        if error.response.status_code == requests.codes.forbidden:
+        if error.response.status_code == requests.codes.unauthorized:
             # get a new token and try again
+            log.warning("Provided token has expired. Attempting to refresh.")
             token, expiry = _get_new_token(
                 auth_url=str(config.pruefbericht.authorization_url),
                 client_id=config.pruefbericht.client_id,
@@ -168,8 +169,10 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token):
             )
             _submit_pruefbericht(base_url=str(config.pruefbericht.api_base_url), token=token, pruefbericht=pruefbericht)
         else:
-            log.error("Encountered an irrecoverable error while submitting the Prüfbericht")
+            log.error("Encountered an irrecoverable error while submitting the Prüfbericht!")
             raise error
+
+    log.info("Prüfbericht submitted successfully.")
 
     if output_json and expiry:
         json.dump({"token": token, "expires": expiry.isoformat()}, sys.stdout)

@@ -90,7 +90,7 @@ def bfarm_submit_api(requests_mock):
                 }
             ),
         ],
-        status=403,
+        status=401,
     )
     yield requests_mock
 
