@@ -1,5 +1,6 @@
 """Command for determining whether a submission is consented for research."""
 
+import enum
 import json
 import logging
 import sys
@@ -17,8 +18,13 @@ from .common import output_json, show_details, submission_dir
 log = logging.getLogger(__name__)
 
 MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
-FHIR_PROVISION_PERMIT = "permit"
-FHIR_PROVISION_DENY = "deny"
+
+
+class FhirProvision(enum.StrEnum):
+    """Possible FHIR Provision options."""
+
+    PERMIT = "permit"
+    DENY = "deny"
 
 
 @click.command()
@@ -79,10 +85,11 @@ def _gather_consent_information(metadata: GrzSubmissionMetadata) -> dict[str, bo
                 mii_consent = json.loads(mii_consent)
 
             if top_level_provision := mii_consent.get("provision"):
-                if top_level_provision.get("type") != FHIR_PROVISION_DENY:
+                if top_level_provision.get("type") != FhirProvision.DENY:
                     sys.exit(
-                        f"Top level provision type must be deny, not {top_level_provision.get('type')}. "
-                        f"(Opt-in via nested provisions)"
+                        f"The root provision type must be deny, not {top_level_provision.get('type')}, "
+                        f"since the profile follows an opt-in consent scheme. "
+                        f"Explicit opt-in consents must be made via nested provisions."
                     )
                 else:
                     nested_provisions = top_level_provision.get("provision")
@@ -95,10 +102,15 @@ def _gather_consent_information(metadata: GrzSubmissionMetadata) -> dict[str, bo
 
 def _check_nested_provisions(provisions: list[dict[str, Any]]) -> bool:
     for provision in provisions:
-        if provision.get("type") == FHIR_PROVISION_PERMIT:
-            for code in provision.get("code", []):
-                for coding in code.get("coding", []):
-                    code_ = coding.get("code")
-                    if code_ == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
-                        return True
+        if provision.get("type") == FhirProvision.PERMIT:
+            for codeable_concept in provision.get("code", []):
+                for coding in codeable_concept.get("coding", []):
+                    code = coding.get("code")
+                    if isinstance(code, str):
+                        return code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU
+                    elif isinstance(code, dict):
+                        if value := code.get("value"):
+                            return value == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU
+                    else:
+                        raise ValueError(code, f"Expected str or dict, got {type(code)}")
     return False
