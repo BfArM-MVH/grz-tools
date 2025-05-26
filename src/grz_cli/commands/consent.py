@@ -105,10 +105,11 @@ def _check_nested_provisions(provisions: list[dict[str, Any]]) -> bool:
                 for coding in codeable_concept.get("coding", []):
                     code = coding.get("code")
                     if isinstance(code, str):
-                        return code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU
+                        if code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
+                            return True
                     elif isinstance(code, dict):
-                        if value := code.get("value"):
-                            return value == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU
+                        if (value := code.get("value")) and value == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
+                            return True
                     else:
                         raise ValueError(code, f"Expected str or dict, got {type(code)}")
     return False
