@@ -94,8 +94,6 @@ def _gather_consent_information(metadata: GrzSubmissionMetadata) -> dict[str, bo
                 else:
                     nested_provisions = top_level_provision.get("provision")
                     consents[donor.donor_pseudonym] = _check_nested_provisions(nested_provisions)
-            else:
-                consents[donor.donor_pseudonym] = False
 
     return consents
 
