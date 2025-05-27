@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.5.0...v0.6.0) (2025-05-27)
+
+
+### Features
+
+* add `consent` command ([#97](https://github.com/BfArM-MVH/grz-cli/issues/97)) ([1074adf](https://github.com/BfArM-MVH/grz-cli/commit/1074adf65f00025b288a606d1a905137b93ce52f))
+* add archive command ([#104](https://github.com/BfArM-MVH/grz-cli/issues/104)) ([a68b976](https://github.com/BfArM-MVH/grz-cli/commit/a68b976631b35be2ced260728af57846d62aecc1))
+* add command to submit Prüfbericht ([#98](https://github.com/BfArM-MVH/grz-cli/issues/98)) ([e7841aa](https://github.com/BfArM-MVH/grz-cli/commit/e7841aab3034eaf27144a9db3e27821bc3f2106d))
+* add force flag to ignore cached results ([#95](https://github.com/BfArM-MVH/grz-cli/issues/95)) ([fbdff96](https://github.com/BfArM-MVH/grz-cli/commit/fbdff961685a45de80aea5b9f430f57eded42ffc))
+* cap filename length to prevent upload errors ([#96](https://github.com/BfArM-MVH/grz-cli/issues/96)) ([dd0be79](https://github.com/BfArM-MVH/grz-cli/commit/dd0be79f4836ba7b0d7a75679bbd643dd9c4cef8))
+* declare typing support for entire package ([f05a4c7](https://github.com/BfArM-MVH/grz-cli/commit/f05a4c704fbf8f3395fa19d1f3b66c8f8a2669e9))
+* implement `grz-cli clean` cmd ([#90](https://github.com/BfArM-MVH/grz-cli/issues/90)) ([4397fd0](https://github.com/BfArM-MVH/grz-cli/commit/4397fd09be613a1f7693e128411c4321638dca71))
+
+
+### Bug Fixes
+
+* allow listing empty buckets ([#103](https://github.com/BfArM-MVH/grz-cli/issues/103)) ([4f2e9ee](https://github.com/BfArM-MVH/grz-cli/commit/4f2e9ee5751d56f6c6282d15d9b006f5b18eed9d))
+* require nonexistent submission download directory ([#102](https://github.com/BfArM-MVH/grz-cli/issues/102)) ([a42b731](https://github.com/BfArM-MVH/grz-cli/commit/a42b7315f0fd78b3f337bfd4ace443c43b577a51))
+* skip strict read length check for ONT reads ([#107](https://github.com/BfArM-MVH/grz-cli/issues/107)) ([1bd2055](https://github.com/BfArM-MVH/grz-cli/commit/1bd2055fb433b9ddb91b3ddcd77dabaabe81d777))
+
 ## [0.5.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.4.0...v0.5.0) (2025-04-28)
 
 
