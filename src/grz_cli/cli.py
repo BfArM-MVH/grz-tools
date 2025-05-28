@@ -13,6 +13,7 @@ import grz_pydantic_models.submission.metadata
 from .commands.archive import archive
 from .commands.clean import clean
 from .commands.consent import consent
+from .commands.db import db
 from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.encrypt import encrypt
@@ -95,6 +96,7 @@ def build_cli(grz_mode=False):
         cli.add_command(clean)
         cli.add_command(consent)
         cli.add_command(pruefbericht)
+        cli.add_command(db)
 
     return cli
 
