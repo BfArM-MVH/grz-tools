@@ -7,6 +7,7 @@ from pydantic import (
     AnyUrl,
     BaseModel,
     ConfigDict,
+    Field,
     UrlConstraints,
     field_validator,
     model_validator,
@@ -127,6 +128,39 @@ class PruefberichtConfig(StrictBaseModel):
     """
 
 
+class Author(StrictBaseModel):
+    name: str
+    """Name of the author"""
+
+    private_key: str | None = None
+    """Author's private key (needed to sign DB modifications)."""
+
+    private_key_path: FilePath | None = None
+    """Path to the author's private key (needed to sign DB modifications)."""
+
+    @model_validator(mode="after")
+    def validate_private_key(self) -> Self:
+        if self.private_key is not None and self.private_key_path is not None:
+            raise ValueError("Only one of private_key or private_key_path must be set.")
+        return self
+
+
+class DbConfig(StrictBaseModel):
+    """Submission database related configuration."""
+
+    database_url: Annotated[str, Field(examples=["sqlite:///submission.sqlite"])]
+    """URL to a database."""
+
+    author: Author
+    """Author information for submission database."""
+
+    known_public_keys: FilePath = "~/.config/grz-cli/known_public_keys"
+    """
+    File listing public keys. Used for DB verification.
+
+    Format: key_format public_key_base64 author_name"""
+
+
 class ConfigModel(StrictBaseSettings):
     model_config = SettingsConfigDict(env_prefix="grz_")
 
@@ -153,6 +187,8 @@ class ConfigModel(StrictBaseSettings):
     s3_options: S3Options
 
     pruefbericht: PruefberichtConfig = PruefberichtConfig()
+
+    db: DbConfig
 
     @field_validator("grz_public_key")
     @classmethod

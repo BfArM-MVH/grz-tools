@@ -1,12 +1,20 @@
 """Command for managing a submission database"""
 
 import json
+import logging
+import os
 import sys
+import traceback
+from collections import namedtuple
+from functools import partial
+from getpass import getpass
 
 import click
+import cryptography
 import rich.console
 import rich.table
 from grz_db import (
+    Author,
     DatabaseConfigurationError,
     DuplicateSubmissionError,
     DuplicateTanGError,
@@ -14,38 +22,88 @@ from grz_db import (
     SubmissionNotFoundError,
     SubmissionStateEnum,
     SubmissionStateLog,
+    SubmissionStateLogPayload,
 )
 
-from .common import output_json
+from ..utils.config import read_config
+from .common import config_file, output_json
 
 console = rich.console.Console()
+log = logging.getLogger(__name__)
 
 DATABASE_URL = "sqlite:///test.sqlite"
 
 
-def get_submission_db_instance(db_url: str | None) -> SubmissionDb:
+def get_submission_db_instance(db_url: str | None, author: Author | None = None) -> SubmissionDb:
     """Creates and returns an instance of SubmissionDb."""
     db_url = db_url or DATABASE_URL
-    return SubmissionDb(db_url=db_url)
+    return SubmissionDb(db_url=db_url, author=author)
 
 
 @click.group(help="Database operations")
-def db():
+@config_file
+@click.pass_context
+def db(ctx: click.Context, config_file: str):
     """Database operations"""
-    pass
+    config = read_config(config_file)
+    author_name = config.db.author.name
+
+    passphrase = os.getenv("GRZ_CLI_AUTHOR_PASSPHRASE")
+    passphrase_callback = (lambda: passphrase) if passphrase else None
+    private_key_bytes = None
+
+    if path := config.db.author.private_key_path:
+        with open(path, "rb") as f:
+            private_key_bytes = f.read()
+        if not passphrase:
+            passphrase_callback = partial(getpass, prompt=f"Passphrase for {path}: ")
+    elif key := config.db.private_key:
+        private_key_bytes = key.encode("utf-8")
+        if not passphrase:
+            passphrase_callback = partial(getpass, prompt="Passphrase for GRZ DB author private key: ")
+    else:
+        raise ValueError("Either private_key or private_key_path must be provided.")
+
+    from cryptography.hazmat.primitives.serialization import load_ssh_private_key, load_ssh_public_key
+
+    log.info(f"Loading private key of {author_name}…")
+    private_key = load_ssh_private_key(
+        private_key_bytes,
+        password=passphrase_callback().encode("utf-8"),
+    )
+
+    log.info("Reading known public keys")
+    KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "author_name"])
+    with open(config.db.known_public_keys) as f:
+        public_key_list = list(map(lambda v: KnownKeyEntry(*v), map(lambda s: s.strip().split(), f.readlines())))
+        public_keys = {
+            author: load_ssh_public_key(f"{fmt}\t{key}\t{author}".encode()) for fmt, key, author in public_key_list
+        }
+        for author in public_keys:
+            log.debug(f"Found public key for {author}")
+
+    author = Author(name=author_name, private_key=private_key)
+    ctx.obj = {"author": author, "public_keys": public_keys, "db_url": config.db.database_url}
 
 
 @db.group()
-def submission():
+@click.pass_context
+def submission(ctx: click.Context):
     """Submission operations"""
     pass
 
 
-db_url_option = click.option("--db", default=DATABASE_URL, envvar="GRZ_DATABASE")
+@db.command()
+@click.pass_context
+def init(ctx: click.Context):
+    """Initializes or upgrades the database schema using Alembic."""
+    db = ctx.obj["db_url"]
+    submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
+    console.print(f"[cyan]Initializing database {db}[/cyan]")
+    submission_db.initialize_schema()
 
 
 @db.command()
-@db_url_option
 @click.option("--revision", default="head", help="Alembic revision to upgrade to (default: 'head').")
 @click.option(
     "--alembic-ini",
@@ -53,15 +111,23 @@ db_url_option = click.option("--db", default=DATABASE_URL, envvar="GRZ_DATABASE"
     default="alembic.ini",
     help="Override path to alembic.ini file.",
 )
-def init(revision: str, alembic_ini: str | None, db: str):
-    """Initializes or upgrades the database schema using Alembic."""
-    submission_db = get_submission_db_instance(db)
+@click.pass_context
+def upgrade(
+    ctx: click.Context,
+    revision: str,
+    alembic_ini: str,
+):
+    """
+    Upgrades the database schema using Alembic.
+    """
+    db = ctx.obj["db_url"]
+    submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
 
     console.print(f"[cyan]Using alembic configuration: {alembic_ini}[/cyan]")
 
     try:
         console.print(f"[cyan]Attempting to upgrade database to revision: {revision}...[/cyan]")
-        _ = submission_db.initialize_schema(
+        _ = submission_db.upgrade_schema(
             alembic_ini_path=alembic_ini,
             revision=revision,
         )
@@ -82,10 +148,11 @@ def init(revision: str, alembic_ini: str | None, db: str):
 
 
 @db.command("list")
-@db_url_option
 @output_json
-def list_submissions(db: str, output_json: bool = False):
+@click.pass_context
+def list_submissions(ctx: click.Context, output_json: bool = False):
     """Lists all submissions in the database with their latest state."""
+    db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
     submissions = db_service.list_submissions()
 
@@ -99,6 +166,7 @@ def list_submissions(db: str, output_json: bool = False):
     table.add_column("Pseudonym", style="magenta")
     table.add_column("Latest State", style="green")
     table.add_column("Last State Timestamp (UTC)", style="yellow")
+    table.add_column("Signature Status")
 
     submission_dicts = []
 
@@ -127,6 +195,29 @@ def list_submissions(db: str, output_json: bool = False):
                 f"[red]{latest_state_str}[/red]" if latest_state_str == SubmissionStateEnum.ERROR else latest_state_str
             )
             latest_timestamp_str = latest_state_obj.timestamp.isoformat() if latest_state_obj else "N/A"
+            author_name_str = latest_state_obj.author_name if latest_state_obj else "N/A"
+            author_public_key = ctx.obj["public_keys"].get(author_name_str)
+            signature_status_str = "N/A"
+
+            if author_public_key:
+                try:
+                    payload_to_verify = SubmissionStateLogPayload(
+                        submission_id=latest_state_obj.submission_id,
+                        author_name=latest_state_obj.author_name,
+                        state=latest_state_obj.state,
+                        data=latest_state_obj.data,
+                        timestamp=latest_state_obj.timestamp,
+                    )
+
+                    signature_bytes = bytes.fromhex(latest_state_obj.signature)
+                    bytes_to_verify = payload_to_verify.to_bytes()
+                    author_public_key.verify(signature_bytes, bytes_to_verify)
+                    signature_status_str = "[green]Verified[/green]"
+                except cryptography.exceptions.InvalidSignature:
+                    signature_status_str = "[red]Failed[/red]"
+                except Exception as e:
+                    signature_status_str = "[yellow]Error[/yellow]"
+                    log.error(e)
 
             table.add_row(
                 submission.id,
@@ -134,6 +225,7 @@ def list_submissions(db: str, output_json: bool = False):
                 submission.pseudonym if submission.pseudonym is not None else "N/A",
                 latest_state_str,
                 latest_timestamp_str,
+                signature_status_str,
             )
 
     if output_json:
@@ -144,13 +236,14 @@ def list_submissions(db: str, output_json: bool = False):
 
 @submission.command()
 @click.argument("submission_id", type=str)
-@db_url_option
 @click.option("--tan-g", "tan_g", type=str, default=None, help="The tanG for the submission.")
 @click.option("--pseudonym", type=str, default=None, help="The pseudonym for the submission.")
-def add(db: str, submission_id: str, tan_g: str | None, pseudonym: str | None):
+@click.pass_context
+def add(ctx: click.Context, submission_id: str, tan_g: str | None, pseudonym: str | None):
     """
     Add a submission to the database.
     """
+    db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
     try:
         db_submission = db_service.add_submission(submission_id, tan_g, pseudonym)
@@ -169,11 +262,12 @@ def add(db: str, submission_id: str, tan_g: str | None, pseudonym: str | None):
 @click.argument(
     "state_str", metavar="STATE", type=click.Choice([s.value for s in SubmissionStateEnum], case_sensitive=False)
 )
-@db_url_option
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
-def update(submission_id: str, state_str: str, db: str, data_json: str | None):
+@click.pass_context
+def update(ctx: click.Context, submission_id: str, state_str: str, data_json: str | None):
     """Update a submission to the given state. Optionally accepts additional JSON data to associate with the log entry."""
-    db_service = get_submission_db_instance(db)
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
     try:
         state_enum = SubmissionStateEnum(state_str)
     except ValueError as e:
@@ -206,16 +300,18 @@ def update(submission_id: str, state_str: str, db: str, data_json: str | None):
         raise click.Abort() from e
     except Exception as e:
         console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
 @submission.command("show")
 @click.argument("submission_id", type=str)
-@db_url_option
-def show(submission_id: str, db: str):
+@click.pass_context
+def show(ctx: click.Context, submission_id: str):
     """
     Show details of a submission.
     """
+    db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
     submission = db_service.get_submission(submission_id)
     if not submission:
