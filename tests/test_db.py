@@ -1,5 +1,6 @@
 """Tests for the db subcommand."""
 
+import json
 import os
 
 from click.testing import CliRunner
@@ -48,3 +49,25 @@ def test_db(
     list_args = [*args_prefix, "list"]
     result = execute(list_args)
     assert result.exit_code == 0, result.output
+
+    # do the same again with json output
+    list_args = [*args_prefix, "list", "--json"]
+    result = execute(list_args)
+    assert result.exit_code == 0, result.output
+    expected_output = [
+        {
+            "id": "S01",
+            "tan_g": "foo",
+            "pseudonym": "bar",
+            "latest_state": {
+                "state": "Downloaded",
+                "timestamp": "MASKED",
+                "data": None,
+                "data_steward": "Alice",
+                "data_steward_signature": "Verified",
+            },
+        }
+    ]
+    actual_output = json.loads(result.output)
+    actual_output[0]["latest_state"]["timestamp"] = "MASKED"
+    assert actual_output == expected_output

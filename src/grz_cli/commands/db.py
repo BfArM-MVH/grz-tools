@@ -1,5 +1,6 @@
 """Command for managing a submission database"""
 
+import enum
 import json
 import logging
 import sys
@@ -15,6 +16,7 @@ from grz_db import (
     DatabaseConfigurationError,
     DuplicateSubmissionError,
     DuplicateTanGError,
+    Submission,
     SubmissionDb,
     SubmissionNotFoundError,
     SubmissionStateEnum,
@@ -161,28 +163,26 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         if submission.states:
             latest_state_obj = max(submission.states, key=lambda s: s.timestamp)
 
+        latest_state_str = "N/A"
+        latest_timestamp_str = "N/A"
+        author_name_str = "N/A"
+        signature_status = SignatureStatus.UNKNOWN
+
+        if latest_state_obj:
+            latest_state_str = latest_state_obj.state.value
+            latest_state_str = (
+                f"[red]{latest_state_str}[/red]" if latest_state_str == SubmissionStateEnum.ERROR else latest_state_str
+            )
+            latest_timestamp_str = latest_state_obj.timestamp.isoformat()
+            author_name_str = latest_state_obj.author_name
+
+            author_public_key = ctx.obj["public_keys"].get(author_name_str)
+            signature_status = _verify_signature(author_public_key, latest_state_obj)
+
         if output_json:
-            submission_dict = _build_submission_dict_from(latest_state_obj, submission)
+            submission_dict = _build_submission_dict_from(latest_state_obj, submission, signature_status)
             submission_dicts.append(submission_dict)
         else:
-            latest_state_str = "N/A"
-            latest_timestamp_str = "N/A"
-            author_name_str = "N/A"
-            signature_status_str = "N/A"
-
-            if latest_state_obj:
-                latest_state_str = latest_state_obj.state.value
-                latest_state_str = (
-                    f"[red]{latest_state_str}[/red]"
-                    if latest_state_str == SubmissionStateEnum.ERROR
-                    else latest_state_str
-                )
-                latest_timestamp_str = latest_state_obj.timestamp.isoformat()
-                author_name_str = latest_state_obj.author_name
-
-                author_public_key = ctx.obj["public_keys"].get(author_name_str)
-                signature_status_str = _verify_signature(author_public_key, latest_state_obj)
-
             table.add_row(
                 submission.id,
                 submission.tan_g if submission.tan_g is not None else "N/A",
@@ -190,7 +190,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
                 latest_state_str,
                 latest_timestamp_str,
                 author_name_str,
-                signature_status_str,
+                signature_status.rich_display(),
             )
 
     if output_json:
@@ -199,21 +199,44 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         console.print(table)
 
 
-def _verify_signature(author_public_key, latest_state_obj):
-    signature_status_str = "N/A"
+class SignatureStatus(enum.StrEnum):
+    """Enum for signature status."""
+
+    VERIFIED = "Verified"
+    FAILED = "Failed"
+    ERROR = "Error"
+    UNKNOWN = "Unknown"
+
+    def rich_display(self) -> str:
+        """Displays the signature status in rich format."""
+        match self:
+            case "Verified":
+                return "[green]Verified[/green]"
+            case "Failed":
+                return "[red]Failed[/red]"
+            case "Error":
+                return "[red]Error[/red]"
+            case "Unknown" | _:
+                return "[yellow]Unknown[/yellow]"
+
+
+def _verify_signature(author_public_key, latest_state_obj: SubmissionStateLog) -> SignatureStatus:
+    signature_status = SignatureStatus.UNKNOWN
     if author_public_key:
         try:
             if latest_state_obj.verify(author_public_key):
-                signature_status_str = "[green]Verified[/green]"
+                signature_status = SignatureStatus.VERIFIED
             else:
-                signature_status_str = "[red]Failed[/red]"
+                signature_status = SignatureStatus.FAILED
         except Exception as e:
-            signature_status_str = "[yellow]Error[/yellow]"
+            signature_status = SignatureStatus.ERROR
             log.error(e)
-    return signature_status_str
+    return signature_status
 
 
-def _build_submission_dict_from(latest_state_obj, submission):
+def _build_submission_dict_from(
+    latest_state_obj: SubmissionStateLog, submission: Submission, signature_status: SignatureStatus
+) -> dict[str, Any]:
     submission_dict: dict[str, Any] = {
         "id": submission.id,
         "tan_g": submission.tan_g,
@@ -226,6 +249,7 @@ def _build_submission_dict_from(latest_state_obj, submission):
             "timestamp": latest_state_obj.timestamp.isoformat(),
             "data": latest_state_obj.data,
             "data_steward": latest_state_obj.author_name,
+            "data_steward_signature": signature_status,
         }
     return submission_dict
 
