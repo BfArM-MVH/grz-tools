@@ -346,13 +346,26 @@ def show(ctx: click.Context, submission_id: str):
         table.add_column("Timestamp (UTC)", style="yellow")
         table.add_column("State", style="green")
         table.add_column("Data", style="cyan", overflow="ellipsis")
+        table.add_column("Data Steward", style="magenta")
+        table.add_column("Signature Status")
 
         sorted_states = sorted(submission.states, key=lambda s: s.timestamp)
         for state_log in sorted_states:
             data_str = json.dumps(state_log.data) if state_log.data else ""
             state = state_log.state.value
             state_str = f"[red]{state}[/red]" if state == SubmissionStateEnum.ERROR else state
-            table.add_row(str(state_log.id), state_log.timestamp.isoformat(), state_str, data_str)
+            data_steward_str = state_log.author_name
+            author_public_key = ctx.obj["public_keys"].get(data_steward_str)
+            signature_status_str = _verify_signature(author_public_key, state_log).rich_display()
+
+            table.add_row(
+                str(state_log.id),
+                state_log.timestamp.isoformat(),
+                state_str,
+                data_str,
+                data_steward_str,
+                signature_status_str,
+            )
         console.print(table)
     else:
         console.print("[yellow]No state history found for this submission.[/yellow]")
