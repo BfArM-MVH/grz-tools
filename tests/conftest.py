@@ -24,6 +24,8 @@ crypt4gh_grz_private_key_file = "tests/mock_files/grz_mock_private_key.sec"
 crypt4gh_grz_public_key_file = "tests/mock_files/grz_mock_public_key.pub"
 crypt4gh_submitter_private_key_file = "tests/mock_files/submitter_mock_private_key.sec"
 crypt4gh_submitter_public_key_file = "tests/mock_files/submitter_mock_public_key.pub"
+db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
+db_known_keys_file = "tests/mock_files/db/known_keys"
 
 
 @pytest.fixture()
@@ -44,6 +46,23 @@ def crypt4gh_submitter_private_key_file_path():
 @pytest.fixture()
 def crypt4gh_submitter_public_key_file_path():
     return Path(crypt4gh_submitter_public_key_file)
+
+
+@pytest.fixture()
+def db_alice_private_key_file_path():
+    return Path(db_alice_private_key_file)
+
+
+@pytest.fixture()
+def db_known_keys_file_path():
+    return Path(db_known_keys_file)
+
+
+@pytest.fixture()
+def db_test_sqlite(tmpdir_factory: pytest.TempdirFactory):
+    db_dir = tmpdir_factory.mktemp("db")
+    db_file = db_dir / "test.db"
+    return f"sqlite:///{str(db_file)}"
 
 
 @pytest.fixture(scope="session")
@@ -204,7 +223,12 @@ def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
 
 @pytest.fixture
 def config_content(
-    crypt4gh_grz_public_key_file_path, crypt4gh_grz_private_key_file_path, crypt4gh_submitter_private_key_file_path
+    crypt4gh_grz_public_key_file_path,
+    crypt4gh_grz_private_key_file_path,
+    crypt4gh_submitter_private_key_file_path,
+    db_alice_private_key_file_path,
+    db_known_keys_file_path,
+    db_test_sqlite,
 ):
     return {
         "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
@@ -215,6 +239,11 @@ def config_content(
             "bucket": "testing",
             "access_key": "testing",
             "secret": "testing",
+        },
+        "db": {
+            "database_url": db_test_sqlite,
+            "author": {"name": "Alice", "private_key_path": str(db_alice_private_key_file_path)},
+            "known_public_keys": str(db_known_keys_file_path),
         },
     }
 
