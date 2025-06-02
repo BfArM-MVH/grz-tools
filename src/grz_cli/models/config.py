@@ -188,7 +188,7 @@ class ConfigModel(StrictBaseSettings):
 
     pruefbericht: PruefberichtConfig = PruefberichtConfig()
 
-    db: DbConfig
+    db: DbConfig | None = None
 
     @field_validator("grz_public_key")
     @classmethod

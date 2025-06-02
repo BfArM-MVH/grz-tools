@@ -42,12 +42,15 @@ def get_submission_db_instance(db_url: str | None, author: Author | None = None)
 def db(ctx: click.Context, config_file: str):
     """Database operations"""
     config = read_config(config_file)
-    author_name = config.db.author.name
+    db_config = config.db
+    if not db_config:
+        raise ValueError("DB config not found")
+    author_name = db_config.author.name
 
-    if path := config.db.author.private_key_path:
+    if path := db_config.author.private_key_path:
         with open(path, "rb") as f:
             private_key_bytes = f.read()
-    elif key := config.db.author.private_key:
+    elif key := db_config.author.private_key:
         private_key_bytes = key.encode("utf-8")
     else:
         raise ValueError("Either private_key or private_key_path must be provided.")
@@ -56,7 +59,7 @@ def db(ctx: click.Context, config_file: str):
 
     log.info("Reading known public keys")
     KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "author_name"])
-    with open(config.db.known_public_keys) as f:
+    with open(db_config.known_public_keys) as f:
         public_key_list = list(map(lambda v: KnownKeyEntry(*v), map(lambda s: s.strip().split(), f.readlines())))
         public_keys = {
             author: load_ssh_public_key(f"{fmt}\t{key}\t{author}".encode()) for fmt, key, author in public_key_list
@@ -65,7 +68,7 @@ def db(ctx: click.Context, config_file: str):
             log.debug(f"Found public key for {author}")
 
     author = Author(name=author_name, private_key_bytes=private_key_bytes)
-    ctx.obj = {"author": author, "public_keys": public_keys, "db_url": config.db.database_url}
+    ctx.obj = {"author": author, "public_keys": public_keys, "db_url": db_config.database_url}
 
 
 @db.group()
