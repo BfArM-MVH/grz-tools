@@ -154,7 +154,7 @@ class DbConfig(StrictBaseModel):
     author: Author
     """Author information for submission database."""
 
-    known_public_keys: FilePath = "~/.config/grz-cli/known_public_keys"
+    known_public_keys: FilePath | str = "~/.config/grz-cli/known_public_keys"
     """
     File listing public keys. Used for DB verification.
 

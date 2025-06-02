@@ -5,6 +5,7 @@ import logging
 import sys
 import traceback
 from collections import namedtuple
+from typing import Any
 
 import click
 import rich.console
@@ -46,7 +47,7 @@ def db(ctx: click.Context, config_file: str):
     if path := config.db.author.private_key_path:
         with open(path, "rb") as f:
             private_key_bytes = f.read()
-    elif key := config.db.private_key:
+    elif key := config.db.author.private_key:
         private_key_bytes = key.encode("utf-8")
     else:
         raise ValueError("Either private_key or private_key_path must be provided.")
@@ -158,39 +159,26 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
             latest_state_obj = max(submission.states, key=lambda s: s.timestamp)
 
         if output_json:
-            submission_dict = {
-                "id": submission.id,
-                "tan_g": submission.tan_g,
-                "pseudonym": submission.pseudonym,
-                "latest_state": None,
-            }
-            if latest_state_obj:
-                submission_dict["latest_state"] = {
-                    "state": latest_state_obj.state.value,
-                    "timestamp": latest_state_obj.timestamp.isoformat(),
-                    "data": latest_state_obj.data,
-                    "data_steward": latest_state_obj.author_name,
-                }
+            submission_dict = _build_submission_dict_from(latest_state_obj, submission)
             submission_dicts.append(submission_dict)
         else:
-            latest_state_str = latest_state_obj.state.value if latest_state_obj else "N/A"
-            latest_state_str = (
-                f"[red]{latest_state_str}[/red]" if latest_state_str == SubmissionStateEnum.ERROR else latest_state_str
-            )
-            latest_timestamp_str = latest_state_obj.timestamp.isoformat() if latest_state_obj else "N/A"
-            author_name_str = latest_state_obj.author_name if latest_state_obj else "N/A"
-            author_public_key = ctx.obj["public_keys"].get(author_name_str)
+            latest_state_str = "N/A"
+            latest_timestamp_str = "N/A"
+            author_name_str = "N/A"
             signature_status_str = "N/A"
 
-            if author_public_key:
-                try:
-                    if latest_state_obj.verify(author_public_key):
-                        signature_status_str = "[green]Verified[/green]"
-                    else:
-                        signature_status_str = "[red]Failed[/red]"
-                except Exception as e:
-                    signature_status_str = "[yellow]Error[/yellow]"
-                    log.error(e)
+            if latest_state_obj:
+                latest_state_str = latest_state_obj.state.value
+                latest_state_str = (
+                    f"[red]{latest_state_str}[/red]"
+                    if latest_state_str == SubmissionStateEnum.ERROR
+                    else latest_state_str
+                )
+                latest_timestamp_str = latest_state_obj.timestamp.isoformat()
+                author_name_str = latest_state_obj.author_name
+
+                author_public_key = ctx.obj["public_keys"].get(author_name_str)
+                signature_status_str = _verify_signature(author_public_key, latest_state_obj)
 
             table.add_row(
                 submission.id,
@@ -206,6 +194,37 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         json.dump(submission_dicts, sys.stdout)
     else:
         console.print(table)
+
+
+def _verify_signature(author_public_key, latest_state_obj):
+    signature_status_str = "N/A"
+    if author_public_key:
+        try:
+            if latest_state_obj.verify(author_public_key):
+                signature_status_str = "[green]Verified[/green]"
+            else:
+                signature_status_str = "[red]Failed[/red]"
+        except Exception as e:
+            signature_status_str = "[yellow]Error[/yellow]"
+            log.error(e)
+    return signature_status_str
+
+
+def _build_submission_dict_from(latest_state_obj, submission):
+    submission_dict: dict[str, Any] = {
+        "id": submission.id,
+        "tan_g": submission.tan_g,
+        "pseudonym": submission.pseudonym,
+        "latest_state": None,
+    }
+    if latest_state_obj:
+        submission_dict["latest_state"] = {
+            "state": latest_state_obj.state.value,
+            "timestamp": latest_state_obj.timestamp.isoformat(),
+            "data": latest_state_obj.data,
+            "data_steward": latest_state_obj.author_name,
+        }
+    return submission_dict
 
 
 @submission.command()
@@ -233,9 +252,7 @@ def add(ctx: click.Context, submission_id: str, tan_g: str | None, pseudonym: st
 
 @submission.command()
 @click.argument("submission_id", type=str)
-@click.argument(
-    "state_str", metavar="STATE", type=click.Choice([s.value for s in SubmissionStateEnum], case_sensitive=False)
-)
+@click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.pass_context
 def update(ctx: click.Context, submission_id: str, state_str: str, data_json: str | None):
