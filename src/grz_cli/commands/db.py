@@ -2,15 +2,11 @@
 
 import json
 import logging
-import os
 import sys
 import traceback
 from collections import namedtuple
-from functools import partial
-from getpass import getpass
 
 import click
-import cryptography
 import rich.console
 import rich.table
 from grz_db import (
@@ -22,7 +18,6 @@ from grz_db import (
     SubmissionNotFoundError,
     SubmissionStateEnum,
     SubmissionStateLog,
-    SubmissionStateLogPayload,
 )
 
 from ..utils.config import read_config
@@ -48,29 +43,15 @@ def db(ctx: click.Context, config_file: str):
     config = read_config(config_file)
     author_name = config.db.author.name
 
-    passphrase = os.getenv("GRZ_CLI_AUTHOR_PASSPHRASE")
-    passphrase_callback = (lambda: passphrase) if passphrase else None
-    private_key_bytes = None
-
     if path := config.db.author.private_key_path:
         with open(path, "rb") as f:
             private_key_bytes = f.read()
-        if not passphrase:
-            passphrase_callback = partial(getpass, prompt=f"Passphrase for {path}: ")
     elif key := config.db.private_key:
         private_key_bytes = key.encode("utf-8")
-        if not passphrase:
-            passphrase_callback = partial(getpass, prompt="Passphrase for GRZ DB author private key: ")
     else:
         raise ValueError("Either private_key or private_key_path must be provided.")
 
-    from cryptography.hazmat.primitives.serialization import load_ssh_private_key, load_ssh_public_key
-
-    log.info(f"Loading private key of {author_name}…")
-    private_key = load_ssh_private_key(
-        private_key_bytes,
-        password=passphrase_callback().encode("utf-8"),
-    )
+    from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 
     log.info("Reading known public keys")
     KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "author_name"])
@@ -82,7 +63,7 @@ def db(ctx: click.Context, config_file: str):
         for author in public_keys:
             log.debug(f"Found public key for {author}")
 
-    author = Author(name=author_name, private_key=private_key)
+    author = Author(name=author_name, private_key_bytes=private_key_bytes)
     ctx.obj = {"author": author, "public_keys": public_keys, "db_url": config.db.database_url}
 
 
@@ -166,6 +147,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
     table.add_column("Pseudonym", style="magenta")
     table.add_column("Latest State", style="green")
     table.add_column("Last State Timestamp (UTC)", style="yellow")
+    table.add_column("Data Steward")
     table.add_column("Signature Status")
 
     submission_dicts = []
@@ -187,6 +169,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
                     "state": latest_state_obj.state.value,
                     "timestamp": latest_state_obj.timestamp.isoformat(),
                     "data": latest_state_obj.data,
+                    "data_steward": latest_state_obj.author_name,
                 }
             submission_dicts.append(submission_dict)
         else:
@@ -201,20 +184,10 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
 
             if author_public_key:
                 try:
-                    payload_to_verify = SubmissionStateLogPayload(
-                        submission_id=latest_state_obj.submission_id,
-                        author_name=latest_state_obj.author_name,
-                        state=latest_state_obj.state,
-                        data=latest_state_obj.data,
-                        timestamp=latest_state_obj.timestamp,
-                    )
-
-                    signature_bytes = bytes.fromhex(latest_state_obj.signature)
-                    bytes_to_verify = payload_to_verify.to_bytes()
-                    author_public_key.verify(signature_bytes, bytes_to_verify)
-                    signature_status_str = "[green]Verified[/green]"
-                except cryptography.exceptions.InvalidSignature:
-                    signature_status_str = "[red]Failed[/red]"
+                    if latest_state_obj.verify(author_public_key):
+                        signature_status_str = "[green]Verified[/green]"
+                    else:
+                        signature_status_str = "[red]Failed[/red]"
                 except Exception as e:
                     signature_status_str = "[yellow]Error[/yellow]"
                     log.error(e)
@@ -225,6 +198,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
                 submission.pseudonym if submission.pseudonym is not None else "N/A",
                 latest_state_str,
                 latest_timestamp_str,
+                author_name_str,
                 signature_status_str,
             )
 
