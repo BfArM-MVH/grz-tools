@@ -213,7 +213,9 @@ class Worker:
             # delete the log file
             self.progress_file_download.unlink()
 
-        download_worker = S3BotoDownloadWorker(config, status_file_path=self.progress_file_download, threads=self._threads)
+        download_worker = S3BotoDownloadWorker(
+            config, status_file_path=self.progress_file_download, threads=self._threads
+        )
 
         self.__log.info("Preparing output directories...")
         download_worker.prepare_download(self.metadata_dir, self.encrypted_files_dir, self.log_dir)
