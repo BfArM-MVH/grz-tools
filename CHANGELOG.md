@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/BfArM-MVH/grz-cli/compare/v0.6.0...v0.6.1) (2025-06-05)
+
+
+### Bug Fixes
+
+* threads parameter was ignored in upload and download ([#118](https://github.com/BfArM-MVH/grz-cli/issues/118)) ([22692d6](https://github.com/BfArM-MVH/grz-cli/commit/22692d6be756636b5ab14d81a4a51cfb628d0cd1))
+
 ## [0.6.0](https://github.com/BfArM-MVH/grz-cli/compare/v0.5.0...v0.6.0) (2025-05-27)
 
 
