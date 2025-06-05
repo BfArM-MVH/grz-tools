@@ -185,7 +185,7 @@ class Worker:
         """
         from .upload import S3BotoUploadWorker
 
-        upload_worker = S3BotoUploadWorker(config, status_file_path=self.progress_file_upload)
+        upload_worker = S3BotoUploadWorker(config, status_file_path=self.progress_file_upload, threads=self._threads)
 
         encrypted_submission = self.parse_encrypted_submission()
 
@@ -199,7 +199,7 @@ class Worker:
         """
         from .upload import S3BotoUploadWorker
 
-        upload_worker = S3BotoUploadWorker(config, status_file_path=self.progress_file_upload)
+        upload_worker = S3BotoUploadWorker(config, status_file_path=self.progress_file_upload, threads=self._threads)
 
         encrypted_submission = self.parse_encrypted_submission()
 
@@ -213,7 +213,7 @@ class Worker:
             # delete the log file
             self.progress_file_download.unlink()
 
-        download_worker = S3BotoDownloadWorker(config, status_file_path=self.progress_file_download)
+        download_worker = S3BotoDownloadWorker(config, status_file_path=self.progress_file_download, threads=self._threads)
 
         self.__log.info("Preparing output directories...")
         download_worker.prepare_download(self.metadata_dir, self.encrypted_files_dir, self.log_dir)
