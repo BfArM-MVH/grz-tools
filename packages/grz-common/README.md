@@ -1,0 +1,1 @@
+Common code shared between packages in `grz-tools` (mainly `grz-cli` and `grzctl`).

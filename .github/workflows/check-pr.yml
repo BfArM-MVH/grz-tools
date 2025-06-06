@@ -1,0 +1,31 @@
+name: "Conventional commit PRs"
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - reopened
+
+jobs:
+  main:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        with:
+          scopes: |
+            grz-common
+            grz-cli
+            grzctl
+            grz-pydantic-models
+            grz-db
+            grz-tools
+            repo
+            release
+            other
+          requireScope: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

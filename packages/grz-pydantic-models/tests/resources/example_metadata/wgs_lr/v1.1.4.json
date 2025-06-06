@@ -1,0 +1,111 @@
+{
+    "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.4/GRZ/grz-schema.json",
+    "submission": {
+        "submissionDate": "2024-12-10",
+        "submissionType": "initial",
+        "tanG": "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234",
+        "localCaseId": "CASE12345",
+        "coverageType": "GKV",
+        "submitterId": "123456789",
+        "genomicDataCenterId": "GRZM00123",
+        "clinicalDataNodeId": "KDKM00456",
+        "diseaseType": "rare",
+        "genomicStudyType": "single",
+        "genomicStudySubtype": "tumor-only",
+        "labName": "Genomics Lab Humangenetik MRI"
+    },
+    "donors": [
+        {
+            "donorPseudonym": "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234",
+            "gender": "other",
+            "relation": "index",
+            "mvConsent": {
+                "presentationDate": "2023-06-10",
+                "version": "1.0",
+                "scope": [
+                    {
+                        "type": "permit",
+                        "date": "2023-06-10",
+                        "domain": "mvSequencing"
+                    }
+                ]
+            },
+            "researchConsents": [
+                {
+                    "schemaVersion": "2025.0.1",
+                    "presentationDate": "2023-06-10",
+                    "scope": {}
+                }
+            ],
+            "labData": [
+                {
+                    "labDataName": "Blood DNA normal",
+                    "tissueOntology": {
+                        "name": "UBERON",
+                        "version": "1.5"
+                    },
+                    "tissueTypeId": "UBERON:0000178",
+                    "tissueTypeName": "blood",
+                    "sampleDate": "2023-06-21",
+                    "sampleConservation": "cryo-frozen",
+                    "sequenceType": "dna",
+                    "sequenceSubtype": "other",
+                    "fragmentationMethod": "none",
+                    "libraryType": "wgs_lr",
+                    "libraryPrepKit": "SMRTbell™ Express Template Prep Kit",
+                    "libraryPrepKitManufacturer": "PacBio",
+                    "sequencerModel": "PacBio Sequel II",
+                    "sequencerManufacturer": "PacBio",
+                    "kitName": "SMRTbell™ Express Template Prep Kit",
+                    "kitManufacturer": "PacBio",
+                    "enrichmentKitManufacturer": "other",
+                    "enrichmentKitDescription": "SMRTbell™ DNA Template Prep Kit",
+                    "barcode": "NA12345",
+                    "sequencingLayout": "single-end",
+                    "tumorCellCount": [
+                        {
+                            "count": 80,
+                            "method": "bioinformatics"
+                        }
+                    ],
+                    "sequenceData": {
+                        "bioinformaticsPipelineName": "DNASeq_Pipeline_XYZ",
+                        "bioinformaticsPipelineVersion": "v3.4.1",
+                        "referenceGenome": "GRCh38",
+                        "percentBasesAboveQualityThreshold": {
+                                "minimumQuality": 50,
+                                "percent": 88
+                        },
+                        "meanDepthOfCoverage": 40,
+                        "minCoverage": 30,
+                        "targetedRegionsAboveMinCoverage": 0.9,
+                        "nonCodingVariants": true,
+                        "callerUsed": [
+                            {
+                                "name": "Nanopolish",
+                                "version": "0.8.4"
+                            }
+                        ],
+                        "files": [
+                            {
+                                "filePath": "donor_001/23014LRa028_01.bam",
+                                "fileType": "bam",
+                                "checksumType": "sha256",
+                                "fileChecksum": "6c771c1f09c227c8fc94f87f580110339a5a2b7f1c17163d9791be6d487159ca",
+                                "fileSizeInBytes": 166756112983,
+                                "readLength": 9063
+                            },
+                            {
+                                "filePath": "donor_001/23014LRa028_01_var.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "0f3efb5a1897e3646cd61b50498d06e2867e8d230dad320a69a92110f916b3cd",
+                                "fileSizeInBytes": 60980704                                              
+                            } 
+                        ]
+                    }
+                }
+            ]
+        }
+    ]
+}
