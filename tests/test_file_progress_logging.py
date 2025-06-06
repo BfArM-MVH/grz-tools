@@ -5,10 +5,9 @@ import json
 from pathlib import Path
 
 import pytest
+from grz_common.progress import FileProgressLogger
+from grz_common.utils.io import read_multiple_json
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
-
-from grz_cli.progress import FileProgressLogger
-from grz_cli.utils.io import read_multiple_json
 
 
 @pytest.fixture(scope="function")

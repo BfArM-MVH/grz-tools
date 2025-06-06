@@ -1,6 +1,6 @@
 """Tests for the fastq_validation module."""
 
-from grz_cli.validation.fastq import (
+from grz_common.validation.fastq import (
     validate_paired_end_reads,
     validate_single_end_reads,
 )

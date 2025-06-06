@@ -1,51 +1,18 @@
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "grz-cli"
-description = "Tool for validation, encryption and upload of MV submissions to GDCs."
-readme = "README.md"
-license = "MIT"
-authors = [
-    { name = "Koray Kirli", email = "koraykirli@gmail.com" },
-    { name = "Mathias Lesche", email = "mathias.lesche@tu-dresden.de" },
-    { name = "Florian R. Hölzlwimmer", email = "git.ich@frhoelzlwimmer.de" },
-    { name = "Till Hartmann", email = "till.hartmann@bih-charite.de" },
-    { name = "Thomas Sell", email = "thomas.sell@bih-charite.de" },
-]
-dynamic = ["version"]
-dependencies = [
-    "boto3 >=1.36,<2",
-    "click >=8.1.7,<9",
-    "crypt4gh >=1.7,<2",
-    "jsonschema >=4.23.0,<5",
-    "pyyaml >=6.0.2,<7",
-    "tqdm >=4.66.5,<5",
-    "pydantic >=2.9.2,<2.10",
-    "pydantic-settings >=2.9.0,<2.10",
-    "platformdirs >=4.3.6,<5",
-    "grz-pydantic-models >=1.3.0",
-    "pysam ==0.23.*",
-    "rich ==13.*",
-    "requests >=2.32.3,<3"
-]
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent"
-]
+name = "grz-tools"
+version = "0.1.0"
 requires-python = ">=3.12"
-keywords = ["GRZ", "GDC", "S3"]
+dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
 
+[tool.uv.sources]
+grz-common = { workspace = true }
+grz-cli = { workspace = true }
+grzctl = { workspace = true }
+grz-db = { workspace = true }
+grz-pydantic-models = { workspace = true }
 
-[tool.setuptools.dynamic]
-version = { attr = "grz_cli.__version__" }
-
-[project.urls]
-"Homepage" = "https://codebase.helmholtz.cloud/grz-mv-genomseq/grz-cli"
-
-[project.scripts]
-grz-cli = "grz_cli.cli:main"
+[tool.uv.workspace]
+members = ["packages/grz-common", "packages/grz-cli", "packages/grz-db", "packages/grzctl", "packages/grz-pydantic-models"]
 
 [project.optional-dependencies]
 test = [
@@ -54,9 +21,13 @@ test = [
     "pytest-mock >=3.14.0,<4",
     "moto[s3] >=5.0.16,<6",
     "pytest-sugar >=1.0.0,<2",
-    "ruff >=0.9.6,<1",
+    "ruff >=0.11.12,<1",
     "numpy >=2.1.2,<3",
-    "responses ==0.25.*"
+    "responses ==0.25.*",
+    "grz-common",
+    "grz-cli",
+    "grz-db",
+    "grzctl",
 ]
 
 [dependency-groups]
@@ -66,7 +37,11 @@ test = [
     "pytest-cov",
     "pytest-sugar",
     "moto[s3]",
-    "numpy"
+    "numpy",
+    "grz-common",
+    "grz-cli",
+    "grz-db",
+    "grzctl",
 ]
 lint = [
     "ruff",
@@ -85,12 +60,14 @@ exclude = [
     "dist",
     "out"
 ]
+extend-exclude = ["alembic"]
+
 line-length = 120
 src = [
     "src",
     "tests"
 ]
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 fixable = [
@@ -117,6 +94,11 @@ ignore = [
     "D206",
     "D300",
     "UP040",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "B028"
 ]
 select = [
     "C90",
@@ -136,20 +118,22 @@ select = [
 max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
+"packages/*/tests/*" = [
+    "S",
+    "SIM",
+    "PLR",
+    "B011",
+]
 "tests/*" = [
     "S",
     "SIM",
     "PLR",
     "B011",
-    "D103"
 ]
 "__init__.py" = [
     "D",
 ]
-"src/grz_cli/models/**.py" = [
-    "D100",
-    "D101",
-    "D102",
+"packages/grz-cli/src/grz_cli/models/**.py" = [
     "N805"
 ]
 
@@ -186,19 +170,9 @@ skip_install = false
 dependency_groups = ["lint"]
 commands = [["pyrefly", "check"]]
 
-[tool.uv]
-dev-dependencies = [
-    "datamodel-code-generator>=0.26.2",
-    "pyrefly>=0.16.0,<0.17.0",
-    "ruff>=0.9.6",
-    "tox>=4.23.2",
-    "tox-uv>=1.20.1",
-    "types-pyyaml>=6.0.12.20240917",
-    "types-tqdm>=4.66.0.20240417",
-]
-
 [tool.pyrefly]
-project_includes = ["src"]
+project_includes = ["packages"]
+project_excludes = ["**/.[!/.]*", "**/tests", "packages/*/build", "packages/grz-db/src/grz_db"]
 python_version = "3.12.0"
 use_untyped_imports = false
 ignore_missing_source = false

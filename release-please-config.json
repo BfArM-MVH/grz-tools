@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    "packages/grz-cli": {
+      "component": "grz-cli",
+      "package-name": "grz-cli",
+      "release-type": "python",
+      "version_file": "packages/grz-cli/pyproject.toml"
+    },
+    "packages/grzctl": {
+      "component": "grzctl",
+      "package-name": "grzctl",
+      "release-type": "python",
+      "version_file": "packages/grzctl/pyproject.toml"
+    },
+    "packages/grz-common": {
+      "component": "grz-common",
+      "package-name": "grz-common",
+      "release-type": "python",
+      "version_file": "packages/grz-common/pyproject.toml"
+    },
+    "packages/grz-db": {
+      "component": "grz-db",
+      "package-name": "grz-db",
+      "release-type": "python",
+      "version_file": "packages/grz-db/pyproject.toml"
+    },
+    "packages/grz-pydantic-models": {
+      "component": "grz-pydantic-models",
+      "package-name": "grz-pydantic-models",
+      "release-type": "python",
+      "version_file": "packages/grz-pydantic-models/pyproject.toml"
+    }
+  }
+}

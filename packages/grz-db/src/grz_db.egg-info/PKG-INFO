@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: grz-db
+Version: 0.0.1
+Summary: SQL models for grz-cli and grz-watchdog.
+Author-email: Till Hartmann <till.hartmann@bih-charite.de>
+Project-URL: Homepage, https://tedil.github.io/grz-db/
+Project-URL: Repository, https://github.com/tedil/grz-db
+Project-URL: Documentation, https://tedil.github.io/grz-db/
+Keywords: python
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: <4.0,>=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: alembic>=1.16.1
+Requires-Dist: cryptography>=45.0.3
+Requires-Dist: sqlmodel>=0.0.24
+Dynamic: license-file

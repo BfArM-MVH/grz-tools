@@ -7,10 +7,9 @@ import importlib.resources
 import json
 
 import click.testing
+import grzctl.cli
 import pytest
 import responses
-
-import grz_cli
 
 from .. import mock_files
 
@@ -95,13 +94,13 @@ def bfarm_submit_api(requests_mock):
     yield requests_mock
 
 
-def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_config_file_path):
+def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         args = [
             "pruefbericht",
             "--config-file",
-            temp_config_file_path,
+            temp_pruefbericht_config_file_path,
             "--submission-dir",
             str(submission_dir),
         ]
@@ -114,19 +113,19 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_config_file_pat
                 "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
             }
         )
-        cli = grz_cli.cli.build_cli(grz_mode=True)
+        cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
 
 
-def test_valid_submission_with_json_output(bfarm_auth_api, bfarm_submit_api, temp_config_file_path):
+def test_valid_submission_with_json_output(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         args = [
             "pruefbericht",
             "--config-file",
-            temp_config_file_path,
+            temp_pruefbericht_config_file_path,
             "--submission-dir",
             str(submission_dir),
             "--json",
@@ -140,7 +139,7 @@ def test_valid_submission_with_json_output(bfarm_auth_api, bfarm_submit_api, tem
                 "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
             }
         )
-        cli = grz_cli.cli.build_cli(grz_mode=True)
+        cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
@@ -150,13 +149,13 @@ def test_valid_submission_with_json_output(bfarm_auth_api, bfarm_submit_api, tem
     assert output["token"] == "my_token"
 
 
-def test_valid_submission_with_token(bfarm_submit_api, temp_config_file_path):
+def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_file_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         args = [
             "pruefbericht",
             "--config-file",
-            temp_config_file_path,
+            temp_pruefbericht_config_file_path,
             "--submission-dir",
             str(submission_dir),
             "--token",
@@ -171,19 +170,19 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_config_file_path):
                 "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
             }
         )
-        cli = grz_cli.cli.build_cli(grz_mode=True)
+        cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
 
 
-def test_valid_submission_with_expired_token(bfarm_auth_api, bfarm_submit_api, temp_config_file_path):
+def test_valid_submission_with_expired_token(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         args = [
             "pruefbericht",
             "--config-file",
-            temp_config_file_path,
+            temp_pruefbericht_config_file_path,
             "--submission-dir",
             str(submission_dir),
             "--token",
@@ -198,7 +197,7 @@ def test_valid_submission_with_expired_token(bfarm_auth_api, bfarm_submit_api, t
                 "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
             }
         )
-        cli = grz_cli.cli.build_cli(grz_mode=True)
+        cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output

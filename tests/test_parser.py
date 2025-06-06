@@ -3,9 +3,8 @@
 from pathlib import Path
 
 import pytest
+from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from pydantic import ValidationError
-
-from grz_cli.workers.submission import EncryptedSubmission, SubmissionMetadata
 
 metadata_missing_read_order = "tests/mock_files/metadata_validation/missing-read-order.json"
 metadata_missing_vcf_file = "tests/mock_files/metadata_validation/missing-vcf-file.json"

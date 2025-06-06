@@ -3,10 +3,8 @@
 from pathlib import Path
 
 import pytest
-from moto import mock_aws
-
-from grz_cli.utils.checksums import calculate_sha256
-from grz_cli.workers.upload import S3BotoUploadWorker
+from grz_common.utils.checksums import calculate_sha256
+from grz_common.workers.upload import S3BotoUploadWorker
 
 
 @pytest.fixture(scope="module")
@@ -26,9 +24,8 @@ def download_file(remote_bucket, object_id, output_path):
     remote_bucket.download_file(object_id, output_path)
 
 
-@mock_aws
 def test_boto_upload(
-    config_model,
+    s3_config_model,
     remote_bucket,
     temp_small_file_path,
     temp_small_file_sha256sum,
@@ -39,7 +36,7 @@ def test_boto_upload(
 ):
     # create upload worker
     upload_worker = S3BotoUploadWorker(
-        config=config_model,
+        s3_options=s3_config_model.s3,
         status_file_path=temp_upload_log_file_path,
     )
 

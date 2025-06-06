@@ -3,21 +3,94 @@ name: Python CI
 on:
   push:
     branches:
-      - main  # Change this to your default branch if it's not 'main'
+      - main
   pull_request:
     branches:
-      - main  # Change this to your default branch if it's not 'main'
+      - main
 
 jobs:
-  test:
+  determine-changes:
+    name: Determine Changed Packages
     runs-on: ubuntu-latest
+    outputs:
+      matrix_paths: ${{ steps.generate_matrix.outputs.matrix }} # JSON array of package paths like "packages/grz-cli"
+      has_changes: ${{ steps.generate_matrix.outputs.has_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
 
-    strategy:
-      matrix:
-        python-version:
-          - "3.12"
-          - "3.13"
+      - name: Get changed files within packages
+        id: changed_package_files
+        uses: tj-actions/changed-files@v46
+        with:
+          files: packages/**
 
+      - name: List changed packages and generate matrix
+        id: generate_matrix
+        env:
+          ALL_CHANGED_FILES: ${{ steps.changed_package_files.outputs.all_changed_files }}
+        run: |
+          echo "All changed files tracked by tj-actions: $ALL_CHANGED_FILES"
+          directly_changed_package_dirs=()
+          for file_path in $ALL_CHANGED_FILES; do
+            # Extract the direct package directory (e.g., packages/package-a)
+            package_dir=$(echo "$file_path" | cut -d/ -f1-2) # Assumes structure like packages/pkg-name/...
+            if [[ -f "$package_dir/pyproject.toml" ]]; then # Check if it's a valid package dir
+              if [[ ! " ${directly_changed_package_dirs[@]} " =~ " ${package_dir} " ]]; then
+                directly_changed_package_dirs+=("$package_dir")
+              fi
+            fi
+          done
+          echo "Directly changed package directories: ${directly_changed_package_dirs[*]}"
+
+          # Define dependency graph (source package name -> space-separated list of dependent package names)
+          declare -A DEPENDENCY_GRAPH
+          DEPENDENCY_GRAPH["grz-pydantic-models"]="grz-cli grzctl grz-common grz-db"
+          DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl"
+          DEPENDENCY_GRAPH["grz-db"]="grzctl"
+          # Add other dependencies as needed: DEPENDENCY_GRAPH["pkg-x"]="pkg-y pkg-z"
+
+          final_test_dirs=("${directly_changed_package_dirs[@]}")
+
+          for changed_dir_path in "${directly_changed_package_dirs[@]}"; do
+              pkg_name=$(basename "$changed_dir_path") # e.g., grz-cli from packages/grz-cli
+              if [[ -n "${DEPENDENCY_GRAPH[$pkg_name]}" ]]; then
+                  echo "Package $pkg_name changed, considering its dependents: ${DEPENDENCY_GRAPH[$pkg_name]}"
+                  for dependent_name in ${DEPENDENCY_GRAPH[$pkg_name]}; do
+                      dependent_path="packages/$dependent_name"
+                      # Add dependent path if not already in the list
+                      if [[ ! " ${final_test_dirs[@]} " =~ " ${dependent_path} " ]]; then
+                          final_test_dirs+=("$dependent_path")
+                          echo "Added dependent to test: $dependent_path"
+                      fi
+                  done
+              fi
+          done
+
+          # Deduplicate final list (though the check above should prevent most duplicates)
+          unique_test_dirs_array=($(echo "${final_test_dirs[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+          echo "Final unique package directories to test: ${unique_test_dirs_array[*]}"
+
+          matrix_json="[]" # Default to empty JSON array
+          if [ ${#unique_test_dirs_array[@]} -gt 0 ]; then
+            matrix_json=$(printf '%s\n' "${unique_test_dirs_array[@]}" | jq -R | jq -sc . )
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No relevant package changes detected."
+          fi
+          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          echo "Generated matrix for testing: $matrix_json"
+
+  quality-checks:
+    name: Global Quality Checks
+    runs-on: ubuntu-latest
+    # Run always on PRs to main, or if determine-changes says something relevant changed on push to main.
+    # This ensures quality checks run even if no "package" code changed but e.g. a workflow file did.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,17 +98,16 @@ jobs:
           lfs: true
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v1
         with:
-          # Install a specific version of uv and enable caching.
-          version: "0.7.2"
+          version: '0.7.9'
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install ${{ matrix.python-version }}
+        run: uv python install 3.12 # Consistent Python for these checks
 
-      - name: Install the project
-        run: uv sync --all-extras --dev --frozen
+      - name: Install project dev dependencies
+        run: uv sync --all-extras --all-groups --all-packages
 
       - name: Setup tox-uv
         run: uv tool install tox --with tox-uv
@@ -49,6 +121,78 @@ jobs:
       - name: Run pyrefly
         run: uv run tox -e pyrefly
 
-      - name: Run tests
-        run: uv run tox -e py${{ matrix.python-version }}
+  run-workspace-tests:
+    name: Run workspace tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v1
+        with:
+          version: '0.7.9'
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install project dev dependencies
+        run: uv sync --all-extras --all-groups --all-packages
+
+      - name: Setup tox-uv
+        run: uv tool install tox --with tox-uv
+
+      - name: Test ${{ matrix.python-version }}
+        run: uv run tox -e ${{ matrix.python-version }}
+
+#  test-changed-packages:
+#    name: Test Changed Packages
+#    needs: [determine-changes, quality-checks]
+#    if: needs.determine-changes.outputs.has_changes == 'true' # Only run if there are packages to test
+#    runs-on: ubuntu-latest
+#    strategy:
+#      fail-fast: false
+#      matrix:
+#        package_path: ${{ fromJson(needs.determine-changes.outputs.matrix_paths) }} # e.g., "packages/grz-cli"
+#        python-version:
+#          - "3.12"
+#          - "3.13"
+#
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#        with:
+#          lfs: true
+#
+#      - name: Install uv
+#        uses: astral-sh/setup-uv@v1
+#        with:
+#          version: '0.7.9'
+#          enable-cache: true
+#
+#      - name: Set up Python ${{ matrix.python-version }}
+#        run: uv python install ${{ matrix.python-version }}
+#
+#      - name: Install project dev dependencies
+#        run: uv sync --all-extras --all-groups --all-packages
+#
+#      - name: Setup tox-uv
+#        run: uv tool install tox --with tox-uv
+#
+#      - name: Extract package name from path
+#        id: pkg_info
+#        run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
+#
+#      - name: Run tests for ${{ steps.pkg_info.outputs.name }} (Py ${{ matrix.python-version }})
+#        run: |
+#          uv run --package ${{ steps.pkg_info.outputs.name }} tox -e ${{ matrix.python-version }}

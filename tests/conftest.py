@@ -7,14 +7,14 @@ from pathlib import Path
 from shutil import copyfile
 
 import boto3
+import grz_cli.models.config
+import grz_common.models.s3
+import grzctl.models.config
 import numpy as np
 import pytest
-import yaml
+from grz_common.utils.crypt import Crypt4GH
+from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from moto import mock_aws
-
-from grz_cli.models.config import ConfigModel
-from grz_cli.utils.crypt import Crypt4GH
-from grz_cli.workers.submission import EncryptedSubmission, SubmissionMetadata
 
 config_path = "tests/mock_files/mock_config.yaml"
 small_file_input_path = "tests/mock_files/mock_small_input_file.bed"
@@ -24,6 +24,8 @@ crypt4gh_grz_private_key_file = "tests/mock_files/grz_mock_private_key.sec"
 crypt4gh_grz_public_key_file = "tests/mock_files/grz_mock_public_key.pub"
 crypt4gh_submitter_private_key_file = "tests/mock_files/submitter_mock_private_key.sec"
 crypt4gh_submitter_public_key_file = "tests/mock_files/submitter_mock_public_key.pub"
+db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
+db_known_keys_file = "tests/mock_files/db/known_keys"
 
 
 @pytest.fixture()
@@ -44,6 +46,23 @@ def crypt4gh_submitter_private_key_file_path():
 @pytest.fixture()
 def crypt4gh_submitter_public_key_file_path():
     return Path(crypt4gh_submitter_public_key_file)
+
+
+@pytest.fixture()
+def db_alice_private_key_file_path():
+    return Path(db_alice_private_key_file)
+
+
+@pytest.fixture()
+def db_known_keys_file_path():
+    return Path(db_known_keys_file)
+
+
+@pytest.fixture()
+def db_test_sqlite(tmpdir_factory: pytest.TempdirFactory):
+    db_dir = tmpdir_factory.mktemp("db")
+    db_file = db_dir / "test.db"
+    return f"sqlite:///{str(db_file)}"
 
 
 @pytest.fixture(scope="session")
@@ -203,32 +222,105 @@ def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
 
 
 @pytest.fixture
-def config_content(
-    crypt4gh_grz_public_key_file_path, crypt4gh_grz_private_key_file_path, crypt4gh_submitter_private_key_file_path
+def keys_config_content(
+    crypt4gh_grz_public_key_file_path,
+    crypt4gh_grz_private_key_file_path,
+    crypt4gh_submitter_private_key_file_path,
 ):
     return {
-        "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
-        "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
-        "submitter_private_key_path": str(crypt4gh_submitter_private_key_file_path),
-        "s3_options": {
-            "endpoint_url": "https://s3.amazonaws.com",
-            "bucket": "testing",
-            "access_key": "testing",
-            "secret": "testing",
-        },
+        "keys": {
+            "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
+            "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
+            "submitter_private_key_path": str(crypt4gh_submitter_private_key_file_path),
+        }
     }
 
 
 @pytest.fixture
-def config_model(config_content):
-    return ConfigModel(**config_content)
+def s3_config_content():
+    return {
+        "s3": {
+            "endpoint_url": "https://s3.amazonaws.com",
+            "bucket": "testing",
+            "access_key": "testing",
+            "secret": "testing",
+        }
+    }
 
 
 @pytest.fixture
-def temp_config_file_path(config_content, temp_data_dir_path) -> Path:
-    config_file = temp_data_dir_path / "config.yaml"
+def db_config_content(
+    db_alice_private_key_file_path,
+    db_known_keys_file_path,
+    db_test_sqlite,
+):
+    return {
+        "db": {
+            "database_url": db_test_sqlite,
+            "author": {"name": "Alice", "private_key_path": str(db_alice_private_key_file_path)},
+            "known_public_keys": str(db_known_keys_file_path),
+        }
+    }
+
+
+@pytest.fixture
+def pruefbericht_config_content():
+    return {
+        "pruefbericht": {
+            "authorization_url": "https://bfarm.localhost/token",
+        }
+    }
+
+
+@pytest.fixture
+def s3_config_model(s3_config_content):
+    return grz_common.models.s3.S3ConfigModel(**s3_config_content)
+
+
+@pytest.fixture
+def encrypt_config_model(keys_config_content):
+    return grz_cli.models.config.EncryptConfig(**keys_config_content)
+
+
+@pytest.fixture
+def db_config_model(db_config_content):
+    return grzctl.models.config.DbConfig(**db_config_content)
+
+
+@pytest.fixture
+def pruefbericht_config_model(pruefbericht_config_content):
+    return grzctl.models.config.PruefberichtConfig(**pruefbericht_config_content)
+
+
+@pytest.fixture
+def temp_s3_config_file_path(temp_data_dir_path, s3_config_model) -> Path:
+    config_file = temp_data_dir_path / "config.s3.yaml"
     with open(config_file, "w") as fd:
-        yaml.dump(config_content, fd)
+        s3_config_model.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_db_config_file_path(temp_data_dir_path, db_config_model) -> Path:
+    config_file = temp_data_dir_path / "config.db.yaml"
+    with open(config_file, "w") as fd:
+        db_config_model.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_keys_config_file_path(temp_data_dir_path, encrypt_config_model) -> Path:
+    config_file = temp_data_dir_path / "config.keys.yaml"
+    with open(config_file, "w") as fd:
+        encrypt_config_model.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_model) -> Path:
+    config_file = temp_data_dir_path / "config.pruefbericht.yaml"
+    with open(config_file, "w") as fd:
+        pruefbericht_config_model.to_yaml(fd)
     return config_file
 
 
@@ -242,27 +334,27 @@ def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitt
 
 
 @pytest.fixture
-def aws_credentials(config_model):
+def aws_credentials(s3_config_model):
     """Mocked AWS Credentials for moto."""
-    os.environ["AWS_ACCESS_KEY_ID"] = config_model.s3_options.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = config_model.s3_options.secret
+    os.environ["AWS_ACCESS_KEY_ID"] = s3_config_model.s3.access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = s3_config_model.s3.secret
     os.environ["MOTO_ALLOW_NONEXISTENT_REGION"] = "1"
+    with mock_aws():
+        yield
 
 
 @pytest.fixture
 def boto_s3_client(aws_credentials):
-    with mock_aws():
-        conn = boto3.client("s3")
-        yield conn
+    conn = boto3.client("s3")
+    yield conn
 
 
-@mock_aws
 @pytest.fixture
-def remote_bucket(boto_s3_client, config_model):
+def remote_bucket(boto_s3_client, s3_config_model):
     # create bucket
-    boto_s3_client.create_bucket(Bucket=config_model.s3_options.bucket)
+    boto_s3_client.create_bucket(Bucket=s3_config_model.s3.bucket)
 
-    return boto3.resource("s3").Bucket(config_model.s3_options.bucket)
+    return boto3.resource("s3").Bucket(s3_config_model.s3.bucket)
 
 
 @pytest.fixture
@@ -284,3 +376,15 @@ def encrypted_files_dir() -> Path:
 def encrypted_submission(submission_metadata_dir, encrypted_files_dir) -> EncryptedSubmission:
     submission = EncryptedSubmission(submission_metadata_dir, encrypted_files_dir)
     return submission
+
+
+@pytest.fixture
+def working_dir(tmpdir_factory: pytest.TempdirFactory):
+    """Create temporary folder for the session"""
+    datadir = tmpdir_factory.mktemp("submission")
+    return datadir
+
+
+@pytest.fixture
+def working_dir_path(working_dir) -> Path:
+    return Path(working_dir.strpath)

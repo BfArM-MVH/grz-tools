@@ -6,14 +6,12 @@ import importlib.resources
 import shutil
 
 import click.testing
-
-import grz_cli
+import grzctl
 
 from .. import mock_files
-from .common import working_dir, working_dir_path  # noqa: F401
 
 
-def test_archive(temp_config_file_path, remote_bucket, working_dir_path):  # noqa: F811
+def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
@@ -22,7 +20,7 @@ def test_archive(temp_config_file_path, remote_bucket, working_dir_path):  # noq
         args = [
             "archive",
             "--config-file",
-            temp_config_file_path,
+            temp_s3_config_file_path,
             "--submission-dir",
             str(working_dir_path),
         ]
@@ -32,7 +30,7 @@ def test_archive(temp_config_file_path, remote_bucket, working_dir_path):  # noq
                 "GRZ_S3_OPTIONS__ENDPOINT_URL": "",
             }
         )
-        cli = grz_cli.cli.build_cli(grz_mode=True)
+        cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output

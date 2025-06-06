@@ -1,20 +1,38 @@
+name: Release Please
+
 on:
   push:
     branches:
-      - main
-
-permissions:
-  contents: write
-  pull-requests: write
-
-name: release-please
+      - main # Or your default branch
+  workflow_dispatch:
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      # e.g. '["packages/grz-cli", "packages/grz-common"]'
+      paths_released: ${{ steps.release.outputs.paths_released }}
+      # releases_created is true if any release PR was created/updated
+      releases_created: ${{ steps.release.outputs.releases_created }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: googleapis/release-please-action@v4
+      - name: Run Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
         with:
-          release-type: python
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           token: ${{ secrets.RELEASE_PLEASE_PAT }}
+
+  release-pr-check:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm Release PR
+        run: |
+          echo "A Release PR has been created or updated by release-please."
+          echo "Affected paths in this release cycle (before PR merge): ${{ needs.release-please.outputs.paths_released }}"
+          echo "Merge the 'chore: release ...' PR to trigger tagging and publishing."
