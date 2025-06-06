@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import DateTime, Field, Relationship, Session, SQLModel, create_engine, select
 
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 
 log = logging.getLogger(__name__)
 
