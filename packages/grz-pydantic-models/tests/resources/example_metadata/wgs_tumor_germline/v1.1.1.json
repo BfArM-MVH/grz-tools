@@ -1,0 +1,340 @@
+{
+    "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json",
+    "submission": {
+        "submissionDate": "2024-10-28",
+        "submissionType": "initial",
+        "tanG": "9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30",
+        "localCaseId": "CASE12345",
+        "coverageType": "GKV",
+        "submitterId": "123456789",
+        "genomicDataCenterId": "GRZM00123",
+        "clinicalDataNodeId": "KDKM00456",
+        "diseaseType": "oncological",
+        "genomicStudyType": "single",
+        "genomicStudySubtype": "tumor+germline",
+        "labName": "Genomics Lab Humangenetik MRI"
+    },
+    "donors": [
+        {
+            "donorPseudonym": "9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30",
+            "gender": "other",
+            "relation": "index",
+            "mvConsent": {
+                "presentationDate": "2023-06-10",
+                "version": "1.0",
+                "scope": [
+                    {
+                        "type": "permit",
+                        "date": "2023-06-10",
+                        "domain": "mvSequencing"
+                    }
+                ]
+            },
+            "researchConsents": [
+                {
+                    "schemaVersion": "2025.0.1",
+                    "presentationDate": "2023-06-10",
+                    "scope": {}
+                }
+            ],
+            "labData": [
+                {
+                    "labDataName": "Blood DNA normal",
+                    "tissueOntology": {
+                        "name": "UBERON",
+                        "version": "1.5"
+                    },
+                    "tissueTypeId": "UBERON:0000178",
+                    "tissueTypeName": "blood",
+                    "sampleDate": "2023-06-21",
+                    "sampleConservation": "cryo-frozen",
+                    "sequenceType": "dna",
+                    "sequenceSubtype": "germline",
+                    "fragmentationMethod": "sonication",
+                    "libraryType": "wgs",
+                    "libraryPrepKit": "TruSeq DNA PCR-Free",
+                    "libraryPrepKitManufacturer": "Illumina",
+                    "sequencerModel": "NovaSeq 6000",
+                    "sequencerManufacturer": "Illumina",
+                    "kitName": "Nextera XT",
+                    "kitManufacturer": "Illumina",
+                    "enrichmentKitManufacturer": "other",
+                    "enrichmentKitDescription": "KAPA Hyper Prep Kit",
+                    "barcode": "NA12345",
+                    "sequencingLayout": "paired-end",                    
+                    "sequenceData": {
+                        "bioinformaticsPipelineName": "DNASeq_Pipeline_XYZ",
+                        "bioinformaticsPipelineVersion": "v3.4.1",
+                        "referenceGenome": "GRCh38",
+                        "percentBasesAboveQualityThreshold": {
+                                "minimumQuality": 50,
+                                "percent": 88
+                        },
+                        "meanDepthOfCoverage": 40,
+                        "minCoverage": 30,
+                        "targetedRegionsAboveMinCoverage": 0.9,
+                        "nonCodingVariants": true,
+                        "callerUsed": [
+                            {
+                                "name": "GATK",
+                                "version": "4.2.0"
+                            },
+                            {
+                                "name": "DeepVariant",
+                                "version": "1.1"
+                            }
+                        ],
+                        "files": [
+                            {
+                                "filePath": "donor_001/HV5TMDSX7-1-IDUDI0034_S1_L001_R1_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "9e87eabc18b726a94a3ffbd8d84df662388bec07b8e3d501ee6a43309c6d43fd",
+                                "fileSizeInBytes": 129174728987,
+                                "readOrder": "R1",
+                                "readLength": 151,
+                                "flowcellId": "HV5TMDSX7",
+                                "laneId": "1"
+                            },
+                            {
+                                "filePath": "donor_001/HV5TMDSX7-1-IDUDI0034_S1_L001_R2_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "4fc803e3c68b2b2ce0cc8c21e45cd27cbac31dc1564adf424ced6f2b766d7c35",
+                                "fileSizeInBytes": 136093590644,
+                                "readOrder": "R2",
+                                "readLength": 151,
+                                "flowcellId": "HV5TMDSX7",
+                                "laneId": "1"                 
+                            },
+                            {
+                                "filePath": "donor_001/HV5TMDSX7-1-IDUDI0034_gatk.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HV5TMDSX7"
+                            },
+                            {
+                                "filePath": "donor_001/HV5TMDSX7-1-IDUDI0034_dv.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HV5TMDSX7"
+                            }      
+                        ]
+                    }
+                },
+                {
+                    "labDataName": "Tumor DNA sample",
+                    "tissueOntology": {
+                        "name": "UBERON",
+                        "version": "1.5"
+                    },
+                    "tissueTypeId": "UBERON:0002112",
+                    "tissueTypeName": "tumor",
+                    "sampleDate": "2023-07-15",
+                    "sampleConservation": "cryo-frozen",
+                    "sequenceType": "dna",
+                    "sequenceSubtype": "somatic",
+                    "fragmentationMethod": "enzymatic",
+                    "libraryType": "wgs",
+                    "libraryPrepKit": "KAPA Hyper Prep",
+                    "libraryPrepKitManufacturer": "Kapa Biosystems",
+                    "sequencerModel": "NovaSeq 6000",
+                    "sequencerManufacturer": "Illumina",
+                    "kitName": "KAPA Hyper Prep",
+                    "kitManufacturer": "Kapa Biosystems",
+                    "enrichmentKitManufacturer": "other",
+                    "enrichmentKitDescription": "KAPA Hyper Prep Kit",
+                    "barcode": "NA67890",
+                    "sequencingLayout": "paired-end",
+                    "tumorCellCount": [
+                        {
+                            "count": 80,
+                            "method": "bioinformatics"
+                        }
+                    ],
+                    "sequenceData": {
+                        "bioinformaticsPipelineName": "DNASeq_Pipeline_Tumor",
+                        "bioinformaticsPipelineVersion": "v3.5.0",
+                        "referenceGenome": "GRCh38",
+                        "percentBasesAboveQualityThreshold": {
+                                "minimumQuality": 50,
+                                "percent": 88
+                        },
+                        "meanDepthOfCoverage": 100,
+                        "minCoverage": 30,
+                        "targetedRegionsAboveMinCoverage": 0.85,
+                        "nonCodingVariants": true,
+                        "callerUsed": [
+                            {
+                                "name": "GATK",
+                                "version": "4.2.0"
+                            },
+                            {
+                                "name": "Strelka",
+                                "version": "2.9.10"
+                            }
+                        ],
+                        "files": [
+                            {
+                                "filePath": "donor_001/HJVHNDSX7-1-IDUDI0031_S12_L001_R1_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "5252e914f0c3c6bf2eb0ee489f3a8042d79474d2ddbd76420246840b85b0ec64",
+                                "fileSizeInBytes": 13067670918,
+                                "readOrder": "R1",
+                                "readLength": 151,
+                                "flowcellId": "HJVHNDSX7",
+                                "laneId": "1"
+                            },
+                            {
+                                "filePath": "donor_001/HJVHNDSX7-1-IDUDI0031_S12_L001_R2_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "3feb4efcad6bc8be40e8de5a6cd490cf3e3a6b0d79baaee626bbfa3ab3bb75e8",
+                                "fileSizeInBytes": 14070269642,
+                                "readOrder": "R2",
+                                "readLength": 151,
+                                "flowcellId": "HJVHNDSX7",
+                                "laneId": "1"
+                            },
+                            {
+                                "filePath": "donor_001/HJVHNDSX7-1-IDUDI0031_gatk.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HJVHNDSX7"
+                            }, 
+                            {
+                                "filePath": "donor_001/HJVHNDSX7-1-IDUDI0031_strelka.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HJVHNDSX7"
+                            },
+                            {
+                                "filePath": "donor_001/HVWWFDSX7-2-IDUDI0031_S138_L002_R1_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e7f0512f9b6cbfc37a39cb67501b1b253c08d4b02722d23c74d006b224b0ce70",
+                                "fileSizeInBytes": 39804061971,
+                                "readOrder": "R1",
+                                "readLength": 151,
+                                "flowcellId": "HVWWFDSX7",
+                                "laneId": "2"
+                            },
+                            {
+                                "filePath": "donor_001/HVWWFDSX7-2-IDUDI0031_S138_L002_R2_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "586ac70126428e24f466292f873f251121e6e4ff66cd072cc7e91cb7dda210e2",
+                                "fileSizeInBytes": 43572350218,
+                                "readOrder": "R2",
+                                "readLength": 151,
+                                "flowcellId": "HVWWFDSX7",
+                                "laneId": "2"               
+                            },
+                            {
+                                "filePath": "donor_001/HVWWFDSX7-2-IDUDI0031_gatk.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HVWWFDSX7"
+                            }, 
+                            {
+                                "filePath": "donor_001/HVWWFDSX7-2-IDUDI0031_strelka.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HVWWFDSX7"
+                            },
+                            {
+                                "filePath": "donor_001/HM22JDSX7-2-IDUDI0031_S12_L002_R1_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "fe447b3557fa17caf86c60f3bec5364057da575a577e232a82989eb20aa243bd",
+                                "fileSizeInBytes": 40921939698,
+                                "readOrder": "R1",
+                                "readLength": 151,
+                                "flowcellId": "HM22JDSX7",
+                                "laneId": "2"
+                            },
+                            {
+                                "filePath": "donor_001/HM22JDSX7-2-IDUDI0031_S12_L002_R2_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "092bdf381ff72ee6ca3e5e3f4ddf0d43711eea20922bb4a6120ab97de3346e5a",
+                                "fileSizeInBytes": 44176562405,
+                                "readOrder": "R2",
+                                "readLength": 151,
+                                "flowcellId": "HM22JDSX7",
+                                "laneId": "2"
+                            },
+                            {
+                                "filePath": "donor_001/HM22JDSX7-2-IDUDI0031_gatk.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HM22JDSX7"
+                            }, 
+                            {
+                                "filePath": "donor_001/HM22JDSX7-2-IDUDI0031_strelka.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HM22JDSX7" 
+                            },
+                            {
+                                "filePath": "donor_001/HM2CNDSX7-2-IDUDI0031_S26_L002_R1_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "c5c33ebfbf24a7b672826054c9009773f000cd3eb9fa57f39af1863b07c37082",
+                                "fileSizeInBytes": 19062888154,
+                                "readOrder": "R1",
+                                "readLength": 151,
+                                "flowcellId": "HM2CNDSX7",
+                                "laneId": "2"
+                            },
+                            {
+                                "filePath": "donor_001/HM2CNDSX7-2-IDUDI0031_S26_L002_R2_001.fastq.gz",
+                                "fileType": "fastq",
+                                "checksumType": "sha256",
+                                "fileChecksum": "0861d90a46054189851403f6840e63528809d4960d8b51dd879a7ba53630ed6c",
+                                "fileSizeInBytes": 20298224493,
+                                "readOrder": "R2",
+                                "readLength": 151,
+                                "flowcellId": "HM2CNDSX7",
+                                "laneId": "2"                   
+                            },
+                            {
+                                "filePath": "donor_001/HM2CNDSX7-2-IDUDI0031_gatk.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HM2CNDSX7"
+                            }, 
+                            {
+                                "filePath": "donor_001/HM2CNDSX7-2-IDUDI0031_strelka.vcf.gz",
+                                "fileType": "vcf",
+                                "checksumType": "sha256",
+                                "fileChecksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                "fileSizeInBytes": 0,
+                                "flowcellId": "HM2CNDSX7"
+                            }
+                        ]
+                    }      
+                }
+            ]
+        }
+    ]
+}

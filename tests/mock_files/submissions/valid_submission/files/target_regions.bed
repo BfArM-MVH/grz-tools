@@ -1,0 +1,5 @@
+chr1    1000000 1001000 target_region_1  500 +
+chr2    2000000 2001500 target_region_2  800 -
+chr3    3000500 3001200 target_region_3  600 +
+chrX    4000000 4000500 target_region_4  900 -
+chrY    5000000 5001000 target_region_5  700 +

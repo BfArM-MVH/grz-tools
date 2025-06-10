@@ -1,0 +1,300 @@
+{
+  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json",
+  "submission": {
+    "submissionDate": "2024-07-15",
+    "submissionType": "initial",
+    "submitterId": "260914050",
+    "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+    "localCaseId": "example_metadata",
+    "genomicDataCenterId": "GRZK00007",
+    "clinicalDataNodeId": "KDKK00007",
+    "labName": "Institute für Humangenetik am Klinikum rechts der Isar",
+    "genomicStudyType": "duo",
+    "genomicStudySubtype": "tumor+germline",
+    "coverageType": "GKV",
+    "diseaseType": "oncological"
+  },
+  "donors": [
+    {
+      "donorPseudonym": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+      "gender": "female",
+      "relation": "index",
+      "mvConsent": {
+        "presentationDate": "2024-07-15",
+        "version": "1.7.1b",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "mvSequencing"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "reIdentification"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "caseIdentification"
+          }
+        ]
+      },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2024-07-15",
+          "scope": {
+            "FOO": "BAR"
+          }
+        }
+      ],
+      "labData": [
+        {
+          "labDataName": "Blut DNA normal",
+          "tissueOntology": {
+            "name": "Human Tissue Ontology",
+            "version": "v1.2.3"
+          },
+          "tissueTypeId": "HTO:0000171",
+          "tissueTypeName": "Blood",
+          "sampleConservation": "fresh-tissue",
+          "sequenceType": "dna",
+          "sequenceSubtype": "germline",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wes",
+          "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
+          "libraryPrepKitManufacturer": "Agilent",
+          "sequencerModel": "Illumina HiSeq X",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Illumina NovaSeq S4 flow cell",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "Illumina",
+          "enrichmentKitDescription": "TruSeq RNA Access Library Prep Kit v2.0",
+          "barcode": "ATCACG",
+          "sequencingLayout": "paired-end",
+          "sequenceData": {
+            "bioinformaticsPipelineName": "In-House Pipeline",
+            "referenceGenome": "GRCh38",
+            "bioinformaticsPipelineVersion": "2e70912",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 30,
+              "percent": 95.4
+            },
+            "meanDepthOfCoverage": 102.4,
+            "minCoverage": 25.4,
+            "targetedRegionsAboveMinCoverage": 0.96,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "Mutect2",
+                "version": "v4.1.8.1"
+              },
+              {
+                "name": "Strelka2",
+                "version": "v2.9.10"
+              },
+              {
+                "name": "VarScan",
+                "version": "v2.4.3"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "GRCh38_target_region_file.bed",
+                "fileType": "bed",
+                "fileChecksum": "0358a9852adc88c77e7321ddfb07caf2e9911986a90ff76816be142f6f38122d",
+                "fileSizeInBytes": 116993
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000.bam",
+                "fileType": "bam",
+                "fileChecksum": "0358a9852adc88c77e7321ddfb07caf2e9911986a90ff76816be142f6f38122d",
+                "fileSizeInBytes": 116993,
+                "readLength": 150
+              }
+            ]
+          },
+          "sampleDate": "1970-01-01"
+        },
+        {
+          "labDataName": "Blut DNA Tumor",
+          "tissueOntology": {
+            "name": "Human Tissue Ontology",
+            "version": "v1.2.3"
+          },
+          "tissueTypeId": "HTO:0000171",
+          "tissueTypeName": "Tumor",
+          "sampleConservation": "fresh-tissue",
+          "sequenceType": "dna",
+          "sequenceSubtype": "somatic",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wes",
+          "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
+          "libraryPrepKitManufacturer": "Agilent",
+          "sequencerModel": "Illumina HiSeq X",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Illumina NovaSeq S4 flow cell",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "Illumina",
+          "enrichmentKitDescription": "TruSeq RNA Access Library Prep Kit v2.0",
+          "barcode": "GGTACTA",
+          "sequencingLayout": "paired-end",
+          "tumorCellCount": [
+            {
+              "count": 80,
+              "method": "bioinformatics"
+            }
+          ],
+          "sequenceData": {
+            "bioinformaticsPipelineName": "In-House Pipeline",
+            "referenceGenome": "GRCh38",
+            "bioinformaticsPipelineVersion": "2e70912",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 30,
+              "percent": 95.4
+            },
+            "meanDepthOfCoverage": 252.4,
+            "minCoverage": 25.4,
+            "targetedRegionsAboveMinCoverage": 0.96,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "Mutect2",
+                "version": "v4.1.8.1"
+              },
+              {
+                "name": "Strelka2",
+                "version": "v2.9.10"
+              },
+              {
+                "name": "VarScan",
+                "version": "v2.4.3"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "GRCh38_target_region_file.bed",
+                "fileType": "bed",
+                "fileChecksum": "0358a9852adc88c77e7321ddfb07caf2e9911986a90ff76816be142f6f38122d",
+                "fileSizeInBytes": 116993
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000001.bam",
+                "fileType": "bam",
+                "fileChecksum": "0358a9852adc88c77e7321ddfb07caf2e9911986a90ff76816be142f6f38122d",
+                "fileSizeInBytes": 116642,
+                "readLength": 150
+              }
+            ]
+          },
+          "sampleDate": "1970-01-01"
+        }
+      ]
+    },
+    {
+      "donorPseudonym": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111",
+      "gender": "male",
+      "relation": "father",
+      "mvConsent": {
+        "presentationDate": "2024-07-15",
+        "version": "1.7.1b",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "mvSequencing"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "reIdentification"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "caseIdentification"
+          }
+        ]
+      },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2024-07-15",
+          "scope": {
+            "FOO": "BAR"
+          }
+        }
+      ],
+      "labData": [
+        {
+          "labDataName": "Blut DNA normal",
+          "tissueOntology": {
+            "name": "Human Tissue Ontology",
+            "version": "v1.2.3"
+          },
+          "tissueTypeId": "HTO:0000171",
+          "tissueTypeName": "Blood",
+          "sampleConservation": "fresh-tissue",
+          "sequenceType": "dna",
+          "sequenceSubtype": "germline",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wes",
+          "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
+          "libraryPrepKitManufacturer": "Agilent",
+          "sequencerModel": "Illumina HiSeq X",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Illumina NovaSeq S4 flow cell",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "Illumina",
+          "enrichmentKitDescription": "TruSeq RNA Access Library Prep Kit v2.0",
+          "barcode": "TTGACA",
+          "sequencingLayout": "paired-end",
+          "sequenceData": {
+            "bioinformaticsPipelineName": "In-House Pipeline",
+            "referenceGenome": "GRCh38",
+            "bioinformaticsPipelineVersion": "2e70912",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 30,
+              "percent": 95.4
+            },
+            "meanDepthOfCoverage": 102.4,
+            "minCoverage": 25.4,
+            "targetedRegionsAboveMinCoverage": 0.96,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "Mutect2",
+                "version": "v4.1.8.1"
+              },
+              {
+                "name": "Strelka2",
+                "version": "v2.9.10"
+              },
+              {
+                "name": "VarScan",
+                "version": "v2.4.3"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "GRCh38_target_region_file.bed",
+                "fileType": "bed",
+                "fileChecksum": "0358a9852adc88c77e7321ddfb07caf2e9911986a90ff76816be142f6f38122d",
+                "fileSizeInBytes": 116993
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000002.bam",
+                "fileType": "bam",
+                "fileChecksum": "b3213e180f6003cee93668aa7d01366046f9b7a04907a6566ab52bd3059c2ce2",
+                "fileSizeInBytes": 116314,
+                "readLength": 150
+              }
+            ]
+          },
+          "sampleDate": "1970-01-01"
+        }
+      ]
+    }
+  ]
+}
