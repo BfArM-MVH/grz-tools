@@ -1,5 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "cd41965ab35ddf20c866d0bb619459b7123da7de",
+  "last-release-sha": "1bbf84a128b4b4667bcc8631c6677242456741f5",
+  "release-type": "python",
+  "group-pull-request-title-pattern": "chore(release): release ${branch}",
+  "separate-pull-requests": true,
   "packages": {
     "packages/grz-cli": {
       "component": "grz-cli",
