@@ -1,40 +1,45 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "cd41965ab35ddf20c866d0bb619459b7123da7de",
+  "last-release-sha": "1bbf84a128b4b4667bcc8631c6677242456741f5",
+  "release-type": "python",
+  "group-pull-request-title-pattern": "chore(release): release ${branch}",
+  "separate-pull-requests": true,
   "packages": {
     "packages/grz-cli": {
       "component": "grz-cli",
       "package-name": "grz-cli",
       "release-type": "python",
       "version_file": "packages/grz-cli/pyproject.toml",
-      "pull-request-title-pattern": "chore(release): release ${component} v${version}"
+      "pull-request-title-pattern": "chore(${scope}): release ${component} v${version}"
     },
     "packages/grzctl": {
       "component": "grzctl",
       "package-name": "grzctl",
       "release-type": "python",
       "version_file": "packages/grzctl/pyproject.toml",
-      "pull-request-title-pattern": "chore(release): release ${component} v${version}"
+      "pull-request-title-pattern": "chore(${scope}): release ${component} v${version}"
     },
     "packages/grz-common": {
       "component": "grz-common",
       "package-name": "grz-common",
       "release-type": "python",
       "version_file": "packages/grz-common/pyproject.toml",
-      "pull-request-title-pattern": "chore(release): release ${component} v${version}"
+      "pull-request-title-pattern": "chore(${scope}): release ${component} v${version}"
     },
     "packages/grz-db": {
       "component": "grz-db",
       "package-name": "grz-db",
       "release-type": "python",
       "version_file": "packages/grz-db/pyproject.toml",
-      "pull-request-title-pattern": "chore(release): release ${component} v${version}"
+      "pull-request-title-pattern": "chore(${scope}): release ${component} v${version}"
     },
     "packages/grz-pydantic-models": {
       "component": "grz-pydantic-models",
       "package-name": "grz-pydantic-models",
       "release-type": "python",
       "version_file": "packages/grz-pydantic-models/pyproject.toml",
-      "pull-request-title-pattern": "chore(release): release ${component} v${version}"
+      "pull-request-title-pattern": "chore(${scope}): release ${component} v${version}"
     }
   }
 }

@@ -25,7 +25,6 @@ jobs:
             grz-tools
             repo
             release
-            other
-          requireScope: true
+          requireScope: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
