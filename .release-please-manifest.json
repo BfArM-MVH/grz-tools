@@ -1,4 +1,6 @@
 {
   "packages/grz-cli": "0.7.0",
-  "packages/grz-pydantic-models": "1.4.0"
+  "packages/grz-pydantic-models": "1.5.0",
+  "packages/grz-db": "0.1.0",
+  "packages/grz-common": "0.1.0"
 }
