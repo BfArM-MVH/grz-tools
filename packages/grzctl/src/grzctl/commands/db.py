@@ -12,14 +12,19 @@ import click
 import rich.console
 import rich.table
 from grz_common.cli import config_file, output_json
-from grz_db import (
-    Author,
+from grz_db.errors import (
     DatabaseConfigurationError,
     DuplicateSubmissionError,
     DuplicateTanGError,
+    SubmissionNotFoundError,
+)
+from grz_db.models.author import Author
+from grz_db.models.base import VerifiableLog
+from grz_db.models.submission import (
+    ChangeRequestEnum,
+    ChangeRequestLog,
     Submission,
     SubmissionDb,
-    SubmissionNotFoundError,
     SubmissionStateEnum,
     SubmissionStateLog,
 )
@@ -199,6 +204,65 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         console.print(table)
 
 
+@db.command("list-change-requests")
+@output_json
+@click.pass_context
+def list_change_requests(ctx: click.Context, output_json: bool = False):
+    """Lists all submissions in the database that have a change request."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db)
+    submissions = db_service.list_change_requests()
+
+    if not submissions:
+        console.print("[yellow]No submissions found in the database.[/yellow]")
+        return
+
+    table = rich.table.Table(title="Submissions with change requests")
+    table.add_column("ID", style="dim", width=12)
+    table.add_column("tanG", style="cyan")
+    table.add_column("Pseudonym", style="magenta")
+    table.add_column("Change", style="green")
+    table.add_column("Last State Timestamp (UTC)", style="yellow")
+    table.add_column("Data Steward")
+    table.add_column("Signature Status")
+
+    submission_dicts = []
+
+    for submission in submissions:
+        for latest_change_request_obj in submission.changes:
+            latest_change_str = "N/A"
+            latest_timestamp_str = "N/A"
+            author_name_str = "N/A"
+            signature_status = SignatureStatus.UNKNOWN
+
+            if latest_change_request_obj:
+                latest_change_str = latest_change_request_obj.change.value
+                latest_timestamp_str = latest_change_request_obj.timestamp.isoformat()
+                author_name_str = latest_change_request_obj.author_name
+
+                author_public_key = ctx.obj["public_keys"].get(author_name_str)
+                signature_status = _verify_signature(author_public_key, latest_change_request_obj)
+
+            if output_json:
+                submission_dict = _build_submission_dict_from(latest_change_request_obj, submission, signature_status)
+                submission_dicts.append(submission_dict)
+            else:
+                table.add_row(
+                    submission.id,
+                    submission.tan_g if submission.tan_g is not None else "N/A",
+                    submission.pseudonym if submission.pseudonym is not None else "N/A",
+                    latest_change_str,
+                    latest_timestamp_str,
+                    author_name_str,
+                    signature_status.rich_display(),
+                )
+
+    if output_json:
+        json.dump(submission_dicts, sys.stdout)
+    else:
+        console.print(table)
+
+
 class SignatureStatus(enum.StrEnum):
     """Enum for signature status."""
 
@@ -220,11 +284,11 @@ class SignatureStatus(enum.StrEnum):
                 return "[yellow]Unknown[/yellow]"
 
 
-def _verify_signature(author_public_key, latest_state_obj: SubmissionStateLog) -> SignatureStatus:
+def _verify_signature(author_public_key, verifiable_log: VerifiableLog) -> SignatureStatus:
     signature_status = SignatureStatus.UNKNOWN
     if author_public_key:
         try:
-            if latest_state_obj.verify(author_public_key):
+            if verifiable_log.verify(author_public_key):
                 signature_status = SignatureStatus.VERIFIED
             else:
                 signature_status = SignatureStatus.FAILED
@@ -235,7 +299,9 @@ def _verify_signature(author_public_key, latest_state_obj: SubmissionStateLog) -
 
 
 def _build_submission_dict_from(
-    latest_state_obj: SubmissionStateLog | None, submission: Submission, signature_status: SignatureStatus
+    log_obj: SubmissionStateLog | ChangeRequestLog | None,
+    submission: Submission,
+    signature_status: SignatureStatus,
 ) -> dict[str, Any]:
     submission_dict: dict[str, Any] = {
         "id": submission.id,
@@ -243,14 +309,27 @@ def _build_submission_dict_from(
         "pseudonym": submission.pseudonym,
         "latest_state": None,
     }
-    if latest_state_obj:
-        submission_dict["latest_state"] = {
-            "state": latest_state_obj.state.value,
-            "timestamp": latest_state_obj.timestamp.isoformat(),
-            "data": latest_state_obj.data,
-            "data_steward": latest_state_obj.author_name,
-            "data_steward_signature": signature_status,
-        }
+    if log_obj:
+        if isinstance(log_obj, SubmissionStateLog):
+            submission_dict["latest_change_request"] = {}
+            submission_dict["latest_state"] = {
+                "timestamp": log_obj.timestamp.isoformat(),
+                "data": log_obj.data,
+                "data_steward": log_obj.author_name,
+                "data_steward_signature": signature_status,
+                "state": log_obj.state.value,
+            }
+        elif isinstance(log_obj, ChangeRequestLog):
+            submission_dict["latest_state"] = {}
+            submission_dict["latest_change_request"] = {
+                "timestamp": log_obj.timestamp.isoformat(),
+                "data": log_obj.data,
+                "data_steward": log_obj.author_name,
+                "data_steward_signature": signature_status,
+                "change": log_obj.change.value,
+            }
+        else:
+            raise TypeError(f"unknown type {type(log_obj)}")
     return submission_dict
 
 
@@ -311,6 +390,46 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             updated_submission = db_service.get_submission(submission_id)
             if updated_submission:
                 console.print(f"  Submission tanG is now: {updated_submission.tan_g}")
+
+    except SubmissionNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"You might need to add it first: grz-cli db add-submission {submission_id}")
+        raise click.Abort() from e
+    except Exception as e:
+        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        traceback.print_exc()
+        raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
+@submission.command()
+@click.argument("submission_id", type=str)
+@click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
+@click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.pass_context
+def change_request(ctx: click.Context, submission_id: str, change_str: str, data_json: str | None):
+    """Register a change request for the given submission. Optionally accepts additional JSON data to associate with the log entry."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        change_request_enum = ChangeRequestEnum(change_str)
+    except ValueError as e:
+        console.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
+        raise click.Abort() from e
+
+    parsed_data = None
+    if data_json:
+        try:
+            parsed_data = json.loads(data_json)
+        except json.JSONDecodeError as e:
+            console.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
+            raise click.Abort() from e
+    try:
+        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, parsed_data)
+        console.print(
+            f"[green]Submission '{submission_id}' has undergone a change request of '{new_change_request_log.change.value}'. Log ID: {new_change_request_log.id}[/green]"
+        )
+        if new_change_request_log.data:
+            console.print(f"  Data: {new_change_request_log.data}")
 
     except SubmissionNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
