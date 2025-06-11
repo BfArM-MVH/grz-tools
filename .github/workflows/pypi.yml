@@ -42,7 +42,7 @@ jobs:
           echo "PyPI Environment URL will be set to: https://pypi.org/p/${{ steps.extract_package_info.outputs.name }}"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v1
+        uses: astral-sh/setup-uv@v6
         with:
           version: '0.7.9'
           enable-cache: true

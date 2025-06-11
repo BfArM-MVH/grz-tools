@@ -171,8 +171,7 @@ dependency_groups = ["lint"]
 commands = [["pyrefly", "check"]]
 
 [tool.pyrefly]
-project_includes = ["packages"]
-project_excludes = ["**/.[!/.]*", "**/tests", "packages/*/build", "packages/grz-db/src/grz_db"]
+project_includes = ["packages/**/*.py"]
 python_version = "3.12.0"
 use_untyped_imports = false
 ignore_missing_source = false
