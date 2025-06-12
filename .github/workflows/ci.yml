@@ -51,6 +51,7 @@ jobs:
           DEPENDENCY_GRAPH["grz-pydantic-models"]="grz-cli grzctl grz-common grz-db"
           DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl"
           DEPENDENCY_GRAPH["grz-db"]="grzctl"
+          DEPENDENCY_GRAPH["grz-cli"]="grzctl"
           # Add other dependencies as needed: DEPENDENCY_GRAPH["pkg-x"]="pkg-y pkg-z"
 
           final_test_dirs=("${directly_changed_package_dirs[@]}")

@@ -28,6 +28,7 @@ dependencies = [
     "requests >=2.32.3,<3",
     "grz-db",
     "grz-common",
+    "grz-cli >=0.7.0"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
