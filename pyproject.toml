@@ -5,14 +5,11 @@ requires-python = ">=3.12"
 dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
 
 [tool.uv.sources]
-grz-common = { workspace = true }
-grz-cli = { workspace = true }
-grzctl = { workspace = true }
-grz-db = { workspace = true }
-grz-pydantic-models = { workspace = true }
-
-[tool.uv.workspace]
-members = ["packages/grz-common", "packages/grz-cli", "packages/grz-db", "packages/grzctl", "packages/grz-pydantic-models"]
+grz-common = { path = "packages/grz-common" }
+grz-cli = { path = "packages/grz-cli" }
+grzctl = { path = "packages/grzctl" }
+grz-db = { path = "packages/grz-db" }
+grz-pydantic-models = { path = "packages/grz-pydantic-models" }
 
 [project.optional-dependencies]
 test = [
@@ -171,7 +168,8 @@ dependency_groups = ["lint"]
 commands = [["pyrefly", "check"]]
 
 [tool.pyrefly]
-project_includes = ["packages/**/*.py"]
+project_includes = ["packages/*/src/**/*.py"]
+project_excludes = ["packages/grz-db", "packages/grz-common"]
 python_version = "3.12.0"
 use_untyped_imports = false
 ignore_missing_source = false

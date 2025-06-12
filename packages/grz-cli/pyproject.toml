@@ -36,7 +36,7 @@ requires-python = ">=3.12"
 keywords = ["GRZ", "GDC", "S3"]
 
 [tool.uv.sources]
-grz-common = { workspace = true }
+grz-common = { path = "../grz-common" }
 
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"
