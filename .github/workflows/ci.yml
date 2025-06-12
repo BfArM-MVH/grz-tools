@@ -155,44 +155,44 @@ jobs:
       - name: Test ${{ matrix.python-version }}
         run: uv run tox -e ${{ matrix.python-version }}
 
-#  test-changed-packages:
-#    name: Test Changed Packages
-#    needs: [determine-changes, quality-checks]
-#    if: needs.determine-changes.outputs.has_changes == 'true' # Only run if there are packages to test
-#    runs-on: ubuntu-latest
-#    strategy:
-#      fail-fast: false
-#      matrix:
-#        package_path: ${{ fromJson(needs.determine-changes.outputs.matrix_paths) }} # e.g., "packages/grz-cli"
-#        python-version:
-#          - "3.12"
-#          - "3.13"
-#
-#    steps:
-#      - name: Checkout code
-#        uses: actions/checkout@v4
-#        with:
-#          lfs: true
-#
-#      - name: Install uv
-#        uses: astral-sh/setup-uv@v6
-#        with:
-#          version: '0.7.9'
-#          enable-cache: true
-#
-#      - name: Set up Python ${{ matrix.python-version }}
-#        run: uv python install ${{ matrix.python-version }}
-#
-#      - name: Install project dev dependencies
-#        run: uv sync --all-extras --all-groups --all-packages
-#
-#      - name: Setup tox-uv
-#        run: uv tool install tox --with tox-uv
-#
-#      - name: Extract package name from path
-#        id: pkg_info
-#        run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
-#
-#      - name: Run tests for ${{ steps.pkg_info.outputs.name }} (Py ${{ matrix.python-version }})
-#        run: |
-#          uv run --package ${{ steps.pkg_info.outputs.name }} tox -e ${{ matrix.python-version }}
+  test-changed-packages:
+    name: Test Changed Packages
+    needs: [determine-changes, quality-checks]
+    if: needs.determine-changes.outputs.has_changes == 'true' # Only run if there are packages to test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package_path: ${{ fromJson(needs.determine-changes.outputs.matrix_paths) }} # e.g., "packages/grz-cli"
+        python-version:
+          - "3.12"
+          - "3.13"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.7.9'
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install project dev dependencies
+        run: uv sync --all-extras --all-groups
+
+      - name: Setup tox-uv
+        run: uv tool install tox --with tox-uv
+
+      - name: Extract package name from path
+        id: pkg_info
+        run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
+
+      - name: Run tests for ${{ steps.pkg_info.outputs.name }} (Py ${{ matrix.python-version }})
+        run: |
+          cd ${{ matrix.package_path }} && uv run tox -e ${{ matrix.python-version }}
