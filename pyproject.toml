@@ -5,11 +5,11 @@ requires-python = ">=3.12"
 dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
 
 [tool.uv.sources]
-grz-common = { path = "packages/grz-common" }
-grz-cli = { path = "packages/grz-cli" }
-grzctl = { path = "packages/grzctl" }
-grz-db = { path = "packages/grz-db" }
-grz-pydantic-models = { path = "packages/grz-pydantic-models" }
+grz-common = { path = "packages/grz-common", editable = true }
+grz-cli = { path = "packages/grz-cli", editable = true }
+grzctl = { path = "packages/grzctl", editable = true }
+grz-db = { path = "packages/grz-db", editable = true }
+grz-pydantic-models = { path = "packages/grz-pydantic-models", editable = true }
 
 [project.optional-dependencies]
 test = [
