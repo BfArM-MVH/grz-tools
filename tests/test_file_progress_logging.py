@@ -102,7 +102,7 @@ def test_get_state_file_not_tracked(
         temp_data_file_path,
         file_metadata=SubmissionFileMetadata(
             **{
-                "filePath": "foo",
+                "filePath": "foo.bed",
                 "fileType": "bed",
                 "fileChecksum": "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c",
                 "fileSizeInBytes": 0,
