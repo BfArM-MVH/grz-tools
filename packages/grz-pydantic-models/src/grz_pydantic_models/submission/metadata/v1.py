@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date
 from enum import StrEnum
 from importlib.resources import files
 from itertools import groupby
+from pathlib import Path
 from typing import Annotated, Any, Self
 
 from pydantic import (
@@ -496,6 +498,26 @@ class File(StrictBaseModel):
     def ensure_read_length_is_present_for_bam_and_fastq(self):
         if self.file_type in {FileType.bam, FileType.fastq} and self.read_length is None:
             raise ValueError(f"Read length missing for file '{self.file_path}' of type '{self.file_type}'.")
+        return self
+
+    @model_validator(mode="after")
+    def ensure_extension_matches_type(self):
+        """
+        The QC pipeline will reject file names that don't satify the criteria below.
+        """
+        file_path = Path(self.file_path)
+        match self.file_type:
+            case FileType.bam:
+                if re.fullmatch(r"\S+\.bam", file_path.name) is None:
+                    raise ValueError("BAM files must have no spaces in the file name and a .bam extension")
+            case FileType.bed:
+                if re.fullmatch(r"\S+\.bed(?:\.gz)?", file_path.name) is None:
+                    raise ValueError("BED files must have no spaces in the file name and a .bed or .bed.gz extension")
+            case FileType.fastq:
+                if re.fullmatch(r"\S+\.f(?:ast)?q\.gz", file_path.name) is None:
+                    raise ValueError(
+                        "FASTQ files must have no spaces in the file name and have a .fastq.gz or .fq.gz extension"
+                    )
         return self
 
     def encrypted_file_path(self):

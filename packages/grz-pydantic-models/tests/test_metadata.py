@@ -3,7 +3,7 @@ import itertools
 import json
 
 import pytest
-from grz_pydantic_models.submission.metadata.v1 import GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata
 from pydantic import ValidationError
 
 from . import resources
@@ -47,3 +47,22 @@ def test_invalid_short_read_submission_with_bam():
 
     with pytest.raises(ValidationError):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+def test_file_extensions():
+    File(
+        filePath="test/valid.bam",
+        fileType=FileType.bam,
+        fileChecksum="29647ae83ccac69f2bf4e0f8f37d8f86ad56c578c14432b7a497481031db25b8",
+        fileSizeInBytes=0,
+        readLength=100,
+    )
+
+    with pytest.raises(ValidationError):
+        File(
+            filePath="test/invalid.bam.gz",
+            fileType=FileType.bam,
+            fileChecksum="29647ae83ccac69f2bf4e0f8f37d8f86ad56c578c14432b7a497481031db25b8",
+            fileSizeInBytes=0,
+            readLength=100,
+        )
