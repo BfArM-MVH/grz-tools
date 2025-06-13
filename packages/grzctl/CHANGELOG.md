@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.1.0...grzctl-v0.1.1) (2025-06-13)
+
+
+### Bug Fixes
+
+* **grzctl:** add missing grz-cli dependency ([#154](https://github.com/BfArM-MVH/grz-tools/issues/154)) ([57b77ad](https://github.com/BfArM-MVH/grz-tools/commit/57b77adb358ac1c5befba6df3dbc4297908fb953))
+
 ## 0.1.0 (2025-06-11)
 
 
