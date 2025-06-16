@@ -19,7 +19,6 @@ from grz_pydantic_models.submission.metadata.v1 import (
     SequenceData,
     SequencingLayout,
 )
-
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
