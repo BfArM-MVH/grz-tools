@@ -45,7 +45,7 @@ lint = [
     "types-pyyaml",
     "types-tqdm",
     "pydantic",
-    "pyrefly",
+    "mypy",
 ]
 
 [tool.ruff]
@@ -139,7 +139,7 @@ convention = "pep257"
 
 [tool.tox]
 requires = ["tox>=4.23"]
-env_list = ["format-check", "lints", "pyrefly", "3.12", "3.13"]
+env_list = ["format-check", "lints", "typecheck", "3.12", "3.13"]
 allowlist_externals = ["pytest", "ruff"]
 isolated_build = true
 
@@ -161,18 +161,16 @@ skip_install = true
 dependency_groups = ["lint"]
 commands = [["ruff", "check"]]
 
-[tool.tox.env."pyrefly"]
+[tool.tox.env."typecheck"]
 runner = "uv-venv-lock-runner"
 skip_install = false
 dependency_groups = ["lint"]
-commands = [["pyrefly", "check"]]
+commands = [["mypy"]]
 
-[tool.pyrefly]
-project_includes = ["packages/*/src/**/*.py"]
-project_excludes = ["packages/grz-db", "packages/grz-common"]
-python_version = "3.12.0"
-use_untyped_imports = false
-ignore_missing_source = false
+[tool.mypy]
+python_version = "3.12"
+plugins = "pydantic.mypy"
+packages = "grz_cli,grzctl,grz_pydantic_models"
 
 [tool.pytest.ini_options]
 addopts = [

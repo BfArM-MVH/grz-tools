@@ -119,8 +119,8 @@ jobs:
       - name: Linting
         run: uv run tox -e lints
 
-      - name: Run pyrefly
-        run: uv run tox -e pyrefly
+      - name: Run type checking
+        run: uv run tox -e typecheck
 
   run-workspace-tests:
     name: Run workspace tests

@@ -87,7 +87,7 @@ class S3BotoUploadWorker(UploadWorker):
         self._s3_client = init_s3_client(s3_options)
 
     @override
-    def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):  # pyrefly: ignore
+    def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):
         """
         Upload a single file to the specified object ID
         :param local_file_path: Path to the file to upload
@@ -143,7 +143,7 @@ class S3BotoUploadWorker(UploadWorker):
         return exists
 
     @override
-    def upload(self, encrypted_submission: EncryptedSubmission, with_logs: bool = False):  # noqa: C901,PLR0912 # pyrefly: ignore
+    def upload(self, encrypted_submission: EncryptedSubmission, with_logs: bool = False):  # noqa: C901,PLR0912
         """
         Upload an encrypted submission
         :param encrypted_submission: The encrypted submission to upload
