@@ -28,6 +28,7 @@ dependencies = [
     "requests >=2.32.3,<3",
     "grz-db",
     "grz-common",
+    "grz-cli >=0.7.0"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -37,7 +38,13 @@ requires-python = ">=3.12"
 keywords = ["GRZ", "GDC", "S3"]
 
 [tool.uv.sources]
-grz-common = { workspace = true }
+grz-common = { path = "../grz-common" }
+
+[tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
+description = "run unit tests"
+dependency_groups = ["test"]
+commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
 
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"
@@ -57,3 +64,16 @@ path = "src/grzctl/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/grzctl"]
+
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-mock",
+    "pytest-cov",
+    "pytest-sugar",
+    "moto[s3]",
+    "numpy",
+    "grz-common",
+    "grzctl",
+    "grz-cli"
+]

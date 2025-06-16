@@ -38,3 +38,17 @@ packages = ["src/grz_pydantic_models"]
 
 [tool.hatch.version]
 path = "src/grz_pydantic_models/__init__.py"
+
+[tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
+description = "run unit tests"
+dependency_groups = ["test"]
+commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
+
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-mock",
+    "pytest-cov",
+    "pytest-sugar",
+]

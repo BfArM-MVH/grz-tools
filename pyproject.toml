@@ -5,14 +5,11 @@ requires-python = ">=3.12"
 dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
 
 [tool.uv.sources]
-grz-common = { workspace = true }
-grz-cli = { workspace = true }
-grzctl = { workspace = true }
-grz-db = { workspace = true }
-grz-pydantic-models = { workspace = true }
-
-[tool.uv.workspace]
-members = ["packages/grz-common", "packages/grz-cli", "packages/grz-db", "packages/grzctl", "packages/grz-pydantic-models"]
+grz-common = { path = "packages/grz-common", editable = true }
+grz-cli = { path = "packages/grz-cli", editable = true }
+grzctl = { path = "packages/grzctl", editable = true }
+grz-db = { path = "packages/grz-db", editable = true }
+grz-pydantic-models = { path = "packages/grz-pydantic-models", editable = true }
 
 [project.optional-dependencies]
 test = [
@@ -31,6 +28,7 @@ test = [
 ]
 
 [dependency-groups]
+dev = ["tox", "tox-uv"]
 test = [
     "pytest",
     "pytest-mock",
@@ -48,7 +46,7 @@ lint = [
     "types-pyyaml",
     "types-tqdm",
     "pydantic",
-    "pyrefly",
+    "mypy",
 ]
 
 [tool.ruff]
@@ -142,7 +140,7 @@ convention = "pep257"
 
 [tool.tox]
 requires = ["tox>=4.23"]
-env_list = ["format-check", "lints", "pyrefly", "3.12", "3.13"]
+env_list = ["format-check", "lints", "typecheck", "3.12", "3.13"]
 allowlist_externals = ["pytest", "ruff"]
 isolated_build = true
 
@@ -164,17 +162,16 @@ skip_install = true
 dependency_groups = ["lint"]
 commands = [["ruff", "check"]]
 
-[tool.tox.env."pyrefly"]
+[tool.tox.env."typecheck"]
 runner = "uv-venv-lock-runner"
 skip_install = false
 dependency_groups = ["lint"]
-commands = [["pyrefly", "check"]]
+commands = [["mypy"]]
 
-[tool.pyrefly]
-project_includes = ["packages/**/*.py"]
-python_version = "3.12.0"
-use_untyped_imports = false
-ignore_missing_source = false
+[tool.mypy]
+python_version = "3.12"
+plugins = "pydantic.mypy"
+packages = "grz_cli,grzctl,grz_pydantic_models"
 
 [tool.pytest.ini_options]
 addopts = [
