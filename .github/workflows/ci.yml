@@ -110,17 +110,14 @@ jobs:
       - name: Install project dev dependencies
         run: uv sync --all-extras --all-groups --all-packages
 
-      - name: Setup tox-uv
-        run: uv tool install tox --with tox-uv
-
       - name: Check formatting
         run: uv run tox -e format-check
 
       - name: Linting
         run: uv run tox -e lints
 
-      - name: Run pyrefly
-        run: uv run tox -e pyrefly
+      - name: Run type checking
+        run: uv run tox -e typecheck
 
   run-workspace-tests:
     name: Run workspace tests
@@ -149,9 +146,6 @@ jobs:
 
       - name: Install project dev dependencies
         run: uv sync --all-extras --all-groups --all-packages
-
-      - name: Setup tox-uv
-        run: uv tool install tox --with tox-uv
 
       - name: Test ${{ matrix.python-version }}
         run: uv run tox -e ${{ matrix.python-version }}
@@ -186,9 +180,6 @@ jobs:
 
       - name: Install project dev dependencies
         run: uv sync --all-extras --all-groups
-
-      - name: Setup tox-uv
-        run: uv tool install tox --with tox-uv
 
       - name: Extract package name from path
         id: pkg_info

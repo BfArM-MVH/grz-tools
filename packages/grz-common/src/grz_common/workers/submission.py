@@ -10,7 +10,6 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
-# pyrefly: ignore
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
     File,
@@ -20,8 +19,6 @@ from grz_pydantic_models.submission.metadata.v1 import (
     SequenceData,
     SequencingLayout,
 )
-
-# pyrefly: ignore
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
@@ -218,7 +215,7 @@ class Submission:
         else:
             yield (
                 f"{str(metadata.file_path)}: Unsupported checksum type: {metadata.checksum_type}. "
-                f"Supported types: {[e.value for e in ChecksumType]}"  # pyrefly: ignore
+                f"Supported types: {[e.value for e in ChecksumType]}"
             )
 
         # Check file size

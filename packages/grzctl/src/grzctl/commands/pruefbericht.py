@@ -9,11 +9,7 @@ import click
 import requests
 from grz_common.cli import config_file, output_json, submission_dir
 from grz_common.workers.submission import Submission
-
-# pyrefly: ignore
 from grz_pydantic_models.pruefbericht import LibraryType, Pruefbericht, SubmittedCase
-
-# pyrefly: ignore
 from grz_pydantic_models.submission.metadata.v1 import (
     GenomicStudySubtype,
     GrzSubmissionMetadata,
