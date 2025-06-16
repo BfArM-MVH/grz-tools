@@ -28,6 +28,7 @@ test = [
 ]
 
 [dependency-groups]
+dev = ["tox", "tox-uv"]
 test = [
     "pytest",
     "pytest-mock",
