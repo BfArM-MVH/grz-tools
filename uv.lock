@@ -348,7 +348,7 @@ wheels = [
 
 [[package]]
 name = "grz-cli"
-source = { directory = "packages/grz-cli" }
+source = { editable = "packages/grz-cli" }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
@@ -386,7 +386,7 @@ requires-dist = [
 
 [[package]]
 name = "grz-common"
-source = { directory = "packages/grz-common" }
+source = { editable = "packages/grz-common" }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
@@ -423,7 +423,7 @@ requires-dist = [
 [[package]]
 name = "grz-db"
 version = "0.1.0"
-source = { directory = "packages/grz-db" }
+source = { editable = "packages/grz-db" }
 dependencies = [
     { name = "alembic" },
     { name = "cryptography" },
@@ -439,7 +439,7 @@ requires-dist = [
 
 [[package]]
 name = "grz-pydantic-models"
-source = { directory = "packages/grz-pydantic-models" }
+source = { editable = "packages/grz-pydantic-models" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -506,15 +506,15 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "grz-cli", directory = "packages/grz-cli" },
-    { name = "grz-cli", marker = "extra == 'test'", directory = "packages/grz-cli" },
-    { name = "grz-common", directory = "packages/grz-common" },
-    { name = "grz-common", marker = "extra == 'test'", directory = "packages/grz-common" },
-    { name = "grz-db", directory = "packages/grz-db" },
-    { name = "grz-db", marker = "extra == 'test'", directory = "packages/grz-db" },
-    { name = "grz-pydantic-models", directory = "packages/grz-pydantic-models" },
-    { name = "grzctl", directory = "packages/grzctl" },
-    { name = "grzctl", marker = "extra == 'test'", directory = "packages/grzctl" },
+    { name = "grz-cli", editable = "packages/grz-cli" },
+    { name = "grz-cli", marker = "extra == 'test'", editable = "packages/grz-cli" },
+    { name = "grz-common", editable = "packages/grz-common" },
+    { name = "grz-common", marker = "extra == 'test'", editable = "packages/grz-common" },
+    { name = "grz-db", editable = "packages/grz-db" },
+    { name = "grz-db", marker = "extra == 'test'", editable = "packages/grz-db" },
+    { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
+    { name = "grzctl", editable = "packages/grzctl" },
+    { name = "grzctl", marker = "extra == 'test'", editable = "packages/grzctl" },
     { name = "moto", extras = ["s3"], marker = "extra == 'test'", specifier = ">=5.0.16,<6" },
     { name = "numpy", marker = "extra == 'test'", specifier = ">=2.1.2,<3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3,<9" },
@@ -535,10 +535,10 @@ lint = [
     { name = "types-tqdm" },
 ]
 test = [
-    { name = "grz-cli", directory = "packages/grz-cli" },
-    { name = "grz-common", directory = "packages/grz-common" },
-    { name = "grz-db", directory = "packages/grz-db" },
-    { name = "grzctl", directory = "packages/grzctl" },
+    { name = "grz-cli", editable = "packages/grz-cli" },
+    { name = "grz-common", editable = "packages/grz-common" },
+    { name = "grz-db", editable = "packages/grz-db" },
+    { name = "grzctl", editable = "packages/grzctl" },
     { name = "moto", extras = ["s3"] },
     { name = "numpy" },
     { name = "pytest" },
@@ -549,7 +549,7 @@ test = [
 
 [[package]]
 name = "grzctl"
-source = { directory = "packages/grzctl" }
+source = { editable = "packages/grzctl" }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
