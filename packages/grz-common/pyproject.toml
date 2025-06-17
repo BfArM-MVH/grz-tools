@@ -34,6 +34,9 @@ classifiers = [
 requires-python = ">=3.12"
 keywords = ["GRZ", "GDC", "S3"]
 
+[dependency-groups]
+dev = ["tox", "tox-uv"]
+
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"
 Repository = "https://github.com/BfArM-MVH/grz-tools"

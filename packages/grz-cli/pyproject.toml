@@ -35,6 +35,9 @@ classifiers = [
 requires-python = ">=3.12"
 keywords = ["GRZ", "GDC", "S3"]
 
+[dependency-groups]
+dev = ["tox", "tox-uv"]
+
 [tool.uv.sources]
 grz-common = { path = "../grz-common" }
 
