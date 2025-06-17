@@ -14,12 +14,14 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
     field_validator,
     model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel
+from ...mii.consent import Consent, ProvisionType
 
 SCHEMA_URL_CURRENT = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.8/GRZ/grz-schema.json"
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)\.([0-9]+)/GRZ/grz-schema\.json"
@@ -37,6 +39,11 @@ def is_supported_version(version: str) -> bool:
     major, minor, patch = (int(part) for part in version.split("."))
     # 1.1.1 <= v <= 1.1.8
     return (major == 1) and (minor == 1) and (1 <= patch <= 8)
+
+
+class ResearchConsentCodes(StrEnum):
+    PATDAT_ERHEBEN_SPEICHERN_NUTZEN = "2.16.840.1.113883.3.1937.777.24.5.3.1"
+    MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
 
 
 class SubmissionType(StrEnum):
@@ -283,12 +290,81 @@ class ResearchConsent(StrictBaseModel):
     Date of the delivery of the research consent in ISO 8601 format (YYYY-MM-DD)
     """
 
-    scope: object
+    # try Consent model first, falling back to dict
+    scope: Annotated[Consent | dict, Field(union_mode="left_to_right")]
     """
     Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
     See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
     'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
     """
+
+    @model_validator(mode="after")
+    def ensure_top_level_provision_deny(self):
+        if isinstance(self.scope, Consent):
+            if (top_level_provision := self.scope.provision) and (top_level_provision.type != ProvisionType.DENY):
+                raise ValueError(
+                    f"The root provision type must be deny, not {self.scope.provision.type}, "
+                    "since the profile follows an opt-in consent scheme. "
+                    "Explicit opt-in consents must be made via nested provisions."
+                )
+        elif self.scope:
+            log.warning(
+                "Could not recognize the object passed to researchConsents[].scope as a FHIR Consent profile. "
+                "GRZs cannot confirm non-MVH research consent unless a valid FHIR Consent profile is provided. "
+                "This is not currently required for submission. "
+                "See below for errors encountered during validation."
+            )
+            try:
+                Consent(**self.scope)
+                raise RuntimeError(
+                    "Pydantic correctly parsed research consent scope but failed to assign it to the correct type during model validation"
+                )
+            except ValidationError as e:
+                for error in e.errors():
+                    log.warning(
+                        f"Validation error of type '{error['type']}' at location '{'.'.join(str(l) for l in error['loc'])}': {error['msg']}"
+                    )
+
+        return self
+
+    def consent_by_code(self, date: date) -> dict[str, bool]:
+        code2consent = {}
+        if isinstance(self.scope, Consent) and (self.scope.provision is not None):
+            provisions = self.scope.provision.provision
+            for provision in provisions:
+                if provision.period.start <= date <= provision.period.end:
+                    for codeable_concept in provision.code:
+                        for coding in codeable_concept.coding:
+                            if provision.type == ProvisionType.PERMIT:
+                                code2consent[coding.code] = True
+                            else:
+                                # explicit deny overrides any prior/later permits for code
+                                code2consent[coding.code] = False
+                                break
+        return code2consent
+
+    @staticmethod
+    def merged_consent_by_code(consents: list[ResearchConsent], date: date) -> dict[str, bool]:
+        code2consent: dict[str, bool] = {}
+        for consent in consents:
+            for code, consented in consent.consent_by_code(date).items():
+                if code in code2consent:
+                    # keep permit only if both permitted
+                    code2consent[code] = code2consent[code] and consented
+                else:
+                    code2consent[code] = consented
+        return code2consent
+
+    @staticmethod
+    def consents_to_research(consents: list[ResearchConsent], date: date) -> bool:
+        all_consented = None
+        code2consent = ResearchConsent.merged_consent_by_code(consents, date)
+
+        for code, consented in code2consent.items():
+            if code in ResearchConsentCodes:
+                all_consented = consented if all_consented is None else consented and all_consented
+
+        return False if all_consented is None else all_consented
 
 
 class TissueOntology(StrictBaseModel):
@@ -894,6 +970,9 @@ class Donor(StrictBaseModel):
                         )
 
         return self
+
+    def consents_to_research(self, date: date) -> bool:
+        return ResearchConsent.consents_to_research(self.research_consents, date)
 
 
 class GrzSubmissionMetadata(StrictBaseModel):
