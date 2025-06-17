@@ -20,6 +20,9 @@ dependencies = [
     "sqlmodel>=0.0.24",
 ]
 
+[dependency-groups]
+dev = ["tox", "tox-uv"]
+
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"
 Repository = "https://github.com/BfArM-MVH/grz-tools/tree/main/packages/grz-db"

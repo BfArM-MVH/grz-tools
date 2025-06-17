@@ -66,6 +66,7 @@ path = "src/grzctl/__init__.py"
 packages = ["src/grzctl"]
 
 [dependency-groups]
+dev = ["tox", "tox-uv"]
 test = [
     "pytest",
     "pytest-mock",

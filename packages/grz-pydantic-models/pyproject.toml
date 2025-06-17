@@ -46,6 +46,7 @@ dependency_groups = ["test"]
 commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
 
 [dependency-groups]
+dev = ["tox", "tox-uv"]
 test = [
     "pytest",
     "pytest-mock",
