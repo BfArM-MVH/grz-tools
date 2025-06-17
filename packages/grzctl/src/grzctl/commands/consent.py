@@ -1,12 +1,10 @@
 """Command for determining whether a submission is consented for research."""
 
-import enum
 import json
 import logging
 import sys
-import typing
+from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 import click
 import rich.console
@@ -14,17 +12,14 @@ import rich.table
 import rich.text
 from grz_common.cli import output_json, show_details, submission_dir
 from grz_common.workers.submission import GrzSubmissionMetadata, SubmissionMetadata
+from grz_pydantic_models.mii.consent import ConsentProvision, ProvisionType
 
 log = logging.getLogger(__name__)
 
-MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
 
-
-class FhirProvision(enum.StrEnum):
-    """Possible FHIR Provision options."""
-
-    PERMIT = "permit"
-    DENY = "deny"
+class ResearchConsentCodes(StrEnum):
+    PATDAT_ERHEBEN_SPEICHERN_NUTZEN = "2.16.840.1.113883.3.1937.777.24.5.3.1"
+    MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
 
 
 @click.command()
@@ -81,36 +76,18 @@ def _gather_consent_information(metadata: GrzSubmissionMetadata) -> dict[str, bo
     for donor in metadata.donors:
         for research_consent in donor.research_consents:
             mii_consent = research_consent.scope
-            if isinstance(mii_consent, str):
-                mii_consent = json.loads(mii_consent)
-            mii_consent = typing.cast(dict[str, Any], mii_consent)
-
-            if top_level_provision := mii_consent.get("provision"):
-                if top_level_provision.get("type") != FhirProvision.DENY:
-                    sys.exit(
-                        f"The root provision type must be deny, not {top_level_provision.get('type')}, "
-                        f"since the profile follows an opt-in consent scheme. "
-                        f"Explicit opt-in consents must be made via nested provisions."
-                    )
-                else:
-                    nested_provisions = top_level_provision.get("provision")
-                    consents[donor.donor_pseudonym] = _check_nested_provisions(nested_provisions)
+            if top_level_provision := mii_consent.provision:
+                nested_provisions = top_level_provision.provision
+                consents[donor.donor_pseudonym] = _check_nested_provisions(nested_provisions)
 
     return consents
 
 
-def _check_nested_provisions(provisions: list[dict[str, Any]]) -> bool:
+def _check_nested_provisions(provisions: list[ConsentProvision]) -> bool:
     for provision in provisions:
-        if provision.get("type") == FhirProvision.PERMIT:
-            for codeable_concept in provision.get("code", []):
-                for coding in codeable_concept.get("coding", []):
-                    code = coding.get("code")
-                    if isinstance(code, str):
-                        if code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
-                            return True
-                    elif isinstance(code, dict):
-                        if (value := code.get("value")) and value == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
-                            return True
-                    else:
-                        raise ValueError(code, f"Expected str or dict, got {type(code)}")
+        if provision.type == ProvisionType.PERMIT:
+            for codeable_concept in provision.code:
+                for coding in codeable_concept.coding:
+                    if coding.code in ResearchConsentCodes:
+                        return True
     return False

@@ -1,8 +1,10 @@
 import importlib.resources
 import itertools
 import json
+from contextlib import nullcontext
 
 import pytest
+from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata
 from pydantic import ValidationError
 
@@ -65,4 +67,16 @@ def test_file_extensions():
             fileChecksum="29647ae83ccac69f2bf4e0f8f37d8f86ad56c578c14432b7a497481031db25b8",
             fileSizeInBytes=0,
             readLength=100,
+        )
+
+
+@pytest.mark.parametrize(
+    "case,valid", (("minimal_consented", True), ("minimal_nonconsented", True), ("minimal_invalid_top_missing", False))
+)
+def test_research_consent(case: str, valid: bool):
+    expectation = nullcontext() if valid else pytest.raises(ValidationError)
+
+    with expectation:
+        Consent.model_validate_json(
+            importlib.resources.files(resources).joinpath("example_research_consent", f"{case}.json").read_text()
         )
