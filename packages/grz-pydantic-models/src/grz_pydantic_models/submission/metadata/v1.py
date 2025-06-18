@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
@@ -885,6 +886,16 @@ class GrzSubmissionMetadata(StrictBaseModel):
     """
     List of donors including the index patient.
     """
+
+    @field_validator("donors", mode="after")
+    @classmethod
+    def ensure_single_index_patient(cls, value: list[Donor]) -> list[Donor]:
+        num_index_patients = sum(donor.relation == Relation.index_ for donor in value)
+        if num_index_patients == 0:
+            raise ValueError("No index donor found! Exactly one index donor required.")
+        elif num_index_patients > 1:
+            raise ValueError("Multiple index donors found! Exactly one index donor required.")
+        return value
 
     @model_validator(mode="after")
     def check_schema(self):
