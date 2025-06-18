@@ -194,7 +194,7 @@ class Submission:
 
         # Check if path exists
         if not local_file_path.exists():
-            yield f"{str(metadata.file_path)} does not exist!"
+            yield f"{str(Path('files') / metadata.file_path)} does not exist! Ensure filePath is relative to the files/ directory under the submission root."
             # Return here as following tests cannot work
             return
 
