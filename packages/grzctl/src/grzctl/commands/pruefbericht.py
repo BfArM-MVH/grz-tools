@@ -150,9 +150,9 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
         if output_json:
             click.echo(pruefbericht.model_dump_json(indent=2))
         else:
-            from rich import print
+            import rich
 
-            print(pruefbericht.submitted_case)
+            rich.print(pruefbericht.submitted_case)
         sys.exit(0)
 
     if token:
