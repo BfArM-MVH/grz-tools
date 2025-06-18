@@ -28,7 +28,8 @@ dependencies = [
     "requests >=2.32.3,<3",
     "grz-db",
     "grz-common",
-    "grz-cli >=0.7.0"
+    "grz-cli >=0.7.0",
+    "grz-pydantic-models"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -38,7 +39,10 @@ requires-python = ">=3.12"
 keywords = ["GRZ", "GDC", "S3"]
 
 [tool.uv.sources]
-grz-common = { path = "../grz-common" }
+grz-common = { path = "../grz-common", editable = true }
+grz-cli = { path = "../grz-cli", editable = true }
+grz-db = { path = "../grz-db", editable = true }
+grz-pydantic-models = { path = "../grz-pydantic-models", editable = true}
 
 [tool.tox.env_run_base]
 runner = "uv-venv-lock-runner"
