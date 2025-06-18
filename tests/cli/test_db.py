@@ -65,6 +65,7 @@ def test_db(
                 "data_steward": "Alice",
                 "data_steward_signature": "Verified",
             },
+            "latest_change_request": {},
         }
     ]
     actual_output = json.loads(result.output)
