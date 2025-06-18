@@ -110,7 +110,11 @@ def _get_library_type(metadata: GrzSubmissionMetadata) -> LibraryType:
 @click.option(
     "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
 )
-@click.option("--dry-run", help="Do not perform the request, only output the pruefbericht. Can be combined with --json.", is_flag=True)
+@click.option(
+    "--dry-run",
+    help="Do not perform the request, only output the pruefbericht. Can be combined with --json.",
+    is_flag=True,
+)
 def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_run):
     """
     Submit a Prüfbericht to BfArM.
@@ -147,6 +151,7 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
             click.echo(pruefbericht.model_dump_json(indent=2))
         else:
             from rich import print
+
             print(pruefbericht.submitted_case)
         sys.exit(0)
 
