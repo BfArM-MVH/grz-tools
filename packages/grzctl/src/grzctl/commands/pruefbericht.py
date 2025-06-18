@@ -7,6 +7,7 @@ import sys
 
 import click
 import requests
+import rich
 from grz_common.cli import config_file, output_json, submission_dir
 from grz_common.workers.submission import Submission
 from grz_pydantic_models.pruefbericht import LibraryType, Pruefbericht, SubmittedCase
@@ -150,8 +151,6 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
         if output_json:
             click.echo(pruefbericht.model_dump_json(indent=2))
         else:
-            import rich
-
             rich.print(pruefbericht.submitted_case)
         sys.exit(0)
 
