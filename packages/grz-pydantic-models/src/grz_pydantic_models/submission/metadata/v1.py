@@ -890,7 +890,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
     @field_validator("donors", mode="after")
     @classmethod
     def ensure_single_index_patient(cls, value: list[Donor]) -> list[Donor]:
-        num_index_patients = sum(1 for donor in value if donor.relation == Relation.index_)
+        num_index_patients = sum(donor.relation == Relation.index_ for donor in value)
         if num_index_patients == 0:
             raise ValueError("No index donor found! Exactly one index donor required.")
         elif num_index_patients > 1:
