@@ -115,7 +115,7 @@ def _get_library_type(metadata: GrzSubmissionMetadata) -> LibraryType:
     help="Do not perform the request, only output the pruefbericht. Can be combined with --json.",
     is_flag=True,
 )
-def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_run):
+def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_run):  # noqa: C901, PLR0913, PLR0912
     """
     Submit a Prüfbericht to BfArM.
     """
