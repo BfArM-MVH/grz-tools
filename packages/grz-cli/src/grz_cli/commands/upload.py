@@ -39,6 +39,6 @@ def upload(
         threads=threads,
     )
     # output the generated submission ID
-    print(worker_inst.upload(config.s3))
+    click.echo(worker_inst.upload(config.s3))
 
     log.info("Upload finished!")

@@ -174,4 +174,4 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token):
         json.dump({"token": token, "expires": expiry.isoformat()}, sys.stdout)
     elif expiry:
         log.info(f"New token expires at {expiry.isoformat()}")
-        print(token)
+        click.echo(token)
