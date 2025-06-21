@@ -452,7 +452,13 @@ class ReadOrder(StrEnum):
 class File(StrictBaseModel):
     file_path: str
     """
-    Path relative to the submission root, e.g.: sequencing_data/patient_001/patient_001_dna.bam
+    Path relative to files/ under the submission root, for example 'patient_001/patient_001_dna.bam'
+    for a submission layout similar to:
+
+    my_submission/
+      files/
+        patient_001/…
+      metadata/
     """
 
     file_type: FileType
@@ -526,7 +532,7 @@ class File(StrictBaseModel):
         file_path = Path(self.file_path)
         if file_path.is_absolute():
             raise ValueError(
-                "File paths must be relative to the submission root, "
+                "File paths must be relative to files/ under the submission root, "
                 "e.g.: sequencing_data/patient_001/patient_001_dna.fastq.gz; "
                 "symlinks are allowed."
             )
