@@ -533,7 +533,7 @@ class File(StrictBaseModel):
         if file_path.is_absolute():
             raise ValueError(
                 "File paths must be relative to files/ under the submission root, "
-                "e.g.: sequencing_data/patient_001/patient_001_dna.fastq.gz; "
+                "e.g.: patient_001/patient_001_dna.fastq.gz; "
                 "symlinks are allowed."
             )
         return self
