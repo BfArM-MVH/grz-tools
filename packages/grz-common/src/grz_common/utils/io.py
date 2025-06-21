@@ -8,40 +8,16 @@ from typing import TextIO
 log = logging.getLogger(__name__)
 
 
-def read_multiple_json(input: TextIO, buffer_size=65536, max_buffer_size=134217728):
+def read_multiple_json(input_file: TextIO):
     """
     Read multiple JSON objects from a text stream.
-    :param input:
-    :param buffer_size:
-    :param max_buffer_size:
+    :param input_file:
     """
-    decoder = json.JSONDecoder()
-    buffer = io.StringIO()  # Use StringIO as the buffer
-
-    while chunk := input.read(buffer_size):
-        if len(buffer.getvalue()) + len(chunk) > max_buffer_size:
-            raise MemoryError("Reached maximum buffer size while reading input")
-
-        # append chunk to buffer
-        buffer.write(chunk)
-
-        while True:
-            try:
-                data = buffer.getvalue().lstrip()
-                # Attempt to decode a JSON object from the current buffer content
-                obj, idx = decoder.raw_decode(data)
-                yield obj  # Process the decoded object
-
-                # Reset the buffer with the unprocessed content
-                buffer = io.StringIO(data[idx:])
-            except json.JSONDecodeError:
-                # If a JSONDecodeError occurs, we need more data, so break out to read the next chunk
-                break
-
-    # If there is any remaining content after the loop, try to process it
-    remaining_data = buffer.getvalue().strip()
-    if remaining_data != "":
-        raise ValueError("Remaining data is not empty. Is there invalid JSON?")
+    for line in input_file:
+        if line.strip():
+            yield json.loads(line)
+        else:
+            raise ValueError("Encountered blank line while reading jsonl, invalid.")
 
 
 class TqdmIOWrapper(io.RawIOBase):
