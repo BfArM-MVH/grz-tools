@@ -20,6 +20,7 @@ from pydantic import (
 from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel
+from ...mii.consent import Consent, ProvisionType
 
 SCHEMA_URL = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.4/GRZ/grz-schema.json"
 
@@ -276,12 +277,22 @@ class ResearchConsent(StrictBaseModel):
     Date of the delivery of the research consent in ISO 8601 format (YYYY-MM-DD)
     """
 
-    scope: object
+    scope: Consent
     """
     Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
     See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
     'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
     """
+
+    @model_validator(mode="after")
+    def ensure_top_level_provision_deny(self):
+        if (top_level_provision := self.scope.provision) and (top_level_provision.type != ProvisionType.DENY):
+            raise ValueError(
+                f"The root provision type must be deny, not {self.scope.provision.type}, "
+                "since the profile follows an opt-in consent scheme. "
+                "Explicit opt-in consents must be made via nested provisions."
+            )
+        return self
 
 
 class TissueOntology(StrictBaseModel):
