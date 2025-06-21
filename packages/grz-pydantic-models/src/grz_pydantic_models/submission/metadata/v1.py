@@ -989,8 +989,8 @@ class GrzSubmissionMetadata(StrictBaseModel):
                                 f"Encountered duplicate file checksum '{checksum}' "
                                 f"in '{lab_datum.lab_data_name}' "
                                 f"in donor '{donor.donor_pseudonym}'. "
-                                f"This is highly unlikely, "
-                                f"please ensure that the submission does not contain duplicate files."
+                                "This is highly unlikely, "
+                                "please ensure that the submission does not contain duplicate files."
                             )
 
         return self
@@ -1010,8 +1010,8 @@ class GrzSubmissionMetadata(StrictBaseModel):
                                 f"Encountered duplicate file path '{file_path}' "
                                 f"in '{lab_datum.lab_data_name}' "
                                 f"in donor '{donor.donor_pseudonym}'. "
-                                f"Are you sure you want to add the same file path "
-                                f"multiple times? "
+                                "Are you sure you want to add the same file path "
+                                "multiple times? "
                             )
 
         return self
