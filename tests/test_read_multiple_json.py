@@ -33,13 +33,9 @@ def test_read_multiple_json_newlines():
                    """
     input_stream = io.StringIO(json_data)
 
-    result = list(read_multiple_json(input_stream))
-
-    assert result == [
-        {"name": "Alice", "age": 30},
-        {"name": "Bob", "age": 25},
-        {"name": "Charlie", "age": 35},
-    ]
+    with pytest.raises(ValueError):
+        # Blank lines in input
+        _result = list(read_multiple_json(input_stream))
 
 
 # Incomplete JSON objects (incomplete at the end)

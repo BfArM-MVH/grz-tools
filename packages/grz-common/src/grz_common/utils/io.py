@@ -16,6 +16,8 @@ def read_multiple_json(input_file: TextIO):
     for line in input_file:
         if line.strip():
             yield json.loads(line)
+        else:
+            raise ValueError("Encountered blank line while reading jsonl, invalid.")
 
 
 class TqdmIOWrapper(io.RawIOBase):
