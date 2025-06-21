@@ -921,7 +921,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         for donor in value:
             if donor.donor_pseudonym in donor_pseudonyms:
                 raise ValueError(f"Encountered duplicate donor pseudonym: '{donor.donor_pseudonym}'")
-            donor_pseudonyms.add(donor.donor_pseudonym)   
+            donor_pseudonyms.add(donor.donor_pseudonym)
         return value
 
     @model_validator(mode="after")
