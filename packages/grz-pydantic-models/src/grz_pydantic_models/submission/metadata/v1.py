@@ -919,10 +919,9 @@ class GrzSubmissionMetadata(StrictBaseModel):
     def ensure_unique_donor_pseudonyms(cls, value: list[Donor]) -> list[Donor]:
         donor_pseudonyms = set()
         for donor in value:
-            if donor.donor_pseudonym not in donor_pseudonyms:
-                donor_pseudonyms.add(donor.donor_pseudonym)
-            else:
+            if donor.donor_pseudonym in donor_pseudonyms:
                 raise ValueError(f"Encountered duplicate donor pseudonym: '{donor.donor_pseudonym}'")
+            donor_pseudonyms.add(donor.donor_pseudonym)   
         return value
 
     @model_validator(mode="after")
