@@ -914,6 +914,17 @@ class GrzSubmissionMetadata(StrictBaseModel):
             raise ValueError("Multiple index donors found! Exactly one index donor required.")
         return value
 
+    @field_validator("donors", mode="after")
+    @classmethod
+    def ensure_unique_donor_pseudonyms(cls, value: list[Donor]) -> list[Donor]:
+        donor_pseudonyms = set()
+        for donor in value:
+            if donor.donor_pseudonym not in donor_pseudonyms:
+                donor_pseudonyms.add(donor.donor_pseudonym)
+            else:
+                raise ValueError(f"Encountered duplicate donor pseudonym: '{donor.donor_pseudonym}'")
+        return value
+
     @model_validator(mode="after")
     def check_schema(self):
         if self.schema_ != SCHEMA_URL:
