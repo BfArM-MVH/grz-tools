@@ -996,6 +996,27 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
+    def check_duplicate_file_paths(self):
+        file_paths = set()
+        for donor in self.donors:
+            for lab_datum in donor.lab_data:
+                if sequence_data := lab_datum.sequence_data:
+                    for file in sequence_data.files:
+                        file_path = file.file_path
+                        if not file_path in file_paths:
+                            file_paths.add(file_path)
+                        else:
+                            log.warning(
+                                f"Encountered duplicate file path '{file_path}' "
+                                f"in '{lab_datum.lab_data_name}' "
+                                f"in donor '{donor.donor_pseudonym}'. "
+                                f"Are you sure you want to add the same file path "
+                                f"multiple times? "
+                            )
+
+        return self
+
+    @model_validator(mode="after")
     def validate_thresholds(self):
         """
         Check if the submission meets the minimum mean coverage requirements.
