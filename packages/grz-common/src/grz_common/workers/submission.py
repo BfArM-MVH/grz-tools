@@ -102,10 +102,7 @@ class SubmissionMetadata:
                     continue
                 for file_data in lab_data.sequence_data.files:
                     file_path = Path(file_data.file_path)
-                    if file_path.is_symlink():
-                        raise ValueError(f"Provided path is a symlink which is not accepted: {file_path}")
-                    else:
-                        submission_files[file_path] = file_data
+                    submission_files[file_path] = file_data
 
         self._files = submission_files
         return self._files

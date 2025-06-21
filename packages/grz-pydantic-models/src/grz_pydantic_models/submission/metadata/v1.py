@@ -521,6 +521,17 @@ class File(StrictBaseModel):
                     )
         return self
 
+    @model_validator(mode="after")
+    def ensure_file_paths_are_relative(self):
+        file_path = Path(self.file_path)
+        if file_path.is_absolute():
+            raise ValueError(
+                "File paths must be relative to the submission root, "
+                "e.g.: sequencing_data/patient_001/patient_001_dna.fastq.gz; "
+                "symlinks are allowed."
+            )
+        return self
+
     def encrypted_file_path(self):
         return self.file_path + ".c4gh"
 
