@@ -14,7 +14,7 @@ The [`grz-cli`](packages/grz-cli/README.md) package is the primary CLI for submi
 It provides functionality for:
 - Validating submissions
 - Encrypting files using crypt4gh
-- Uploading files to/from a GRZ
+- Uploading files to a GRZ
 
 For detailed installation and usage instructions, please refer to the [grz-cli README](packages/grz-cli/README.md).
 
