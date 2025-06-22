@@ -525,9 +525,9 @@ class EncryptedSubmission:
         self.metadata = SubmissionMetadata(self.metadata_dir / "metadata.json")
 
     @property
-    def encrypted_files(self):
+    def encrypted_files(self) -> dict[Path, SubmissionFileMetadata]:
         """
-        The encrypted files liked in the metadata.
+        The encrypted files linked in the metadata.
 
         :return: Dictionary of `local_file_path` -> `SubmissionFileMetadata` pairs.
         """
