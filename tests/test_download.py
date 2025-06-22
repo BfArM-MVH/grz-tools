@@ -53,10 +53,10 @@ def test_boto_download(
     # Execute download
     local_file_path = files_dir / "large_test_file.fastq"
     s3_object_id = f"{submission_id}/large_test_file.fastq"
-    download_worker.download_file(local_file_path, s3_object_id, 100000)
+    download_worker._download_with_progress(str(local_file_path), s3_object_id)
     local_file_path = files_dir / "small_test_file.txt"
     s3_object_id = f"{submission_id}/small_test_file.txt"
-    download_worker.download_file(local_file_path, s3_object_id, 100000)
+    download_worker._download_with_progress(str(local_file_path), s3_object_id)
 
     # Assert that the files have been downloaded correctly
     assert (files_dir / "large_test_file.fastq").exists(), "Fastq file was not downloaded."
