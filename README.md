@@ -3,7 +3,7 @@
 This monorepo hosts the following packages:
 
 - [`grz-cli`](packages/grz-cli/README.md) - A command-line tool for validating, encrypting, uploading and downloading submissions to/from a GDC/GRZ (Genomrechenzentrum).
-- [`grz-pydantic-models`](packages/grz-pydantic-models/README.md) - Pydantic models of the BfArM GRZ metadata schema.
+- [`grz-pydantic-models`](packages/grz-pydantic-models/README.md) - Pydantic models for schemas related to the genomDE Model Project.
 - [`grzctl`](packages/grzctl/README.md) - GRZ internal tooling.
 - [`grz-common`](packages/grz-common/README.md) - Common code shared between packages in `grz-tools`.
 - [`grz-db`](packages/grz-db/README.md) - Libraries, SQL models and alembic migrations for GRZ DB.
