@@ -6,7 +6,7 @@ This monorepo hosts the following packages:
 - [`grz-pydantic-models`](packages/grz-pydantic-models/README.md) - Pydantic models for schemas related to the genomDE Model Project.
 - [`grzctl`](packages/grzctl/README.md) - GRZ internal tooling.
 - [`grz-common`](packages/grz-common/README.md) - Common code shared between packages in `grz-tools`.
-- [`grz-db`](packages/grz-db/README.md) - Libraries, SQL models and alembic migrations for GRZ DB.
+- [`grz-db`](packages/grz-db/README.md) - Libraries, SQL models and alembic migrations for the GRZ internal submission DB.
 
 ## grz-cli
 
