@@ -314,16 +314,9 @@ class SubmissionDb:
             db_state_log = SubmissionStateLog.model_validate(state_log_create)
             session.add(db_state_log)
 
-            # Remove tanG once it has been reported?
-            if state == SubmissionStateEnum.REPORTED and submission.tan_g is not None:
-                submission.tan_g = None
-                session.add(submission)
-
             try:
                 session.commit()
                 session.refresh(db_state_log)
-                if state == SubmissionStateEnum.REPORTED and submission.tan_g is None:
-                    session.refresh(submission)
                 return db_state_log
             except Exception:
                 session.rollback()

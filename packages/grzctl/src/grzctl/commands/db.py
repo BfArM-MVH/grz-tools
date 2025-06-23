@@ -386,11 +386,6 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
         if new_state_log.data:
             console.print(f"  Data: {new_state_log.data}")
 
-        if state_enum == SubmissionStateEnum.REPORTED:
-            updated_submission = db_service.get_submission(submission_id)
-            if updated_submission:
-                console.print(f"  Submission tanG is now: {updated_submission.tan_g}")
-
     except SubmissionNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
         console.print(f"You might need to add it first: grz-cli db add-submission {submission_id}")
