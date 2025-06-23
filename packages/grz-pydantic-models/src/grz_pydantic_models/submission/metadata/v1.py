@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
@@ -451,7 +452,13 @@ class ReadOrder(StrEnum):
 class File(StrictBaseModel):
     file_path: str
     """
-    Path relative to the submission root, e.g.: sequencing_data/patient_001/patient_001_dna.bam
+    Path relative to files/ under the submission root, for example 'patient_001/patient_001_dna.bam'
+    for a submission layout similar to:
+
+    my_submission/
+      files/
+        patient_001/…
+      metadata/
     """
 
     file_type: FileType
@@ -518,6 +525,17 @@ class File(StrictBaseModel):
                     raise ValueError(
                         "FASTQ files must have no spaces in the file name and have a .fastq.gz or .fq.gz extension"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def ensure_file_paths_are_relative(self):
+        file_path = Path(self.file_path)
+        if file_path.is_absolute():
+            raise ValueError(
+                "File paths must be relative to files/ under the submission root, "
+                "e.g.: patient_001/patient_001_dna.fastq.gz; "
+                "symlinks are allowed."
+            )
         return self
 
     def encrypted_file_path(self):
@@ -886,6 +904,26 @@ class GrzSubmissionMetadata(StrictBaseModel):
     List of donors including the index patient.
     """
 
+    @field_validator("donors", mode="after")
+    @classmethod
+    def ensure_single_index_patient(cls, value: list[Donor]) -> list[Donor]:
+        num_index_patients = sum(donor.relation == Relation.index_ for donor in value)
+        if num_index_patients == 0:
+            raise ValueError("No index donor found! Exactly one index donor required.")
+        elif num_index_patients > 1:
+            raise ValueError("Multiple index donors found! Exactly one index donor required.")
+        return value
+
+    @field_validator("donors", mode="after")
+    @classmethod
+    def ensure_unique_donor_pseudonyms(cls, value: list[Donor]) -> list[Donor]:
+        donor_pseudonyms = set()
+        for donor in value:
+            if donor.donor_pseudonym in donor_pseudonyms:
+                raise ValueError(f"Encountered duplicate donor pseudonym: '{donor.donor_pseudonym}'")
+            donor_pseudonyms.add(donor.donor_pseudonym)
+        return value
+
     @model_validator(mode="after")
     def check_schema(self):
         if self.schema_ != SCHEMA_URL:
@@ -943,6 +981,48 @@ class GrzSubmissionMetadata(StrictBaseModel):
                     raise ValueError(f"Duplicate lab datum '{lab_datum.lab_data_name}' in donor '{pseudonym}'")
                 else:
                     lab_data_names.add(lab_datum.lab_data_name)
+
+        return self
+
+    @model_validator(mode="after")
+    def check_duplicate_file_checksums(self):
+        checksums = set()
+        for donor in self.donors:
+            for lab_datum in donor.lab_data:
+                if sequence_data := lab_datum.sequence_data:
+                    for file in sequence_data.files:
+                        checksum = file.file_checksum
+                        if not checksum in checksums:
+                            checksums.add(checksum)
+                        else:
+                            log.warning(
+                                f"Encountered duplicate file checksum '{checksum}' "
+                                f"in '{lab_datum.lab_data_name}' "
+                                f"in donor '{donor.donor_pseudonym}'. "
+                                "This is highly unlikely, "
+                                "please ensure that the submission does not contain duplicate files."
+                            )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_duplicate_file_paths(self):
+        file_paths = set()
+        for donor in self.donors:
+            for lab_datum in donor.lab_data:
+                if sequence_data := lab_datum.sequence_data:
+                    for file in sequence_data.files:
+                        file_path = file.file_path
+                        if not file_path in file_paths:
+                            file_paths.add(file_path)
+                        else:
+                            log.warning(
+                                f"Encountered duplicate file path '{file_path}' "
+                                f"in '{lab_datum.lab_data_name}' "
+                                f"in donor '{donor.donor_pseudonym}'. "
+                                "Are you sure you want to add the same file path "
+                                "multiple times? "
+                            )
 
         return self
 

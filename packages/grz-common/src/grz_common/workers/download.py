@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
+from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import BaseModel
 from tqdm.auto import tqdm
 
@@ -42,7 +43,7 @@ class DownloadError(Exception):
 
 
 class S3BotoDownloadWorker:
-    """Implementation of an upload worker using boto3 for S3"""
+    """Implementation of a download worker using boto3 for S3"""
 
     __log = log.getChild("S3BotoDownloadWorker")
 
@@ -53,10 +54,11 @@ class S3BotoDownloadWorker:
         threads: int = 1,
     ):
         """
-        An download manager for S3 storage
+        A download manager for S3 storage
 
-        :param config: The configuration model
+        :param s3_options: The S3 configuration options
         :param status_file_path: The path to the status file
+        :param threads: The number of concurrent download threads
         """
         super().__init__()
 
@@ -82,7 +84,7 @@ class S3BotoDownloadWorker:
         for dir_path in [metadata_dir, encrypted_files_dir, log_dir]:
             if not dir_path.exists():
                 self.__log.debug("Creating directory: %s", dir_path)
-                dir_path.mkdir(parents=False, exist_ok=False)  # Create the directories
+                dir_path.mkdir(parents=False, exist_ok=False)
             else:
                 self.__log.debug("Directory exists: %s", dir_path)
 
@@ -102,28 +104,41 @@ class S3BotoDownloadWorker:
         metadata_key = str(Path(submission_id) / metadata_dir.name / metadata_file_name)
         metadata_file_path = metadata_dir / metadata_file_name
 
+        self.__log.info("Downloading metadata file: '%s'", metadata_key)
         try:
-            self.download_file(str(metadata_file_path), metadata_key, 10000)
-        except Exception as e:
-            self.__log.error("Download failed for '%s'", str(metadata_key))
+            # Ensure the local target directory exists
+            metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
+            self._s3_client.download_file(self._s3_options.bucket, metadata_key, str(metadata_file_path))
+            self.__log.info("Metadata download complete.")
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "404":
+                error_msg = f"Metadata file '{metadata_key}' not found in S3 bucket '{self._s3_options.bucket}'."
+                self.__log.error(error_msg)
+                raise DownloadError(error_msg) from e
+            raise e
+        except Exception as e:
+            self.__log.error("Download failed for metadata '%s'", metadata_key)
             raise e
 
-    def download_file(self, local_file_path, s3_object_id, filesize):
+    def _download_with_progress(self, local_file_path: str, s3_object_id: str):
         """
-        Upload a single file to the specified object ID
-        :param local_file_path: Path to the file to upload
-        :param s3_object_id: Remote S3 object ID under which the file should be stored
-        :param filesize: size of the file
+        Download a single file from S3 to local storage.
+
+        :param local_file_path: Path to the local target file.
+        :param s3_object_id: The S3 object key to download.
         """
-        # self.__log.info(f"Download {s3_object_id} to {local_file_path}...")
+        s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
+        filesize = s3_object_meta["ContentLength"]
 
         chunksize = (
             math.ceil(filesize / MULTIPART_MAX_CHUNKS)
             if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
             else MULTIPART_CHUNKSIZE
         )
-        self.__log.debug(f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {filesize / chunksize} chunks")
+        self.__log.debug(
+            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunks"
+        )
 
         config = TransferConfig(
             multipart_threshold=MULTIPART_THRESHOLD,
@@ -132,71 +147,85 @@ class S3BotoDownloadWorker:
         )
 
         transfer = S3Transfer(self._s3_client, config)
-        progress_bar = tqdm(total=filesize, unit="B", unit_scale=True, unit_divisor=1024, smoothing=TQDM_SMOOTHING)
-        transfer.download_file(
-            self._s3_options.bucket,
-            s3_object_id,
-            local_file_path,
-            callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-        )
+        with tqdm(
+            total=filesize, unit="B", unit_scale=True, unit_divisor=1024, smoothing=TQDM_SMOOTHING
+        ) as progress_bar:
+            transfer.download_file(
+                self._s3_options.bucket,
+                s3_object_id,
+                local_file_path,
+                callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
+            )
+
+    def download_file(
+        self,
+        local_file_path: Path,
+        s3_object_id: str,
+        progress_logger: FileProgressLogger[DownloadState],
+        file_metadata: SubmissionFileMetadata,
+    ):
+        """
+        Download a single file from S3 to the specified local_file_path.
+
+        :param local_file_path: Path to the local file.
+        :param s3_object_id: S3 key of the file to download.
+        :param progress_logger: The progress logger instance.
+        :param file_metadata: The metadata for the file.
+        """
+        try:
+            local_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+
+            self._download_with_progress(str(local_file_path), s3_object_id)
+
+            self.__log.info(f"Download complete for {str(local_file_path)}.")
+            progress_logger.set_state(local_file_path, file_metadata, state=DownloadState(download_successful=True))
+
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "404":
+                error_msg = f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
+                exc = DownloadError(error_msg)
+            else:
+                error_msg = f"S3 client error for '{s3_object_id}': {e}"
+                exc = e
+            self.__log.error(error_msg)
+            progress_logger.set_state(
+                local_file_path, file_metadata, state=DownloadState(download_successful=False, errors=[str(exc)])
+            )
+            raise exc from e
+        except Exception as e:
+            self.__log.error("Download failed for '%s': %s", str(local_file_path), e)
+            progress_logger.set_state(
+                local_file_path, file_metadata, state=DownloadState(download_successful=False, errors=[str(e)])
+            )
+            raise e
 
     def download(self, submission_id: str, encrypted_submission: EncryptedSubmission):
         """
-        Upload an encrypted submission
-        :param encrypted_submission: The encrypted submission to upload
+        Download an encrypted submission.
+
+        This method iterates through the files listed in the submission's metadata,
+        constructs their S3 object keys, and downloads them.
+
+        :param submission_id: The ID of the submission, used as a prefix in S3.
+        :param encrypted_submission: The encrypted submission to download.
         """
         progress_logger = FileProgressLogger[DownloadState](self._status_file_path)
 
-        encrypted_files_key_prefix = f"{submission_id}/files/"
+        for local_file_path, file_metadata in encrypted_submission.encrypted_files.items():
+            relative_encrypted_path = file_metadata.encrypted_file_path()
+            file_key = f"{submission_id}/files/{relative_encrypted_path}"
 
-        response = self._s3_client.list_objects_v2(Bucket=self._s3_options.bucket, Prefix=encrypted_files_key_prefix)
+            logged_state = progress_logger.get_state(local_file_path, file_metadata)
+            if logged_state and logged_state.get("download_successful"):
+                self.__log.info(
+                    "File '%s' already downloaded (at '%s'), skipping.",
+                    file_key,
+                    str(local_file_path),
+                )
+                continue
 
-        if "Contents" in response:
-            for file in response["Contents"]:
-                if file["Size"] == 0:
-                    continue
-                else:
-                    file_key = file["Key"]
-                    file_path = Path(file_key).relative_to(encrypted_files_key_prefix)
-                    full_path = encrypted_submission.encrypted_files_dir / file_path
-                    if full_path not in encrypted_submission.encrypted_files:
-                        raise DownloadError(f"File {file_path} not listed in metadata.json")
-                    file_metadata = encrypted_submission.encrypted_files[full_path]
-                    logged_state = progress_logger.get_state(full_path, file_metadata)
-
-                    if (logged_state is None) or not logged_state.get("download_successful", False):
-                        self.__log.info(
-                            "Download file: '%s' -> '%s'",
-                            file_key,
-                            str(full_path),
-                        )
-
-                        try:
-                            full_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
-                            self.download_file(str(full_path), file_key, file["Size"])
-
-                            self.__log.info(f"Download complete for {str(full_path)}. ")
-                            progress_logger.set_state(
-                                full_path,
-                                file_metadata,
-                                state=DownloadState(download_successful=True),
-                            )
-                        except Exception as e:
-                            self.__log.error("Download failed for '%s'", str(full_path))
-
-                            progress_logger.set_state(
-                                full_path,
-                                file_metadata,
-                                state=DownloadState(download_successful=False, errors=[str(e)]),
-                            )
-
-                            raise e
-                    else:
-                        self.__log.info(
-                            "File '%s' already downloaded (at '%s')",
-                            file_key,
-                            str(full_path),
-                        )
+            self.__log.info("Downloading file: '%s' -> '%s'", file_key, str(local_file_path))
+            self.download_file(local_file_path, file_key, progress_logger, file_metadata)
 
 
 class SubmissionInboxState(BaseModel):

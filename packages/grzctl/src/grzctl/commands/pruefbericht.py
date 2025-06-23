@@ -7,6 +7,7 @@ import sys
 
 import click
 import requests
+import rich
 from grz_common.cli import config_file, output_json, submission_dir
 from grz_common.workers.submission import Submission
 from grz_pydantic_models.pruefbericht import LibraryType, Pruefbericht, SubmittedCase
@@ -110,7 +111,12 @@ def _get_library_type(metadata: GrzSubmissionMetadata) -> LibraryType:
 @click.option(
     "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
 )
-def pruefbericht(config_file, submission_dir, output_json, failed, token):
+@click.option(
+    "--dry-run",
+    help="Do not perform the request, only output the pruefbericht. Can be combined with --json.",
+    is_flag=True,
+)
+def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_run):  # noqa: C901, PLR0913, PLR0912
     """
     Submit a Prüfbericht to BfArM.
     """
@@ -140,6 +146,13 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token):
             dataQualityCheckPassed=not failed,
         )
     )
+
+    if dry_run:
+        if output_json:
+            click.echo(pruefbericht.model_dump_json(indent=None, by_alias=True))
+        else:
+            rich.print(pruefbericht.submitted_case)
+        sys.exit(0)
 
     if token:
         # replace newlines in token if accidentally present from pasting
@@ -174,4 +187,4 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token):
         json.dump({"token": token, "expires": expiry.isoformat()}, sys.stdout)
     elif expiry:
         log.info(f"New token expires at {expiry.isoformat()}")
-        print(token)
+        click.echo(token)

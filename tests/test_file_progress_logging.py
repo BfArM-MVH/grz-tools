@@ -45,8 +45,9 @@ def temp_file_metadata_dict(temp_data_file_path):
 
     stat = temp_data_file_path.stat()
 
+    # Use the filename as a relative path instead of the absolute path
     return {
-        "filePath": str(temp_data_file_path),
+        "filePath": temp_data_file_path.name,
         "fileType": "bed",
         "fileChecksum": sha256sum,
         "fileSizeInBytes": stat.st_size,

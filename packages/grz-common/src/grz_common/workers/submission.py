@@ -102,10 +102,7 @@ class SubmissionMetadata:
                     continue
                 for file_data in lab_data.sequence_data.files:
                     file_path = Path(file_data.file_path)
-                    if file_path.is_symlink():
-                        raise ValueError(f"Provided path is a symlink which is not accepted: {file_path}")
-                    else:
-                        submission_files[file_path] = file_data
+                    submission_files[file_path] = file_data
 
         self._files = submission_files
         return self._files
@@ -194,7 +191,7 @@ class Submission:
 
         # Check if path exists
         if not local_file_path.exists():
-            yield f"{str(metadata.file_path)} does not exist!"
+            yield f"{str(Path('files') / metadata.file_path)} does not exist! Ensure filePath is relative to the files/ directory under the submission root."
             # Return here as following tests cannot work
             return
 
@@ -528,9 +525,9 @@ class EncryptedSubmission:
         self.metadata = SubmissionMetadata(self.metadata_dir / "metadata.json")
 
     @property
-    def encrypted_files(self):
+    def encrypted_files(self) -> dict[Path, SubmissionFileMetadata]:
         """
-        The encrypted files liked in the metadata.
+        The encrypted files linked in the metadata.
 
         :return: Dictionary of `local_file_path` -> `SubmissionFileMetadata` pairs.
         """
