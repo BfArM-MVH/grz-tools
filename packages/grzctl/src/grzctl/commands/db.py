@@ -402,7 +402,7 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.pass_context
 def change_request(ctx: click.Context, submission_id: str, change_str: str, data_json: str | None):
-    """Register a change request for the given submission. Optionally accepts additional JSON data to associate with the log entry."""
+    """Register a completed change request for the given submission. Optionally accepts additional JSON data to associate with the log entry."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
     try:
