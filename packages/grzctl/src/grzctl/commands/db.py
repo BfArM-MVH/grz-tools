@@ -74,7 +74,11 @@ def db(ctx: click.Context, config_file: str):
         for author in public_keys:
             log.debug(f"Found public key for {author}")
 
-    author = Author(name=author_name, private_key_bytes=private_key_bytes)
+    author = Author(
+        name=author_name,
+        private_key_bytes=private_key_bytes,
+        private_key_passphrase=db_config.author.private_key_passphrase,
+    )
     ctx.obj = {"author": author, "public_keys": public_keys, "db_url": db_config.database_url}
 
 

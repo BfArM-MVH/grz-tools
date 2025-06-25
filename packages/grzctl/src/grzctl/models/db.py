@@ -14,6 +14,9 @@ class Author(IgnoringBaseSettings):
     private_key_path: FilePath | None = None
     """Path to the author's private key (needed to sign DB modifications)."""
 
+    private_key_passphrase: str | None = None
+    """Passphrase to author's private key (should almost always be provided in an environment variable)"""
+
     @model_validator(mode="after")
     def validate_private_key(self) -> Self:
         if self.private_key is not None and self.private_key_path is not None:
