@@ -10,10 +10,10 @@ from click.testing import CliRunner
 def test_db(
     temp_db_config_file_path,
 ):
-    env = {"GRZ_DB_AUTHOR_PASSPHRASE": "test"}
+    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
     os.environ.update(env)
 
-    runner = CliRunner(env={"GRZ_DB_AUTHOR_PASSPHRASE": "test"})
+    runner = CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
     cli = grzctl.cli.build_cli()
     execute = lambda args: runner.invoke(cli, args, catch_exceptions=False)
 
@@ -24,8 +24,16 @@ def test_db(
     assert result.exit_code == 0, result.output
 
     # then add a submission
-    add_args = [*args_prefix, "submission", "add", "S01", "--tan-g", "foo", "--pseudonym", "bar"]
+    add_args = [*args_prefix, "submission", "add", "S01"]
     result = execute(add_args)
+    assert result.exit_code == 0, result.output
+
+    # then update the submission's tanG and/or pseudonym
+    modify_args = [*args_prefix, "submission", "modify", "S01", "tanG", "foo"]
+    result = execute(modify_args)
+    assert result.exit_code == 0, result.output
+    modify_args = [*args_prefix, "submission", "modify", "S01", "pseudonym", "bar"]
+    result = execute(modify_args)
     assert result.exit_code == 0, result.output
 
     # then update a submission

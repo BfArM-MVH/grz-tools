@@ -74,7 +74,11 @@ def db(ctx: click.Context, config_file: str):
         for author in public_keys:
             log.debug(f"Found public key for {author}")
 
-    author = Author(name=author_name, private_key_bytes=private_key_bytes)
+    author = Author(
+        name=author_name,
+        private_key_bytes=private_key_bytes,
+        private_key_passphrase=db_config.author.private_key_passphrase,
+    )
     ctx.obj = {"author": author, "public_keys": public_keys, "db_url": db_config.database_url}
 
 
@@ -335,19 +339,16 @@ def _build_submission_dict_from(
 
 @submission.command()
 @click.argument("submission_id", type=str)
-@click.option("--tan-g", "tan_g", type=str, default=None, help="The tanG for the submission.")
-@click.option("--pseudonym", type=str, default=None, help="The pseudonym for the submission.")
 @click.pass_context
-def add(ctx: click.Context, submission_id: str, tan_g: str | None, pseudonym: str | None):
+def add(ctx: click.Context, submission_id: str):
     """
     Add a submission to the database.
     """
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
     try:
-        db_submission = db_service.add_submission(submission_id, tan_g, pseudonym)
+        db_submission = db_service.add_submission(submission_id)
         console.print(f"[green]Submission '{db_submission.id}' added successfully.[/green]")
-        console.print(f"  tanG: {db_submission.tan_g}, Pseudonym: {db_submission.pseudonym}")
     except (DuplicateSubmissionError, DuplicateTanGError) as e:
         console.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
@@ -385,6 +386,33 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
         )
         if new_state_log.data:
             console.print(f"  Data: {new_state_log.data}")
+
+    except SubmissionNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"You might need to add it first: grz-cli db add-submission {submission_id}")
+        raise click.Abort() from e
+    except Exception as e:
+        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        traceback.print_exc()
+        raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
+@submission.command()
+@click.argument("submission_id", type=str)
+@click.argument("key", metavar="KEY", type=click.Choice(["tanG", "pseudonym"], case_sensitive=False))
+@click.argument("value", metavar="VALUE", type=str)
+@click.pass_context
+def modify(ctx: click.Context, submission_id: str, key: str, value: str):
+    """Modify a submission's tanG or index donor pseudonym."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    try:
+        submission = db_service.get_submission(submission_id)
+        if not submission:
+            raise SubmissionNotFoundError(submission_id)
+        _ = db_service.modify_submission(submission_id, key, value)
+        console.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
 
     except SubmissionNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")

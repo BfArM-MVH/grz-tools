@@ -3,9 +3,20 @@ from typing import Annotated, Self
 from grz_common.models.base import IgnoringBaseSettings
 from pydantic import Field, FilePath, model_validator
 
+# No whitespace (\s)
+# No control characters (\x00-\x1f and \x7f)
+AuthorNameStr = Annotated[
+    str,
+    Field(
+        pattern=r"^[^\s\x00-\x1f\x7f]+$",
+        min_length=1,
+        description="A username without whitespace and control characters",
+    ),
+]
+
 
 class Author(IgnoringBaseSettings):
-    name: str
+    name: AuthorNameStr
     """Name of the author"""
 
     private_key: str | None = None
@@ -13,6 +24,9 @@ class Author(IgnoringBaseSettings):
 
     private_key_path: FilePath | None = None
     """Path to the author's private key (needed to sign DB modifications)."""
+
+    private_key_passphrase: str | None = None
+    """Passphrase to author's private key (should almost always be provided in an environment variable)"""
 
     @model_validator(mode="after")
     def validate_private_key(self) -> Self:

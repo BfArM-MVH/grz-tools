@@ -49,6 +49,9 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):
 class SubmissionBase(SQLModel):
     """Submission base model."""
 
+    model_config = ConfigDict(validate_assignment=True)
+
+    id: str
     tan_g: str | None = Field(default=None, unique=True, index=True, alias="tanG")
     pseudonym: str | None = Field(default=None, index=True)
 
@@ -247,16 +250,12 @@ class SubmissionDb:
     def add_submission(
         self,
         submission_id: str,
-        tan_g: str | None = None,
-        pseudonym: str | None = None,
     ) -> Submission:
         """
         Adds a submission to the database.
 
         Args:
             submission_id: Submission ID.
-            tan_g: tanG if in phase 0
-            pseudonym: pseudonym if phase >= 0
 
         Returns:
             An instance of Submission.
@@ -266,7 +265,7 @@ class SubmissionDb:
             if existing_submission:
                 raise DuplicateSubmissionError(submission_id)
 
-            submission_create = SubmissionCreate(id=submission_id, tan_g=tan_g, pseudonym=pseudonym)
+            submission_create = SubmissionCreate(id=submission_id)
             db_submission = Submission.model_validate(submission_create)
 
             session.add(db_submission)
@@ -276,8 +275,36 @@ class SubmissionDb:
                 return db_submission
             except IntegrityError as e:
                 session.rollback()
-                if "UNIQUE constraint failed: submissions.tanG" in str(e) and tan_g:
-                    raise DuplicateTanGError(tan_g) from e
+                raise e
+            except Exception:
+                session.rollback()
+                raise
+
+    def modify_submission(self, submission_id: str, key: str, value: str) -> Submission:
+        if key.casefold() in {"tan-g", "tan_g", "tang"}:
+            key = "tan_g"
+        elif key.casefold() in {"pseudonym", "donor-pseudonym", "donor_pseudonym"}:
+            key = "pseudonym"
+        else:
+            raise ValueError("Can only modify tan_g or pseudonym")
+
+        with self.get_session() as session:
+            submission = session.get(Submission, submission_id)
+            if submission:
+                pass
+            else:
+                raise SubmissionNotFoundError(submission_id)
+
+            setattr(submission, key, value)
+            session.add(submission)
+            try:
+                session.commit()
+                session.refresh(submission)
+                return submission
+            except IntegrityError as e:
+                session.rollback()
+                if "UNIQUE constraint failed: submissions.tanG" in str(e) and key == "tan_g":
+                    raise DuplicateTanGError(value) from e
                 raise
             except Exception:
                 session.rollback()
