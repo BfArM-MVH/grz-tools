@@ -398,6 +398,35 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
 
 @submission.command()
 @click.argument("submission_id", type=str)
+@click.argument("key", metavar="KEY", type=click.Choice(["tanG", "pseudonym"], case_sensitive=False))
+@click.argument("value", metavar="VALUE", type=str)
+@click.pass_context
+def modify(ctx: click.Context, submission_id: str, key: str, value: str):
+    """Modify a submission's tanG or index donor pseudonym."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    try:
+        submission = db_service.get_submission(submission_id)
+        tan_g, pseudonym = submission.tan_g, submission.pseudonym
+        updated_submission = db_service.modify_submission(submission_id, key, value)
+        updated_tan_g, updated_pseudonym = updated_submission.tan_g, updated_submission.pseudonym
+        console.print(
+            f"[green]Submission '{submission_id}' updated from tanG: {tan_g}, pseudonym: {pseudonym} to tanG: {updated_tan_g}, pseudonym: {updated_pseudonym} [/green]"
+        )
+
+    except SubmissionNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"You might need to add it first: grz-cli db add-submission {submission_id}")
+        raise click.Abort() from e
+    except Exception as e:
+        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        traceback.print_exc()
+        raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
+@submission.command()
+@click.argument("submission_id", type=str)
 @click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.pass_context
