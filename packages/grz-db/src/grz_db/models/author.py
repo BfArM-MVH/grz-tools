@@ -23,8 +23,14 @@ class Author:
         if not passphrase:
             passphrase_callback = partial(getpass, prompt=f"Passphrase for GRZ DB author ({self.name}'s) private key: ")
         log.info(f"Loading private key of {self.name}…")
-        private_key = load_ssh_private_key(
-            self.private_key_bytes,
-            password=passphrase_callback().encode("utf-8"),
-        )
+        try:
+            private_key = load_ssh_private_key(
+                self.private_key_bytes,
+                password=passphrase_callback().encode("utf-8"),
+            )
+        except ValueError as e:
+            if "Corrupt data: broken checksum" in str(e):
+                raise ValueError("Could not load private key, likely incorrect passphrase supplied.") from e
+            else:
+                raise e
         return private_key
