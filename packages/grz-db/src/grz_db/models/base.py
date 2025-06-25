@@ -3,7 +3,7 @@ import logging
 from typing import Any, ClassVar, Generic, TypeVar
 
 import cryptography
-from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes, PublicKeyTypes
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from pydantic import ConfigDict
 from sqlmodel import SQLModel
 
@@ -32,7 +32,7 @@ class BaseSignablePayload(SQLModel):
         payload_json = self.model_dump_json(by_alias=True)
         return payload_json.encode("utf8")
 
-    def sign(self, private_key: PrivateKeyTypes) -> bytes:
+    def sign(self, private_key: Ed25519PrivateKey) -> bytes:
         """Sign this payload using the given private key."""
         bytes_to_sign = self.to_bytes()
         signature = private_key.sign(bytes_to_sign)
@@ -65,7 +65,7 @@ class VerifiableLog(Generic[P]):
                 f"Got: {cls.payload_model_class}"
             )
 
-    def verify(self, public_key: PublicKeyTypes) -> bool:
+    def verify(self, public_key: Ed25519PublicKey) -> bool:
         """Verify the signature of this log entry."""
         if not hasattr(self, "signature") or not isinstance(self.signature, str) or not self.signature:
             log.warning(f"Missing/invalid signature for {self.__class__.__name__} (id: {getattr(self, 'id', 'N/A')}).")
