@@ -24,8 +24,16 @@ def test_db(
     assert result.exit_code == 0, result.output
 
     # then add a submission
-    add_args = [*args_prefix, "submission", "add", "S01", "--tan-g", "foo", "--pseudonym", "bar"]
+    add_args = [*args_prefix, "submission", "add", "S01"]
     result = execute(add_args)
+    assert result.exit_code == 0, result.output
+
+    # then update the submission's tanG and/or pseudonym
+    modify_args = [*args_prefix, "submission", "modify", "S01", "tanG", "foo"]
+    result = execute(modify_args)
+    assert result.exit_code == 0, result.output
+    modify_args = [*args_prefix, "submission", "modify", "S01", "pseudonym", "bar"]
+    result = execute(modify_args)
     assert result.exit_code == 0, result.output
 
     # then update a submission
