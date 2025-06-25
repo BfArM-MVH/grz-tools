@@ -10,10 +10,10 @@ from click.testing import CliRunner
 def test_db(
     temp_db_config_file_path,
 ):
-    env = {"GRZ_DB_AUTHOR_PASSPHRASE": "test"}
+    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
     os.environ.update(env)
 
-    runner = CliRunner(env={"GRZ_DB_AUTHOR_PASSPHRASE": "test"})
+    runner = CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
     cli = grzctl.cli.build_cli()
     execute = lambda args: runner.invoke(cli, args, catch_exceptions=False)
 

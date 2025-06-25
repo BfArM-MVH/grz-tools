@@ -1,5 +1,4 @@
 import logging
-import os
 
 from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes
 
@@ -7,9 +6,10 @@ log = logging.getLogger(__name__)
 
 
 class Author:
-    def __init__(self, name: str, private_key_bytes: bytes):
+    def __init__(self, name: str, private_key_bytes: bytes, private_key_passphrase: str | None):
         self.name = name
         self.private_key_bytes = private_key_bytes
+        self.private_key_passphrase = private_key_passphrase
 
     def private_key(self) -> PrivateKeyTypes:
         from functools import partial
@@ -17,7 +17,7 @@ class Author:
 
         from cryptography.hazmat.primitives.serialization import load_ssh_private_key
 
-        passphrase = os.getenv("GRZ_DB_AUTHOR_PASSPHRASE")
+        passphrase = self.private_key_passphrase
         passphrase_callback = (lambda: passphrase) if passphrase else None
 
         if not passphrase:
