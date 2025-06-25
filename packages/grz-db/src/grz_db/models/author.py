@@ -17,7 +17,7 @@ class Author:
 
         from cryptography.hazmat.primitives.serialization import load_ssh_private_key
 
-        passphrase = os.getenv("GRZ_DB_AUTHOR_PASSPHRASE")
+        passphrase = os.getenv("GRZ_DB__AUTHOR_PASSPHRASE")
         passphrase_callback = (lambda: passphrase) if passphrase else None
 
         if not passphrase:
