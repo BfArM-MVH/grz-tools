@@ -182,6 +182,11 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
             author_name_str = latest_state_obj.author_name
 
             author_public_key = ctx.obj["public_keys"].get(author_name_str)
+            if not author_public_key:
+                known_authors = list(sorted(ctx.obj["public_keys"].keys()))
+                log.warning(
+                    f"Could not find public key for author {author_name_str}. Known authors: {', '.join(known_authors)}"
+                )
             signature_status = _verify_signature(author_public_key, latest_state_obj)
 
         if output_json:
@@ -241,6 +246,11 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                 author_name_str = latest_change_request_obj.author_name
 
                 author_public_key = ctx.obj["public_keys"].get(author_name_str)
+                if not author_public_key:
+                    known_authors = list(sorted(ctx.obj["public_keys"].keys()))
+                    log.warning(
+                        f"Could not find public key for author {author_name_str}. Known authors: {', '.join(known_authors)}"
+                    )
                 signature_status = _verify_signature(author_public_key, latest_change_request_obj)
 
             if output_json:
@@ -470,6 +480,11 @@ def show(ctx: click.Context, submission_id: str):
             state_str = f"[red]{state}[/red]" if state == SubmissionStateEnum.ERROR else state
             data_steward_str = state_log.author_name
             author_public_key = ctx.obj["public_keys"].get(data_steward_str)
+            if not author_public_key:
+                known_authors = list(sorted(ctx.obj["public_keys"].keys()))
+                log.warning(
+                    f"Could not find public key for author {data_steward_str}. Known authors: {', '.join(known_authors)}"
+                )
             signature_status_str = _verify_signature(author_public_key, state_log).rich_display()
 
             table.add_row(
