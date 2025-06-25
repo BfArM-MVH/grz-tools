@@ -27,7 +27,7 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):
         sys.exit("No submission ID provided. Please specify a submission ID to clean.")
 
     if yes_i_really_mean_it or click.confirm(
-        f"Are you SURE you want to delete the submission '{submission_id}' from the inbox bucket ({bucket_name})?",
+        f"Are you SURE you want to delete the submission '{submission_id}' from the bucket '{bucket_name}'?",
         default=False,
         show_default=True,
     ):
