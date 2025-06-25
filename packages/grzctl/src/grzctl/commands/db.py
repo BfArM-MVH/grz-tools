@@ -405,6 +405,8 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
 
     try:
         submission = db_service.get_submission(submission_id)
+        if not submission:
+            raise SubmissionNotFoundError(submission_id)
         tan_g, pseudonym = submission.tan_g, submission.pseudonym
         updated_submission = db_service.modify_submission(submission_id, key, value)
         updated_tan_g, updated_pseudonym = updated_submission.tan_g, updated_submission.pseudonym
