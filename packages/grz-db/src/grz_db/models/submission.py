@@ -275,6 +275,7 @@ class SubmissionDb:
                 return db_submission
             except IntegrityError as e:
                 session.rollback()
+                raise e
             except Exception:
                 session.rollback()
                 raise
