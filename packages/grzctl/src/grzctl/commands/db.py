@@ -335,19 +335,16 @@ def _build_submission_dict_from(
 
 @submission.command()
 @click.argument("submission_id", type=str)
-@click.option("--tan-g", "tan_g", type=str, default=None, help="The tanG for the submission.")
-@click.option("--pseudonym", type=str, default=None, help="The pseudonym for the submission.")
 @click.pass_context
-def add(ctx: click.Context, submission_id: str, tan_g: str | None, pseudonym: str | None):
+def add(ctx: click.Context, submission_id: str):
     """
     Add a submission to the database.
     """
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
     try:
-        db_submission = db_service.add_submission(submission_id, tan_g, pseudonym)
+        db_submission = db_service.add_submission(submission_id)
         console.print(f"[green]Submission '{db_submission.id}' added successfully.[/green]")
-        console.print(f"  tanG: {db_submission.tan_g}, Pseudonym: {db_submission.pseudonym}")
     except (DuplicateSubmissionError, DuplicateTanGError) as e:
         console.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e

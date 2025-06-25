@@ -256,8 +256,6 @@ class SubmissionDb:
 
         Args:
             submission_id: Submission ID.
-            tan_g: tanG if in phase 0
-            pseudonym: pseudonym if phase >= 0
 
         Returns:
             An instance of Submission.
@@ -277,9 +275,6 @@ class SubmissionDb:
                 return db_submission
             except IntegrityError as e:
                 session.rollback()
-                if "UNIQUE constraint failed: submissions.tanG" in str(e) and tan_g:
-                    raise DuplicateTanGError(tan_g) from e
-                raise
             except Exception:
                 session.rollback()
                 raise
@@ -305,6 +300,11 @@ class SubmissionDb:
                 session.commit()
                 session.refresh(submission)
                 return submission
+            except IntegrityError as e:
+                session.rollback()
+                if "UNIQUE constraint failed: submissions.tanG" in str(e) and key == "tan_g":
+                    raise DuplicateTanGError(value) from e
+                raise
             except Exception:
                 session.rollback()
                 raise
