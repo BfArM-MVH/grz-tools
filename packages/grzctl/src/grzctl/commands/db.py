@@ -411,9 +411,7 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         submission = db_service.get_submission(submission_id)
         if not submission:
             raise SubmissionNotFoundError(submission_id)
-        _, _ = submission.tan_g, submission.pseudonym
-        updated_submission = db_service.modify_submission(submission_id, key, value)
-        _, _ = updated_submission.tan_g, updated_submission.pseudonym
+        _ = db_service.modify_submission(submission_id, key, value)
         console.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
 
     except SubmissionNotFoundError as e:
