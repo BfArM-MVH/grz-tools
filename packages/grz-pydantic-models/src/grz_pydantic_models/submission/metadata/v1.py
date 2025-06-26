@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import posixpath
-
+import re
 from datetime import date
 from enum import StrEnum
 from importlib.resources import files
@@ -23,8 +22,8 @@ from pydantic import (
 from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel
-from ...utils import is_relative_subdirectory
 from ...mii.consent import Consent, ProvisionType
+from ...utils import is_relative_subdirectory
 
 SCHEMA_URL_CURRENT = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.8/GRZ/grz-schema.json"
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)\.([0-9]+)/GRZ/grz-schema\.json"
