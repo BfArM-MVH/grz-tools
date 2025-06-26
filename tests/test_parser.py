@@ -11,6 +11,8 @@ metadata_missing_vcf_file = "tests/mock_files/metadata_validation/missing-vcf-fi
 metadata_missing_fastq_r2 = "tests/mock_files/metadata_validation/missing-fastq-r2.json"
 metadata_no_target_regions = "tests/mock_files/metadata_validation/missing-target-regions.json"
 metadata_incompatible_reference_genomes = "tests/mock_files/metadata_validation/incompatible-reference-genomes.json"
+metadata_file_path_traversal = "tests/mock_files/metadata_validation/file-path-traversal.json"
+metadata_file_path_not_normalized = "tests/mock_files/metadata_validation/file-path-not-normalized.json"
 
 
 def test_submission_metadata(temp_metadata_file_path):
@@ -38,6 +40,12 @@ def test_submission_metadata_fails():
 
     with pytest.raises(error_types, match="Incompatible reference genomes found"):
         SubmissionMetadata(metadata_incompatible_reference_genomes)
+
+    with pytest.raises(error_types, match="File paths must be relative to files/"):
+        SubmissionMetadata(metadata_file_path_traversal)
+
+    with pytest.raises(error_types, match="File paths must be normalized"):
+        SubmissionMetadata(metadata_file_path_not_normalized)
 
 
 def test_encrypted_submission():

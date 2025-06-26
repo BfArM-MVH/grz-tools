@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import posixpath
+
 from datetime import date
 from enum import StrEnum
 from importlib.resources import files
@@ -619,6 +621,15 @@ class File(StrictBaseModel):
                 "File paths must be relative to files/ under the submission root, "
                 "e.g.: patient_001/patient_001_dna.fastq.gz; "
                 "symlinks are allowed."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def ensure_file_paths_are_normalized_posix(self):
+        normalized_path = posixpath.normpath(self.file_path)
+        if self.file_path != normalized_path:
+            raise ValueError(
+                f"File paths must be normalized: Please replace {self.file_path} with {normalized_path}. "
             )
         return self
 
