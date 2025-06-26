@@ -41,7 +41,7 @@ def build_cli():
     @click.version_option(
         version=version("grz-cli"),
         prog_name="grz-cli",
-        message=f"%(prog)s v%(version)s (metadata schema versions: {', '.join(grz_pydantic_models.submission.metadata.get_supported_versions())})",
+        message=f"%(prog)s v%(version)s (currently accepted metadata schema versions: {', '.join(grz_pydantic_models.submission.metadata.get_accepted_versions())})",
     )
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(

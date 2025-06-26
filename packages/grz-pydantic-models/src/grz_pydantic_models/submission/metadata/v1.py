@@ -21,7 +21,8 @@ from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel
 
-SCHEMA_URL = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.4/GRZ/grz-schema.json"
+SCHEMA_URL_CURRENT = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.8/GRZ/grz-schema.json"
+SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)\.([0-9]+)/GRZ/grz-schema\.json"
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,12 @@ Tan = Annotated[str, StringConstraints(pattern=r"^[A-Fa-f0-9]{64}$")]
 SubmitterId = Annotated[str, StringConstraints(pattern=r"^[0-9]{9}$")]
 GenomicDataCenterId = Annotated[str, StringConstraints(pattern=r"^GRZ[A-Z0-9]{3}[0-9]{3}$")]
 ClinicalDataNodeId = Annotated[str, StringConstraints(pattern=r"^KDK[A-Z0-9]{3}[0-9]{3}$")]
+
+
+def is_supported_version(version: str) -> bool:
+    major, minor, patch = (int(part) for part in version.split("."))
+    # 1.1.1 <= v <= 1.1.8
+    return (major == 1) and (minor == 1) and (1 <= patch <= 8)
 
 
 class SubmissionType(StrEnum):
@@ -894,7 +901,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
     General metadata schema for submissions to the GRZ
     """
 
-    schema_: Annotated[str, Field(alias="$schema")] = SCHEMA_URL
+    schema_: Annotated[str, Field(alias="$schema", pattern=SCHEMA_URL_PATTERN)] = SCHEMA_URL_CURRENT
     model_config = ConfigDict(json_schema_extra={"$schema": GenerateJsonSchema.schema_dialect})
 
     submission: Submission
@@ -924,10 +931,18 @@ class GrzSubmissionMetadata(StrictBaseModel):
             donor_pseudonyms.add(donor.donor_pseudonym)
         return value
 
+    def get_schema_version(self) -> str:
+        if match := re.fullmatch(SCHEMA_URL_PATTERN, self.schema_):
+            schema_version = ".".join(match.groups())
+        else:
+            raise ValueError("Schema URL should have matched pattern but didn't")
+        return schema_version
+
     @model_validator(mode="after")
-    def check_schema(self):
-        if self.schema_ != SCHEMA_URL:
-            log.warning(f"Unknown GRZ metadata schema URL: {self.schema_}")
+    def ensure_supported_schema_version(self):
+        schema_version = self.get_schema_version()
+        if not is_supported_version(schema_version):
+            raise ValueError(f"Unsupported metadata schema version: {schema_version}")
         return self
 
     @model_validator(mode="after")

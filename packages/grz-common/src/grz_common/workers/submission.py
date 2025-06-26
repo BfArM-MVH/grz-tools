@@ -10,6 +10,7 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
+from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
     File,
@@ -107,12 +108,17 @@ class SubmissionMetadata:
         self._files = submission_files
         return self._files
 
-    def validate(self) -> Generator[str]:
+    def validate(self) -> Generator[str]:  # noqa: C901
         """
         Validates this submission's metadata (content).
 
         :return: Generator of errors
         """
+        metadata_schema_version = self.content.get_schema_version()
+        accepted_versions = get_accepted_versions()
+        if metadata_schema_version not in accepted_versions:
+            yield f"Metadata schema version {metadata_schema_version} is outdated. Currently accepting the following versions: {', '.join(accepted_versions)}"
+
         submission_files: dict[str | PathLike, SubmissionFileMetadata] = {}
         for donor in self.content.donors:
             for lab_data in donor.lab_data:

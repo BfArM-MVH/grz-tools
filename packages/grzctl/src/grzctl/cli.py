@@ -9,7 +9,6 @@ import logging.config
 from importlib.metadata import version
 
 import click
-import grz_pydantic_models.submission.metadata
 from grz_cli.commands.encrypt import encrypt
 from grz_cli.commands.submit import submit
 from grz_cli.commands.upload import upload
@@ -50,7 +49,7 @@ def build_cli():
     @click.version_option(
         version=version("grzctl"),
         prog_name="grzctl",
-        message=f"%(prog)s v%(version)s (metadata schema versions: {', '.join(grz_pydantic_models.submission.metadata.get_supported_versions())})",
+        message="%(prog)s v%(version)s",
     )
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(

@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.1/GRZ/grz-schema.json",
+  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.8/GRZ/grz-schema.json",
   "submission": {
     "submissionDate": "2024-07-15",
     "submissionType": "initial",
