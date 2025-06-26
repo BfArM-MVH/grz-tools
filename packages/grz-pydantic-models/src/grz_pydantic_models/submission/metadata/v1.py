@@ -628,9 +628,7 @@ class File(StrictBaseModel):
     def ensure_file_paths_are_normalized_posix(self):
         normalized_path = posixpath.normpath(self.file_path)
         if self.file_path != normalized_path:
-            raise ValueError(
-                f"File paths must be normalized: Please replace {self.file_path} with {normalized_path}. "
-            )
+            raise ValueError(f"File paths must be normalized: Please replace {self.file_path} with {normalized_path}. ")
         return self
 
     def encrypted_file_path(self):
