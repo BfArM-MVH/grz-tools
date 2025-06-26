@@ -11,6 +11,10 @@ grzctl = { path = "packages/grzctl", editable = true }
 grz-db = { path = "packages/grz-db", editable = true }
 grz-pydantic-models = { path = "packages/grz-pydantic-models", editable = true }
 
+[tool.setuptools.packages.find]
+where = ["packages"]
+include = ["grz_common*", "grz_cli*", "grzctl*", "grz_db*", "grz_pydantic_models*"]
+
 [project.optional-dependencies]
 test = [
     "pytest >=8.3.3,<9",
