@@ -10,7 +10,6 @@ from itertools import groupby
 from pathlib import Path
 from typing import Annotated, Any, Self
 
-from grz_common.utils.paths import is_relative_subdirectory
 from pydantic import (
     ConfigDict,
     Field,
@@ -22,6 +21,7 @@ from pydantic import (
 from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel
+from ...utils import is_relative_subdirectory
 from ...mii.consent import Consent, ProvisionType
 
 SCHEMA_URL_CURRENT = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.8/GRZ/grz-schema.json"

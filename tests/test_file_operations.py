@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.utils.crypt import Crypt4GH
-from grz_common.utils.paths import is_relative_subdirectory
+from grz_pydantic_models.utils.paths import is_relative_subdirectory
 
 
 def test_calculate_sha256(temp_small_file_path: str, temp_small_file_sha256sum):
