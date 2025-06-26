@@ -73,7 +73,7 @@ def db(ctx: click.Context, config_file: str):
             comment: load_ssh_public_key(f"{fmt}\t{key}\t{comment}".encode()) for fmt, key, comment in public_key_list
         }
         for comment in public_keys:
-            log.debug(f"Found public key for {comment}")
+            log.debug(f"Found public key labeled '{comment}'")
 
     author = Author(
         name=author_name,
@@ -186,7 +186,9 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
             latest_timestamp_str = latest_state_obj.timestamp.isoformat()
             author_name_str = latest_state_obj.author_name
 
-            signature_status, verifying_key_comment = _verify_signature(ctx.obj["public_keys"], latest_state_obj)
+            signature_status, verifying_key_comment = _verify_signature(
+                ctx.obj["public_keys"], author_name_str, latest_state_obj
+            )
 
         if output_json:
             submission_dict = _build_submission_dict_from(latest_state_obj, submission, signature_status)
@@ -245,7 +247,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                 author_name_str = latest_change_request_obj.author_name
 
                 signature_status, verifying_key_comment = _verify_signature(
-                    ctx.obj["public_keys"], latest_change_request_obj
+                    ctx.obj["public_keys"], author_name_str, latest_change_request_obj
                 )
 
             if output_json:
@@ -290,20 +292,29 @@ class SignatureStatus(enum.StrEnum):
 
 
 def _verify_signature(
-    public_keys: dict[str, Ed25519PublicKey], verifiable_log: VerifiableLog
+    public_keys: dict[str, Ed25519PublicKey], expected_key_comment: str, verifiable_log: VerifiableLog
 ) -> tuple[SignatureStatus, str | None]:
     signature_status = SignatureStatus.UNKNOWN
     verifying_key_comment = None
-    for comment, public_key in public_keys.items():
+    if public_key := public_keys.get(expected_key_comment):
         try:
-            if verifiable_log.verify(public_key):
-                signature_status = SignatureStatus.VERIFIED
-                verifying_key_comment = comment
-                # stop trying after first verification success
-                break
+            signature_status = SignatureStatus.VERIFIED if verifiable_log.verify(public_key) else SignatureStatus.FAILED
         except Exception as e:
             signature_status = SignatureStatus.ERROR
             log.error(e)
+    else:
+        log.info("Found no key with matching username in comment, trying all keys")
+        for comment, public_key in public_keys.items():
+            try:
+                if verifiable_log.verify(public_key):
+                    signature_status = SignatureStatus.VERIFIED
+                    verifying_key_comment = comment
+                    # stop trying after first verification success
+                    break
+            except Exception as e:
+                signature_status = SignatureStatus.ERROR
+                log.error(e)
+
     return signature_status, verifying_key_comment
 
 
@@ -502,7 +513,9 @@ def show(ctx: click.Context, submission_id: str):
             state = state_log.state.value
             state_str = f"[red]{state}[/red]" if state == SubmissionStateEnum.ERROR else state
             data_steward_str = state_log.author_name
-            signature_status, verifying_key_comment = _verify_signature(ctx.obj["public_keys"], state_log)
+            signature_status, verifying_key_comment = _verify_signature(
+                ctx.obj["public_keys"], data_steward_str, state_log
+            )
             signature_status_str = signature_status.rich_display(verifying_key_comment)
 
             table.add_row(
