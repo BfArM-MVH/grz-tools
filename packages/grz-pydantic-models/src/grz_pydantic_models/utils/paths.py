@@ -4,6 +4,8 @@ import logging
 import os
 from os import PathLike
 
+__all__ = ["is_relative_subdirectory"]
+
 log = logging.getLogger(__name__)
 
 
