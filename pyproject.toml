@@ -2,7 +2,13 @@
 name = "grz-tools"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
+dependencies = [
+    "grz-common @ file:./packages/grz-common",
+    "grz-cli @ file:./packages/grz-cli",
+    "grzctl @ file:./packages/grzctl",
+    "grz-db @ file:./packages/grz-db",
+    "grz-pydantic-models @ file:./packages/grz-pydantic-models"
+]
 
 [tool.uv.sources]
 grz-common = { path = "packages/grz-common", editable = true }
@@ -12,8 +18,16 @@ grz-db = { path = "packages/grz-db", editable = true }
 grz-pydantic-models = { path = "packages/grz-pydantic-models", editable = true }
 
 [tool.setuptools.packages.find]
-where = ["packages"]
-include = ["grz_common*", "grz_cli*", "grzctl*", "grz_db*", "grz_pydantic_models*"]
+where = [
+    "packages",
+]
+include = [
+    "grz_common",
+    "grz_cli",
+    "grzctl",
+    "grz_db",
+    "grz_pydantic_models"
+]
 
 [project.optional-dependencies]
 test = [
