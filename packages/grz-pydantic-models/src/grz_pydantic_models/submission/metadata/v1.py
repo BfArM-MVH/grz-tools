@@ -10,6 +10,7 @@ from itertools import groupby
 from pathlib import Path
 from typing import Annotated, Any, Self
 
+from grz_common.utils.paths import is_relative_subdirectory
 from pydantic import (
     ConfigDict,
     Field,
@@ -613,7 +614,7 @@ class File(StrictBaseModel):
     @model_validator(mode="after")
     def ensure_file_paths_are_relative(self):
         file_path = Path(self.file_path)
-        if file_path.is_absolute():
+        if not is_relative_subdirectory(file_path, "./"):
             raise ValueError(
                 "File paths must be relative to files/ under the submission root, "
                 "e.g.: patient_001/patient_001_dna.fastq.gz; "
