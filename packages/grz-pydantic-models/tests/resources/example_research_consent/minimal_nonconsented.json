@@ -1,0 +1,65 @@
+{
+  "status": "active",
+  "scope": {
+    "coding": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/consentscope",
+        "code": "research"
+      }
+    ]
+  },
+  "category": [
+    {
+      "coding": [
+        {
+          "system": "http://loinc.org",
+          "code": "57016-8"
+        }
+      ]
+    },
+    {
+      "coding": [
+        {
+          "system": "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
+          "code": "2.16.840.1.113883.3.1937.777.24.2.184"
+        }
+      ]
+    }
+  ],
+  "patient": {
+    "reference": "Patient/9b4a702d-162c-428a-8c5d-8b98af21b693"
+  },
+  "dateTime": "2020-09-01",
+  "policy": [
+    {
+      "uri": "urn:oid:2.16.840.1.113883.3.1937.777.24.2.1791"
+    }
+  ],
+  "provision": {
+    "type": "deny",
+    "period": {
+      "start": "2020-09-01",
+      "end": "2050-08-31"
+    },
+    "provision": [
+      {
+        "code": [
+          {
+            "coding": [
+              {
+                "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                "code": "2.16.840.1.113883.3.1937.777.24.5.3.1",
+                "display": "PATDAT_erheben_speichern_nutzen"
+              }
+            ]
+          }
+        ],
+        "type": "deny",
+        "period": {
+          "start": "2020-09-01",
+          "end": "2050-08-31"
+        }
+      }
+    ]
+  }
+}

@@ -13,8 +13,10 @@ def test_consent_submission(working_dir_path):
 
     testargs = [
         "consent",
+        "--date",
+        "2025-06-25",
         "--submission-dir",
-        str(submission_dir),
+        str(working_dir_path),
     ]
     runner = CliRunner()
     cli = grzctl.cli.build_cli()

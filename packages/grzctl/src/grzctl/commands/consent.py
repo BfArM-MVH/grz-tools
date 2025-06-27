@@ -1,12 +1,10 @@
 """Command for determining whether a submission is consented for research."""
 
-import enum
+import datetime
 import json
 import logging
 import sys
-import typing
 from pathlib import Path
-from typing import Any
 
 import click
 import rich.console
@@ -17,21 +15,13 @@ from grz_common.workers.submission import GrzSubmissionMetadata, SubmissionMetad
 
 log = logging.getLogger(__name__)
 
-MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
-
-
-class FhirProvision(enum.StrEnum):
-    """Possible FHIR Provision options."""
-
-    PERMIT = "permit"
-    DENY = "deny"
-
 
 @click.command()
 @submission_dir
 @output_json
 @show_details
-def consent(submission_dir, output_json, show_details):
+@click.option("--date", help="date for which to check consent validity in ISO format (default: today)")
+def consent(submission_dir, output_json, show_details, date):
     """
     Check if a submission is consented for research.
 
@@ -41,7 +31,8 @@ def consent(submission_dir, output_json, show_details):
     """
     metadata = SubmissionMetadata(Path(submission_dir) / "metadata" / "metadata.json").content
 
-    consents = _gather_consent_information(metadata)
+    date = datetime.date.today() if date is None else datetime.date.fromisoformat(date)
+    consents = _gather_consent_information(metadata, date)
     overall_consent = _submission_has_research_consent(consents)
 
     match output_json, show_details:
@@ -76,41 +67,9 @@ def _print_rich_table(consents: dict[str, bool]):
     console.print(table)
 
 
-def _gather_consent_information(metadata: GrzSubmissionMetadata) -> dict[str, bool]:
+def _gather_consent_information(metadata: GrzSubmissionMetadata, date: datetime.date) -> dict[str, bool]:
     consents = {donor.donor_pseudonym: False for donor in metadata.donors}
     for donor in metadata.donors:
-        for research_consent in donor.research_consents:
-            mii_consent = research_consent.scope
-            if isinstance(mii_consent, str):
-                mii_consent = json.loads(mii_consent)
-            mii_consent = typing.cast(dict[str, Any], mii_consent)
-
-            if top_level_provision := mii_consent.get("provision"):
-                if top_level_provision.get("type") != FhirProvision.DENY:
-                    sys.exit(
-                        f"The root provision type must be deny, not {top_level_provision.get('type')}, "
-                        f"since the profile follows an opt-in consent scheme. "
-                        f"Explicit opt-in consents must be made via nested provisions."
-                    )
-                else:
-                    nested_provisions = top_level_provision.get("provision")
-                    consents[donor.donor_pseudonym] = _check_nested_provisions(nested_provisions)
+        consents[donor.donor_pseudonym] = donor.consents_to_research(date)
 
     return consents
-
-
-def _check_nested_provisions(provisions: list[dict[str, Any]]) -> bool:
-    for provision in provisions:
-        if provision.get("type") == FhirProvision.PERMIT:
-            for codeable_concept in provision.get("code", []):
-                for coding in codeable_concept.get("coding", []):
-                    code = coding.get("code")
-                    if isinstance(code, str):
-                        if code == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
-                            return True
-                    elif isinstance(code, dict):
-                        if (value := code.get("value")) and value == MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU:
-                            return True
-                    else:
-                        raise ValueError(code, f"Expected str or dict, got {type(code)}")
-    return False

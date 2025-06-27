@@ -11,6 +11,7 @@ from typing import Any
 import click
 import rich.console
 import rich.table
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from grz_common.cli import config_file, output_json
 from grz_db.errors import (
     DatabaseConfigurationError,
@@ -65,14 +66,14 @@ def db(ctx: click.Context, config_file: str):
     from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 
     log.info("Reading known public keys")
-    KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "author_name"])
+    KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])
     with open(db_config.known_public_keys) as f:
         public_key_list = list(map(lambda v: KnownKeyEntry(*v), map(lambda s: s.strip().split(), f.readlines())))
         public_keys = {
-            author: load_ssh_public_key(f"{fmt}\t{key}\t{author}".encode()) for fmt, key, author in public_key_list
+            comment: load_ssh_public_key(f"{fmt}\t{key}\t{comment}".encode()) for fmt, key, comment in public_key_list
         }
-        for author in public_keys:
-            log.debug(f"Found public key for {author}")
+        for comment in public_keys:
+            log.debug(f"Found public key labeled '{comment}'")
 
     author = Author(
         name=author_name,
@@ -185,8 +186,9 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
             latest_timestamp_str = latest_state_obj.timestamp.isoformat()
             author_name_str = latest_state_obj.author_name
 
-            author_public_key = ctx.obj["public_keys"].get(author_name_str)
-            signature_status = _verify_signature(author_public_key, latest_state_obj)
+            signature_status, verifying_key_comment = _verify_signature(
+                ctx.obj["public_keys"], author_name_str, latest_state_obj
+            )
 
         if output_json:
             submission_dict = _build_submission_dict_from(latest_state_obj, submission, signature_status)
@@ -199,7 +201,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
                 latest_state_str,
                 latest_timestamp_str,
                 author_name_str,
-                signature_status.rich_display(),
+                signature_status.rich_display(verifying_key_comment),
             )
 
     if output_json:
@@ -244,8 +246,9 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                 latest_timestamp_str = latest_change_request_obj.timestamp.isoformat()
                 author_name_str = latest_change_request_obj.author_name
 
-                author_public_key = ctx.obj["public_keys"].get(author_name_str)
-                signature_status = _verify_signature(author_public_key, latest_change_request_obj)
+                signature_status, verifying_key_comment = _verify_signature(
+                    ctx.obj["public_keys"], author_name_str, latest_change_request_obj
+                )
 
             if output_json:
                 submission_dict = _build_submission_dict_from(latest_change_request_obj, submission, signature_status)
@@ -258,7 +261,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                     latest_change_str,
                     latest_timestamp_str,
                     author_name_str,
-                    signature_status.rich_display(),
+                    signature_status.rich_display(verifying_key_comment),
                 )
 
     if output_json:
@@ -275,31 +278,44 @@ class SignatureStatus(enum.StrEnum):
     ERROR = "Error"
     UNKNOWN = "Unknown"
 
-    def rich_display(self) -> str:
+    def rich_display(self, comment: str | None) -> str:
         """Displays the signature status in rich format."""
         match self:
             case "Verified":
-                return "[green]Verified[/green]"
+                return "[green]Verified[/green]" if comment is None else f"[green]Verified ({comment})[/green]"
             case "Failed":
                 return "[red]Failed[/red]"
             case "Error":
                 return "[red]Error[/red]"
             case "Unknown" | _:
-                return "[yellow]Unknown[/yellow]"
+                return "[yellow]Unknown Key[/yellow]"
 
 
-def _verify_signature(author_public_key, verifiable_log: VerifiableLog) -> SignatureStatus:
+def _verify_signature(
+    public_keys: dict[str, Ed25519PublicKey], expected_key_comment: str, verifiable_log: VerifiableLog
+) -> tuple[SignatureStatus, str | None]:
     signature_status = SignatureStatus.UNKNOWN
-    if author_public_key:
+    verifying_key_comment = None
+    if public_key := public_keys.get(expected_key_comment):
         try:
-            if verifiable_log.verify(author_public_key):
-                signature_status = SignatureStatus.VERIFIED
-            else:
-                signature_status = SignatureStatus.FAILED
+            signature_status = SignatureStatus.VERIFIED if verifiable_log.verify(public_key) else SignatureStatus.FAILED
         except Exception as e:
             signature_status = SignatureStatus.ERROR
             log.error(e)
-    return signature_status
+    else:
+        log.info("Found no key with matching username in comment, trying all keys")
+        for comment, public_key in public_keys.items():
+            try:
+                if verifiable_log.verify(public_key):
+                    signature_status = SignatureStatus.VERIFIED
+                    verifying_key_comment = comment
+                    # stop trying after first verification success
+                    break
+            except Exception as e:
+                signature_status = SignatureStatus.ERROR
+                log.error(e)
+
+    return signature_status, verifying_key_comment
 
 
 def _build_submission_dict_from(
@@ -497,8 +513,10 @@ def show(ctx: click.Context, submission_id: str):
             state = state_log.state.value
             state_str = f"[red]{state}[/red]" if state == SubmissionStateEnum.ERROR else state
             data_steward_str = state_log.author_name
-            author_public_key = ctx.obj["public_keys"].get(data_steward_str)
-            signature_status_str = _verify_signature(author_public_key, state_log).rich_display()
+            signature_status, verifying_key_comment = _verify_signature(
+                ctx.obj["public_keys"], data_steward_str, state_log
+            )
+            signature_status_str = signature_status.rich_display(verifying_key_comment)
 
             table.add_row(
                 str(state_log.id),

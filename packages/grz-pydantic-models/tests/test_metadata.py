@@ -1,9 +1,12 @@
 import importlib.resources
 import itertools
 import json
+from contextlib import nullcontext
+from datetime import date
 
 import pytest
-from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata
+from grz_pydantic_models.mii.consent import Consent
+from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata, ResearchConsent
 from pydantic import ValidationError
 
 from . import resources
@@ -66,3 +69,46 @@ def test_file_extensions():
             fileSizeInBytes=0,
             readLength=100,
         )
+
+
+@pytest.mark.parametrize(
+    "case,valid",
+    (
+        ("minimal_consented", True),
+        ("minimal_nonconsented", True),
+        ("minimal_consented_expired", True),
+        ("mii_ig_consent_v2025_example1", True),
+        ("invalid_missing_fields", False),
+    ),
+)
+def test_research_consent_parse(case: str, valid: bool):
+    expectation = nullcontext() if valid else pytest.raises(ValidationError)
+
+    with expectation:
+        Consent.model_validate_json(
+            importlib.resources.files(resources).joinpath("example_research_consent", f"{case}.json").read_text()
+        )
+
+
+@pytest.mark.parametrize(
+    "cases,consenting",
+    (
+        (["minimal_consented"], True),
+        (["minimal_nonconsented"], False),
+        (["minimal_consented_expired"], False),
+        (["mii_ig_consent_v2025_example1"], False),
+        (["minimal_consented", "minimal_nonconsented"], False),
+        (["minimal_consented", "minimal_consented_expired"], True),
+        (["minimal_consented", "mii_ig_consent_v2025_example1"], True),
+        (["minimal_consented_expired", "mii_ig_consent_v2025_example1"], False),
+    ),
+)
+def test_multi_research_consent(cases: list[str], consenting: bool):
+    consents = []
+    for case in cases:
+        consent = Consent.model_validate_json(
+            importlib.resources.files(resources).joinpath("example_research_consent", f"{case}.json").read_text()
+        )
+        consents.append(ResearchConsent(schemaVersion="2025.0.1", scope=consent))
+
+    assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting

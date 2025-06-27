@@ -1,3 +1,4 @@
+import functools
 import logging
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -11,6 +12,8 @@ class Author:
         self.private_key_bytes = private_key_bytes
         self.private_key_passphrase = private_key_passphrase
 
+    # cache to avoid asking for passphrase multiple times if needed
+    @functools.cache  # noqa: B019
     def private_key(self) -> Ed25519PrivateKey:
         from functools import partial
         from getpass import getpass
