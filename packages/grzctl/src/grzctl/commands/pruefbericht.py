@@ -73,7 +73,7 @@ def _get_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryTyp
         for library_type in index_patient_submission_library_types
         if library_type in PruefberichtLibraryType
     }
-    if len(index_patient_pruefbericht_library_types) < 1:
+    if not index_patient_pruefbericht_library_types:
         raise ValueError(
             f"Submission contained ONLY library types ({', '.join(index_patient_submission_library_types)}) that cannot be submitted in the Prüfbericht. "
             f"Valid types are {', '.join(PruefberichtLibraryType)}."
