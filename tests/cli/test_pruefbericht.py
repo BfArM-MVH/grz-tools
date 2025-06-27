@@ -288,7 +288,7 @@ def test_invalid_submission_invalid_library_type(
             metadata["donors"][0]["labData"] = metadata["donors"][0]["labData"][:1]
             metadata["submission"]["genomicStudyType"] = "single"
             # set to valid submission library type but invalid pruefbericht library type
-            metadata["donors"][0]["labData"][0]["libraryType"] = "wes_lr"
+            metadata["donors"][0]["labData"][0]["libraryType"] = "other"
 
             metadata_file.seek(0)
             json.dump(metadata, metadata_file)
