@@ -836,6 +836,12 @@ class LabDatum(StrictBaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def ensure_unpaired_long_read_data(self) -> Self:
+        if self.library_type.endswith("_lr") and (self.sequencing_layout == SequencingLayout.paired_end):
+            raise ValueError("Long read libraries can't be paired-end.")
+        return self
+
 
 class Donor(StrictBaseModel):
     donor_pseudonym: str
