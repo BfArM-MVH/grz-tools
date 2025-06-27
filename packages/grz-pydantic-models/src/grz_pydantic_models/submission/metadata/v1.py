@@ -7,7 +7,7 @@ from datetime import date
 from enum import StrEnum
 from importlib.resources import files
 from itertools import groupby
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Self
 
 from pydantic import (
@@ -534,7 +534,7 @@ class ReadOrder(StrEnum):
 
 
 def _path_is_relative_and_normalized(path_str: str) -> str:
-    path = Path(path_str)
+    path = PurePosixPath(path_str)
     if path.is_absolute():
         raise ValueError(
             "File paths must be relative to files/ under the submission root, "
