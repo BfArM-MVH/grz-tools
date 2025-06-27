@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any, Self
 
 from pydantic import (
+    AfterValidator,
     ConfigDict,
     Field,
     StringConstraints,
@@ -532,8 +533,23 @@ class ReadOrder(StrEnum):
     r2 = "R2"
 
 
+def _path_is_relative_and_normalized(path_str: str) -> str:
+    path = Path(path_str)
+    if path.is_absolute():
+        raise ValueError(
+            "File paths must be relative to files/ under the submission root, "
+            "e.g.: patient_001/patient_001_dna.fastq.gz; "
+            "symlinks are allowed."
+        )
+    # pathlib.Path does not normalize '..' so we must explicitly check
+    if (".." in path.parts) or (str(path) != path_str):
+        raise ValueError("File paths must be normalized. '..' or '.' in paths is not allowed.")
+
+    return path_str
+
+
 class File(StrictBaseModel):
-    file_path: str
+    file_path: Annotated[str, AfterValidator(_path_is_relative_and_normalized)]
     """
     Path relative to files/ under the submission root, for example 'patient_001/patient_001_dna.bam'
     for a submission layout similar to:
@@ -608,17 +624,6 @@ class File(StrictBaseModel):
                     raise ValueError(
                         "FASTQ files must have no spaces in the file name and have a .fastq.gz or .fq.gz extension"
                     )
-        return self
-
-    @model_validator(mode="after")
-    def ensure_file_paths_are_relative(self):
-        file_path = Path(self.file_path)
-        if file_path.is_absolute():
-            raise ValueError(
-                "File paths must be relative to files/ under the submission root, "
-                "e.g.: patient_001/patient_001_dna.fastq.gz; "
-                "symlinks are allowed."
-            )
         return self
 
     def encrypted_file_path(self):
