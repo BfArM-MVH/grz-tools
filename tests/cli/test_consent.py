@@ -26,8 +26,5 @@ def test_consent_submission(working_dir_path):
     testargs += ["--json", "--details"]
     result = runner.invoke(cli, testargs, catch_exceptions=False)
     assert result.stdout.strip() == (
-        "{"
-        '"aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000": true, '
-        '"bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111": true'
-        "}"
+        '{"index": true, "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111": true}'
     )
