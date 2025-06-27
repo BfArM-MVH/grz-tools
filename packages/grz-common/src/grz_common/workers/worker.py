@@ -207,7 +207,7 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        upload_worker.upload(encrypted_submission, with_logs=True)
+        upload_worker.archive(encrypted_submission)
 
     def download(self, s3_options: S3Options, submission_id: str, force: bool = False):
         """
