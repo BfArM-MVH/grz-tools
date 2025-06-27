@@ -736,8 +736,15 @@ class LabDatum(StrictBaseModel):
     Sequence data generated from the wet lab experiment.
     """
 
-    def has_sequence_data(self) -> bool:
-        return self.sequence_data is not None
+    @model_validator(mode="after")
+    def ensure_sequence_data_is_not_empty(self) -> Self:
+        if not self.sequence_data:
+            raise ValueError(
+                f"No sequence data for '{self.lab_data_name}'. "
+                "If this truly is a submission without sequence data, "
+                "only submission of relevant data to a clinical data node / KDK is necessary."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_sequencing_setup(self) -> Self:
