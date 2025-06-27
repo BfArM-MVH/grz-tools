@@ -75,7 +75,7 @@ def _get_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryTyp
     }
     if len(index_patient_pruefbericht_library_types) < 1:
         raise ValueError(
-            f"Submission contained ONLY library types ({', '.join(index_patient_submission_library_types - index_patient_pruefbericht_library_types)}) that cannot be submitted in the Prüfbericht. "
+            f"Submission contained ONLY library types ({', '.join(index_patient_submission_library_types)}) that cannot be submitted in the Prüfbericht. "
             f"Valid types are {', '.join(PruefberichtLibraryType)}."
         )
     # enums sort by their definition order
