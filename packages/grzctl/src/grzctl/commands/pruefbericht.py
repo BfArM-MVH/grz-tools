@@ -10,12 +10,11 @@ import requests
 import rich
 from grz_common.cli import config_file, output_json, submission_dir
 from grz_common.workers.submission import Submission
-from grz_pydantic_models.pruefbericht import LibraryType, Pruefbericht, SubmittedCase
+from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
+from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
 from grz_pydantic_models.submission.metadata.v1 import (
-    GenomicStudySubtype,
     GrzSubmissionMetadata,
     Relation,
-    SequenceSubtype,
 )
 from pydantic_core import to_jsonable_python
 
@@ -63,44 +62,26 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
         response.raise_for_status()
 
 
-def _get_library_type(metadata: GrzSubmissionMetadata) -> LibraryType:
-    index_patients = [donor for donor in metadata.donors if donor.relation == Relation.index_]
-    if len(index_patients) != 1:
-        # TODO handle in grz-pydantic-model validation?
-        raise ValueError("Multiple index patients in one submission")
-    index_patient = index_patients[0]
+def _get_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryType:
+    # pydantic model ensures one and only one index patient
+    index_patient = next(donor for donor in metadata.donors if donor.relation == Relation.index_)
 
-    # assume somatic is tumor in context of genomDE
-    data_tumor = filter(lambda datum: datum.sequence_subtype == SequenceSubtype.somatic, index_patient.lab_data)
-    data_germline = filter(lambda datum: datum.sequence_subtype == SequenceSubtype.germline, index_patient.lab_data)
+    index_patient_submission_library_types = {str(datum.library_type) for datum in index_patient.lab_data}
 
-    unique_tumor_library_types = {datum.library_type for datum in data_tumor}
-    if len(unique_tumor_library_types) > 1:
-        raise ValueError("Multiple different library types detected for tumor data")
+    index_patient_pruefbericht_library_types = {
+        str(PruefberichtLibraryType(library_type))
+        for library_type in index_patient_submission_library_types
+        if library_type in PruefberichtLibraryType
+    }
+    if len(index_patient_pruefbericht_library_types) < 1:
+        raise ValueError(
+            f"Submission contained ONLY library types ({', '.join(index_patient_submission_library_types - index_patient_pruefbericht_library_types)}) that cannot be submitted in the Prüfbericht. "
+            f"Valid types are {', '.join(PruefberichtLibraryType)}."
+        )
+    # enums sort by their definition order
+    most_expensive_library_type = sorted(index_patient_pruefbericht_library_types)[-1]
 
-    unique_germline_library_types = {datum.library_type for datum in data_germline}
-    if len(unique_germline_library_types) > 1:
-        raise ValueError("Multiple different library types detected for germline data")
-
-    match metadata.submission.genomic_study_subtype:
-        case GenomicStudySubtype.tumor_only:
-            if not unique_tumor_library_types:
-                raise ValueError("No somatic library types detected in tumor submission")
-            library_type = LibraryType(str(next(iter(unique_tumor_library_types))))
-        case GenomicStudySubtype.germline_only:
-            if not unique_germline_library_types:
-                raise ValueError("No germline library types detected in germline submission")
-            library_type = LibraryType(str(next(iter(unique_germline_library_types))))
-        case GenomicStudySubtype.tumor_germline:
-            unique_library_types = unique_tumor_library_types | unique_germline_library_types
-            if len(unique_library_types) != 1:
-                # TODO: is there a better solution to this?
-                raise ValueError("None or multiple different library types detected for tumor+germline sample")
-            library_type = LibraryType(str(next(iter(unique_library_types))))
-        case _:
-            raise ValueError(f"Unknown genomic study subtype: {metadata.submission.genomic_study_subtype}")
-
-    return library_type
+    return PruefberichtLibraryType(most_expensive_library_type)
 
 
 @click.command()

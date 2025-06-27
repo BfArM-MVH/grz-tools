@@ -5,6 +5,7 @@ Tests for the Prüfbericht submission functionality.
 import datetime
 import importlib.resources
 import json
+import shutil
 
 import click.testing
 import grzctl.cli
@@ -46,6 +47,7 @@ def bfarm_auth_api(requests_mock):
 @pytest.fixture
 def bfarm_submit_api(requests_mock):
     """Fakes the Prüfbericht submission endpoint."""
+    # valid submission + valid token
     requests_mock.post(
         "https://bfarm.localhost/api/upload",
         match=[
@@ -68,6 +70,32 @@ def bfarm_submit_api(requests_mock):
             ),
         ],
     )
+
+    # valid submission with multiple library types + valid token
+    requests_mock.post(
+        "https://bfarm.localhost/api/upload",
+        match=[
+            responses.matchers.header_matcher({"Authorization": "bearer my_token"}),
+            responses.matchers.json_params_matcher(
+                {
+                    "SubmittedCase": {
+                        "submissionDate": "2024-07-15",
+                        "submissionType": "initial",
+                        "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000001",
+                        "submitterId": "260914050",
+                        "dataNodeId": "GRZK00007",
+                        "diseaseType": "oncological",
+                        "dataCategory": "genomic",
+                        "libraryType": "wgs",
+                        "coverageType": "GKV",
+                        "dataQualityCheckPassed": True,
+                    }
+                }
+            ),
+        ],
+    )
+
+    # valid submission + expired token
     requests_mock.post(
         "https://bfarm.localhost/api/upload",
         match=[
@@ -201,3 +229,87 @@ def test_valid_submission_with_expired_token(bfarm_auth_api, bfarm_submit_api, t
         result = runner.invoke(cli, args, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
+
+
+def test_valid_submission_multiple_library_types(
+    bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path
+):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        # create and modify a temporary copy of the metadata JSON
+        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
+            metadata = json.load(metadata_file)
+
+            # use to differentiate from standard valid submission mock
+            metadata["submission"]["tanG"] = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000001"
+            # set only ONE libary type to WGS
+            # should sort higher than the other WES data and therefore WGS is sent in Pruefbericht
+            metadata["donors"][0]["labData"][0]["libraryType"] = "wgs"
+
+            metadata_file.seek(0)
+            json.dump(metadata, metadata_file)
+            metadata_file.truncate()
+
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_pruefbericht_config_file_path,
+            "--submission-dir",
+            str(tmp_path),
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grzctl.cli.build_cli()
+        result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+
+
+def test_invalid_submission_invalid_library_type(
+    bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path
+):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        # create and modify a temporary copy of the metadata JSON
+        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
+            metadata = json.load(metadata_file)
+
+            # remove other donors/lab data
+            metadata["donors"] = metadata["donors"][:1]
+            metadata["donors"][0]["labData"] = metadata["donors"][0]["labData"][:1]
+            metadata["submission"]["genomicStudyType"] = "single"
+            # set to valid submission library type but invalid pruefbericht library type
+            metadata["donors"][0]["labData"][0]["libraryType"] = "wes_lr"
+
+            metadata_file.seek(0)
+            json.dump(metadata, metadata_file)
+            metadata_file.truncate()
+
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_pruefbericht_config_file_path,
+            "--submission-dir",
+            str(tmp_path),
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grzctl.cli.build_cli()
+        with pytest.raises(ValueError, match="cannot be submitted in the Prüfbericht"):
+            runner.invoke(cli, args, catch_exceptions=False)
