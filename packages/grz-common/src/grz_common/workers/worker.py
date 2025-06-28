@@ -6,6 +6,7 @@ import logging
 from os import PathLike
 from pathlib import Path
 
+from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
@@ -86,17 +87,18 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, force=False):
+    def validate(self, identifiers: IdentifiersModel, force=False):
         """
         Validate this submission
 
+        :param identifiers: IdentifiersModel containing GRZ and LE identifiers.
         :param force: Force validation of already validated files
         :raises SubmissionValidationError: if the validation fails
         """
         submission = self.parse_submission()
 
         self.__log.info("Starting metadata validation...")
-        if errors := list(submission.metadata.validate()):
+        if errors := list(submission.metadata.validate(identifiers)):
             error_msg = "\n".join(["Metadata validation failed! Errors:", *errors])
             self.__log.error(error_msg)
 

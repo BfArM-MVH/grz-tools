@@ -13,10 +13,10 @@ metadata_no_target_regions = "tests/mock_files/metadata_validation/missing-targe
 metadata_incompatible_reference_genomes = "tests/mock_files/metadata_validation/incompatible-reference-genomes.json"
 
 
-def test_submission_metadata(temp_metadata_file_path):
+def test_submission_metadata(temp_metadata_file_path, identifiers_config_model):
     submission_metadata = SubmissionMetadata(temp_metadata_file_path)
 
-    errors = list(submission_metadata.validate())
+    errors = list(submission_metadata.validate(identifiers_config_model.identifiers))
     assert errors == []
 
     assert len(submission_metadata.files) > 0
