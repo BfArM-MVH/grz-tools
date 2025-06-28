@@ -22,6 +22,7 @@ from grz_pydantic_models.submission.metadata.v1 import (
 )
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
+from tqdm.auto import tqdm
 
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
@@ -345,69 +346,82 @@ class Submission:
                 validation_passed=validation_passed,
             )
 
-        for fastq_file in fastq_files:
-            logged_state = progress_logger.get_state(
-                self.files_dir / fastq_file.file_path,
-                fastq_file,
-                default=validate_file,  # validate the file if the state was not calculated yet
-            )
-            if logged_state:
-                yield from logged_state["errors"]
+        total_bytes = sum(map(lambda f: f.file_size_in_bytes, fastq_files))
+        with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Processing single-end FASTQ files") as pbar:
+            for fastq_file in fastq_files:
+                pbar.set_description(f"Validating {fastq_file.file_path}")
+                logged_state = progress_logger.get_state(
+                    self.files_dir / fastq_file.file_path,
+                    fastq_file,
+                    default=validate_file,  # validate the file if the state was not calculated yet
+                )
+                if logged_state:
+                    yield from logged_state["errors"]
+                pbar.update(fastq_file.file_size_in_bytes)
 
     def _validate_paired_end(
         self,
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
     ) -> Generator[str, None, None]:
-        key = lambda f: (f.flowcell_id, f.lane_id)
-        fastq_files.sort(key=key)
-        for _key, group in groupby(fastq_files, key):
-            files = list(group)
+        total_bytes = sum(f.file_size_in_bytes for f in fastq_files)
 
-            # separate R1 and R2 files
-            fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
-            fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
+        with tqdm(
+            total=total_bytes, unit="B", unit_scale=True, unit_divisor=1024, desc="Validating paired-end reads"
+        ) as pbar:
+            key = lambda f: (f.flowcell_id, f.lane_id)
+            fastq_files.sort(key=key)
+            for _key, group in groupby(fastq_files, key):
+                files = list(group)
 
-            for fastq_r1, fastq_r2 in zip(fastq_r1_files, fastq_r2_files, strict=True):
-                local_fastq_r1_path = self.files_dir / fastq_r1.file_path
-                local_fastq_r2_path = self.files_dir / fastq_r2.file_path
+                # separate R1 and R2 files
+                fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
+                fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
 
-                # get saved state
-                logged_state_r1 = progress_logger.get_state(
-                    local_fastq_r1_path,
-                    fastq_r1,
-                )
-                logged_state_r2 = progress_logger.get_state(
-                    local_fastq_r2_path,
-                    fastq_r2,
-                )
-                if logged_state_r1 is None or logged_state_r2 is None or logged_state_r1 != logged_state_r2:
-                    # calculate state
-                    errors = list(
-                        validate_paired_end_reads(
-                            local_fastq_r1_path,  # fastq R1
-                            local_fastq_r2_path,  # fastq R2
-                            expected_read_length=fastq_r1.read_length,  # fastq R1 and R2 should have the same read length
+                for fastq_r1, fastq_r2 in zip(fastq_r1_files, fastq_r2_files, strict=True):
+                    pbar.set_description(f"Validating {fastq_r1.file_path}")
+
+                    local_fastq_r1_path = self.files_dir / fastq_r1.file_path
+                    local_fastq_r2_path = self.files_dir / fastq_r2.file_path
+
+                    # get saved state
+                    logged_state_r1 = progress_logger.get_state(
+                        local_fastq_r1_path,
+                        fastq_r1,
+                    )
+                    logged_state_r2 = progress_logger.get_state(
+                        local_fastq_r2_path,
+                        fastq_r2,
+                    )
+                    if logged_state_r1 is None or logged_state_r2 is None or logged_state_r1 != logged_state_r2:
+                        # calculate state
+                        errors = list(
+                            validate_paired_end_reads(
+                                local_fastq_r1_path,  # fastq R1
+                                local_fastq_r2_path,  # fastq R2
+                                expected_read_length=fastq_r1.read_length,  # fastq R1 and R2 should have the same read length
+                            )
                         )
-                    )
-                    validation_passed = len(errors) == 0
+                        validation_passed = len(errors) == 0
 
-                    state = ValidationState(
-                        errors=errors,
-                        validation_passed=validation_passed,
-                    )
-                    # update state for both files
-                    progress_logger.set_state(  # fastq R1
-                        local_fastq_r1_path, fastq_r1, state
-                    )
-                    progress_logger.set_state(  # fastq R2
-                        local_fastq_r2_path, fastq_r2, state
-                    )
+                        state = ValidationState(
+                            errors=errors,
+                            validation_passed=validation_passed,
+                        )
+                        # update state for both files
+                        progress_logger.set_state(  # fastq R1
+                            local_fastq_r1_path, fastq_r1, state
+                        )
+                        progress_logger.set_state(  # fastq R2
+                            local_fastq_r2_path, fastq_r2, state
+                        )
 
-                    yield from state["errors"]
-                else:
-                    # both fastq states are equal, so simply yield one of them
-                    yield from logged_state_r1["errors"]
+                        yield from state["errors"]
+                    else:
+                        # both fastq states are equal, so simply yield one of them
+                        yield from logged_state_r1["errors"]
+
+                    pbar.update(fastq_r1.file_size_in_bytes + fastq_r2.file_size_in_bytes)
 
     def encrypt(
         self,
