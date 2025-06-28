@@ -71,6 +71,6 @@ def test_validate_submission_incorrect_grz_id(
     result = runner.invoke(cli, testargs, catch_exceptions=True)
     exc_type, exc, *_ = result.exc_info
     assert exc_type == SubmissionValidationError
-    assert "does not match genomic data center Id" in str(exc)
+    assert "does not match genomic data center identifier" in str(exc)
 
     assert result.exit_code == 1, result.output
