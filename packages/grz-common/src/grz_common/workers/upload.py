@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import abc
+import json
 import logging
 import math
 import re
+import shutil
 from os import PathLike
 from os.path import getsize
 from pathlib import Path
@@ -44,7 +46,7 @@ class UploadWorker(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def upload(self, encrypted_submission: EncryptedSubmission):
         """
-        Upload an encrypted submission
+        Upload an encrypted submission to a GRZ inbox
 
         :param encrypted_submission: The encrypted submission to upload
         :raises UploadError: when the upload failed
@@ -57,6 +59,16 @@ class UploadWorker(metaclass=abc.ABCMeta):
         Upload a single file to the specified object ID
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
+        """
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def archive(self, encrypted_submission: EncryptedSubmission):
+        """
+        Archive an encrypted submission within a GRZ
+
+        :param encrypted_submission: The encrypted submission to archive
+        :raises UploadError: when archival failed
         """
         raise NotImplementedError()
 
@@ -142,30 +154,7 @@ class S3BotoUploadWorker(UploadWorker):
 
         return exists
 
-    @override
-    def upload(self, encrypted_submission: EncryptedSubmission, with_logs: bool = False):  # noqa: C901,PLR0912
-        """
-        Upload an encrypted submission
-        :param encrypted_submission: The encrypted submission to upload
-        """
-        progress_logger = FileProgressLogger[UploadState](self._status_file_path)
-        metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
-
-        if self._remote_id_exists(metadata_s3_object_id):
-            raise UploadError("Submission already uploaded. Corrections, additions, and followups require a new tanG.")
-
-        files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
-        files_to_upload[metadata_file_path] = metadata_s3_object_id
-
-        if with_logs:
-            log_file_to_object_id = encrypted_submission.get_log_files_and_object_id()
-            overlapping_files = files_to_upload.keys() & log_file_to_object_id.keys()
-            if overlapping_files:
-                raise ValueError(
-                    f"Conflict in files specified for upload: {overlapping_files}. This is a bug. Please report this upstream."
-                )
-            files_to_upload.update(log_file_to_object_id)
-
+    def _upload_logged_files(self, encrypted_submission, progress_logger, files_to_upload):
         for file_path in files_to_upload:
             if not Path(file_path).exists():
                 raise UploadError(f"File {file_path} does not exist")
@@ -209,23 +198,89 @@ class S3BotoUploadWorker(UploadWorker):
                     str(s3_object_id),
                 )
 
-        if with_logs:
-            # do not track upload state, instead just reupload in case of a failure
-            for file_path, s3_object_id in encrypted_submission.get_log_files_and_object_id().items():
-                try:
-                    self.upload_file(file_path, s3_object_id)
-                    self.__log.info(f"Upload complete for {str(file_path)}.")
-                except Exception as e:
-                    self.__log.error("Upload failed for '%s'", str(file_path))
-                    raise e
-
-        # finally upload the metadata.json file, unconditionally:
+    def _upload_metadata(self, metadata_file_path, metadata_s3_object_id):
+        # upload metadata unconditionally
         try:
             self.upload_file(metadata_file_path, metadata_s3_object_id)
             self.__log.info(f"Upload complete for {str(metadata_file_path)}. ")
         except Exception as e:
             self.__log.error("Upload failed for '%s'", str(metadata_file_path))
             raise e
+
+    @override
+    def upload(self, encrypted_submission: EncryptedSubmission):
+        """
+        Upload an encrypted submission
+        :param encrypted_submission: The encrypted submission to upload
+        """
+        progress_logger = FileProgressLogger[UploadState](self._status_file_path)
+        metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+
+        if self._remote_id_exists(metadata_s3_object_id):
+            raise UploadError("Submission already uploaded. Corrections, additions, and followups require a new tanG.")
+
+        files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
+        files_to_upload[metadata_file_path] = metadata_s3_object_id
+
+        self._upload_logged_files(encrypted_submission, progress_logger, files_to_upload)
+
+        self._upload_metadata(metadata_file_path, metadata_s3_object_id)
+
+    @override
+    def archive(self, encrypted_submission: EncryptedSubmission):
+        """
+        Archive an encrypted submission
+        :param encrypted_submission: The encrypted submission to upload
+        """
+        progress_logger = FileProgressLogger[UploadState](self._status_file_path)
+        metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+
+        if self._remote_id_exists(metadata_s3_object_id):
+            raise UploadError("Submission already archived.")
+
+        files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
+        files_to_upload[metadata_file_path] = metadata_s3_object_id
+
+        log_file_to_object_id = encrypted_submission.get_log_files_and_object_id()
+        overlapping_files = files_to_upload.keys() & log_file_to_object_id.keys()
+        if overlapping_files:
+            raise ValueError(
+                f"Conflict in files specified for archive: {overlapping_files}. This is a bug. Please report this to the developers."
+            )
+        files_to_upload.update(log_file_to_object_id)
+
+        self._upload_logged_files(encrypted_submission, progress_logger, files_to_upload)
+
+        # do not track upload state for logs, instead just reupload in case of a failure
+        for file_path, s3_object_id in encrypted_submission.get_log_files_and_object_id().items():
+            try:
+                self.upload_file(file_path, s3_object_id)
+                self.__log.info(f"Upload complete for {str(file_path)}.")
+            except Exception as e:
+                self.__log.error("Upload failed for '%s'", str(file_path))
+                raise e
+
+        # make a back up copy of metadata before editing
+        shutil.copy(metadata_file_path, metadata_file_path.with_suffix(".orig.json"))
+
+        with open(metadata_file_path, mode="r+") as metadata_file:
+            metadata = json.load(metadata_file)
+            # redact tanG as all zeros
+            metadata["submission"]["tanG"] = "".join(["0"] * 64)
+
+            # redact local case ID
+            metadata["submission"]["localCaseId"] = ""
+
+            for donor in metadata["donors"]:
+                if donor["relation"] == "index":
+                    # redact index donorPseudonym (which can be the tanG)
+                    donor["donorPseudonym"] = "index"
+
+            metadata_file.seek(0)
+            json.dump(metadata, metadata_file, indent=2)
+            metadata_file.truncate()
+
+        self._upload_metadata(metadata_file_path, metadata_s3_object_id)
 
     def _check_for_completed_submission(self, s3_object_id: str) -> bool:
         try:
