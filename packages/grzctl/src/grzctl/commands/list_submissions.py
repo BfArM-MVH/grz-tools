@@ -53,7 +53,7 @@ def list_submissions(config_file, output_json, show_cleaned):
                     status_text = rich.text.Text("Unknown", style="red")
             table.add_row(
                 submission.submission_id,
-                rich.text.Text(status_text),
+                status_text,
                 submission.oldest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
                 submission.newest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
             )
