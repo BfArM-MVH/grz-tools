@@ -35,6 +35,34 @@ def test_encrypt_submission(
     assert result.exit_code == 0, result.output
 
 
+def test_encrypt_submission_protect_overwrite(
+    working_dir_path,
+    temp_keys_config_file_path,
+    tmpdir_factory: pytest.TempdirFactory,
+):
+    submission_dir = Path("tests/mock_files/submissions/valid_submission")
+
+    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+
+    # create a file we know is the target path of an encrypted file
+    (working_dir_path / "encrypted_files").mkdir()
+    (working_dir_path / "encrypted_files/target_regions.bed.c4gh").touch()
+
+    testargs = [
+        "encrypt",
+        "--submission-dir",
+        str(working_dir_path),
+        "--config-file",
+        temp_keys_config_file_path,
+    ]
+
+    runner = CliRunner()
+    cli = grz_cli.cli.build_cli()
+    with pytest.raises(RuntimeError, match="target_regions.bed.c4gh already exists"):
+        runner.invoke(cli, testargs, catch_exceptions=False)
+
+
 def test_decrypt_submission(working_dir_path, temp_keys_config_file_path):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
