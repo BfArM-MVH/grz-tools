@@ -129,8 +129,8 @@ class SubmissionMetadata:
 
         if (specified_le_id := self.content.submission.submitter_id) != le_id:
             yield (
-                f"Submitter Id specified in the metadata.json ({specified_le_id}) "
-                f"does not match submitter Id in config ({le_id})"
+                f"Submitter (LE) Id specified in the metadata.json ({specified_le_id}) "
+                f"does not match submitter (LE) Id in config ({le_id})"
             )
 
         submission_files: dict[str | PathLike, SubmissionFileMetadata] = {}
