@@ -11,6 +11,7 @@ from io import RawIOBase
 from os import PathLike
 from typing import TextIO
 
+import pysam
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_SMOOTHING
@@ -75,24 +76,32 @@ def calculate_fastq_stats(file_path, expected_read_length: int | None = None) ->
       - Number of lines in the file
       - Observed read length
     """
-    with open_fastq(file_path) as f:
-        for line_number, line in enumerate(f):
-            if (line_number % 4) == 1:
-                # Sequence lines are every 4th line starting from the 2nd
-                # Check if the read length is consistent
-                read_length = len(line.strip())
-                if expected_read_length is None:
-                    expected_read_length = read_length
-                elif read_length != expected_read_length:
-                    raise ValueError(
-                        f"Read length mismatch at line {line_number + 1}: "
-                        f"expected {expected_read_length}, found {read_length}"
-                    )
+    with pysam.FastxFile(file_path) as f:
+        for record_number, entry in enumerate(f):
+            seq = entry.sequence
+            if not seq:
+                raise ValueError(f"FASTQ record {record_number + 1} has no sequence.")
+            read_length = len(seq)
 
-    return (
-        line_number + 1,  # enumerate starts indexing at 0
-        expected_read_length,
-    )
+            qual = entry.quality
+            if not qual:
+                raise ValueError(f"FASTQ record {record_number + 1} has no quality.")
+            quality_length = len(qual)
+
+            if read_length != quality_length:
+                raise ValueError(
+                    "Read length does not match quality length: "
+                    f"{read_length} != {quality_length} in record {record_number + 1}."
+                )
+            if expected_read_length is None:
+                expected_read_length = read_length
+            elif read_length != expected_read_length:
+                raise ValueError(
+                    f"Read length mismatch in record {record_number + 1}: "
+                    f"expected {expected_read_length}, found {read_length}"
+                )
+
+    return record_number + 1, expected_read_length
 
 
 def validate_fastq_file(
@@ -104,7 +113,7 @@ def validate_fastq_file(
     :param fastq_file: Path to the fastq file
     :param expected_read_length: Expected read length (None if not known)
     :return: Tuple with the following fields:
-      - number of lines
+      - number of records
       - set of observed read lengths
       - list of errors found
     """
@@ -113,19 +122,13 @@ def validate_fastq_file(
         if expected_read_length is not None:
             log.debug("%s: expecting read length of %s", fastq_file, expected_read_length)
 
-        # Calculate the number of lines and read lengths
-        num_lines, read_length = calculate_fastq_stats(fastq_file, expected_read_length=expected_read_length)
+        # Calculate the number of records and read lengths
+        num_records, read_length = calculate_fastq_stats(fastq_file, expected_read_length=expected_read_length)
     except ValueError as e:
         errors.append(f"{fastq_file}: {e}")
         return -1, -1, errors
 
-    # Check if the number of lines in a FASTQ file is a multiple of 4.
-    if num_lines % 4 != 0:
-        errors.append(f"{fastq_file}: Number of lines is not a multiple of 4! Found {num_lines} lines.")
-    else:
-        log.debug("%s: %s lines", fastq_file, num_lines)
-
-    return num_lines, read_length, errors
+    return num_records, read_length, errors
 
 
 def validate_single_end_reads(fastq_file: str | PathLike, expected_read_length: int | None = None) -> Generator[str]:
@@ -153,14 +156,14 @@ def validate_paired_end_reads(
     :param expected_read_length: Expected read length (None if not known)
     :return: Generator of errors, if any.
     """
-    num_lines_file1, read_lengths_file1, errors_file1 = validate_fastq_file(
+    num_records_file1, read_lengths_file1, errors_file1 = validate_fastq_file(
         fastq_file1, expected_read_length=expected_read_length
     )
     yield from errors_file1
-    num_lines_file2, read_lengths_file2, errors_file2 = validate_fastq_file(
+    num_records_file2, read_lengths_file2, errors_file2 = validate_fastq_file(
         fastq_file2, expected_read_length=expected_read_length
     )
     yield from errors_file2
 
-    if num_lines_file1 != num_lines_file2:
-        yield f"Paired-end files have different read counts: '{fastq_file1}' ({num_lines_file1}) and '{fastq_file2}' ({num_lines_file2})!"
+    if num_records_file1 != num_records_file2:
+        yield f"Paired-end files have different read counts: '{fastq_file1}' ({num_records_file1}) and '{fastq_file2}' ({num_records_file2})!"

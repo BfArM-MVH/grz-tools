@@ -6,11 +6,11 @@ from grz_common.validation.fastq import (
 )
 
 
-# Test case 1: Single end, line count not multiple of 4
-def test_single_end_line_count_not_multiple_of_4():
+# Test case 1: Single end, FASTQ file missing last quality line
+def test_single_end_line_count_incomplete_record():
     errors = list(validate_single_end_reads("tests/mock_files/fastq_files_1000/single_end_failing.line_count.fastq.gz"))
     assert len(errors) == 1
-    assert "Number of lines is not a multiple of 4" in errors[0]
+    assert "has no quality" in errors[0]
 
 
 # Test case 2: Single end, inconsistent read length
