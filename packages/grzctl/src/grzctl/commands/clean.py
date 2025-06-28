@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 @submission_id
 @config_file
 @click.option("--yes-i-really-mean-it", is_flag=True)
-def clean(submission_id, config_file, yes_i_really_mean_it: bool):
+def clean(submission_id, config_file, yes_i_really_mean_it: bool):  # noqa: C901
     """
     Remove all files of a submission from the S3 inbox.
     """
@@ -36,9 +36,18 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):
 
         resource = init_s3_resource(config.s3)
         bucket = resource.Bucket(bucket_name)
-        log.info(f"Deleting {prefix} from {bucket_name} …")
+        log.info(f"Cleaning '{prefix}' from '{bucket_name}' …")
+        # add a marker at start of cleaning to
+        #  1.) ensure user can upload the "cleaned" marker at the end _before_ we start deleting things
+        #  2.) detect incomplete cleans if needed
+        bucket.put_object(Body=b"", Key=f"{submission_id}/cleaning")
 
-        responses = bucket.objects.filter(Prefix=prefix).delete()
+        # keep metadata.json to prevent future re-uploads
+        keys_to_keep = {f"{submission_id}/metadata/metadata.json", f"{submission_id}/cleaning"}
+        responses = []
+        for obj in bucket.objects.filter(Prefix=prefix):
+            if obj.key not in keys_to_keep:
+                responses.append(obj.delete())
         if not responses:
             sys.exit(f"No objects with prefix '{prefix}' in bucket '{bucket_name}' found for deletion.")
 
@@ -77,4 +86,11 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):
         if errors_encountered:
             sys.exit(f"Errors encountered while deleting objects from bucket '{bucket_name}'. See log for details.")
 
-        log.info(f"Deleted '{prefix}' from '{bucket_name}'.")
+        # redact metadata.json since it contains tanG + localCaseId
+        bucket.put_object(Body=b"", Key=f"{submission_id}/metadata/metadata.json")
+
+        # mark that we've cleaned this submission
+        bucket.put_object(Body=b"", Key=f"{submission_id}/cleaned")
+        bucket.Object(f"{submission_id}/cleaning").delete()
+
+        log.info(f"Cleaned '{prefix}' from '{bucket_name}' …")

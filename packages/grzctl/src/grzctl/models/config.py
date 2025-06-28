@@ -18,7 +18,7 @@ class DecryptConfig(KeyConfigModel):
     pass
 
 
-class CleanConfig(S3ConfigModel, KeyConfigModel):
+class CleanConfig(S3ConfigModel):
     pass
 
 
