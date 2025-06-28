@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 @submission_id
 @config_file
 @click.option("--yes-i-really-mean-it", is_flag=True)
-def clean(submission_id, config_file, yes_i_really_mean_it: bool):  # noqa: C901
+def clean(submission_id, config_file, yes_i_really_mean_it: bool):
     """
     Remove all files of a submission from the S3 inbox.
     """
@@ -44,47 +44,15 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):  # noqa: C901
 
         # keep metadata.json to prevent future re-uploads
         keys_to_keep = {f"{submission_id}/metadata/metadata.json", f"{submission_id}/cleaning"}
-        responses = []
+        num_deleted = 0
         for obj in bucket.objects.filter(Prefix=prefix):
             if obj.key not in keys_to_keep:
-                responses.append(obj.delete())
-        if not responses:
+                _ = obj.delete()
+                num_deleted += 1
+        if not num_deleted:
             sys.exit(f"No objects with prefix '{prefix}' in bucket '{bucket_name}' found for deletion.")
 
-        successfully_deleted_keys = []
-        errors_encountered = []
-        objects_found = 0
-
-        # responses is a list of dicts reporting the result of the deletion API call
-        # because the API does things in batches
-        for response in responses:
-            deleted_batch = response.get("Deleted", [])
-            for deleted_obj in deleted_batch:
-                key = deleted_obj.get("Key")
-                if key:
-                    successfully_deleted_keys.append(key)
-
-            errors_batch = response.get("Errors", [])
-            for error_obj in errors_batch:
-                errors_encountered.append(
-                    {
-                        "Key": error_obj.get("Key", "N/A"),
-                        "Code": error_obj.get("Code", "N/A"),
-                        "Message": error_obj.get("Message", "N/A"),
-                    }
-                )
-
-            objects_found += len(deleted_batch) + len(errors_batch)
-
-        log.info(f"Total objects attempted to delete: {objects_found}")
-        log.info(f"Successfully deleted: {len(successfully_deleted_keys)} objects.")
-        log.info(f"Failed to delete: {len(errors_encountered)} objects.")
-
-        for error in errors_encountered:
-            log.error(f"  - Key: {error['Key']}, Code: {error['Code']}, Message: {error['Message']}")
-
-        if errors_encountered:
-            sys.exit(f"Errors encountered while deleting objects from bucket '{bucket_name}'. See log for details.")
+        log.info(f"Successfully deleted {num_deleted} objects.")
 
         # redact metadata.json since it contains tanG + localCaseId
         bucket.put_object(Body=b"", Key=f"{submission_id}/metadata/metadata.json")
