@@ -23,6 +23,7 @@ from grz_pydantic_models.submission.metadata.v1 import (
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
 
+from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
@@ -108,7 +109,7 @@ class SubmissionMetadata:
         self._files = submission_files
         return self._files
 
-    def validate(self) -> Generator[str]:  # noqa: C901
+    def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """
         Validates this submission's metadata (content).
 
@@ -118,6 +119,19 @@ class SubmissionMetadata:
         accepted_versions = get_accepted_versions()
         if metadata_schema_version not in accepted_versions:
             yield f"Metadata schema version {metadata_schema_version} is outdated. Currently accepting the following versions: {', '.join(accepted_versions)}"
+
+        grz_id, le_id = identifiers.grz, identifiers.le
+        if (specified_grz_id := self.content.submission.genomic_data_center_id) != grz_id:
+            yield (
+                f"Genomic data center Id specified in the metadata.json ({specified_grz_id}) "
+                f"does not match genomic data center Id in config ({grz_id})"
+            )
+
+        if (specified_le_id := self.content.submission.submitter_id) != le_id:
+            yield (
+                f"Submitter Id specified in the metadata.json ({specified_le_id}) "
+                f"does not match submitter Id in config ({le_id})"
+            )
 
         submission_files: dict[str | PathLike, SubmissionFileMetadata] = {}
         for donor in self.content.donors:

@@ -273,6 +273,16 @@ def pruefbericht_config_content():
 
 
 @pytest.fixture
+def identifiers_config_content():
+    return {
+        "identifiers": {
+            "grz": "GRZK00007",
+            "le": "260914050",
+        }
+    }
+
+
+@pytest.fixture
 def s3_config_model(s3_config_content):
     return grz_common.models.s3.S3ConfigModel(**s3_config_content)
 
@@ -285,6 +295,11 @@ def encrypt_config_model(keys_config_content):
 @pytest.fixture
 def db_config_model(db_config_content):
     return grzctl.models.config.DbConfig(**db_config_content)
+
+
+@pytest.fixture
+def identifiers_config_model(identifiers_config_content):
+    return grz_cli.models.config.ValidateConfig(**identifiers_config_content)
 
 
 @pytest.fixture
@@ -313,6 +328,14 @@ def temp_keys_config_file_path(temp_data_dir_path, encrypt_config_model) -> Path
     config_file = temp_data_dir_path / "config.keys.yaml"
     with open(config_file, "w") as fd:
         encrypt_config_model.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_identifiers_config_file_path(temp_data_dir_path, identifiers_config_model) -> Path:
+    config_file = temp_data_dir_path / "config.ids.yaml"
+    with open(config_file, "w") as fd:
+        identifiers_config_model.to_yaml(fd)
     return config_file
 
 
