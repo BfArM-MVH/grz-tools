@@ -39,6 +39,9 @@ def test_submission_metadata_fails():
     with pytest.raises(error_types, match="Incompatible reference genomes found"):
         SubmissionMetadata(metadata_incompatible_reference_genomes)
 
+    with pytest.raises(error_types, match="must have a unique combination of flowcell_id, lane_id, and read_order"):
+        SubmissionMetadata("tests/mock_files/metadata_validation/duplicate-run-id.json")
+
 
 def test_encrypted_submission():
     input_path = "/submission/files/a.fastq"
