@@ -40,17 +40,17 @@ def list_submissions(config_file, output_json, show_cleaned):
         for submission in submissions:
             match submission.state:
                 case InboxSubmissionState.INCOMPLETE:
-                    status_text = "[yellow]Incomplete[/yellow]"
+                    status_text = rich.text.Text("Incomplete", style="yellow")
                 case InboxSubmissionState.COMPLETE:
-                    status_text = "[green]Complete[/green]"
+                    status_text = rich.text.Text("Complete", style="green")
                 case InboxSubmissionState.CLEANING:
-                    status_text = "[yellow]Cleaning[/yellow]"
+                    status_text = rich.text.Text("Cleaning", style="yellow")
                 case InboxSubmissionState.CLEANED:
-                    status_text = "[sky_blue1]Cleaned[/sky_blue1]"
+                    status_text = rich.text.Text("Cleaned", style="sky_blue1")
                 case InboxSubmissionState.ERROR:
-                    status_text = "[red]Error[/red]"
+                    status_text = rich.text.Text("Error", style="red")
                 case _:
-                    status_text = "[red]Unknown[/red]"
+                    status_text = rich.text.Text("Unknown", style="red")
             table.add_row(
                 submission.submission_id,
                 rich.text.Text(status_text),
