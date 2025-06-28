@@ -123,14 +123,14 @@ class SubmissionMetadata:
         expected_grz_id, expected_le_id = identifiers.grz, identifiers.le
         if (submitted_grz_id := self.content.submission.genomic_data_center_id) != expected_grz_id:
             yield (
-                f"Genomic data center Id specified in the metadata.json ({submitted_grz_id}) "
-                f"does not match genomic data center Id in config ({expected_grz_id})"
+                f"Genomic data center identifier specified in the metadata.json ({submitted_grz_id}) "
+                f"does not match genomic data center identifier in config ({expected_grz_id})"
             )
 
         if (submitted_le_id := self.content.submission.submitter_id) != expected_le_id:
             yield (
-                f"Submitter (LE) Id specified in the metadata.json ({submitted_le_id}) "
-                f"does not match submitter (LE) Id in config ({expected_le_id})"
+                f"Submitter (LE) identifier specified in the metadata.json ({submitted_le_id}) "
+                f"does not match submitter (LE) identifier in config ({expected_le_id})"
             )
 
         submission_files: dict[str | PathLike, SubmissionFileMetadata] = {}
