@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import datetime
+import enum
 import itertools
 import logging
 import math
 import re
+from collections import OrderedDict
 from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
@@ -228,16 +230,24 @@ class S3BotoDownloadWorker:
             self.download_file(local_file_path, file_key, progress_logger, file_metadata)
 
 
-class SubmissionInboxState(BaseModel):
+class InboxSubmissionState(enum.StrEnum):
+    INCOMPLETE = "incomplete"
+    COMPLETE = "complete"
+    CLEANING = "cleaning"
+    CLEANED = "cleaned"
+    ERROR = "error"
+
+
+class InboxSubmissionSummary(BaseModel):
     """A summary of the state of a submission in an inbox"""
 
     submission_id: str
-    complete: bool
+    state: InboxSubmissionState
     oldest_upload: datetime.datetime
     newest_upload: datetime.datetime
 
 
-def query_submissions(s3_options: S3Options) -> list[SubmissionInboxState]:
+def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSubmissionSummary]:
     """Queries the state of all submissions in the configured bucket."""
     s3_client = init_s3_client(s3_options)
     paginator = s3_client.get_paginator("list_objects_v2")
@@ -252,16 +262,39 @@ def query_submissions(s3_options: S3Options) -> list[SubmissionInboxState]:
 
     submissions = []
     for submission_id, submission_objects in submission2objects.items():
-        submission_objects_sorted = sorted(submission_objects, key=itemgetter("LastModified"))
-        oldest_object = submission_objects_sorted[0]
-        newest_object = submission_objects_sorted[-1]
-        is_complete = len(list(filter(lambda o: o["Key"].endswith("/metadata.json"), submission_objects))) == 1
-        submission = SubmissionInboxState(
+        submission_objects_sorted = OrderedDict(
+            (o["Key"], o) for o in sorted(submission_objects, key=itemgetter("LastModified"))
+        )
+        oldest_object = submission_objects_sorted[next(iter(submission_objects_sorted))]
+        newest_object = submission_objects_sorted[next(reversed(submission_objects_sorted))]
+
+        cleaning_key = f"{submission_id}/cleaning"
+        cleaned_key = f"{submission_id}/cleaned"
+        if (cleaning_key in submission_objects_sorted) and (cleaned_key in submission_objects_sorted):
+            log.warning("Submission '{submission_id}' is in an incomplete cleaned state!")
+            state = InboxSubmissionState.ERROR
+        elif cleaning_key in submission_objects_sorted:
+            state = InboxSubmissionState.CLEANING
+        elif cleaned_key in submission_objects_sorted:
+            state = InboxSubmissionState.CLEANED
+        else:
+            state = (
+                InboxSubmissionState.COMPLETE
+                if f"{submission_id}/metadata/metadata.json" in submission_objects_sorted
+                else InboxSubmissionState.INCOMPLETE
+            )
+
+        submission = InboxSubmissionSummary(
             submission_id=submission_id,
-            complete=is_complete,
+            state=state,
             oldest_upload=oldest_object["LastModified"],
             newest_upload=newest_object["LastModified"],
         )
+
+        if state in {InboxSubmissionState.CLEANING, InboxSubmissionState.CLEANED} and (not show_cleaned):
+            # skip listing cleaning/cleaned submissions unless show_cleaned is true
+            continue
+
         submissions.append(submission)
 
     return sorted(submissions, key=attrgetter("oldest_upload"))

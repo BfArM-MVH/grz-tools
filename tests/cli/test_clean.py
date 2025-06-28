@@ -3,6 +3,7 @@ Tests for the Prüfbericht submission functionality.
 """
 
 import importlib.resources
+import json
 import shutil
 from unittest import mock
 
@@ -12,7 +13,7 @@ import grzctl
 from .. import mock_files
 
 
-def test_clean(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_path):
+def test_clean_and_list(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
@@ -60,3 +61,13 @@ def test_clean(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_pa
         assert f"{submission_id}/cleaning" not in uploaded_keys
         # ensure metadata is empty
         assert remote_bucket.Object(f"{submission_id}/metadata/metadata.json").content_length == 0
+
+        list_args = ["list", "--config-file", temp_s3_config_file_path, "--json", "--show-cleaned"]
+
+        result_list = runner.invoke(cli, list_args, catch_exceptions=False)
+
+        assert result_list.exit_code == 0, result_list.output
+
+        listed_submissions = json.loads(result_list.stdout.strip())
+        assert len(listed_submissions) == 1
+        assert listed_submissions[0]["state"] == "cleaned"
