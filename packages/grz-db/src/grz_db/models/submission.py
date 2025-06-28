@@ -304,7 +304,7 @@ class SubmissionDb:
             except IntegrityError as e:
                 session.rollback()
                 if "UNIQUE constraint failed: submissions.tanG" in str(e) and key == "tan_g":
-                    raise DuplicateTanGError(value) from e
+                    raise DuplicateTanGError() from e
                 raise
             except Exception:
                 session.rollback()
