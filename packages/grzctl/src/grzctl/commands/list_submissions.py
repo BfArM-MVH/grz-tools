@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 @click.command()
 @config_file
 @output_json
-@click.option("--show-cleaned/--hide-cleaned")
+@click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
 def list_submissions(config_file, output_json, show_cleaned):
     """
     List submissions within an inbox from oldest to newest.
