@@ -61,4 +61,4 @@ def clean(submission_id, config_file, yes_i_really_mean_it: bool):
         bucket.put_object(Body=b"", Key=f"{submission_id}/cleaned")
         bucket.Object(f"{submission_id}/cleaning").delete()
 
-        log.info(f"Cleaned '{prefix}' from '{bucket_name}' …")
+        log.info(f"Cleaned '{prefix}' from '{bucket_name}'.")
