@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import itertools
 import json
 import logging
 import re
@@ -845,7 +844,7 @@ class LabDatum(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_sequencing_file_exists(self):  # noqa: C901, PLR0912
+    def validate_sequencing_file_exists(self):  # noqa: C901
         """
         Check if there is a FASTQ or BAM file (depending on library type)
         """
@@ -876,9 +875,7 @@ class LabDatum(StrictBaseModel):
 
             key = lambda f: (f.flowcell_id, f.lane_id)
             fastq_files.sort(key=key)
-            for _key, group in groupby(fastq_files, key):
-                flowcell_id = _key[0]
-                lane_id = _key[1]
+            for (flowcell_id, lane_id), group in groupby(fastq_files, key):
                 files = list(group)
 
                 # separate R1 and R2 files
@@ -886,26 +883,10 @@ class LabDatum(StrictBaseModel):
                 fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
 
                 # check that there are exactly one R1 and on R2 file present
-                if len(fastq_r1_files) > 1:
+                if (len(fastq_r1_files) != 1) or (len(fastq_r2_files) != 1):
                     raise ValueError(
                         f"Error in lab datum '{self.lab_data_name}': "
-                        f"Paired end sequencing layout but multiple R1 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
-                    )
-                elif len(fastq_r1_files) < 1:
-                    raise ValueError(
-                        f"Error in lab datum '{self.lab_data_name}': "
-                        f"Paired end sequencing layout but missing R1 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
-                    )
-
-                if len(fastq_r2_files) > 1:
-                    raise ValueError(
-                        f"Error in lab datum '{self.lab_data_name}': "
-                        f"Paired end sequencing layout but multiple R2 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
-                    )
-                elif len(fastq_r2_files) < 1:
-                    raise ValueError(
-                        f"Error in lab datum '{self.lab_data_name}': "
-                        f"Paired end sequencing layout but missing R2 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
+                        f"Paired end sequencing layout but not there is not exactly one R1 and one R2 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
                     )
 
         return self
@@ -917,7 +898,7 @@ class LabDatum(StrictBaseModel):
 
         read_files = filter(lambda f: f.file_type in {FileType.fastq, FileType.bam}, self.sequence_data.files)
         read_files_sorted = sorted(read_files, key=attrgetter("flowcell_id", "lane_id", "read_order"))
-        for (flowcell_id, lane_id, read_order), group in itertools.groupby(
+        for (flowcell_id, lane_id, read_order), group in groupby(
             read_files_sorted, key=attrgetter("flowcell_id", "lane_id", "read_order")
         ):
             group_t = tuple(group)

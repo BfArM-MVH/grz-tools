@@ -33,7 +33,9 @@ def test_submission_metadata_fails():
     with pytest.raises(error_types, match="VCF file missing for lab datum"):
         SubmissionMetadata(metadata_missing_vcf_file)
 
-    with pytest.raises(error_types, match="Paired end sequencing layout but missing R2 file for flowcell id"):
+    with pytest.raises(
+        error_types, match="Paired end sequencing layout but not there is not exactly one R1 and one R2"
+    ):
         SubmissionMetadata(metadata_missing_fastq_r2)
 
     with pytest.raises(error_types, match="Incompatible reference genomes found"):
