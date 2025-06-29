@@ -33,11 +33,16 @@ def test_submission_metadata_fails():
     with pytest.raises(error_types, match="VCF file missing for lab datum"):
         SubmissionMetadata(metadata_missing_vcf_file)
 
-    with pytest.raises(error_types, match="Paired end sequencing layout but missing R2 file for flowcell id"):
+    with pytest.raises(
+        error_types, match="Paired end sequencing layout but not there is not exactly one R1 and one R2"
+    ):
         SubmissionMetadata(metadata_missing_fastq_r2)
 
     with pytest.raises(error_types, match="Incompatible reference genomes found"):
         SubmissionMetadata(metadata_incompatible_reference_genomes)
+
+    with pytest.raises(error_types, match="must have a unique combination of flowcell_id, lane_id, and read_order"):
+        SubmissionMetadata("tests/mock_files/metadata_validation/duplicate-run-id.json")
 
 
 def test_encrypted_submission():

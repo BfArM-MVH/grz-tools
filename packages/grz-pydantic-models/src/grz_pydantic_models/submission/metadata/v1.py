@@ -7,6 +7,7 @@ from datetime import date
 from enum import StrEnum
 from importlib.resources import files
 from itertools import groupby
+from operator import attrgetter
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Self
 
@@ -842,6 +843,72 @@ class LabDatum(StrictBaseModel):
             raise ValueError("Long read libraries can't be paired-end.")
         return self
 
+    @model_validator(mode="after")
+    def validate_sequencing_file_exists(self):  # noqa: C901
+        """
+        Check if there is a FASTQ or BAM file (depending on library type)
+        """
+        if self.sequence_data is None:
+            # Skip if no sequence data is present
+            return self
+
+        fastq_files = self.sequence_data.list_files(FileType.fastq)
+        bam_files = self.sequence_data.list_files(FileType.bam)
+
+        if self.library_type.endswith("_lr"):
+            if len(fastq_files) + len(bam_files) == 0:
+                raise ValueError("Long-read datasets must contain at least one BAM or FASTQ file!")
+        else:
+            if len(bam_files) > 0:
+                raise ValueError("Short-read datasets cannot contain BAM files!")
+            if len(fastq_files) == 0:
+                raise ValueError("Short-read datasets must contain at least one FASTQ file!")
+
+        if self.sequencing_layout == SequencingLayout.paired_end:
+            # check if read order is specified
+            for i in fastq_files:
+                if i.read_order is None:
+                    raise ValueError(
+                        f"Error in lab datum '{self.lab_data_name}': "
+                        f"No read order specified for FASTQ file '{i.file_path}'!"
+                    )
+
+            key = lambda f: (f.flowcell_id, f.lane_id)
+            fastq_files.sort(key=key)
+            for (flowcell_id, lane_id), group in groupby(fastq_files, key):
+                files = list(group)
+
+                # separate R1 and R2 files
+                fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
+                fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
+
+                # check that there are exactly one R1 and on R2 file present
+                if (len(fastq_r1_files) != 1) or (len(fastq_r2_files) != 1):
+                    raise ValueError(
+                        f"Error in lab datum '{self.lab_data_name}': "
+                        f"Paired end sequencing layout but not there is not exactly one R1 and one R2 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
+                    )
+
+        return self
+
+    @model_validator(mode="after")
+    def ensure_unique_run_id(self) -> Self:
+        if not self.sequence_data:
+            return self
+
+        read_files = filter(lambda f: f.file_type in {FileType.fastq, FileType.bam}, self.sequence_data.files)
+        read_files_sorted = sorted(read_files, key=attrgetter("flowcell_id", "lane_id", "read_order"))
+        for (flowcell_id, lane_id, read_order), group in groupby(
+            read_files_sorted, key=attrgetter("flowcell_id", "lane_id", "read_order")
+        ):
+            group_t = tuple(group)
+            if len(group_t) > 1:
+                raise ValueError(
+                    "Each read file in a lab datum must have a unique combination of flowcell_id, lane_id, and read_order. "
+                    f"Found {len(group_t)} files with flowcell_id '{flowcell_id}', lane_id '{lane_id}', and read_order '{read_order}': {', '.join(f.file_path for f in group_t)}"
+                )
+        return self
+
 
 class Donor(StrictBaseModel):
     donor_pseudonym: str
@@ -920,72 +987,6 @@ class Donor(StrictBaseModel):
                 raise ValueError(
                     f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'."
                 )
-
-        return self
-
-    @model_validator(mode="after")
-    def validate_sequencing_file_exists(self):  # noqa: C901, PLR0912
-        """
-        Check if there is a FASTQ or BAM file (depending on library type)
-        """
-        for lab_datum in self.lab_data:
-            if lab_datum.sequence_data is None:
-                # Skip if no sequence data is present
-                continue
-            fastq_files = lab_datum.sequence_data.list_files(FileType.fastq)
-            bam_files = lab_datum.sequence_data.list_files(FileType.bam)
-
-            if lab_datum.library_type.endswith("_lr"):
-                if len(fastq_files) + len(bam_files) == 0:
-                    raise ValueError("Long-read datasets must contain at least one BAM or FASTQ file!")
-            else:
-                if len(bam_files) > 0:
-                    raise ValueError("Short-read datasets cannot contain BAM files!")
-                if len(fastq_files) == 0:
-                    raise ValueError("Short-read datasets must contain at least one FASTQ file!")
-
-            if lab_datum.sequencing_layout == SequencingLayout.paired_end:
-                # check if read order is specified
-                for i in fastq_files:
-                    if i.read_order is None:
-                        raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
-                            f"No read order specified for FASTQ file '{i.file_path}'!"
-                        )
-
-                key = lambda f: (f.flowcell_id, f.lane_id)
-                fastq_files.sort(key=key)
-                for _key, group in groupby(fastq_files, key):
-                    flowcell_id = _key[0]
-                    lane_id = _key[1]
-                    files = list(group)
-
-                    # separate R1 and R2 files
-                    fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
-                    fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
-
-                    # check that there are exactly one R1 and on R2 file present
-                    if len(fastq_r1_files) > 1:
-                        raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
-                            f"Paired end sequencing layout but multiple R1 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
-                        )
-                    elif len(fastq_r1_files) < 1:
-                        raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
-                            f"Paired end sequencing layout but missing R1 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
-                        )
-
-                    if len(fastq_r2_files) > 1:
-                        raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
-                            f"Paired end sequencing layout but multiple R2 files for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
-                        )
-                    elif len(fastq_r2_files) < 1:
-                        raise ValueError(
-                            f"Error in lab datum '{lab_datum.lab_data_name}' of donor '{self.donor_pseudonym}': "
-                            f"Paired end sequencing layout but missing R2 file for flowcell id '{flowcell_id}', lane id '{lane_id}'!"
-                        )
 
         return self
 
