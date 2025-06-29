@@ -155,6 +155,7 @@ class Worker:
             progress_log_file=self.progress_file_encrypt,
             recipient_public_key_path=recipient_public_key_path,
             submitter_private_key_path=submitter_private_key_path,
+            force=force,
         )
 
         return encrypted_submission

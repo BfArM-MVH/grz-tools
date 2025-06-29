@@ -429,6 +429,7 @@ class Submission:
         progress_log_file: str | PathLike,
         recipient_public_key_path: str | PathLike,
         submitter_private_key_path: str | PathLike | None = None,
+        force: bool = False,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh
@@ -437,6 +438,7 @@ class Submission:
         :param progress_log_file: Path to a log file to store the progress of the encryption process
         :param recipient_public_key_path: Path to the public key file which will be used for encryption
         :param submitter_private_key_path: Path to the private key file which will be used to sign the encryption
+        :param force: Force encryption even if target files already exist
         :return: EncryptedSubmission instance
         """
         encrypted_files_dir = Path(encrypted_files_dir)
@@ -477,6 +479,8 @@ class Submission:
             encrypted_file_path = encrypted_files_dir / EncryptedSubmission.get_encrypted_file_path(
                 file_metadata.file_path
             )
+            if encrypted_file_path.exists() and not force:
+                raise RuntimeError(f"'{encrypted_file_path} already exists. Delete it or use --force to overwrite it.")
             encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
             if (

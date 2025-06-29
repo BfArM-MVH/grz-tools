@@ -15,8 +15,8 @@ class DuplicateSubmissionError(ValueError):
 class DuplicateTanGError(ValueError):
     """Exception for when a tanG is already in use."""
 
-    def __init__(self, tan_g: str):
-        super().__init__(f"Duplicate tanG {tan_g}")
+    def __init__(self):
+        super().__init__("Duplicate tanG")
 
 
 class DatabaseConfigurationError(Exception):
