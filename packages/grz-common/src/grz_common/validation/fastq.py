@@ -87,7 +87,8 @@ def calculate_fastq_stats(file_path, expected_read_length: int | None = None) ->
                     # For the time being, read length mismatch is downgraded to warning
                     log.warning(
                         f"Read length mismatch at line {line_number + 1}: "
-                        f"expected {expected_read_length}, found {read_length}"
+                        f"expected {expected_read_length}, found {read_length}. "
+                        "This will be an error in the future."
                     )
 
     return (
