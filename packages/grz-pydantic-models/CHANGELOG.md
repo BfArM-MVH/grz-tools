@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.0.0...grz-pydantic-models-v2.0.1) (2025-06-30)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** add specific exemption to mvConsent ([#241](https://github.com/BfArM-MVH/grz-tools/issues/241)) ([779488d](https://github.com/BfArM-MVH/grz-tools/commit/779488d3c6f09b0c55c3faecfcd2698453874a64))
+
 ## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v1.5.0...grz-pydantic-models-v2.0.0) (2025-06-30)
 
 
