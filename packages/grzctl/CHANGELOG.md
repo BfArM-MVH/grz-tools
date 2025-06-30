@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.0...grzctl-v0.2.1) (2025-06-30)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** add specific exemption to mvConsent ([#243](https://github.com/BfArM-MVH/grz-tools/issues/243)) ([3ae4e55](https://github.com/BfArM-MVH/grz-tools/commit/3ae4e5513259933671146c40458e2c485a8fa612))
+
 ## [0.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.1.0...grzctl-v0.2.0) (2025-06-30)
 
 
