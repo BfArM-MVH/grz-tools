@@ -993,6 +993,9 @@ class Donor(StrictBaseModel):
             ):
                 raise ValueError("Must have at least a permit of mvSequencing")
         else:
+            if self.relation == Relation.index_:
+                raise ValueError("Index donors must have at least a permit of mvSequencing")
+
             if not self.research_consents:
                 raise ValueError(
                     "Neither mvConsent nor researchConsent provided. Cannot confirm donor consented to participation."

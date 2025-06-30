@@ -40,6 +40,14 @@ def test_wgs_trio_special_consent():
     )
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
+    # only non-index donors can have the special researchConsent exemption
+    metadata = json.loads(metadata_str)
+    metadata["donors"][0]["mvConsent"]["scope"] = []
+    metadata["donors"][0]["researchConsents"][0]["scope"] = metadata["donors"][1]["researchConsents"][0]["scope"]
+
+    with pytest.raises(ValidationError, match="Index donors must have at least a permit of mvSequencing"):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
 
 def test_example_wgs_lr():
     metadata_str = (
