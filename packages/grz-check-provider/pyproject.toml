@@ -9,6 +9,11 @@ description = "Builds and provides the grz-check executable for grz-tools."
 classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
+requires-python = ">=3.12"
+keywords = ["GRZ", "GDC", "S3"]
+
+[dependency-groups]
+dev = ["tox", "tox-uv", "cibuildwheel>=3.0.0"]
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_hooks.py"
@@ -32,9 +37,4 @@ before-build = [
     "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal",
     "source $HOME/.cargo/env",
     "cargo install cross --git https://github.com/cross-rs/cross --rev 51f46f2"
-]
-
-[dependency-groups]
-dev = [
-    "cibuildwheel>=3.0.0",
 ]
