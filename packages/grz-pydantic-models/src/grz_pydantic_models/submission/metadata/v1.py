@@ -263,15 +263,6 @@ class MvConsent(StrictBaseModel):
     Modules of the consent to MV: must have at least a permit of mvSequencing
     """
 
-    @model_validator(mode="after")
-    def ensure_mv_sequencing_scope_is_present(self):
-        if not any(
-            scope.domain == MvConsentScopeDomain.mv_sequencing and scope.type_ == MvConsentScopeType.permit
-            for scope in self.scope
-        ):
-            raise ValueError("Must have at least a permit of mvSequencing")
-        return self
-
 
 class ResearchConsentSchemaVersion(StrEnum):
     v_2025_0_1 = "2025.0.1"
@@ -992,6 +983,36 @@ class Donor(StrictBaseModel):
 
     def consents_to_research(self, date: date) -> bool:
         return ResearchConsent.consents_to_research(self.research_consents, date)
+
+    @model_validator(mode="after")
+    def ensure_mv_consented(self):
+        if self.mv_consent.scope:
+            if not any(
+                scope.domain == MvConsentScopeDomain.mv_sequencing and scope.type_ == MvConsentScopeType.permit
+                for scope in self.mv_consent.scope
+            ):
+                raise ValueError("Must have at least a permit of mvSequencing")
+        else:
+            if not self.research_consents:
+                raise ValueError(
+                    "Neither mvConsent nor researchConsent provided. Cannot confirm donor consented to participation."
+                )
+
+            mv_consent_exempt = False
+            for research_consent in self.research_consents:
+                presented_before_cutoff = (research_consent.presentation_date is not None) and (
+                    research_consent.presentation_date < date(year=2025, month=6, day=15)
+                )
+                consents_to_research = ResearchConsent.consents_to_research([research_consent], date.today())
+                if presented_before_cutoff and consents_to_research:
+                    mv_consent_exempt = True
+
+            if not mv_consent_exempt:
+                raise ValueError(
+                    "mvConsent not provided and researchConsent does not specify broad consent presented before 2025-06-15. Cannot confirm donor consented to participation."
+                )
+
+        return self
 
 
 class GrzSubmissionMetadata(StrictBaseModel):

@@ -1,0 +1,319 @@
+{
+  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.7/GRZ/grz-schema.json",
+  "submission": {
+    "submissionDate": "2024-10-28",
+    "submissionType": "initial",
+    "tanG": "9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30",
+    "localCaseId": "CASE12345",
+    "coverageType": "GKV",
+    "submitterId": "123456789",
+    "genomicDataCenterId": "GRZM00123",
+    "clinicalDataNodeId": "KDKM00456",
+    "diseaseType": "rare",
+    "genomicStudyType": "trio",
+    "genomicStudySubtype": "germline-only",
+    "labName": "Genomics Lab Humangenetik MRI"
+  },
+  "donors": [
+    {
+      "donorPseudonym": "9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30",
+      "gender": "other",
+      "relation": "index",
+      "mvConsent": {
+        "presentationDate": "2023-06-10",
+        "version": "1.0",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2023-06-10",
+            "domain": "mvSequencing"
+          }
+        ]
+      },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2023-06-10",
+          "scope": {}
+        }
+      ],
+      "labData": [
+        {
+          "labDataName": "Blood DNA normal",
+          "tissueOntology": {
+            "name": "UBERON",
+            "version": "1.5"
+          },
+          "tissueTypeId": "UBERON:0000178",
+          "tissueTypeName": "blood",
+          "sampleDate": "2023-06-21",
+          "sampleConservation": "cryo-frozen",
+          "sequenceType": "dna",
+          "sequenceSubtype": "germline",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wgs",
+          "libraryPrepKit": "TruSeq DNA PCR-Free",
+          "libraryPrepKitManufacturer": "Illumina",
+          "sequencerModel": "HiSeq 2500",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Nextera XT",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "other",
+          "enrichmentKitDescription": "KAPA Hyper Prep Kit",
+          "barcode": "NA12345",
+          "sequencingLayout": "paired-end",
+          "sequenceData": {
+            "bioinformaticsPipelineName": "DNASeq_Pipeline_XYZ",
+            "bioinformaticsPipelineVersion": "v3.4.1",
+            "referenceGenome": "GRCh38",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 50,
+              "percent": 88
+            },
+            "meanDepthOfCoverage": 40,
+            "minCoverage": 30,
+            "targetedRegionsAboveMinCoverage": 0.9,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "GATK",
+                "version": "4.2.0"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "donor_index/MPHG005_S4_L004_R1_001.fastq.gz",
+                "fileType": "fastq",
+                "checksumType": "sha256",
+                "fileChecksum": "09e790af4bdd0f4a6eaf9a8f7b0dfb11a9ba6e09912698f5aaac74a7dd65c6c4",
+                "fileSizeInBytes": 16461443215,
+                "readOrder": "R1",
+                "readLength": 125,
+                "flowcellId": "MPHG005",
+                "laneId": "1"
+              },
+              {
+                "filePath": "donor_index/MPHG005_S4_L004_R2_001.fastq.gz",
+                "fileType": "fastq",
+                "checksumType": "sha256",
+                "fileChecksum": "2fa620b0fd679e0e0d09c2896ffb878685ee24d5288a30f22afcc2ac282b9dca",
+                "fileSizeInBytes": 17276029366,
+                "readOrder": "R2",
+                "readLength": 125,
+                "flowcellId": "MPHG005",
+                "laneId": "1"
+              },
+              {
+                "filePath": "donor_index/Chinese-trio_TARDIS.bilkentuniv.052119.vcf.gz",
+                "fileType": "vcf",
+                "checksumType": "sha256",
+                "fileChecksum": "77bd849585e0d795e441690b2b3ea1e81ca0e6afbd9561b16bc3c89c8345eba5",
+                "fileSizeInBytes": 188830
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "donorPseudonym": "9e107d9d372bb6826bd81l3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30",
+      "gender": "female",
+      "relation": "mother",
+      "mvConsent": {
+        "presentationDate": "2023-06-10",
+        "version": "1.0",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2023-06-10",
+            "domain": "mvSequencing"
+          }
+        ]
+      },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2023-06-10",
+          "scope": {}
+        }
+      ],
+      "labData": [
+        {
+          "labDataName": "Blood DNA normal",
+          "tissueOntology": {
+            "name": "UBERON",
+            "version": "1.5"
+          },
+          "tissueTypeId": "UBERON:0000178",
+          "tissueTypeName": "blood",
+          "sampleDate": "2023-06-21",
+          "sampleConservation": "cryo-frozen",
+          "sequenceType": "dna",
+          "sequenceSubtype": "germline",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wgs",
+          "libraryPrepKit": "TruSeq DNA PCR-Free",
+          "libraryPrepKitManufacturer": "Illumina",
+          "sequencerModel": "HiSeq 2500",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Nextera XT",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "other",
+          "enrichmentKitDescription": "KAPA Hyper Prep Kit",
+          "barcode": "NA12345",
+          "sequencingLayout": "paired-end",
+          "sequenceData": {
+            "bioinformaticsPipelineName": "DNASeq_Pipeline_XYZ",
+            "bioinformaticsPipelineVersion": "v3.4.1",
+            "referenceGenome": "GRCh38",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 50,
+              "percent": 88
+            },
+            "meanDepthOfCoverage": 40,
+            "minCoverage": 30,
+            "targetedRegionsAboveMinCoverage": 0.9,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "GATK",
+                "version": "4.2.0"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "donor_mother/HGHG007_S6_L006_R1_001.fastq.gz",
+                "fileType": "fastq",
+                "checksumType": "sha256",
+                "fileChecksum": "c701bb0f8c25e599ab20e4fb382737bbc8fcd2510763ecffd828502b98d71122",
+                "fileSizeInBytes": 15448265400,
+                "readOrder": "R1",
+                "readLength": 125,
+                "flowcellId": "HGHG007",
+                "laneId": "1"
+              },
+              {
+                "filePath": "donor_mother/HGHG007_S6_L006_R2_001.fastq.gz",
+                "fileType": "fastq",
+                "checksumType": "sha256",
+                "fileChecksum": "fd53b4da60d1fd1d8302b440a17314a7593b95cd0e74ae8e3a71c04989a534e1",
+                "fileSizeInBytes": 15982485494,
+                "readOrder": "R2",
+                "readLength": 125,
+                "flowcellId": "HGHG007",
+                "laneId": "1"
+              },
+              {
+                "filePath": "donor_mother/Chinese-trio_TARDIS.bilkentuniv.052119.vcf.gz",
+                "fileType": "vcf",
+                "checksumType": "sha256",
+                "fileChecksum": "77bd849585e0d795e441690b2b3ea1e81ca0e6afbd9561b16bc3c89c8345eba5",
+                "fileSizeInBytes": 188830
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "donorPseudonym": "9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32ezf8f7b77c61cbe3f30",
+      "gender": "male",
+      "relation": "father",
+      "mvConsent": {
+        "presentationDate": "2023-06-10",
+        "version": "1.0",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2023-06-10",
+            "domain": "mvSequencing"
+          }
+        ]
+      },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2023-06-10",
+          "scope": {}
+        }
+      ],
+      "labData": [
+        {
+          "labDataName": "Blood DNA normal",
+          "tissueOntology": {
+            "name": "UBERON",
+            "version": "1.5"
+          },
+          "tissueTypeId": "UBERON:0000178",
+          "tissueTypeName": "blood",
+          "sampleDate": "2023-06-21",
+          "sampleConservation": "cryo-frozen",
+          "sequenceType": "dna",
+          "sequenceSubtype": "germline",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wgs",
+          "libraryPrepKit": "TruSeq DNA PCR-Free",
+          "libraryPrepKitManufacturer": "Illumina",
+          "sequencerModel": "HiSeq 2500",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Nextera XT",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "other",
+          "enrichmentKitDescription": "KAPA Hyper Prep Kit",
+          "barcode": "NA12345",
+          "sequencingLayout": "paired-end",
+          "sequenceData": {
+            "bioinformaticsPipelineName": "DNASeq_Pipeline_XYZ",
+            "bioinformaticsPipelineVersion": "v3.4.1",
+            "referenceGenome": "GRCh38",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 50,
+              "percent": 88
+            },
+            "meanDepthOfCoverage": 40,
+            "minCoverage": 30,
+            "targetedRegionsAboveMinCoverage": 0.9,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "GATK",
+                "version": "4.2.0"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "donor_father/MPHG006_S5_L005_R1_001.fastq.gz",
+                "fileType": "fastq",
+                "checksumType": "sha256",
+                "fileChecksum": "4e9ab4919f06ebb81641d121364d4b17011d5a3eea51a49cda97093cff1a059c",
+                "fileSizeInBytes": 16658796536,
+                "readOrder": "R1",
+                "readLength": 125,
+                "flowcellId": "MPHG006",
+                "laneId": "1"
+              },
+              {
+                "filePath": "donor_father/MPHG006_S5_L005_R2_001.fastq.gz",
+                "fileType": "fastq",
+                "checksumType": "sha256",
+                "fileChecksum": "fa9a5d2bfec787116ae52dd8bbedeeecce92e98a09cc054ee98526b6098e3a35",
+                "fileSizeInBytes": 17435349253,
+                "readOrder": "R2",
+                "readLength": 125,
+                "flowcellId": "MPHG006",
+                "laneId": "1"
+              },
+              {
+                "filePath": "donor_father/Chinese-trio_TARDIS.bilkentuniv.052119.vcf.gz",
+                "fileType": "vcf",
+                "checksumType": "sha256",
+                "fileChecksum": "77bd849585e0d795e441690b2b3ea1e81ca0e6afbd9561b16bc3c89c8345eba5",
+                "fileSizeInBytes": 188830
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

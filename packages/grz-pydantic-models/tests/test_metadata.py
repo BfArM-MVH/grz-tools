@@ -22,6 +22,25 @@ def test_examples(dataset: str, version: str):
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
 
+def test_wgs_trio():
+    metadata_str = (
+        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", "v1.1.7.json").read_text()
+    )
+    GrzSubmissionMetadata.model_validate_json(metadata_str)
+
+
+def test_wgs_trio_special_consent():
+    """
+    Broad Consent obtained before 2025-06-15 for non-index donors is allowed to stand in for mvConsent if missing
+    """
+    metadata_str = (
+        importlib.resources.files(resources)
+        .joinpath("example_metadata", "wgs_trio", "v1.1.7.earlyBCException.json")
+        .read_text()
+    )
+    GrzSubmissionMetadata.model_validate_json(metadata_str)
+
+
 def test_example_wgs_lr():
     metadata_str = (
         importlib.resources.files(resources).joinpath("example_metadata", "wgs_lr", "v1.1.4.json").read_text()
