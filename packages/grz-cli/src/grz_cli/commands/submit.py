@@ -29,7 +29,7 @@ def submit(ctx, submission_dir, config_file, threads, force):
     3. Upload the encrypted submission
     """
     click.echo("Starting submission process...")
-    ctx.invoke(validate, submission_dir=submission_dir, force=force)
+    ctx.invoke(validate, submission_dir=submission_dir, config_file=config_file, force=force)
     ctx.invoke(encrypt, submission_dir=submission_dir, config_file=config_file, force=force)
     ctx.invoke(upload, submission_dir=submission_dir, config_file=config_file, threads=threads)
     click.echo("Submission finished!")
