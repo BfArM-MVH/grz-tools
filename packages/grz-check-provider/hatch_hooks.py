@@ -25,7 +25,7 @@ class CustomBuildHook(BuildHookInterface):
             command = ["cargo", "metadata", "--no-deps", "--format-version", "1"]
             self.app.display_info(f"Querying cargo metadata with: `{' '.join(command)}`")
 
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603
                 command,
                 cwd=str(rust_project_path),
                 check=True,
@@ -79,7 +79,7 @@ class CustomBuildHook(BuildHookInterface):
 
         self.app.display_info(f"Running command: {' '.join(build_command)}")
         try:
-            subprocess.run(build_command, cwd=str(rust_project_path), check=True)
+            subprocess.run(build_command, cwd=str(rust_project_path), check=True)  # noqa: S603
         except subprocess.CalledProcessError as e:
             self.app.display_critical("Rust build failed")
             raise e

@@ -277,7 +277,7 @@ class Submission:
             if logged_state:
                 yield from logged_state["errors"]
 
-    def validate_sequencing_data(self, progress_log_file: str | PathLike) -> Generator[str]:
+    def validate_sequencing_data(self, progress_log_file: str | PathLike) -> Generator[str]:  # noqa C901
         """
         Quick-validates sequencing data linked in this submission.
 

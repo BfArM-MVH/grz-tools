@@ -28,7 +28,7 @@ def run_grz_check(args: list[str]) -> subprocess.CompletedProcess:
 
         binary_path.chmod(0o755)
 
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603
             command,
             capture_output=True,
             text=True,
