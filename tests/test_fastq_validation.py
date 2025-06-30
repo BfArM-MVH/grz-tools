@@ -1,5 +1,7 @@
 """Tests for the fastq_validation module."""
 
+import logging
+
 from grz_common.validation.fastq import (
     validate_paired_end_reads,
     validate_single_end_reads,
@@ -14,14 +16,17 @@ def test_single_end_line_count_not_multiple_of_4():
 
 
 # Test case 2: Single end, inconsistent read length
-def test_single_end_inconsistent_read_length():
-    errors = list(
-        validate_single_end_reads(
-            "tests/mock_files/fastq_files_1000/single_end_failing.inconsistent_read_length.fastq.gz"
+def test_single_end_inconsistent_read_length(caplog):
+    # the read length errors have been downgraded to warnings for the time being;
+    # therefore, we don't expect any errors here
+    with caplog.at_level(logging.WARNING):
+        errors = list(
+            validate_single_end_reads(
+                "tests/mock_files/fastq_files_1000/single_end_failing.inconsistent_read_length.fastq.gz"
+            )
         )
-    )
-    assert len(errors) == 1
-    assert "Read length mismatch" in errors[0]
+    assert len(errors) == 0
+    assert "Read length mismatch" in caplog.text
 
 
 # Test case 3: Paired end, differing line numbers
