@@ -116,7 +116,10 @@ def validate_fastq_file(
         # Calculate the number of lines and read lengths
         num_lines, read_length = calculate_fastq_stats(fastq_file, expected_read_length=expected_read_length)
     except ValueError as e:
-        errors.append(f"{fastq_file}: {e}")
+        if "Read length mismatch" in str(e):
+            log.warning(f"{fastq_file}: {e}")
+        else:
+            errors.append(f"{fastq_file}: {e}")
         return -1, -1, errors
 
     # Check if the number of lines in a FASTQ file is a multiple of 4.
