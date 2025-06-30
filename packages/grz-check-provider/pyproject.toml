@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grz-check-provider"
+version = "0.1.0"
+description = "Builds and provides the grz-check executable for grz-tools."
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_hooks.py"
+class = "CustomBuildHook"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grz_check_provider"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/rust_src",
+    "/hatch_hooks.py",
+]

@@ -10,6 +10,7 @@ grz-cli = { path = "packages/grz-cli", editable = true }
 grzctl = { path = "packages/grzctl", editable = true }
 grz-db = { path = "packages/grz-db", editable = true }
 grz-pydantic-models = { path = "packages/grz-pydantic-models", editable = true }
+grz-check-provider = { path = "packages/grz-check-provider", editable = true }
 
 [project.optional-dependencies]
 test = [
