@@ -29,9 +29,8 @@ def run_grz_check(args: list[str]) -> subprocess.CompletedProcess:
         binary_path.chmod(0o755)
 
         return subprocess.run(
-            " ".join(command),
+            command,
             capture_output=True,
             text=True,
             check=True,
-            shell=True,
         )
