@@ -57,7 +57,7 @@ jobs:
           echo "Building package: ${{ steps.extract_package_info.outputs.name }}"
           OUTPUT_DIR="dist_for_upload"
           mkdir -p $OUTPUT_DIR
-          uv build --sdist --wheel --package ${{ steps.extract_package_info.outputs.name }} --out-dir $OUTPUT_DIR
+          uv build --sdist --wheel --project "packages/${{ steps.extract_package_info.outputs.name }}" --out-dir $OUTPUT_DIR
 
           echo "Contents of $OUTPUT_DIR:"
           ls -l $OUTPUT_DIR
