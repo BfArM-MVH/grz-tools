@@ -84,7 +84,8 @@ def calculate_fastq_stats(file_path, expected_read_length: int | None = None) ->
                 if expected_read_length is None:
                     expected_read_length = read_length
                 elif read_length != expected_read_length:
-                    raise ValueError(
+                    # For the time being, read length mismatch is downgraded to warning
+                    log.warning(
                         f"Read length mismatch at line {line_number + 1}: "
                         f"expected {expected_read_length}, found {read_length}"
                     )
