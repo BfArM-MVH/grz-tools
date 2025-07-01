@@ -1,6 +1,6 @@
 [project]
 name = "grz-db"
-version = "0.2.0"
+dynamic = ["version"]
 description = "SQL models for grz-cli and grz-watchdog."
 authors = [{ name = "Till Hartmann", email = "till.hartmann@bih-charite.de" }]
 readme = "README.md"
