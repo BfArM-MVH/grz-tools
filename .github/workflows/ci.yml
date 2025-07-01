@@ -107,6 +107,9 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12 # Consistent Python for these checks
 
+      - name: Ensure uv lockfile is up-to-date
+        run: uv lock --check
+
       - name: Install project dev dependencies
         run: uv sync --all-extras --all-groups --all-packages
 
@@ -184,6 +187,9 @@ jobs:
       - name: Extract package name from path
         id: pkg_info
         run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
+
+      - name: Ensure package uv lockfile is up-to-date
+        run: cd ${{ matrix.package_path }} && uv lock --check
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }} (Py ${{ matrix.python-version }})
         run: |
