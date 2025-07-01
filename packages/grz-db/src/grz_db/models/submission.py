@@ -1,6 +1,6 @@
 import datetime
 import os
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -22,7 +22,7 @@ from .author import Author
 from .base import BaseSignablePayload, VerifiableLog
 
 
-class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):
+class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Submission state enum."""
 
     UPLOADING = "Uploading"
@@ -49,7 +49,7 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):
 class SubmissionBase(SQLModel):
     """Submission base model."""
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True)  # type: ignore
 
     id: str
     tan_g: str | None = Field(default=None, unique=True, index=True, alias="tanG")
@@ -83,7 +83,7 @@ class SubmissionStateLogBase(SQLModel):
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
-    model_config = ConfigDict(
+    model_config = ConfigDict(  # type: ignore
         json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
@@ -103,7 +103,7 @@ class SubmissionStateLog(SubmissionStateLogBase, VerifiableLog[SubmissionStateLo
 
     __tablename__ = "submission_states"
 
-    payload_model_class = SubmissionStateLogPayload
+    _payload_model_class = SubmissionStateLogPayload
 
     id: int | None = Field(default=None, primary_key=True, index=True)
     submission_id: str = Field(foreign_key="submissions.id", index=True)
@@ -128,7 +128,7 @@ class SubmissionCreate(SubmissionBase):
     id: str
 
 
-class ChangeRequestEnum(CaseInsensitiveStrEnum, ListableEnum):
+class ChangeRequestEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Change request enum."""
 
     MODIFY = "Modify"
@@ -150,7 +150,7 @@ class ChangeRequestLogBase(SQLModel):
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
-    model_config = ConfigDict(
+    model_config = ConfigDict(  # type: ignore[assignment]
         json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
@@ -170,7 +170,7 @@ class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPaylo
 
     __tablename__ = "submission_change_requests"
 
-    payload_model_class = ChangeRequestLogPayload
+    _payload_model_class = ChangeRequestLogPayload
 
     id: int | None = Field(default=None, primary_key=True, index=True)
     submission_id: str = Field(foreign_key="submissions.id", index=True)
@@ -331,6 +331,8 @@ class SubmissionDb:
             submission = session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
+            if not self._author:
+                raise ValueError("No author defined")
 
             state_log_payload = SubmissionStateLogPayload(
                 submission_id=submission_id, author_name=self._author.name, state=state, data=data
@@ -370,6 +372,8 @@ class SubmissionDb:
             submission = session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
+            if not self._author:
+                raise ValueError("No author defined")
 
             change_request_log_payload = ChangeRequestLogPayload(
                 submission_id=submission_id, author_name=self._author.name, change=change, data=data
@@ -402,12 +406,12 @@ class SubmissionDb:
         """
         with self.get_session() as session:
             statement = (
-                select(Submission).where(Submission.id == submission_id).options(selectinload(Submission.states))
+                select(Submission).where(Submission.id == submission_id).options(selectinload(Submission.states))  # type: ignore[arg-type]
             )
             submission = session.exec(statement).first()
             return submission
 
-    def list_submissions(self) -> list[Submission]:
+    def list_submissions(self) -> Sequence[Submission]:
         """
         Lists all submissions in the database.
 
@@ -415,11 +419,11 @@ class SubmissionDb:
             A list of all submissions in the database, ordered by their ID.
         """
         with self.get_session() as session:
-            statement = select(Submission).options(selectinload(Submission.states)).order_by(Submission.id)
+            statement = select(Submission).options(selectinload(Submission.states)).order_by(Submission.id)  # type: ignore[arg-type]
             submissions = session.exec(statement).all()
             return submissions
 
-    def list_change_requests(self) -> list[Submission]:
+    def list_change_requests(self) -> Sequence[Submission]:
         """
         Lists all submissions in the database.
 
@@ -429,8 +433,8 @@ class SubmissionDb:
         with self.get_session() as session:
             statement = (
                 select(Submission)
-                .where(Submission.changes.any())
-                .options(selectinload(Submission.changes))
+                .where(Submission.changes.any())  # type: ignore[attr-defined]
+                .options(selectinload(Submission.changes))  # type: ignore[arg-type]
                 .order_by(Submission.id)
             )
             change_requests = session.exec(statement).all()

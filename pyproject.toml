@@ -171,7 +171,7 @@ commands = [["mypy"]]
 [tool.mypy]
 python_version = "3.12"
 plugins = "pydantic.mypy"
-packages = "grz_cli,grzctl,grz_pydantic_models"
+packages = "grz_cli,grzctl,grz_pydantic_models,grz_db"
 
 [tool.pytest.ini_options]
 addopts = [

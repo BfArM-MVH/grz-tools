@@ -20,7 +20,7 @@ class BaseSignablePayload(SQLModel):
     Provides a default `sign` method using the private key of the author.
     """
 
-    model_config = ConfigDict(
+    model_config = ConfigDict(  # type: ignore
         json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
@@ -48,21 +48,23 @@ class VerifiableLog(Generic[P]):
     """
     Mixin class for SQLModels that store a signature and can be verified.
     Subclasses MUST:
-    1. Define `payload_model_class: ClassVar[type[P]]`.
+    1. Define `_payload_model_class: ClassVar[type[P]]`.
     2. Have an instance attribute `signature: str`.
     """
 
     signature: str
-    payload_model_class: ClassVar[type[P]]
+    _payload_model_class: ClassVar[type[P]]  # type: ignore
 
     def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: D105
         super().__init_subclass__(**kwargs)
-        if not hasattr(cls, "payload_model_class"):
-            raise TypeError(f"Class {cls.__name__} lacks 'payload_model_class' attribute required by VerifiableLog.")
-        if not (isinstance(cls.payload_model_class, type) and issubclass(cls.payload_model_class, BaseSignablePayload)):
+        if not hasattr(cls, "_payload_model_class"):
+            raise TypeError(f"Class {cls.__name__} lacks '_payload_model_class' attribute required by VerifiableLog.")
+        if not (
+            isinstance(cls._payload_model_class, type) and issubclass(cls._payload_model_class, BaseSignablePayload)
+        ):
             raise TypeError(
-                f"'payload_model_class' in {cls.__name__} must be a class and a subclass of BaseSignedPayload. "
-                f"Got: {cls.payload_model_class}"
+                f"'_payload_model_class' in {cls.__name__} must be a class and a subclass of BaseSignedPayload. "
+                f"Got: {cls._payload_model_class}"
             )
 
     def verify(self, public_key: Ed25519PublicKey) -> bool:
@@ -72,8 +74,8 @@ class VerifiableLog(Generic[P]):
             return False
 
         signature_bytes = bytes.fromhex(self.signature)
-        data_for_payload = self.model_dump(by_alias=True, exclude={"signature", "payload_model_class"})
-        payload_to_verify = self.payload_model_class(**data_for_payload)
+        data_for_payload = self.model_dump(by_alias=True, exclude={"signature", "_payload_model_class"})  # type: ignore[attr-defined]
+        payload_to_verify = self._payload_model_class(**data_for_payload)
         bytes_to_verify = payload_to_verify.to_bytes()
 
         try:

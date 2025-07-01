@@ -21,10 +21,11 @@ class Author:
         from cryptography.hazmat.primitives.serialization import load_ssh_private_key
 
         passphrase = self.private_key_passphrase
-        passphrase_callback = (lambda: passphrase) if passphrase else None
-
-        if not passphrase:
+        if passphrase:
+            passphrase_callback = lambda: passphrase
+        else:
             passphrase_callback = partial(getpass, prompt=f"Passphrase for GRZ DB author ({self.name}'s) private key: ")
+
         log.info(f"Loading private key of {self.name}…")
         try:
             private_key = load_ssh_private_key(
