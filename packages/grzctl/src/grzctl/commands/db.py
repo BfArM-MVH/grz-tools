@@ -177,6 +177,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         latest_timestamp_str = "N/A"
         author_name_str = "N/A"
         signature_status = SignatureStatus.UNKNOWN
+        verifying_key_comment = None
 
         if latest_state_obj:
             latest_state_str = latest_state_obj.state.value
