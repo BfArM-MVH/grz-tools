@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import cryptography
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
@@ -53,7 +53,7 @@ class VerifiableLog(Generic[P]):
     """
 
     signature: str
-    _payload_model_class: ClassVar[type[P]]  # type: ignore
+    _payload_model_class: type[P]
 
     def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: D105
         super().__init_subclass__(**kwargs)
