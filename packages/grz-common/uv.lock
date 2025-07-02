@@ -321,7 +321,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
-    { name = "click", specifier = ">=8.1.7,<9" },
+    { name = "click", specifier = ">=8.2,<9" },
     { name = "crypt4gh", specifier = ">=1.7,<2" },
     { name = "grz-pydantic-models", editable = "../grz-pydantic-models" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
