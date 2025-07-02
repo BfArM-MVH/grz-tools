@@ -43,7 +43,7 @@ class SubmissionMetadata:
 
     __log = log.getChild("SubmissionMetadata")
 
-    def __init__(self, metadata_file):
+    def __init__(self, metadata_file: Path):
         """
         Load, parse and validate the metadata file.
 
