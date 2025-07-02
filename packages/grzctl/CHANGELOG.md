@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.1...grzctl-v0.2.2) (2025-07-02)
+
+
+### Bug Fixes
+
+* **grz-db,grzctl:** address previously unchecked mypy type checks ([#247](https://github.com/BfArM-MVH/grz-tools/issues/247)) ([e51a65b](https://github.com/BfArM-MVH/grz-tools/commit/e51a65b090c891f44c6c4cc7199138d4cb15c07a))
+* **grz-db:** undefined verifying_key_comment if no latest_state_obj ([#246](https://github.com/BfArM-MVH/grz-tools/issues/246)) ([dc793aa](https://github.com/BfArM-MVH/grz-tools/commit/dc793aaa4be33ff2a55dd2017869dc3bfea9f22d))
+
 ## [0.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.0...grzctl-v0.2.1) (2025-06-30)
 
 
