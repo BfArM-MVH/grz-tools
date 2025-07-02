@@ -493,7 +493,9 @@ class Submission:
                 )
 
                 if encrypted_file_path.exists() and not force:
-                    raise RuntimeError(f"'{encrypted_file_path} already exists. Delete it or use --force to overwrite it.")
+                    raise RuntimeError(
+                        f"'{encrypted_file_path}' already exists. Delete it or use --force to overwrite it."
+                    )
 
                 try:
                     Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
