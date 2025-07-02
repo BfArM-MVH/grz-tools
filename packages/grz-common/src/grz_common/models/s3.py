@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import AnyHttpUrl, AnyUrl
 
 from .base import IgnoringBaseModel, IgnoringBaseSettings
@@ -51,7 +53,7 @@ class S3Options(IgnoringBaseModel):
     The proxy URL for S3 operations (optional).
     """
 
-    request_checksum_calculation: str | None = None
+    request_checksum_calculation: Literal["when_supported", "when_required"] | None = None
     """
     Whether to calculate checksums for S3 request payloads (optional).
     Valid values are:
