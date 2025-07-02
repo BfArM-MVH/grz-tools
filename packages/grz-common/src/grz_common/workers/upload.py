@@ -126,10 +126,10 @@ class S3BotoUploadWorker(UploadWorker):
             use_threads=self._threads > 1,
         )
 
-        transfer = S3Transfer(self._s3_client, config)
+        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
         progress_bar = tqdm(total=filesize, unit="B", unit_scale=True, unit_divisor=1024, smoothing=TQDM_SMOOTHING)
         transfer.upload_file(
-            local_file_path,
+            str(local_file_path),
             self._s3_options.bucket,
             s3_object_id,
             callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),

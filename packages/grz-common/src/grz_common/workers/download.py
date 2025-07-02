@@ -148,7 +148,7 @@ class S3BotoDownloadWorker:
             max_concurrency=self._threads,
         )
 
-        transfer = S3Transfer(self._s3_client, config)
+        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
         with tqdm(
             total=filesize, unit="B", unit_scale=True, unit_divisor=1024, smoothing=TQDM_SMOOTHING
         ) as progress_bar:
@@ -188,7 +188,7 @@ class S3BotoDownloadWorker:
                 exc = DownloadError(error_msg)
             else:
                 error_msg = f"S3 client error for '{s3_object_id}': {e}"
-                exc = e
+                exc = e  # type: ignore[assignment]
             self.__log.error(error_msg)
             progress_logger.set_state(
                 local_file_path, file_metadata, state=DownloadState(download_successful=False, errors=[str(exc)])
