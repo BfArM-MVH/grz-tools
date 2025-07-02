@@ -479,8 +479,6 @@ class Submission:
             encrypted_file_path = encrypted_files_dir / EncryptedSubmission.get_encrypted_file_path(
                 file_metadata.file_path
             )
-            if encrypted_file_path.exists() and not force:
-                raise RuntimeError(f"'{encrypted_file_path} already exists. Delete it or use --force to overwrite it.")
             encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
             if (
@@ -493,6 +491,9 @@ class Submission:
                     str(file_path),
                     str(encrypted_file_path),
                 )
+
+                if encrypted_file_path.exists() and not force:
+                    raise RuntimeError(f"'{encrypted_file_path} already exists. Delete it or use --force to overwrite it.")
 
                 try:
                     Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
