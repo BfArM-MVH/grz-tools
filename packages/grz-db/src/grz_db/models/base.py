@@ -48,7 +48,7 @@ class VerifiableLog(Generic[P]):
     """
     Mixin class for SQLModels that store a signature and can be verified.
     Subclasses MUST:
-    1. Define `_payload_model_class: ClassVar[type[P]]`.
+    1. Define `_payload_model_class: type[P]`.
     2. Have an instance attribute `signature: str`.
     """
 
