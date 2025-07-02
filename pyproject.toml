@@ -45,7 +45,7 @@ lint = [
     "ruff",
     "types-pyyaml",
     "types-tqdm",
-    "types-boto3[s3]",
+    "types-boto3[s3] >=1.36,<2",
     "pydantic",
     "mypy",
 ]

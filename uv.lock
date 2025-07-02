@@ -455,6 +455,7 @@ dependencies = [
     { name = "requests" },
     { name = "rich" },
     { name = "tqdm" },
+    { name = "types-boto3", extra = ["s3"] },
 ]
 
 [package.metadata]
@@ -472,6 +473,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3,<3" },
     { name = "rich", specifier = "==13.*" },
     { name = "tqdm", specifier = ">=4.66.5,<5" },
+    { name = "types-boto3", extras = ["s3"], specifier = ">=1.36,<2" },
 ]
 
 [package.metadata.requires-dev]
@@ -609,7 +611,7 @@ lint = [
     { name = "mypy" },
     { name = "pydantic" },
     { name = "ruff" },
-    { name = "types-boto3", extras = ["s3"] },
+    { name = "types-boto3", extras = ["s3"], specifier = ">=1.36,<2" },
     { name = "types-pyyaml" },
     { name = "types-tqdm" },
 ]
