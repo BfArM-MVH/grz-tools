@@ -107,9 +107,9 @@ class Worker:
             self.__log.info("Metadata validation successful!")
 
         if force:
-            # delete the log files
-            self.progress_file_checksum_validation.unlink()
-            self.progress_file_sequencing_data_validation.unlink()
+            # delete the log files if they exist
+            self.progress_file_checksum_validation.unlink(missing_ok=True)
+            self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
 
         self.__log.info("Starting checksum validation...")
         if errors := list(submission.validate_checksums(progress_log_file=self.progress_file_checksum_validation)):
@@ -147,8 +147,8 @@ class Worker:
         submission = self.parse_submission()
 
         if force:
-            # delete the log file
-            self.progress_file_encrypt.unlink()
+            # delete the log file if it exists
+            self.progress_file_encrypt.unlink(missing_ok=True)
 
         encrypted_submission = submission.encrypt(
             encrypted_files_dir=str(self.encrypted_files_dir),
@@ -171,8 +171,8 @@ class Worker:
         encrypted_submission = self.parse_encrypted_submission()
 
         if force:
-            # delete the log file
-            self.progress_file_decrypt.unlink()
+            # delete the log file if it exists
+            self.progress_file_decrypt.unlink(missing_ok=True)
 
         submission = encrypted_submission.decrypt(
             files_dir=self.files_dir,
@@ -217,8 +217,8 @@ class Worker:
         Download an encrypted submission
         """
         if force:
-            # delete the log file
-            self.progress_file_download.unlink()
+            # delete the log file if it exists
+            self.progress_file_download.unlink(missing_ok=True)
 
         download_worker = S3BotoDownloadWorker(
             s3_options, status_file_path=self.progress_file_download, threads=self._threads
