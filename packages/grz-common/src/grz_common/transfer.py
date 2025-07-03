@@ -11,6 +11,10 @@ from botocore.config import Config as Boto3Config  # type: ignore[import-untyped
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
     from types_boto3_s3.service_resource import S3ServiceResource
+else:
+    # avoid undefined objects when not type checking
+    S3Client = object
+    S3ServiceResource = object
 
 from .models.s3 import S3Options
 
