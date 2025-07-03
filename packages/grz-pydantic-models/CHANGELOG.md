@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.0.1...grz-pydantic-models-v2.0.2) (2025-07-03)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models,grz-cli,grzctl:** accept only metadata schema 1.1.9 ([#262](https://github.com/BfArM-MVH/grz-tools/issues/262)) ([f61bd2c](https://github.com/BfArM-MVH/grz-tools/commit/f61bd2c03e1a7ce0a667c7c9a7b467233d0835b3))
+
 ## [2.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.0.0...grz-pydantic-models-v2.0.1) (2025-06-30)
 
 
