@@ -26,7 +26,7 @@ dependencies = [
     "rich ==13.*",
     "requests >=2.32.3,<3",
     "grz-db >=0.2.1",
-    "grz-common >=1.0.1,<2",
+    "grz-common >=1.0.2,<2",
     "grz-cli >=1.0.0",
     "grz-pydantic-models >=2.0.1,<3"
 ]
