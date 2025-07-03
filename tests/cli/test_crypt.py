@@ -45,10 +45,6 @@ def test_encrypt_submission_protect_overwrite(
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
     shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
-    # create a file we know is the target path of an encrypted file
-    (working_dir_path / "encrypted_files").mkdir()
-    (working_dir_path / "encrypted_files/target_regions.bed.c4gh").touch()
-
     testargs = [
         "encrypt",
         "--submission-dir",
@@ -59,7 +55,15 @@ def test_encrypt_submission_protect_overwrite(
 
     runner = CliRunner()
     cli = grz_cli.cli.build_cli()
-    with pytest.raises(RuntimeError, match="target_regions.bed.c4gh already exists"):
+    # run encrypt once to build logs
+    runner.invoke(cli, testargs, catch_exceptions=False)
+
+    # running again should not error because cache is used
+    runner.invoke(cli, testargs, catch_exceptions=False)
+
+    # removing the cache and running again should error without force
+    (working_dir_path / "logs" / "progress_encrypt.cjson").unlink()
+    with pytest.raises(RuntimeError, match="already exists. Delete it or use --force to overwrite it."):
         runner.invoke(cli, testargs, catch_exceptions=False)
 
 
