@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.0.1...grz-common-v1.0.2) (2025-07-03)
+
+
+### Bug Fixes
+
+* **grz-common,grz-cli,grzctl:** fix encrypt caching ([#257](https://github.com/BfArM-MVH/grz-tools/issues/257)) ([3d86767](https://github.com/BfArM-MVH/grz-tools/commit/3d86767c77352e1a44807e312faac7604bd04de8))
+* **grz-common,grzctl,grz-cli:** remove runtime dependency on type stubs ([#258](https://github.com/BfArM-MVH/grz-tools/issues/258)) ([a116499](https://github.com/BfArM-MVH/grz-tools/commit/a116499de19655ec9c4a43093c2c077dd10efbbc))
+
 ## [1.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.0.0...grz-common-v1.0.1) (2025-07-02)
 
 
