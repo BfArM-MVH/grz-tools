@@ -26,7 +26,6 @@ dependencies = [
     "pysam ==0.23.*",
     "rich ==13.*",
     "requests >=2.32.3,<3",
-    "types-boto3[s3] >=1.36,<2"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
