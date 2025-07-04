@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections import namedtuple
 from collections.abc import Generator
 from itertools import groupby
 from os import PathLike
-from pathlib import Path
+from pathlib import Path, PosixPath
+from tempfile import NamedTemporaryFile
 
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
@@ -27,8 +29,8 @@ from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
+from ..validation import run_grz_check
 from ..validation.bam import validate_bam
-from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
 log = logging.getLogger(__name__)
 
@@ -275,7 +277,7 @@ class Submission:
             if logged_state:
                 yield from logged_state["errors"]
 
-    def validate_sequencing_data(self, progress_log_file: str | PathLike) -> Generator[str]:
+    def validate_sequencing_data(self, progress_log_file: str | PathLike) -> Generator[str]:  # noqa C901
         """
         Quick-validates sequencing data linked in this submission.
 
@@ -296,23 +298,44 @@ class Submission:
         def find_bam_files(sequence_data: SequenceData) -> list[File]:
             return [f for f in sequence_data.files if f.file_type == FileType.bam]
 
-        for donor in self.metadata.content.donors:
-            for lab_data in donor.lab_data:
-                sequencing_layout = lab_data.sequencing_layout
-                sequence_data = lab_data.sequence_data
-                # find all FASTQ files
-                fastq_files = find_fastq_files(sequence_data) if sequence_data else []
-                bam_files = find_bam_files(sequence_data) if sequence_data else []
+        with NamedTemporaryFile(suffix=".tsv") as report_tsv:
+            grz_check_args = []
 
-                if not lab_data.library_type.endswith("_lr"):
-                    match sequencing_layout:
-                        case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
-                            yield from self._validate_single_end(fastq_files, progress_logger)
+            for donor in self.metadata.content.donors:
+                for lab_data in donor.lab_data:
+                    sequencing_layout = lab_data.sequencing_layout
+                    sequence_data = lab_data.sequence_data
+                    # find all FASTQ files
+                    fastq_files = find_fastq_files(sequence_data) if sequence_data else []
+                    bam_files = find_bam_files(sequence_data) if sequence_data else []
 
-                        case SequencingLayout.paired_end:
-                            yield from self._validate_paired_end(fastq_files, progress_logger)
+                    if not lab_data.library_type.endswith("_lr"):
+                        match sequencing_layout:
+                            case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
+                                for args in self._collect_single_end(fastq_files, progress_logger):
+                                    grz_check_args.extend(args)
 
-                yield from self._validate_bams(bam_files, progress_logger)
+                            case SequencingLayout.paired_end:
+                                for args in self._collect_paired_end(fastq_files, progress_logger):
+                                    grz_check_args.extend(args)
+                    yield from self._validate_bams(bam_files, progress_logger)
+
+            if grz_check_args:
+                run_grz_check(["--show-progress", "true", "fastq", "--output", report_tsv.name, *grz_check_args])
+
+                with open(report_tsv.name) as f:
+                    field_names = ["path", "status", "num_reads", "read_length", "errors"]
+                    ReportEntry = namedtuple("ReportEntry", field_names)
+                    header = f.readline().strip("\r\n ").split("\t")
+                    if header != field_names:
+                        raise ValueError(f"Incompatible report tsv with header: {header}. Expected: {field_names}")
+                    for line in f:
+                        entry = ReportEntry(*line.strip("\r\n ").split("\t"))
+                        progress_logger.set_state(
+                            entry.path,
+                            self.files[PosixPath(entry.path)],
+                            ValidationState(errors=entry.errors.split(","), validation_passed=entry.status == "OK"),
+                        )
 
     def _validate_bams(
         self,
@@ -341,38 +364,29 @@ class Submission:
             if logged_state:
                 yield from logged_state["errors"]
 
-    def _validate_single_end(
+    def _collect_single_end(
         self,
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
-    ) -> Generator[str, None, None]:
-        def validate_file(local_file_path, file_metadata: SubmissionFileMetadata) -> ValidationState:
-            self.__log.debug("Validating '%s'...", str(local_file_path))
-
-            # validate the file
-            errors = list(validate_single_end_reads(local_file_path, expected_read_length=file_metadata.read_length))
-            validation_passed = len(errors) == 0
-
-            # return log state
-            return ValidationState(
-                errors=errors,
-                validation_passed=validation_passed,
-            )
-
+    ) -> Generator[list[str], None, None]:
         for fastq_file in fastq_files:
-            logged_state = progress_logger.get_state(
+            fastq_path = self.files_dir / fastq_file.file_path
+            fastq_path = fastq_path.relative_to(self.files_dir)
+            read_length = fastq_file.read_length or 0
+            logged_state: ValidationState | None = progress_logger.get_state(
                 self.files_dir / fastq_file.file_path,
                 fastq_file,
-                default=validate_file,  # validate the file if the state was not calculated yet
             )
-            if logged_state:
-                yield from logged_state["errors"]
+            if logged_state and logged_state["validation_passed"]:
+                continue
 
-    def _validate_paired_end(
+            yield ["--single", str(fastq_path), str(read_length)]
+
+    def _collect_paired_end(
         self,
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
-    ) -> Generator[str, None, None]:
+    ) -> Generator[list[str], None, None]:
         key = lambda f: (f.flowcell_id, f.lane_id)
         fastq_files.sort(key=key)
         for _key, group in groupby(fastq_files, key):
@@ -383,45 +397,26 @@ class Submission:
             fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
 
             for fastq_r1, fastq_r2 in zip(fastq_r1_files, fastq_r2_files, strict=True):
-                local_fastq_r1_path = self.files_dir / fastq_r1.file_path
-                local_fastq_r2_path = self.files_dir / fastq_r2.file_path
+                fastq_r1_path = self.files_dir / fastq_r1.file_path
+                fastq_r2_path = self.files_dir / fastq_r2.file_path
 
-                # get saved state
-                logged_state_r1 = progress_logger.get_state(
-                    local_fastq_r1_path,
+                r1_read_length = fastq_r1.read_length or 0
+                r2_read_length = fastq_r2.read_length or 0
+
+                logged_state_r1: ValidationState | None = progress_logger.get_state(
+                    fastq_r1_path,
                     fastq_r1,
                 )
-                logged_state_r2 = progress_logger.get_state(
-                    local_fastq_r2_path,
+                logged_state_r2: ValidationState | None = progress_logger.get_state(
+                    fastq_r2_path,
                     fastq_r2,
                 )
-                if logged_state_r1 is None or logged_state_r2 is None or logged_state_r1 != logged_state_r2:
-                    # calculate state
-                    errors = list(
-                        validate_paired_end_reads(
-                            local_fastq_r1_path,  # fastq R1
-                            local_fastq_r2_path,  # fastq R2
-                            expected_read_length=fastq_r1.read_length,  # fastq R1 and R2 should have the same read length
-                        )
-                    )
-                    validation_passed = len(errors) == 0
-
-                    state = ValidationState(
-                        errors=errors,
-                        validation_passed=validation_passed,
-                    )
-                    # update state for both files
-                    progress_logger.set_state(  # fastq R1
-                        local_fastq_r1_path, fastq_r1, state
-                    )
-                    progress_logger.set_state(  # fastq R2
-                        local_fastq_r2_path, fastq_r2, state
-                    )
-
-                    yield from state["errors"]
-                else:
-                    # both fastq states are equal, so simply yield one of them
-                    yield from logged_state_r1["errors"]
+                if (
+                    logged_state_r1 is None
+                    or logged_state_r2 is None
+                    or logged_state_r1["validation_passed"] != logged_state_r2["validation_passed"]
+                ):
+                    yield ["--paired", str(fastq_r1_path), str(fastq_r2_path), str(r1_read_length), str(r2_read_length)]
 
     def encrypt(
         self,

@@ -395,12 +395,27 @@ wheels = [
 ]
 
 [[package]]
+name = "grz-check-provider"
+version = "0.1.0"
+source = { editable = "packages/grz-check-provider" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "cibuildwheel", specifier = ">=3.0.0" },
+    { name = "tox" },
+    { name = "tox-uv" },
+]
+
+[[package]]
 name = "grz-cli"
 source = { editable = "packages/grz-cli" }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
     { name = "crypt4gh" },
+    { name = "grz-check-provider" },
     { name = "grz-common" },
     { name = "grz-pydantic-models" },
     { name = "jsonschema" },
@@ -419,6 +434,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
     { name = "click", specifier = ">=8.2,<9" },
     { name = "crypt4gh", specifier = ">=1.7,<2" },
+    { name = "grz-check-provider", editable = "packages/grz-check-provider" },
     { name = "grz-common", editable = "packages/grz-common" },
     { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },

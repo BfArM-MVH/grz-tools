@@ -27,6 +27,7 @@ dependencies = [
     "rich ==13.*",
     "requests >=2.32.3,<3",
     "grz-common >=1.0.2,<2",
+    "grz-check-provider",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -41,6 +42,7 @@ dev = ["tox", "tox-uv"]
 [tool.uv.sources]
 grz-common = { path = "../grz-common", editable = true }
 grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
+grz-check-provider = { path = "../grz-check-provider", editable = true }
 
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"
