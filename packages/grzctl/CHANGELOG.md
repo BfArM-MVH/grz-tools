@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.3](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.2...grzctl-v0.2.3) (2025-07-04)
+
+
+### Bug Fixes
+
+* **grz-common,grzctl,grz-cli:** remove runtime dependency on type stubs ([#258](https://github.com/BfArM-MVH/grz-tools/issues/258)) ([a116499](https://github.com/BfArM-MVH/grz-tools/commit/a116499de19655ec9c4a43093c2c077dd10efbbc))
+* **grzctl,grz-cli:** bump deps to enforce 1.1.9 metadata submission ([#264](https://github.com/BfArM-MVH/grz-tools/issues/264)) ([1255260](https://github.com/BfArM-MVH/grz-tools/commit/1255260e4af25d342e1c17e803aa6f6152de69c7))
+* **grzctl,grz-cli:** fix type check dependency by bumping grz-common ([#260](https://github.com/BfArM-MVH/grz-tools/issues/260)) ([92dce72](https://github.com/BfArM-MVH/grz-tools/commit/92dce723d8d2fbc7c11d03e2ebea98f7a0f4da19))
+
 ## [0.2.2](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.1...grzctl-v0.2.2) (2025-07-02)
 
 
