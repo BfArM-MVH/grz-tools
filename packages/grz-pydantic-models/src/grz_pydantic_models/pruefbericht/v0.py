@@ -16,6 +16,7 @@ from ..submission.metadata import (
     SubmissionType,
     SubmitterId,
     Tan,
+    TestTan,
 )
 
 
@@ -47,7 +48,7 @@ class SubmittedCase(StrictBaseModel):
 
     submission_type: SubmissionType
 
-    tan: Tan
+    tan: TestTan | Tan
     """
     T-VNk or T-VNg.
     """

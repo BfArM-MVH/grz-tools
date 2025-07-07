@@ -15,7 +15,9 @@ from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
 from grz_pydantic_models.submission.metadata.v1 import (
     GrzSubmissionMetadata,
     Relation,
+    TestTanValidator,
 )
+from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
 
 from ..models.config import PruefberichtConfig
@@ -97,7 +99,8 @@ def _get_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryTyp
     help="Do not perform the request, only output the pruefbericht. Can be combined with --json.",
     is_flag=True,
 )
-def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_run):  # noqa: C901, PLR0913, PLR0912
+@click.option("--test", help="Allow submitting a Prüfbericht for a test submission with a test TAN", is_flag=True)
+def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_run, test):  # noqa: C901, PLR0913, PLR0912
     """
     Submit a Prüfbericht to BfArM.
     """
@@ -127,6 +130,17 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
             dataQualityCheckPassed=not failed,
         )
     )
+
+    try:
+        TestTanValidator.validate_python(pruefbericht.submitted_case.tan)
+        test_submission = True
+    except ValidationError:
+        test_submission = False
+
+    if (not test) and test_submission:
+        sys.exit("Test submissions must be submitted with the --test flag")
+    elif test and (not test_submission):
+        sys.exit("Only test submissions can be submitted with the --test flag")
 
     if dry_run:
         if output_json:

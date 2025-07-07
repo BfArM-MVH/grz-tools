@@ -119,6 +119,31 @@ def bfarm_submit_api(requests_mock):
         ],
         status=401,
     )
+
+    # valid test submission + valid token
+    requests_mock.post(
+        "https://bfarm.localhost/api/upload",
+        match=[
+            responses.matchers.header_matcher({"Authorization": "bearer my_token"}),
+            responses.matchers.json_params_matcher(
+                {
+                    "SubmittedCase": {
+                        "submissionDate": "2001-01-01",
+                        "submissionType": "initial",
+                        "tan": "TESTGRZXYZ123123456789C05D8A6B890A7B84E9A2F3C1D086FE24C05D8A6B89",
+                        "submitterId": "123456789",
+                        "dataNodeId": "GRZXYZ123",
+                        "diseaseType": "oncological",
+                        "dataCategory": "genomic",
+                        "libraryType": "wes",
+                        "coverageType": "GKV",
+                        "dataQualityCheckPassed": True,
+                    }
+                }
+            ),
+        ],
+    )
+
     yield requests_mock
 
 
@@ -313,3 +338,46 @@ def test_invalid_submission_invalid_library_type(
         cli = grzctl.cli.build_cli()
         with pytest.raises(ValueError, match="cannot be submitted in the Prüfbericht"):
             runner.invoke(cli, args, catch_exceptions=False)
+
+
+def test_valid_test_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        # create and modify a temporary copy of the metadata JSON
+        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
+            metadata = json.load(metadata_file)
+
+            metadata["submission"]["submissionDate"] = "2001-01-01"
+            metadata["submission"]["tanG"] = "TESTGRZXYZ123123456789C05D8A6B890A7B84E9A2F3C1D086FE24C05D8A6B89"
+            metadata["submission"]["genomicDataCenterId"] = "GRZXYZ123"
+            metadata["submission"]["submitterId"] = "123456789"
+
+            metadata_file.seek(0)
+            json.dump(metadata, metadata_file)
+            metadata_file.truncate()
+
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_pruefbericht_config_file_path,
+            "--submission-dir",
+            str(tmp_path),
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grzctl.cli.build_cli()
+
+        # submitting Prüfbericht for test submission should fail without --test
+        result_fail = runner.invoke(cli, args, catch_exceptions=False)
+        assert result_fail.exit_code != 0, result_fail.output
+
+        result_pass = runner.invoke(cli, [*args, "--test"], catch_exceptions=False)
+        assert result_pass.exit_code == 0, result_pass.output

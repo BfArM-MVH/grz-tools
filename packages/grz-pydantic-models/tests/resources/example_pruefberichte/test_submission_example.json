@@ -1,0 +1,14 @@
+{
+  "SubmittedCase": {
+    "submissionDate": "2001-01-01",
+    "submissionType": "initial",
+    "tan": "TESTGRZXYZ123123456789C05D8A6B890A7B84E9A2F3C1D086FE24C05D8A6B89",
+    "submitterId": "123456789",
+    "dataNodeId": "GRZXYZ123",
+    "diseaseType": "oncological",
+    "dataCategory": "clinical",
+    "libraryType": "panel",
+    "coverageType": "GKV",
+    "dataQualityCheckPassed": true
+  }
+}
