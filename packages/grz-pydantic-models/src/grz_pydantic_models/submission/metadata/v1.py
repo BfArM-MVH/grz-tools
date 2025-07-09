@@ -1218,7 +1218,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
 
-def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):
+def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):  # noqa: C901
     if lab_datum.sequence_data is None:
         # Skip if no sequence data is present; warning issues in the validator `warn_empty_sequence_data` of `Donor`.
         return
@@ -1241,6 +1241,21 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
             raise ValueError(
                 f"Read length for donor '{pseudonym}', lab datum '{lab_data_name}' "
                 f"below threshold: {read_length_v} < {read_length_t}"
+            )
+
+    if percent_bases_above_quality_threshold_t := thresholds.get("percentBasesAboveQualityThreshold"):
+        minimum_quality_t = percent_bases_above_quality_threshold_t.get("qualityThreshold")
+        minimum_quality_v = sequence_data.percent_bases_above_quality_threshold.minimum_quality
+        if minimum_quality_t and (minimum_quality_t != minimum_quality_v):
+            # TODO also print out genomic study subtype because that determines thresholds, but is defined at submission level
+            raise ValueError(
+                f"Expected minimumQuality '{minimum_quality_t}' for library type '{lab_datum.library_type}' and sequence subtype '{lab_datum.sequence_subtype}'. Got '{minimum_quality_v}' instead."
+            )
+        percent_t = percent_bases_above_quality_threshold_t.get("percent")
+        percent_v = sequence_data.percent_bases_above_quality_threshold.percent
+        if percent_t and (percent_v < percent_t):
+            raise ValueError(
+                f"Percentage of bases above quality threshold are below threshold: {percent_v} < {percent_t}"
             )
 
     if t := thresholds.get("targetedRegionsAboveMinCoverage"):
