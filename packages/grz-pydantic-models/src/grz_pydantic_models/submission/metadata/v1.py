@@ -1251,7 +1251,7 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
             raise ValueError(
                 f"Expected minimumQuality '{minimum_quality_t}' for library type '{lab_datum.library_type}' and sequence subtype '{lab_datum.sequence_subtype}'. Got '{minimum_quality_v}' instead."
             )
-        percent_t = percent_bases_above_quality_threshold_t.get("percent")
+        percent_t = percent_bases_above_quality_threshold_t.get("percentBasesAbove")
         percent_v = sequence_data.percent_bases_above_quality_threshold.percent
         if percent_t and (percent_v < percent_t):
             raise ValueError(
