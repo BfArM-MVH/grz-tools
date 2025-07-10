@@ -28,12 +28,6 @@ def validate_bam(bam_path: str | PathLike) -> Generator[str]:
     # unlikely to accidentally contain identifying information
     concerning_keys = header.keys() - {"HD"}
     if concerning_keys:
-        log.warning(f"Detected a header in BAM file '{bam_path}', ensure it contains no private information:")
-        for key in concerning_keys:
-            for line in header[key]:
-                log.warning(f"@{key}")
-                for tag, value in line.items():
-                    log.warning(f" {tag}: {value}")
-        log.warning("--- End of potentially-concerning BAM header information ---")
+        log.warning(f"Detected a header in BAM file '{bam_path}', ensure it contains no private information!")
 
     yield from errors
