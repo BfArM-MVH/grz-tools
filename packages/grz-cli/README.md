@@ -84,10 +84,12 @@ conda create -n grz-tools -c conda-forge -c bioconda "grz-cli"
 conda activate grz-tools
 ```
 
-##### Update instructions:
+##### Update instructions
+
 Use the following command to update the tool:
+
 ```bash
-conda update -n grz-tools "grz-cli"
+conda update -n grz-tools -c conda-forge -c bioconda grz-cli
 ```
 
 
@@ -108,6 +110,7 @@ pip upgrade grz-cli
 #### Docker
 Docker images are available via biocontainers at [https://biocontainers.pro/tools/grz-cli](https://biocontainers.pro/tools/grz-cli).
 
+The build process can take at least a few days after the Bioconda release, so double-check that the latest version in Bioconda is also the latest Docker image version.
 
 ## Usage
 
