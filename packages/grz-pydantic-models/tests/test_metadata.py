@@ -45,7 +45,7 @@ def test_wgs_trio_special_consent():
     metadata["donors"][0]["mvConsent"]["scope"] = []
     metadata["donors"][0]["researchConsents"][0]["scope"] = metadata["donors"][1]["researchConsents"][0]["scope"]
 
-    with pytest.raises(ValidationError, match="Index donors must have at least a permit of mvSequencing"):
+    with pytest.raises(ValidationError, match="Donors must have at least a permit of mvSequencing"):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 

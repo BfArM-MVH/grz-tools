@@ -993,8 +993,10 @@ class Donor(StrictBaseModel):
             ):
                 raise ValueError("Must have at least a permit of mvSequencing")
         else:
-            if self.relation == Relation.index_:
-                raise ValueError("Index donors must have at least a permit of mvSequencing")
+            if self.relation not in {Relation.mother, Relation.father}:
+                raise ValueError(
+                    "Donors must have at least a permit of mvSequencing. Exemptions only apply to parents."
+                )
 
             if not self.research_consents:
                 raise ValueError(
@@ -1004,7 +1006,7 @@ class Donor(StrictBaseModel):
             mv_consent_exempt = False
             for research_consent in self.research_consents:
                 presented_before_cutoff = (research_consent.presentation_date is not None) and (
-                    research_consent.presentation_date < date(year=2025, month=6, day=15)
+                    research_consent.presentation_date <= date(year=2025, month=6, day=15)
                 )
                 consents_to_research = ResearchConsent.consents_to_research([research_consent], date.today())
                 if presented_before_cutoff and consents_to_research:
