@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.3...grzctl-v0.2.4) (2025-07-14)
+
+
+### Bug Fixes
+
+* **grzctl,grz-cli:** bump grz-pydantic-models for end-to-end tests ([#274](https://github.com/BfArM-MVH/grz-tools/issues/274)) ([a1ed791](https://github.com/BfArM-MVH/grz-tools/commit/a1ed791f1f9fce52d08f8e70fba12a674336d250))
+
 ## [0.2.3](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.2...grzctl-v0.2.3) (2025-07-04)
 
 

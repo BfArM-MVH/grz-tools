@@ -3,5 +3,5 @@
   "packages/grz-pydantic-models": "2.1.0",
   "packages/grz-db": "0.2.1",
   "packages/grz-common": "1.0.3",
-  "packages/grzctl": "0.2.3"
+  "packages/grzctl": "0.2.4"
 }
