@@ -39,8 +39,8 @@ ClinicalDataNodeId = Annotated[str, StringConstraints(pattern=r"^KDK[A-Z0-9]{3}[
 
 def is_supported_version(version: str) -> bool:
     major, minor, patch = (int(part) for part in version.split("."))
-    # 1.1.1 <= v <= 1.1.8
-    return (major == 1) and (minor == 1) and (1 <= patch <= 9)
+    # 1.1.1 <= v <= 1.2.1
+    return (major == 1) and ((minor == 1 and 1 <= patch <= 9) or (minor == 2 and 0 <= patch <= 1))
 
 
 class ResearchConsentCodes(StrEnum):
@@ -50,13 +50,14 @@ class ResearchConsentCodes(StrEnum):
 
 class SubmissionType(StrEnum):
     """
-    The options are: 'initial' for first submission, 'followup' is for followup submissions, 'addition' for additional submission, 'correction' for correction
+    The options are: 'initial' for first submission, 'followup' is for followup submissions, 'addition' for additional submission, 'correction' for correction, 'test' for test submissions
     """
 
     initial = "initial"
     followup = "followup"
     addition = "addition"
     correction = "correction"
+    test = "test"
 
 
 class GenomicStudyType(StrEnum):
