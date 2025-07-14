@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.0.2...grz-common-v1.0.3) (2025-07-14)
+
+
+### Bug Fixes
+
+* **grz-common:** reduce validation logging verbosity ([#273](https://github.com/BfArM-MVH/grz-tools/issues/273)) ([18d15d9](https://github.com/BfArM-MVH/grz-tools/commit/18d15d94543dcfb4ca3fa8918094ca1a52b8812c))
+
 ## [1.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.0.1...grz-common-v1.0.2) (2025-07-03)
 
 
