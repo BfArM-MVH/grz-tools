@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.0.3...grz-pydantic-models-v2.1.0) (2025-07-14)
+
+
+### Features
+
+* **grz-pydantic-models:** support test submission types and new schema versions ([#280](https://github.com/BfArM-MVH/grz-tools/issues/280)) ([e8f7701](https://github.com/BfArM-MVH/grz-tools/commit/e8f77013a31a4895d9a210eb348337e9725e8535))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** Fix conditions for consent exemption ([#276](https://github.com/BfArM-MVH/grz-tools/issues/276)) ([bfe50a0](https://github.com/BfArM-MVH/grz-tools/commit/bfe50a040e0a4b7a2b0159f4c244cbe0b38ceeca))
+
+## [2.0.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.0.2...grz-pydantic-models-v2.0.3) (2025-07-09)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** use correct key from thresholds definition ([#270](https://github.com/BfArM-MVH/grz-tools/issues/270)) ([485c504](https://github.com/BfArM-MVH/grz-tools/commit/485c504acd8648c3227182b5cbdf42195549554e))
+* **grz-pydantic-models:** validate percentBasesAboveQualityThreshold against thresholds ([#268](https://github.com/BfArM-MVH/grz-tools/issues/268)) ([7df1f67](https://github.com/BfArM-MVH/grz-tools/commit/7df1f679760c399c8506453b7ef124b4dc142e60))
+
 ## [2.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.0.1...grz-pydantic-models-v2.0.2) (2025-07-03)
 
 

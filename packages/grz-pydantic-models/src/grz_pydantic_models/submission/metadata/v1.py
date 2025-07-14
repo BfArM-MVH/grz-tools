@@ -39,8 +39,8 @@ ClinicalDataNodeId = Annotated[str, StringConstraints(pattern=r"^KDK[A-Z0-9]{3}[
 
 def is_supported_version(version: str) -> bool:
     major, minor, patch = (int(part) for part in version.split("."))
-    # 1.1.1 <= v <= 1.1.8
-    return (major == 1) and (minor == 1) and (1 <= patch <= 9)
+    # 1.1.1 <= v <= 1.2.1
+    return (major == 1) and ((minor == 1 and 1 <= patch <= 9) or (minor == 2 and 0 <= patch <= 1))
 
 
 class ResearchConsentCodes(StrEnum):
@@ -50,13 +50,14 @@ class ResearchConsentCodes(StrEnum):
 
 class SubmissionType(StrEnum):
     """
-    The options are: 'initial' for first submission, 'followup' is for followup submissions, 'addition' for additional submission, 'correction' for correction
+    The options are: 'initial' for first submission, 'followup' is for followup submissions, 'addition' for additional submission, 'correction' for correction, 'test' for test submissions
     """
 
     initial = "initial"
     followup = "followup"
     addition = "addition"
     correction = "correction"
+    test = "test"
 
 
 class GenomicStudyType(StrEnum):
@@ -993,8 +994,10 @@ class Donor(StrictBaseModel):
             ):
                 raise ValueError("Must have at least a permit of mvSequencing")
         else:
-            if self.relation == Relation.index_:
-                raise ValueError("Index donors must have at least a permit of mvSequencing")
+            if self.relation not in {Relation.mother, Relation.father}:
+                raise ValueError(
+                    "Donors must have at least a permit of mvSequencing. Exemptions only apply to parents."
+                )
 
             if not self.research_consents:
                 raise ValueError(
@@ -1004,7 +1007,7 @@ class Donor(StrictBaseModel):
             mv_consent_exempt = False
             for research_consent in self.research_consents:
                 presented_before_cutoff = (research_consent.presentation_date is not None) and (
-                    research_consent.presentation_date < date(year=2025, month=6, day=15)
+                    research_consent.presentation_date <= date(year=2025, month=6, day=15)
                 )
                 consents_to_research = ResearchConsent.consents_to_research([research_consent], date.today())
                 if presented_before_cutoff and consents_to_research:

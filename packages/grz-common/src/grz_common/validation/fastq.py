@@ -76,6 +76,7 @@ def calculate_fastq_stats(file_path, expected_read_length: int | None = None) ->
       - Observed read length
     """
     with open_fastq(file_path) as f:
+        read_length_warned = False
         for line_number, line in enumerate(f):
             if (line_number % 4) == 1:
                 # Sequence lines are every 4th line starting from the 2nd
@@ -83,13 +84,15 @@ def calculate_fastq_stats(file_path, expected_read_length: int | None = None) ->
                 read_length = len(line.strip())
                 if expected_read_length is None:
                     expected_read_length = read_length
-                elif read_length != expected_read_length:
+                elif (not read_length_warned) and (read_length != expected_read_length):
                     # For the time being, read length mismatch is downgraded to warning
                     log.warning(
                         f"Read length mismatch at line {line_number + 1}: "
                         f"expected {expected_read_length}, found {read_length}. "
                         "This will be an error in the future."
+                        "Further mismatches in the same file won't be reported."
                     )
+                    read_length_warned = True
 
     return (
         line_number + 1,  # enumerate starts indexing at 0

@@ -73,6 +73,6 @@ class SubmittedCase(StrictBaseModel):
 class Pruefbericht(StrictBaseModel):
     """Quality control report submitted to BfArM for each submission to a KDK/GRZ."""
 
-    _version: str = "0.3"
+    _version: str = "0.4"
 
     submitted_case: SubmittedCase = Field(alias="SubmittedCase")
