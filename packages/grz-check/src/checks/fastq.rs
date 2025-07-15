@@ -23,7 +23,7 @@ pub fn check_single_fastq(
 
         let first_record = match records.next() {
             Some(Ok(rec)) => rec,
-            Some(Err(e)) => return Err(format!("Failed to parse first record: {}", e)),
+            Some(Err(e)) => return Err(format!("Failed to parse first record: {e}")),
             None => {
                 return Ok(CheckOutcome {
                     errors: vec!["File is empty. Expected at least one record.".to_string()],

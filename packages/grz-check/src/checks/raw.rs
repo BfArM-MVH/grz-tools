@@ -8,7 +8,7 @@ pub fn check_raw(path: &Path, file_pb: &ProgressBar, global_pb: &ProgressBar) ->
     check_file(path, file_pb, global_pb, false, |reader| {
         match io::copy(reader, &mut io::sink()) {
             Ok(_) => Ok(CheckOutcome::default()),
-            Err(e) => Err(format!("Failed to read file: {}", e)),
+            Err(e) => Err(format!("Failed to read file: {e}")),
         }
     })
 }

@@ -36,7 +36,7 @@ where
         Err(e) => {
             return FileReport::new_with_error(
                 path,
-                format!("Failed to open file for reading: {}", e),
+                format!("Failed to open file for reading: {e}"),
             );
         }
     };
@@ -50,10 +50,7 @@ where
         match niffler::get_reader(Box::new(progress_reader)) {
             Ok((r, _)) => r,
             Err(e) => {
-                return FileReport::new_with_error(
-                    path,
-                    format!("Failed to decompress file: {}", e),
-                );
+                return FileReport::new_with_error(path, format!("Failed to decompress file: {e}"));
             }
         }
     } else {

@@ -11,7 +11,7 @@ pub fn check_bam(path: &Path, file_pb: &ProgressBar, global_pb: &ProgressBar) ->
         let mut bam_reader = bam::io::Reader::new(BufReader::new(reader));
         let header = match bam_reader.read_header() {
             Ok(h) => h,
-            Err(e) => return Err(format!("Failed to read BAM header: {}", e)),
+            Err(e) => return Err(format!("Failed to read BAM header: {e}")),
         };
 
         let mut warnings = Vec::new();
@@ -74,15 +74,13 @@ pub fn check_bam(path: &Path, file_pb: &ProgressBar, global_pb: &ProgressBar) ->
 
         if let Some((rec_num, read_name)) = first_secondary_warning_details {
             warnings.push(format!(
-                "File contains {} secondary alignment(s). First detected at record #{} ('{}').",
-                secondary_alignment_count, rec_num, read_name
+                "File contains {secondary_alignment_count} secondary alignment(s). First detected at record #{rec_num} ('{read_name}')."
             ));
         }
 
         if let Some((rec_num, read_name)) = first_hard_clip_warning_details {
             warnings.push(format!(
-                "File contains {} primary alignment(s) with hard-clipped bases. First detected at record #{} ('{}').",
-                hard_clip_count, rec_num, read_name
+                "File contains {hard_clip_count} primary alignment(s) with hard-clipped bases. First detected at record #{rec_num} ('{read_name}')."
             ));
         }
 

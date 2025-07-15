@@ -748,7 +748,7 @@ mod tests {
                     TestReport::Fastq(d) => d.path.ends_with(suffix),
                     _ => false,
                 })
-                .unwrap_or_else(|| panic!("Report for file ending in '{}' not found", suffix))
+                .unwrap_or_else(|| panic!("Report for file ending in '{suffix}' not found"))
                 .clone()
         };
 
