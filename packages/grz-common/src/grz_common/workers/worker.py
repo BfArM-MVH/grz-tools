@@ -61,8 +61,7 @@ class Worker:
             self.__log.debug("Creating log directory...")
             self.log_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
-        self.progress_file_checksum_validation = self.log_dir / "progress_checksum_validation.cjson"
-        self.progress_file_sequencing_data_validation = self.log_dir / "progress_sequencing_data_validation.cjson"
+        self.progress_file_validation = self.log_dir / "progress_file_validation.cjson"
         self.progress_file_encrypt = self.log_dir / "progress_encrypt.cjson"
         self.progress_file_decrypt = self.log_dir / "progress_decrypt.cjson"
         self.progress_file_upload = self.log_dir / "progress_upload.cjson"
@@ -108,28 +107,16 @@ class Worker:
 
         if force:
             # delete the log files if they exist
-            self.progress_file_checksum_validation.unlink(missing_ok=True)
-            self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
+            self.progress_file_validation.unlink(missing_ok=True)
 
-        self.__log.info("Starting checksum validation...")
-        if errors := list(submission.validate_checksums(progress_log_file=self.progress_file_checksum_validation)):
-            error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
+        self.__log.info("Starting file validation...")
+        if errors := list(submission.validate_files(progress_log_file=self.progress_file_validation)):
+            error_msg = "\n".join(["File validation failed! Errors:", *errors])
             self.__log.error(error_msg)
 
             raise SubmissionValidationError(error_msg)
         else:
-            self.__log.info("Checksum validation successful!")
-
-        self.__log.info("Starting sequencing data validation...")
-        if errors := list(
-            submission.validate_sequencing_data(progress_log_file=self.progress_file_sequencing_data_validation)
-        ):
-            error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
-            self.__log.error(error_msg)
-
-            raise SubmissionValidationError(error_msg)
-        else:
-            self.__log.info("Sequencing data validation successful!")
+            self.__log.info("File validation successful!")
 
     def encrypt(
         self,
@@ -163,8 +150,7 @@ class Worker:
     def decrypt(self, recipient_private_key_path: str | PathLike, force: bool = False) -> Submission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
-        :param recipient_public_key_path: Path to the public key file of the recipient.
-        :param submitter_private_key_path: Path to the private key file of the submitter.
+        :param recipient_private_key_path: Path to the private key file of the recipient.
         :param force: Force decryption of already decrypted files
         :return: EncryptedSubmission instance
         """
