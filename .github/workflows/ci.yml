@@ -13,8 +13,10 @@ jobs:
     name: Determine Changed Packages
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.generate_matrix.outputs.matrix }} # JSON array of objects: {"path": "...", "type": "..."}
-      has_changes: ${{ steps.generate_matrix.outputs.has_changes }}
+      python_matrix: ${{ steps.generate_matrix.outputs.python_matrix }}
+      rust_matrix: ${{ steps.generate_matrix.outputs.rust_matrix }}
+      has_python_changes: ${{ steps.generate_matrix.outputs.has_python_changes }}
+      has_rust_changes: ${{ steps.generate_matrix.outputs.has_rust_changes }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -77,31 +79,39 @@ jobs:
           unique_test_dirs_array=($(echo "${final_test_dirs[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
           echo "Final unique package directories to test: ${unique_test_dirs_array[*]}"
 
-          json_objects=""
-          for pkg_path in "${unique_test_dirs_array[@]}"; do
-            pkg_type=""
-            if [[ -f "$pkg_path/pyproject.toml" ]]; then
-              pkg_type="python"
-            elif [[ -f "$pkg_path/Cargo.toml" ]]; then
-              pkg_type="rust"
-            fi
+          python_json_objects=""
+          rust_json_objects=""
 
-            if [[ -n "$pkg_type" ]]; then
-              json_objects+=$(jq -n --arg path "$pkg_path" --arg type "$pkg_type" '{"path": $path, "type": $type}')
+          for pkg_path in "${unique_test_dirs_array[@]}"; do
+            if [[ -f "$pkg_path/pyproject.toml" ]]; then
+              # Note: We only need the path in the matrix object now
+              python_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
+            elif [[ -f "$pkg_path/Cargo.toml" ]]; then
+              rust_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
             fi
           done
 
-          matrix_json=$(echo "$json_objects" | jq -s .)
+          python_matrix=$(echo "$python_json_objects" | jq -s .)
+          rust_matrix=$(echo "$rust_json_objects" | jq -s .)
 
-          if [ "$(echo '$matrix_json' | jq 'length')" -gt 0 ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "python_matrix=$python_matrix" >> $GITHUB_OUTPUT
+          echo "rust_matrix=$rust_matrix" >> $GITHUB_OUTPUT
+
+          if [ "$(echo "$python_matrix" | jq 'length')" -gt 0 ]; then
+            echo "has_python_changes=true" >> $GITHUB_OUTPUT
+            echo "Generated Python matrix: $python_matrix"
           else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "No relevant package changes detected."
-            matrix_json="[]"
+            echo "has_python_changes=false" >> $GITHUB_OUTPUT
+            echo "No Python package changes detected."
           fi
-          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
-          echo "Generated matrix for testing: $matrix_json"
+
+          if [ "$(echo "$rust_matrix" | jq 'length')" -gt 0 ]; then
+            echo "has_rust_changes=true" >> $GITHUB_OUTPUT
+            echo "Generated Rust matrix: $rust_matrix"
+          else
+            echo "has_rust_changes=false" >> $GITHUB_OUTPUT
+            echo "No Rust package changes detected."
+          fi
 
   quality-checks-python:
     name: Global Quality Checks (Python)
@@ -195,12 +205,12 @@ jobs:
   test-changed-packages-python:
     name: Test Python (${{ matrix.python-version }}) - ${{ matrix.package.path }}
     needs: [determine-changes, quality-checks-python]
-    if: needs.determine-changes.outputs.has_changes == 'true' && matrix.package.type == 'python'
+    if: needs.determine-changes.outputs.has_python_changes == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJson(needs.determine-changes.outputs.matrix) }}
+        package: ${{ fromJson(needs.determine-changes.outputs.python_matrix) }}
         python-version:
           - "3.12"
           - "3.13"
@@ -236,12 +246,12 @@ jobs:
   test-changed-packages-rust:
     name: Test Rust - ${{ matrix.package.path }}
     needs: [determine-changes, quality-checks-rust]
-    if: needs.determine-changes.outputs.has_changes == 'true' && matrix.package.type == 'rust'
+    if: needs.determine-changes.outputs.has_rust_changes == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJson(needs.determine-changes.outputs.matrix) }}
+        package: ${{ fromJson(needs.determine-changes.outputs.rust_matrix) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
