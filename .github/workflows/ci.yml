@@ -203,7 +203,7 @@ jobs:
         run: uv run tox -e ${{ matrix.python-version }}
 
   test-changed-packages-python:
-    name: Test Python (${{ matrix.python-version }}) - ${{ matrix.package.path }}
+    name: Test Changed Python Packages
     needs: [determine-changes, quality-checks-python]
     if: needs.determine-changes.outputs.has_python_changes == 'true'
     runs-on: ubuntu-latest
@@ -240,11 +240,11 @@ jobs:
       - name: Ensure package uv lockfile is up-to-date
         run: cd ${{ matrix.package.path }} && uv lock --check
 
-      - name: Run tests for ${{ matrix.package.path }}
+      - name: Run tests for ${{ steps.pkg_info.outputs.name }}
         run: cd ${{ matrix.package.path }} && uv run tox -e ${{ matrix.python-version }}
 
   test-changed-packages-rust:
-    name: Test Rust - ${{ matrix.package.path }}
+    name: Test Changed Rust Packages
     needs: [determine-changes, quality-checks-rust]
     if: needs.determine-changes.outputs.has_rust_changes == 'true'
     runs-on: ubuntu-latest
@@ -261,5 +261,9 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Run tests for ${{ matrix.package.path }}
+      - name: Extract package name from path
+        id: pkg_info
+        run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
+
+      - name: Run tests for ${{ steps.pkg_info.outputs.name }}
         run: cd ${{ matrix.package.path }} && cargo test --all-features
