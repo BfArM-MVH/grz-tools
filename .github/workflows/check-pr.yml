@@ -23,7 +23,7 @@ jobs:
             grz-pydantic-models
             grz-db
             grz-tools
-            grz-check-provider
+            grz-check
             repo
             release
             other

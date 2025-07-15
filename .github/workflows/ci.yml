@@ -1,4 +1,4 @@
-name: Python CI
+name: Python & Rust CI
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     name: Determine Changed Packages
     runs-on: ubuntu-latest
     outputs:
-      matrix_paths: ${{ steps.generate_matrix.outputs.matrix }} # JSON array of package paths like "packages/grz-cli"
+      matrix: ${{ steps.generate_matrix.outputs.matrix }} # JSON array of objects: {"path": "...", "type": "..."}
       has_changes: ${{ steps.generate_matrix.outputs.has_changes }}
     steps:
       - name: Checkout code
@@ -37,8 +37,10 @@ jobs:
           directly_changed_package_dirs=()
           for file_path in $ALL_CHANGED_FILES; do
             # Extract the direct package directory (e.g., packages/package-a)
-            package_dir=$(echo "$file_path" | cut -d/ -f1-2) # Assumes structure like packages/pkg-name/...
-            if [[ -f "$package_dir/pyproject.toml" ]]; then # Check if it's a valid package dir
+            package_dir=$(echo "$file_path" | cut -d/ -f1-2)
+
+            # Check if it's a valid package dir (Python or Rust)
+            if [[ -f "$package_dir/pyproject.toml" || -f "$package_dir/Cargo.toml" ]]; then
               if [[ ! " ${directly_changed_package_dirs[@]} " =~ " ${package_dir} " ]]; then
                 directly_changed_package_dirs+=("$package_dir")
               fi
@@ -75,19 +77,34 @@ jobs:
           unique_test_dirs_array=($(echo "${final_test_dirs[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
           echo "Final unique package directories to test: ${unique_test_dirs_array[*]}"
 
-          matrix_json="[]" # Default to empty JSON array
-          if [ ${#unique_test_dirs_array[@]} -gt 0 ]; then
-            matrix_json=$(printf '%s\n' "${unique_test_dirs_array[@]}" | jq -R | jq -sc . )
+          json_objects=""
+          for pkg_path in "${unique_test_dirs_array[@]}"; do
+            pkg_type=""
+            if [[ -f "$pkg_path/pyproject.toml" ]]; then
+              pkg_type="python"
+            elif [[ -f "$pkg_path/Cargo.toml" ]]; then
+              pkg_type="rust"
+            fi
+
+            if [[ -n "$pkg_type" ]]; then
+              json_objects+=$(jq -n --arg path "$pkg_path" --arg type "$pkg_type" '{"path": $path, "type": $type}')
+            fi
+          done
+
+          matrix_json=$(echo "$json_objects" | jq -s .)
+
+          if [ "$(echo '$matrix_json' | jq 'length')" -gt 0 ]; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "No relevant package changes detected."
+            matrix_json="[]"
           fi
           echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
           echo "Generated matrix for testing: $matrix_json"
 
-  quality-checks:
-    name: Global Quality Checks
+  quality-checks-python:
+    name: Global Quality Checks (Python)
     runs-on: ubuntu-latest
     # Run always on PRs to main, or if determine-changes says something relevant changed on push to main.
     # This ensures quality checks run even if no "package" code changed but e.g. a workflow file did.
@@ -101,7 +118,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: '0.7.9'
+          version: '0.7.21'
           enable-cache: true
 
       - name: Set up Python
@@ -122,8 +139,30 @@ jobs:
       - name: Run type checking
         run: uv run tox -e typecheck
 
-  run-workspace-tests:
-    name: Run workspace tests
+  quality-checks-rust:
+    name: Global Quality Checks (Rust)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting for all Rust packages
+        run: |
+          find packages -name Cargo.toml -print0 | xargs -0 -I {} bash -c 'cd "$(dirname {})" && cargo fmt --all -- --check'
+
+      - name: Linting with Clippy for all Rust packages
+        run: |
+          find packages -name Cargo.toml -print0 | xargs -0 -I {} bash -c 'cd "$(dirname {})" && cargo clippy --all-targets -- -D warnings'
+
+  run-workspace-tests-python:
+    name: Run workspace tests (Python)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -141,7 +180,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: '0.7.9'
+          version: '0.7.21'
           enable-cache: true
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -153,15 +192,15 @@ jobs:
       - name: Test ${{ matrix.python-version }}
         run: uv run tox -e ${{ matrix.python-version }}
 
-  test-changed-packages:
-    name: Test Changed Packages
-    needs: [determine-changes, quality-checks]
-    if: needs.determine-changes.outputs.has_changes == 'true' # Only run if there are packages to test
+  test-changed-packages-python:
+    name: Test Python (${{ matrix.python-version }}) - ${{ matrix.package.path }}
+    needs: [determine-changes, quality-checks-python]
+    if: needs.determine-changes.outputs.has_changes == 'true' && matrix.package.type == 'python'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package_path: ${{ fromJson(needs.determine-changes.outputs.matrix_paths) }} # e.g., "packages/grz-cli"
+        package: ${{ fromJson(needs.determine-changes.outputs.matrix) }}
         python-version:
           - "3.12"
           - "3.13"
@@ -175,7 +214,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: '0.7.9'
+          version: '0.7.21'
           enable-cache: true
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -189,8 +228,28 @@ jobs:
         run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
 
       - name: Ensure package uv lockfile is up-to-date
-        run: cd ${{ matrix.package_path }} && uv lock --check
+        run: cd ${{ matrix.package.path }} && uv lock --check
 
-      - name: Run tests for ${{ steps.pkg_info.outputs.name }} (Py ${{ matrix.python-version }})
-        run: |
-          cd ${{ matrix.package_path }} && uv run tox -e ${{ matrix.python-version }}
+      - name: Run tests for ${{ matrix.package.path }}
+        run: cd ${{ matrix.package.path }} && uv run tox -e ${{ matrix.python-version }}
+
+  test-changed-packages-rust:
+    name: Test Rust - ${{ matrix.package.path }}
+    needs: [determine-changes, quality-checks-rust]
+    if: needs.determine-changes.outputs.has_changes == 'true' && matrix.package.type == 'rust'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.determine-changes.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run tests for ${{ matrix.package.path }}
+        run: cd ${{ matrix.package.path }} && cargo test --all-features

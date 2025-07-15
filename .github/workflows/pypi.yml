@@ -1,4 +1,4 @@
-name: Build and Publish to PyPI
+name: Publish to PyPI
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ jobs:
   build-and-publish-package:
     name: Build & Publish Package from tag
     runs-on: ubuntu-latest
-    if: "!startsWith(github.ref_name, 'grz-check-provider')"  # grz-check-provider is handled explicitly in build-binary-wheels.yml
+    if: "!startsWith(github.ref_name, 'grz-check')"
     environment:
       name: pypi
       url: ${{ steps.update_env_url.outputs.PYPI_PACKAGE_URL }}

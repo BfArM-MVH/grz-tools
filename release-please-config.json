@@ -20,6 +20,10 @@
     },
     "packages/grz-pydantic-models": {
       "package-name": "grz-pydantic-models"
+    },
+    "packages/grz-check": {
+      "release-type": "rust",
+      "package-name": "grz-check"
     }
   }
 }
