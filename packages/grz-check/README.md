@@ -28,7 +28,7 @@ Options:
           A file for which to only calculate the SHA256 checksum, skipping all other validation
 
       --output <OUTPUT>
-          Path to write the output TSV report
+          Path to write the output JSONL report
 
       --continue-on-error
           Continue processing all files even if an error is found
