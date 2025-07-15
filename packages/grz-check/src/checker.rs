@@ -221,7 +221,7 @@ pub fn run_check(
 ) -> anyhow::Result<()> {
     if paired_raw.is_empty() && single_raw.is_empty() && bam_raw.is_empty() && raw.is_empty() {
         anyhow::bail!(
-            "No input files provided. Use --paired, --single, --bam, or --checksum-only."
+            "No input files provided. Use --fastq-single, --fastq-paired, --bam, or --raw."
         );
     }
 
