@@ -27,6 +27,7 @@ struct Args {
     #[arg(
         long,
         action = clap::ArgAction::Append,
+        allow_hyphen_values = true,
         num_args = 4,
         value_names = ["FQ1_PATH", "FQ2_PATH", "FQ1_READ_LEN", "FQ2_READ_LEN"]
     )]
@@ -37,6 +38,7 @@ struct Args {
     #[arg(
         long,
         action = clap::ArgAction::Append,
+        allow_hyphen_values = true,
         num_args = 2,
         value_names = ["FQ_PATH", "READ_LEN"]
     )]
