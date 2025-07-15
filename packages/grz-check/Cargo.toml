@@ -7,6 +7,7 @@ description = "grz-check is a tool for validating incoming files of Modellvorhab
 homepage = "https://github.com/BfArM-MVH/grz-tools/tree/main/packages/grz-check"
 repository = "https://github.com/BfArM-MVH/grz-tools"
 readme = "README.md"
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.98"
