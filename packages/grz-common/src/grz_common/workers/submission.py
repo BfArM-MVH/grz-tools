@@ -222,7 +222,7 @@ class Submission:
             yield from self._validate_checksums_fallback(progress_logger)
             yield from self._validate_sequencing_data_fallback(progress_logger)
 
-    def _validate_files_with_grz_check(self, progress_log_file: str | PathLike) -> Generator[str, None, None]:  # noqa: C901
+    def _validate_files_with_grz_check(self, progress_log_file: str | PathLike) -> Generator[str, None, None]:  # noqa: C901, PLR0915, PLR0912
         """
         Validates submission files using the `grz-check` external tool.
         """
@@ -303,7 +303,7 @@ class Submission:
 
                 report_file.flush()
                 report_file.seek(0)
-                self._process_grz_check_report(report_file, progress_logger)
+                self._process_grz_check_report(report_file, progress_logger)  # type: ignore[arg-type]
 
         for local_file_path, file_metadata in self.files.items():
             logged_state = progress_logger.get_state(local_file_path, file_metadata)
@@ -345,7 +345,7 @@ class Submission:
 
                 if (
                     checksum
-                    and file_metadata.checksum_type.lower() == "sha256"
+                    and (file_metadata.checksum_type or "").lower() == "sha256"
                     and file_metadata.file_checksum != checksum
                 ):
                     all_issues.append(
