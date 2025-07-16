@@ -311,7 +311,7 @@ class Submission:
                 for error in logged_state.get("errors", []):
                     yield f"{local_file_path.relative_to(self.files_dir)}: {error}"
 
-    def _process_grz_check_report(
+    def _process_grz_check_report(  # noqa: C901
         self, report_file: typing.TextIO, progress_logger: FileProgressLogger[ValidationState]
     ):
         """
@@ -339,7 +339,8 @@ class Submission:
 
                 all_issues = errors
                 if warnings:
-                    all_issues.extend([f"WARNING: {w}" for w in warnings])
+                    for w in warnings:
+                        self.__log.warning(w)
 
                 validation_passed = status == "OK"
 
