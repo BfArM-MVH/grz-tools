@@ -61,7 +61,8 @@ class Worker:
             self.__log.debug("Creating log directory...")
             self.log_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
-        self.progress_file_validation = self.log_dir / "progress_file_validation.cjson"
+        self.progress_file_checksum_validation = self.log_dir / "progress_checksum_validation.cjson"
+        self.progress_file_sequencing_data_validation = self.log_dir / "progress_sequencing_data_validation.cjson"
         self.progress_file_encrypt = self.log_dir / "progress_encrypt.cjson"
         self.progress_file_decrypt = self.log_dir / "progress_decrypt.cjson"
         self.progress_file_upload = self.log_dir / "progress_upload.cjson"
@@ -92,6 +93,7 @@ class Worker:
 
         :param identifiers: IdentifiersModel containing GRZ and LE identifiers.
         :param force: Force validation of already validated files
+        :param with_grz_check: If True, use the grz-check tool for validation.
         :raises SubmissionValidationError: if the validation fails
         """
         submission = self.parse_submission()
@@ -107,18 +109,50 @@ class Worker:
 
         if force:
             # delete the log files if they exist
-            self.progress_file_validation.unlink(missing_ok=True)
+            self.progress_file_checksum_validation.unlink(missing_ok=True)
+            self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
 
-        self.__log.info("Starting file validation...")
+        if with_grz_check:
+            try:
+                self.__log.info("Starting file validation with `grz-check`...")
+                errors = list(
+                    submission.validate_files_with_grz_check(
+                        checksum_progress_file=self.progress_file_checksum_validation,
+                        seq_data_progress_file=self.progress_file_sequencing_data_validation,
+                    )
+                )
+                if errors:
+                    error_msg = "\n".join(["File validation failed! Errors:", *errors])
+                    self.__log.error(error_msg)
+                    raise SubmissionValidationError(error_msg)
+                else:
+                    self.__log.info("File validation successful!")
+                return
+            except (FileNotFoundError, ModuleNotFoundError):
+                self.__log.warning("`grz-check` not found. Falling back to python-based validation.")
+
+        # Fallback validation
+        self.__log.info("Starting checksum validation (fallback)...")
         if errors := list(
-            submission.validate_files(progress_log_file=self.progress_file_validation, with_grz_check=with_grz_check)
+            submission._validate_checksums_fallback(progress_log_file=self.progress_file_checksum_validation)
         ):
-            error_msg = "\n".join(["File validation failed! Errors:", *errors])
+            error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
             self.__log.error(error_msg)
-
             raise SubmissionValidationError(error_msg)
         else:
-            self.__log.info("File validation successful!")
+            self.__log.info("Checksum validation successful!")
+
+        self.__log.info("Starting sequencing data validation (fallback)...")
+        if errors := list(
+            submission._validate_sequencing_data_fallback(
+                progress_log_file=self.progress_file_sequencing_data_validation
+            )
+        ):
+            error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
+            self.__log.error(error_msg)
+            raise SubmissionValidationError(error_msg)
+        else:
+            self.__log.info("Sequencing data validation successful!")
 
     def encrypt(
         self,
