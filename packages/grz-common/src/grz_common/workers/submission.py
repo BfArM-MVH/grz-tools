@@ -202,7 +202,7 @@ class Submission:
         return retval
 
     def validate_files_with_grz_check(  # noqa: C901, PLR0915, PLR0912
-        self, checksum_progress_file: str | PathLike, seq_data_progress_file: str | PathLike
+        self, checksum_progress_file: str | PathLike, seq_data_progress_file: str | PathLike, threads: int | None
     ) -> Generator[str, None, None]:
         """
         Validates submission files using `grz-check` and populates both progress logs.
@@ -285,7 +285,9 @@ class Submission:
             self.__log.info("All files are already validated. Skipping `grz-check`.")
         else:
             with tempfile.NamedTemporaryFile(mode="w+", delete=True, suffix=".jsonl") as report_file:
-                command_args = ["--output", report_file.name, "--continue-on-error", *grz_check_args]
+                command_args = ["--output", report_file.name, *grz_check_args]
+                if threads:
+                    command_args.extend(["--threads", str(threads)])
                 try:
                     run_grz_check(command_args)
                 except subprocess.CalledProcessError as e:

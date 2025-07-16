@@ -87,7 +87,7 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False, with_grz_check=True):
+    def validate(self, identifiers: IdentifiersModel, force=False, threads=1, with_grz_check=True):
         """
         Validate this submission
 
@@ -119,6 +119,7 @@ class Worker:
                     submission.validate_files_with_grz_check(
                         checksum_progress_file=self.progress_file_checksum_validation,
                         seq_data_progress_file=self.progress_file_sequencing_data_validation,
+                        threads=self._threads,
                     )
                 )
                 if errors:
