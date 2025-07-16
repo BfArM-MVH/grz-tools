@@ -48,5 +48,5 @@ Options:
 ```sh
 # --fastq-paired R1 R2 read_length_R1 read_length_R2
 # --fastq-single R1 read_length_R1
-grz-check --show-progress --output report.tsv --fastq-paired path/to/sample__R1.fastq.gz path/to/sample_R2.fastq.gz 150 150 --fastq-single path/to/sample.fastq.gz 151
+grz-check --show-progress --output report.jsonl --fastq-paired path/to/sample__R1.fastq.gz path/to/sample_R2.fastq.gz 150 150 --fastq-single path/to/sample.fastq.gz 151
 ```
