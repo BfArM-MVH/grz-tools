@@ -20,7 +20,7 @@ def run_grz_check(args: list[str]) -> subprocess.CompletedProcess:
 
     return subprocess.run(  # noqa: S603
         command,
-        capture_output=True,
+        capture_output=False,
         text=True,
         check=True,
     )
