@@ -201,7 +201,9 @@ class Submission:
 
         return retval
 
-    def validate_files(self, progress_log_file: str | PathLike) -> Generator[str, None, None]:
+    def validate_files(
+        self, progress_log_file: str | PathLike, with_grz_check: bool = True
+    ) -> Generator[str, None, None]:
         """
         Validates the files of the submission.
 
@@ -209,18 +211,25 @@ class Submission:
         If `grz-check` is not found, fall back to the original validation methods.
 
         :param progress_log_file: Path to the progress log file.
+        :param with_grz_check: If `True`, try to use grz check.
         :return: Generator of errors.
         """
-        try:
-            yield from self._validate_files_with_grz_check(progress_log_file)
-            return
-        except (FileNotFoundError, ModuleNotFoundError):
-            self.__log.warning("`grz-check` not found. Falling back to python-based validation. ")
-            progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
-            progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
+        if with_grz_check:
+            try:
+                yield from self._validate_files_with_grz_check(progress_log_file)
+                return
+            except (FileNotFoundError, ModuleNotFoundError):
+                self.__log.warning("`grz-check` not found. Falling back to python-based validation.")
 
-            yield from self._validate_checksums_fallback(progress_logger)
-            yield from self._validate_sequencing_data_fallback(progress_logger)
+        yield from self._perform_fallback_validation(progress_log_file)
+
+    def _perform_fallback_validation(self, progress_log_file: str | PathLike) -> Generator[str, None, None]:
+        """Use python-based file validation routine."""
+        progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
+        progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
+
+        yield from self._validate_checksums_fallback(progress_logger)
+        yield from self._validate_sequencing_data_fallback(progress_logger)
 
     def _validate_files_with_grz_check(self, progress_log_file: str | PathLike) -> Generator[str, None, None]:  # noqa: C901, PLR0915, PLR0912
         """

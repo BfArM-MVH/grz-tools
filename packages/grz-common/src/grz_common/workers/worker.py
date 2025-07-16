@@ -86,7 +86,7 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False):
+    def validate(self, identifiers: IdentifiersModel, force=False, with_grz_check=True):
         """
         Validate this submission
 
@@ -110,7 +110,9 @@ class Worker:
             self.progress_file_validation.unlink(missing_ok=True)
 
         self.__log.info("Starting file validation...")
-        if errors := list(submission.validate_files(progress_log_file=self.progress_file_validation)):
+        if errors := list(
+            submission.validate_files(progress_log_file=self.progress_file_validation, with_grz_check=with_grz_check)
+        ):
             error_msg = "\n".join(["File validation failed! Errors:", *errors])
             self.__log.error(error_msg)
 
