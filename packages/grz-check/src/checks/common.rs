@@ -26,10 +26,7 @@ where
 {
     file_pb.set_message(format!(
         "~ CHECK {}",
-        path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
+        path.file_name().unwrap_or_default().to_string_lossy()
     ));
 
     let file = match fs::File::open(path) {
