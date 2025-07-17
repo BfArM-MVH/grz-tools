@@ -70,15 +70,13 @@ impl FileReport {
 #[derive(Debug, Serialize, Clone)]
 pub struct PairReport {
     pub fq1_report: FileReport,
-    pub fq2_report: Option<FileReport>,
+    pub fq2_report: FileReport,
     pub pair_errors: Vec<String>,
 }
 
 impl PairReport {
     fn is_ok(&self) -> bool {
-        self.fq1_report.is_ok()
-            && self.fq2_report.as_ref().is_some_and(|r2| r2.is_ok())
-            && self.pair_errors.is_empty()
+        self.fq1_report.is_ok() && self.fq2_report.is_ok() && self.pair_errors.is_empty()
     }
 }
 
@@ -285,12 +283,12 @@ fn process_job(
                                         outcome1.errors,
                                         outcome1.warnings,
                                     ),
-                                    fq2_report: Some(FileReport::new(
+                                    fq2_report: FileReport::new(
                                         &job.fq2_path,
                                         None,
                                         outcome2.errors,
                                         outcome2.warnings,
-                                    )),
+                                    ),
                                     pair_errors: vec![
                                         "Parsing error during paired fastq check.".to_string(),
                                     ],
@@ -322,7 +320,7 @@ fn process_job(
 
                     PairReport {
                         fq1_report,
-                        fq2_report: Some(fq2_report),
+                        fq2_report,
                         pair_errors,
                     }
                 }
@@ -339,7 +337,7 @@ fn process_job(
                     );
                     PairReport {
                         fq1_report,
-                        fq2_report: Some(fq2_report),
+                        fq2_report,
                         pair_errors: vec![],
                     }
                 }
@@ -356,7 +354,7 @@ fn process_job(
                     let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
                     PairReport {
                         fq1_report,
-                        fq2_report: Some(fq2_report),
+                        fq2_report,
                         pair_errors: vec![],
                     }
                 }
@@ -365,7 +363,7 @@ fn process_job(
                     let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
                     PairReport {
                         fq1_report,
-                        fq2_report: Some(fq2_report),
+                        fq2_report,
                         pair_errors: vec![],
                     }
                 }
@@ -641,52 +639,31 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
         CheckResult::PairedFastq(pair_report) => {
             let is_pair_error = !pair_report.pair_errors.is_empty();
 
-            // Process R1
             let r1 = &pair_report.fq1_report;
-            let mut fq1_errors = r1.errors.clone();
-            if is_pair_error {
-                fq1_errors.extend(pair_report.pair_errors.clone());
-            }
-            let status = if r1.is_ok() && !is_pair_error {
-                "OK"
-            } else {
-                "ERROR"
-            };
+            let r2 = &pair_report.fq2_report;
+            let file_reports = [r1, r2];
 
-            let report1 = JsonReport::Fastq(FastqReport {
-                path: &r1.path,
-                status,
-                num_records: r1.stats.map(|s| s.num_records),
-                read_length: r1.stats.and_then(|s| s.read_length),
-                checksum: r1.sha256.as_ref(),
-                errors: fq1_errors,
-                warnings: &r1.warnings,
-            });
-            serde_json::to_writer(&mut *writer, &report1)?;
-            writer.write_all(b"\n")?;
-
-            // Process R2, if it exists
-            if let Some(r2) = &pair_report.fq2_report {
-                let mut fq2_errors = r2.errors.clone();
+            for file_report in file_reports {
+                let mut errors = file_report.errors.clone();
                 if is_pair_error {
-                    fq2_errors.extend(pair_report.pair_errors.clone());
+                    errors.extend(pair_report.pair_errors.clone());
                 }
-                let status = if r2.is_ok() && !is_pair_error {
+                let status = if file_report.is_ok() && !is_pair_error {
                     "OK"
                 } else {
                     "ERROR"
                 };
 
-                let report2 = JsonReport::Fastq(FastqReport {
-                    path: &r2.path,
+                let report = JsonReport::Fastq(FastqReport {
+                    path: &file_report.path,
                     status,
-                    num_records: r2.stats.map(|s| s.num_records),
-                    read_length: r2.stats.and_then(|s| s.read_length),
-                    checksum: r2.sha256.as_ref(),
-                    errors: fq2_errors,
-                    warnings: &r2.warnings,
+                    num_records: file_report.stats.map(|s| s.num_records),
+                    read_length: file_report.stats.and_then(|s| s.read_length),
+                    checksum: file_report.sha256.as_ref(),
+                    errors,
+                    warnings: &file_report.warnings,
                 });
-                serde_json::to_writer(&mut *writer, &report2)?;
+                serde_json::to_writer(&mut *writer, &report)?;
                 writer.write_all(b"\n")?;
             }
         }
