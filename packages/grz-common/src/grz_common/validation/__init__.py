@@ -1,22 +1,17 @@
 """Validation package for grz-cli."""
-
+import logging
 import subprocess
 
 
 def run_grz_check(args: list[str]) -> subprocess.CompletedProcess:
     """
-    Finds and executes the 'grz-check' binary with the given arguments.
+    Run `grz-check` with the given args.
 
-    Returns:
-        subprocess.CompletedProcess: The result of the execution.
-
-    Raises:
-        FileNotFoundError: If the 'grz-check' binary cannot be found.
-        subprocess.CalledProcessError: If the binary returns a non-zero exit code.
+    :param args: Arguments to pass to `grz-check`.
     """
 
     command = ["grz-check", *args]
-    print(f"Executing command: {' '.join(command)}")
+    logging.info(f"Executing command: {' '.join(command)}")
 
     return subprocess.run(  # noqa: S603
         command,
