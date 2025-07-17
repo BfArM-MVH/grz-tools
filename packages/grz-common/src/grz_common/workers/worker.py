@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
+from ..validation import UserInterruptException
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
 
@@ -129,8 +130,10 @@ class Worker:
                 else:
                     self.__log.info("File validation successful!")
                 return
-            except (FileNotFoundError, ModuleNotFoundError):
-                self.__log.warning("`grz-check` not found. Falling back to python-based validation.")
+            except UserInterruptException as e:
+                error_msg = "Validation was cancelled by the user and is incomplete."
+                self.__log.error(error_msg)
+                raise SubmissionValidationError(error_msg) from e
 
         # Fallback validation
         self.__log.info("Starting checksum validation (fallback)...")

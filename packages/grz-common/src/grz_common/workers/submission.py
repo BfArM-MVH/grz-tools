@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import subprocess
-import tempfile
 import typing
 from collections.abc import Generator
 from itertools import groupby
@@ -30,7 +29,7 @@ from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
-from ..validation import run_grz_check
+from ..validation import UserInterruptException, run_grz_check
 from ..validation.bam import validate_bam
 from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
@@ -284,22 +283,29 @@ class Submission:
         if not grz_check_args:
             self.__log.info("All files are already validated. Skipping `grz-check`.")
         else:
-            with tempfile.NamedTemporaryFile(mode="w+", delete=True, suffix=".jsonl") as report_file:
-                command_args = ["--output", report_file.name, *grz_check_args]
-                if threads:
-                    command_args.extend(["--threads", str(threads)])
-                try:
-                    run_grz_check(command_args)
-                except subprocess.CalledProcessError as e:
-                    self.__log.error(f"`grz-check` failed with exit code {e.returncode}")
-                    self.__log.error(f"stdout: {e.stdout}")
-                    self.__log.error(f"stderr: {e.stderr}")
-                    yield "`grz-check` execution failed. See logs for details."
-                    return
+            log_dir = Path(checksum_progress_file).parent
+            temp_report_path = log_dir / "grz-check.report.jsonl"
+            temp_report_path.unlink(missing_ok=True)
 
-                report_file.flush()
-                report_file.seek(0)
-                self._process_grz_check_report(report_file, checksum_progress_logger, seq_data_progress_logger)  # type: ignore[arg-type]
+            command_args = ["--output", str(temp_report_path), *grz_check_args]
+            if threads:
+                command_args.extend(["--threads", str(threads)])
+            try:
+                run_grz_check(command_args)
+            except UserInterruptException:
+                self.__log.warning("Validation cancelled by user. Processing partial results...")
+                raise
+            except subprocess.CalledProcessError as e:
+                self.__log.error(f"`grz-check` failed with exit code {e.returncode}")
+                yield "`grz-check` execution failed. See logs for details."
+            finally:
+                if temp_report_path.is_file():
+                    self.__log.info(f"Processing report file: {temp_report_path}")
+                    with temp_report_path.open("r") as f:
+                        self._process_grz_check_report(f, checksum_progress_logger, seq_data_progress_logger)  # type: ignore
+                    temp_report_path.unlink()
+                else:
+                    self.__log.warning("`grz-check` did not produce a report file.")
 
         # Aggregate errors from both logs
         all_errors = set()
