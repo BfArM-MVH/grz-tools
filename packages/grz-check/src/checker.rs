@@ -405,6 +405,7 @@ fn process_job(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn process_jobs(
     jobs: Vec<Job>,
     continue_on_error: bool,
