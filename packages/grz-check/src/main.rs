@@ -62,7 +62,7 @@ struct Args {
     )]
     raw: Vec<PathBuf>,
 
-    /// Path to write the output TSV report.
+    /// Path to write the output JSONL report.
     #[arg(long, required = true)]
     output: PathBuf,
 
