@@ -24,12 +24,13 @@ pub fn check_file<F>(
 where
     F: FnOnce(&mut dyn Read) -> Result<CheckOutcome, String>,
 {
-    file_pb.set_message(
+    file_pb.set_message(format!(
+        "~ CHECK {}",
         path.file_name()
             .unwrap_or_default()
             .to_string_lossy()
-            .to_string(),
-    );
+            .to_string()
+    ));
 
     let file = match fs::File::open(path) {
         Ok(f) => f,

@@ -257,7 +257,7 @@ pub fn run_check(
                 let fq1_report =
                     fastq::check_single_fastq(&job.fq1, job.fq1_length_check, &fq1_pb, main_pb);
                 if fq1_report.is_ok() {
-                    fq1_pb.finish_with_message("✓ OK");
+                    fq1_pb.finish_with_message(format!("✓ OK    {:?}", &job.fq1));
                 } else {
                     fq1_pb.abandon_with_message("✗ ERROR");
                 }
