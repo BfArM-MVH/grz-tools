@@ -437,10 +437,16 @@ class Submission:
         :return: Generator of errors
         """
         progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
+        # cleanup log file and keep only files listed here
         progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
+        # fields:
+        # - "errors": List[str]
+        # - "validation_passed": bool
 
         def validate_file(local_file_path, file_metadata):
             self.__log.debug("Validating '%s'...", str(local_file_path))
+
+            # validate the file
             errors = list(self._validate_file_data_fallback(file_metadata, local_file_path))
             validation_passed = len(errors) == 0
 
@@ -467,7 +473,11 @@ class Submission:
         from ..progress import FileProgressLogger
 
         progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
+        # cleanup log file and keep only files listed here
         progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
+        # fields:
+        # - "errors": List[str]
+        # - "validation_passed": bool
 
         def find_fastq_files(sequence_data: SequenceData) -> list[File]:
             return [f for f in sequence_data.files if f.file_type == FileType.fastq]
