@@ -11,8 +11,9 @@ use sha2::{Digest, Sha256};
 use std::error::Error as StdError;
 use std::fmt;
 use std::fs;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
@@ -433,22 +434,45 @@ pub fn run_check(
         }
     };
 
-    let mut output_writer = fs::File::create(output)
-        .with_context(|| format!("Failed to create report file at {}", output.display()))?;
+    let writer = Arc::new(Mutex::new(BufWriter::new(
+        fs::File::create(output)
+            .with_context(|| format!("Failed to create report file at {}", output.display()))?,
+    )));
 
     if continue_on_error {
-        let reports: Vec<CheckResult> = jobs
-            .into_par_iter()
-            .map_with((mpb.clone(), main_pb.clone(), file_style), process_job)
-            .collect();
+        let num_failed_jobs = Arc::new(AtomicUsize::new(0));
 
-        let num_failed_jobs = reports.iter().filter(|r| r.is_error()).count();
-        write_jsonl_report(&reports, &mut output_writer)?;
+        jobs.into_par_iter().for_each_with(
+            (
+                mpb.clone(),
+                main_pb.clone(),
+                file_style,
+                writer.clone(),
+                num_failed_jobs.clone(),
+            ),
+            |(mpb, main_pb, style, writer, num_failed), job| {
+                let report = process_job(&mut (mpb.clone(), main_pb.clone(), style.clone()), job);
 
-        if num_failed_jobs > 0 {
+                if report.is_error() {
+                    num_failed.fetch_add(1, Ordering::SeqCst);
+                }
+
+                let mut writer_guard = writer.lock().unwrap();
+                if let Err(e) = write_jsonl_report_entry(&report, &mut *writer_guard) {
+                    eprintln!(
+                        "Failed to write report line for {:?}: {}",
+                        report.primary_path(),
+                        e
+                    );
+                }
+            },
+        );
+
+        let final_fail_count = num_failed_jobs.load(Ordering::SeqCst);
+        if final_fail_count > 0 {
             main_pb.abandon_with_message(format!(
                 "Processing complete. {} pairs/files failed. See report: {}",
-                num_failed_jobs,
+                final_fail_count,
                 output.display()
             ));
         } else {
@@ -458,21 +482,31 @@ pub fn run_check(
             ));
         }
     } else {
-        let result: Result<Vec<CheckResult>, EarlyExitError> = jobs
-            .into_par_iter()
-            .map_with((mpb.clone(), main_pb.clone(), file_style), |state, job| {
-                let report = process_job(state, job);
+        let result: Result<(), EarlyExitError> = jobs.into_par_iter().try_for_each_with(
+            (mpb.clone(), main_pb.clone(), file_style, writer.clone()),
+            |(mpb, main_pb, style, writer), job| {
+                let report = process_job(&mut (mpb.clone(), main_pb.clone(), style.clone()), job);
+
+                let mut writer_guard = writer.lock().unwrap();
+                if let Err(e) = write_jsonl_report_entry(&report, &mut *writer_guard) {
+                    eprintln!(
+                        "Failed to write report line for {:?}: {}",
+                        report.primary_path(),
+                        e
+                    );
+                }
+                drop(writer_guard);
+
                 if report.is_error() {
                     Err(EarlyExitError(report))
                 } else {
-                    Ok(report)
+                    Ok(())
                 }
-            })
-            .collect();
+            },
+        );
 
         match result {
-            Ok(reports) => {
-                write_jsonl_report(&reports, &mut output_writer)?;
+            Ok(_) => {
                 main_pb.finish_with_message(format!(
                     "All checks passed! Report written to {}",
                     output.display()
@@ -483,7 +517,6 @@ pub fn run_check(
                     "An error occurred in {}. See report for details. Aborting due to fail-fast mode.",
                     failed_report.primary_path().display()
                 );
-                write_jsonl_report(&[failed_report], &mut output_writer)?;
                 main_pb
                     .abandon_with_message(format!("Error found. See report: {}", output.display()));
                 mpb.clear()?;
@@ -492,6 +525,12 @@ pub fn run_check(
         }
     }
 
+    let mut writer_guard = Arc::try_unwrap(writer)
+        .expect("Writer Arc should not be in use after threads complete")
+        .into_inner()
+        .expect("Mutex should not be poisoned");
+
+    writer_guard.flush()?;
     mpb.clear()?;
     Ok(())
 }
@@ -537,100 +576,97 @@ enum JsonReport<'a> {
     Raw(RawReport<'a>),
 }
 
-fn write_jsonl_report<W: Write>(results: &[CheckResult], writer: &mut W) -> anyhow::Result<()> {
-    for result in results {
-        match result {
-            CheckResult::PairedFastq(pair_report) => {
-                let is_pair_error = !pair_report.pair_errors.is_empty();
+fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> anyhow::Result<()> {
+    match result {
+        CheckResult::PairedFastq(pair_report) => {
+            let is_pair_error = !pair_report.pair_errors.is_empty();
 
-                // Process R1
-                let r1 = &pair_report.fq1_report;
-                let mut fq1_errors = r1.errors.clone();
+            // Process R1
+            let r1 = &pair_report.fq1_report;
+            let mut fq1_errors = r1.errors.clone();
+            if is_pair_error {
+                fq1_errors.extend(pair_report.pair_errors.clone());
+            }
+            let status = if r1.is_ok() && !is_pair_error {
+                "OK"
+            } else {
+                "ERROR"
+            };
+
+            let report1 = JsonReport::Fastq(FastqReport {
+                path: &r1.path,
+                status,
+                num_records: r1.stats.map(|s| s.num_records),
+                read_length: r1.stats.and_then(|s| s.read_length),
+                checksum: r1.sha256.as_ref(),
+                errors: fq1_errors,
+                warnings: &r1.warnings,
+            });
+            serde_json::to_writer(&mut *writer, &report1)?;
+            writer.write_all(b"\n")?;
+
+            // Process R2, if it exists
+            if let Some(r2) = &pair_report.fq2_report {
+                let mut fq2_errors = r2.errors.clone();
                 if is_pair_error {
-                    fq1_errors.extend(pair_report.pair_errors.clone());
+                    fq2_errors.extend(pair_report.pair_errors.clone());
                 }
-                let status = if r1.is_ok() && !is_pair_error {
+                let status = if r2.is_ok() && !is_pair_error {
                     "OK"
                 } else {
                     "ERROR"
                 };
 
-                let report1 = JsonReport::Fastq(FastqReport {
-                    path: &r1.path,
+                let report2 = JsonReport::Fastq(FastqReport {
+                    path: &r2.path,
                     status,
-                    num_records: r1.stats.map(|s| s.num_records),
-                    read_length: r1.stats.and_then(|s| s.read_length),
-                    checksum: r1.sha256.as_ref(),
-                    errors: fq1_errors,
-                    warnings: &r1.warnings,
+                    num_records: r2.stats.map(|s| s.num_records),
+                    read_length: r2.stats.and_then(|s| s.read_length),
+                    checksum: r2.sha256.as_ref(),
+                    errors: fq2_errors,
+                    warnings: &r2.warnings,
                 });
-                serde_json::to_writer(&mut *writer, &report1)?;
-                writer.write_all(b"\n")?;
-
-                // Process R2, if it exists
-                if let Some(r2) = &pair_report.fq2_report {
-                    let mut fq2_errors = r2.errors.clone();
-                    if is_pair_error {
-                        fq2_errors.extend(pair_report.pair_errors.clone());
-                    }
-                    let status = if r2.is_ok() && !is_pair_error {
-                        "OK"
-                    } else {
-                        "ERROR"
-                    };
-
-                    let report2 = JsonReport::Fastq(FastqReport {
-                        path: &r2.path,
-                        status,
-                        num_records: r2.stats.map(|s| s.num_records),
-                        read_length: r2.stats.and_then(|s| s.read_length),
-                        checksum: r2.sha256.as_ref(),
-                        errors: fq2_errors,
-                        warnings: &r2.warnings,
-                    });
-                    serde_json::to_writer(&mut *writer, &report2)?;
-                    writer.write_all(b"\n")?;
-                }
-            }
-            CheckResult::SingleFastq(report) => {
-                let json_report = JsonReport::Fastq(FastqReport {
-                    path: &report.path,
-                    status: if report.is_ok() { "OK" } else { "ERROR" },
-                    num_records: report.stats.map(|s| s.num_records),
-                    read_length: report.stats.and_then(|s| s.read_length),
-                    checksum: report.sha256.as_ref(),
-                    errors: report.errors.clone(),
-                    warnings: &report.warnings,
-                });
-                serde_json::to_writer(&mut *writer, &json_report)?;
-                writer.write_all(b"\n")?;
-            }
-            CheckResult::Bam(report) => {
-                let json_report = JsonReport::Bam(BamReport {
-                    path: &report.path,
-                    status: if report.is_ok() { "OK" } else { "ERROR" },
-                    num_records: report.stats.map(|s| s.num_records),
-                    checksum: report.sha256.as_ref(),
-                    errors: &report.errors,
-                    warnings: &report.warnings,
-                });
-                serde_json::to_writer(&mut *writer, &json_report)?;
-                writer.write_all(b"\n")?;
-            }
-            CheckResult::Raw(report) => {
-                let json_report = JsonReport::Raw(RawReport {
-                    path: &report.path,
-                    status: if report.is_ok() { "OK" } else { "ERROR" },
-                    checksum: report.sha256.as_ref(),
-                    errors: &report.errors,
-                    warnings: &report.warnings,
-                });
-                serde_json::to_writer(&mut *writer, &json_report)?;
+                serde_json::to_writer(&mut *writer, &report2)?;
                 writer.write_all(b"\n")?;
             }
         }
+        CheckResult::SingleFastq(report) => {
+            let json_report = JsonReport::Fastq(FastqReport {
+                path: &report.path,
+                status: if report.is_ok() { "OK" } else { "ERROR" },
+                num_records: report.stats.map(|s| s.num_records),
+                read_length: report.stats.and_then(|s| s.read_length),
+                checksum: report.sha256.as_ref(),
+                errors: report.errors.clone(),
+                warnings: &report.warnings,
+            });
+            serde_json::to_writer(&mut *writer, &json_report)?;
+            writer.write_all(b"\n")?;
+        }
+        CheckResult::Bam(report) => {
+            let json_report = JsonReport::Bam(BamReport {
+                path: &report.path,
+                status: if report.is_ok() { "OK" } else { "ERROR" },
+                num_records: report.stats.map(|s| s.num_records),
+                checksum: report.sha256.as_ref(),
+                errors: &report.errors,
+                warnings: &report.warnings,
+            });
+            serde_json::to_writer(&mut *writer, &json_report)?;
+            writer.write_all(b"\n")?;
+        }
+        CheckResult::Raw(report) => {
+            let json_report = JsonReport::Raw(RawReport {
+                path: &report.path,
+                status: if report.is_ok() { "OK" } else { "ERROR" },
+                checksum: report.sha256.as_ref(),
+                errors: &report.errors,
+                warnings: &report.warnings,
+            });
+            serde_json::to_writer(&mut *writer, &json_report)?;
+            writer.write_all(b"\n")?;
+        }
     }
-    writer.flush()?;
     Ok(())
 }
 
