@@ -90,7 +90,7 @@ enum CheckResult {
     PairedFastq(PairReport),
     SingleFastq(FileReport),
     Bam(FileReport),
-    Checksum(FileReport),
+    Raw(FileReport),
 }
 
 impl CheckResult {
@@ -99,7 +99,7 @@ impl CheckResult {
             CheckResult::PairedFastq(r) => r.is_error(),
             CheckResult::SingleFastq(r) => !r.is_ok(),
             CheckResult::Bam(r) => !r.is_ok(),
-            CheckResult::Checksum(r) => !r.is_ok(),
+            CheckResult::Raw(r) => !r.is_ok(),
         }
     }
     fn primary_path(&self) -> &Path {
@@ -107,7 +107,7 @@ impl CheckResult {
             CheckResult::PairedFastq(r) => &r.fq1_report.path,
             CheckResult::SingleFastq(r) => &r.path,
             CheckResult::Bam(r) => &r.path,
-            CheckResult::Checksum(r) => &r.path,
+            CheckResult::Raw(r) => &r.path,
         }
     }
 }
@@ -328,7 +328,7 @@ pub fn run_check(
                 } else {
                     pb.abandon_with_message("✗ ERROR");
                 }
-                CheckResult::Checksum(report)
+                CheckResult::Raw(report)
             }
         }
     };
@@ -517,7 +517,7 @@ fn write_jsonl_report<W: Write>(results: &[CheckResult], writer: &mut W) -> anyh
                 serde_json::to_writer(&mut *writer, &json_report)?;
                 writer.write_all(b"\n")?;
             }
-            CheckResult::Checksum(report) => {
+            CheckResult::Raw(report) => {
                 let json_report = JsonReport::Raw(RawReport {
                     path: &report.path,
                     status: if report.is_ok() { "OK" } else { "ERROR" },
