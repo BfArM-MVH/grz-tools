@@ -56,7 +56,7 @@ pub fn check_single_fastq(
                 num_reads += 1;
                 let record = match record {
                     Ok(rec) => rec,
-                    Err(e) => return Err(format!("Failed to parse record #{}: {}", i, e)),
+                    Err(e) => return Err(format!("Failed to parse record #{i}: {e}")),
                 };
 
                 if record.sequence().len() != file_read_length {
