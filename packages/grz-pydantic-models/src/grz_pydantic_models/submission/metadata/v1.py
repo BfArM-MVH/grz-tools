@@ -25,7 +25,6 @@ from pydantic.json_schema import GenerateJsonSchema
 from ...common import StrictBaseModel
 from ...mii.consent import Consent, ProvisionType
 
-SCHEMA_URL_CURRENT = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.8/GRZ/grz-schema.json"
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)\.([0-9]+)/GRZ/grz-schema\.json"
 
 log = logging.getLogger(__name__)
@@ -1026,7 +1025,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
     General metadata schema for submissions to the GRZ
     """
 
-    schema_: Annotated[str, Field(alias="$schema", pattern=SCHEMA_URL_PATTERN)] = SCHEMA_URL_CURRENT
+    schema_: Annotated[str, Field(alias="$schema", pattern=SCHEMA_URL_PATTERN)]
     model_config = ConfigDict(json_schema_extra={"$schema": GenerateJsonSchema.schema_dialect})
 
     submission: Submission
