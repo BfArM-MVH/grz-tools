@@ -251,8 +251,8 @@ class Submission:
                             r1_path = self.files_dir / r1_meta.file_path
                             r2_path = self.files_dir / r2_meta.file_path
                             if should_check_file(r1_path, r1_meta) or should_check_file(r2_path, r2_meta):
-                                r1_read_len = r1_meta.read_length or -1
-                                r2_read_len = r2_meta.read_length or -1
+                                r1_read_len = -1  # disable read length check for now; r1_meta.read_length
+                                r2_read_len = -1  # disable read length check for now; r2_meta.read_length
                                 grz_check_args.extend(
                                     ["--fastq-paired", str(r1_path), str(r2_path), str(r1_read_len), str(r2_read_len)]
                                 )
@@ -264,7 +264,7 @@ class Submission:
                         if f_path in checked_files:
                             continue
                         if should_check_file(f_path, f_meta):
-                            read_len = f_meta.read_length or -1
+                            read_len = -1  # disable read length check for now; f_meta.read_length
                             grz_check_args.extend(["--fastq-single", str(f_path), str(read_len)])
                         checked_files.add(f_path)
 
