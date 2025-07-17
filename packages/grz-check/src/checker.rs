@@ -13,7 +13,7 @@ use std::fmt;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
@@ -117,12 +117,22 @@ impl CheckResult {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
-pub struct EarlyExitError(CheckResult);
+enum StopReason {
+    Error(CheckResult),
+    Interrupted,
+}
+
+#[derive(Debug)]
+pub struct EarlyExitError(StopReason);
 
 impl fmt::Display for EarlyExitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "A validation error occurred, exiting.")
+        match &self.0 {
+            StopReason::Error(_) => write!(f, "A validation error occurred, exiting."),
+            StopReason::Interrupted => write!(f, "Operation was interrupted by the user."),
+        }
     }
 }
 
@@ -212,245 +222,216 @@ fn create_jobs(
     Ok((jobs, total_bytes))
 }
 
-pub fn run_check(
-    paired_raw: Vec<String>,
-    single_raw: Vec<String>,
-    bam_raw: Vec<PathBuf>,
-    raw: Vec<PathBuf>,
-    output: &Path,
-    continue_on_error: bool,
-    show_progress: Option<bool>,
-) -> anyhow::Result<()> {
-    if paired_raw.is_empty() && single_raw.is_empty() && bam_raw.is_empty() && raw.is_empty() {
-        anyhow::bail!(
-            "No input files provided. Use --fastq-single, --fastq-paired, --bam, or --raw."
-        );
-    }
+fn filename(path: impl AsRef<Path>) -> String {
+    path.as_ref()
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
+}
 
-    let (jobs, total_bytes) = create_jobs(&paired_raw, &single_raw, &bam_raw, &raw)?;
-
-    let mpb = MultiProgress::new();
-    match show_progress {
-        Some(true) => {
-            mpb.set_draw_target(ProgressDrawTarget::stderr());
-        }
-        Some(false) => {
-            mpb.set_draw_target(ProgressDrawTarget::hidden());
-        }
-        _ => { // keep default
-        }
-    }
-
-    let file_style = ProgressStyle::with_template(
-        "{prefix:10.bold} [{bar:50.cyan/blue}] {bytes:>10}/{total_bytes:<10} ({bytes_per_sec:>12}, ETA: {eta:>6}) {wide_msg}"
-    )?.progress_chars("█▒░");
-    let main_pb = mpb.add(ProgressBar::new(total_bytes));
-    main_pb.set_style(file_style.clone());
-    main_pb.set_prefix("Overall");
-
-    fn filename(path: impl AsRef<Path>) -> String {
-        path.as_ref()
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    }
-
-    let process_job = |(m, main_pb, style): &mut (MultiProgress, ProgressBar, ProgressStyle),
-                       job: Job|
-     -> CheckResult {
-        match job {
-            Job::SingleFastq(job) => {
-                let pb = m.add(ProgressBar::new(job.size));
-                pb.set_style(style.clone());
-                pb.set_prefix("FASTQ");
-                let report = fastq::check_single_fastq(&job.path, job.length_check, &pb, main_pb);
-                if report.is_ok() {
-                    pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
-                } else {
-                    pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
-                }
-                CheckResult::SingleFastq(report)
+fn process_job(
+    (m, main_pb, style): &mut (MultiProgress, ProgressBar, ProgressStyle),
+    job: Job,
+) -> CheckResult {
+    match job {
+        Job::SingleFastq(job) => {
+            let pb = m.add(ProgressBar::new(job.size));
+            pb.set_style(style.clone());
+            pb.set_prefix("FASTQ");
+            let report = fastq::check_single_fastq(&job.path, job.length_check, &pb, main_pb);
+            if report.is_ok() {
+                pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
+            } else {
+                pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
             }
-            Job::PairedFastq(job) => {
-                let fq1_pb = m.add(ProgressBar::new(job.fq1_size));
-                fq1_pb.set_style(style.clone());
-                fq1_pb.set_prefix("FASTQ R1");
+            CheckResult::SingleFastq(report)
+        }
+        Job::PairedFastq(job) => {
+            let fq1_pb = m.add(ProgressBar::new(job.fq1_size));
+            fq1_pb.set_style(style.clone());
+            fq1_pb.set_prefix("FASTQ R1");
 
-                let fq2_pb = m.add(ProgressBar::new(job.fq2_size));
-                fq2_pb.set_style(style.clone());
-                fq2_pb.set_prefix("FASTQ R2");
+            let fq2_pb = m.add(ProgressBar::new(job.fq2_size));
+            fq2_pb.set_style(style.clone());
+            fq2_pb.set_prefix("FASTQ R2");
 
-                let fq1_setup = common::setup_file_reader(&job.fq1_path, &fq1_pb, main_pb, true);
-                let fq2_setup = common::setup_file_reader(&job.fq2_path, &fq2_pb, main_pb, true);
+            let fq1_setup = common::setup_file_reader(&job.fq1_path, &fq1_pb, main_pb, true);
+            let fq2_setup = common::setup_file_reader(&job.fq2_path, &fq2_pb, main_pb, true);
 
-                let report = match (fq1_setup, fq2_setup) {
-                    (Ok((reader1, hasher1)), Ok((reader2, hasher2))) => {
-                        let (fq1_outcome, fq2_outcome, pair_errors) =
-                            match fastq::process_paired_readers(
-                                reader1,
-                                reader2,
-                                job.fq1_length_check,
-                                job.fq2_length_check,
-                            ) {
-                                Ok(result) => result,
-                                Err(e) => {
-                                    let outcome1 = common::CheckOutcome {
-                                        errors: vec![e.clone()],
-                                        ..Default::default()
-                                    };
-                                    let outcome2 = common::CheckOutcome {
-                                        errors: vec![e],
-                                        ..Default::default()
-                                    };
-                                    return CheckResult::PairedFastq(PairReport {
-                                        fq1_report: FileReport::new(
-                                            &job.fq1_path,
-                                            None,
-                                            outcome1.errors,
-                                            outcome1.warnings,
-                                        ),
-                                        fq2_report: Some(FileReport::new(
-                                            &job.fq2_path,
-                                            None,
-                                            outcome2.errors,
-                                            outcome2.warnings,
-                                        )),
-                                        pair_errors: vec![
-                                            "Parsing error during paired fastq check.".to_string(),
-                                        ],
-                                    });
-                                }
-                            };
-
-                        let finalize = |hasher: Arc<Mutex<Sha256>>| match Arc::try_unwrap(hasher) {
-                            Ok(mutex) => {
-                                Some(format!("{:x}", mutex.into_inner().unwrap().finalize()))
+            let report = match (fq1_setup, fq2_setup) {
+                (Ok((reader1, hasher1)), Ok((reader2, hasher2))) => {
+                    let (fq1_outcome, fq2_outcome, pair_errors) =
+                        match fastq::process_paired_readers(
+                            reader1,
+                            reader2,
+                            job.fq1_length_check,
+                            job.fq2_length_check,
+                        ) {
+                            Ok(result) => result,
+                            Err(e) => {
+                                let outcome1 = common::CheckOutcome {
+                                    errors: vec![e.clone()],
+                                    ..Default::default()
+                                };
+                                let outcome2 = common::CheckOutcome {
+                                    errors: vec![e],
+                                    ..Default::default()
+                                };
+                                return CheckResult::PairedFastq(PairReport {
+                                    fq1_report: FileReport::new(
+                                        &job.fq1_path,
+                                        None,
+                                        outcome1.errors,
+                                        outcome1.warnings,
+                                    ),
+                                    fq2_report: Some(FileReport::new(
+                                        &job.fq2_path,
+                                        None,
+                                        outcome2.errors,
+                                        outcome2.warnings,
+                                    )),
+                                    pair_errors: vec![
+                                        "Parsing error during paired fastq check.".to_string(),
+                                    ],
+                                });
                             }
-                            Err(_) => None,
                         };
-                        let cs1 = finalize(hasher1);
-                        let cs2 = finalize(hasher2);
 
-                        let fq1_report = FileReport::new(
-                            &job.fq1_path,
-                            fq1_outcome.stats,
-                            fq1_outcome.errors,
-                            fq1_outcome.warnings,
-                        )
-                        .with_sha256(cs1);
-                        let fq2_report = FileReport::new(
-                            &job.fq2_path,
-                            fq2_outcome.stats,
-                            fq2_outcome.errors,
-                            fq2_outcome.warnings,
-                        )
-                        .with_sha256(cs2);
+                    let finalize = |hasher: Arc<Mutex<Sha256>>| match Arc::try_unwrap(hasher) {
+                        Ok(mutex) => Some(format!("{:x}", mutex.into_inner().unwrap().finalize())),
+                        Err(_) => None,
+                    };
+                    let cs1 = finalize(hasher1);
+                    let cs2 = finalize(hasher2);
 
-                        PairReport {
-                            fq1_report,
-                            fq2_report: Some(fq2_report),
-                            pair_errors,
-                        }
-                    }
-                    (Err(e1), Ok((_r2, _h2))) => {
-                        let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
-                        let fq2_report = FileReport::new(
-                            &job.fq2_path,
-                            None,
-                            vec![format!(
-                                "R1 ({:?}) failed to parse; check aborted.",
-                                &job.fq1_path
-                            )],
-                            vec![],
-                        );
-                        PairReport {
-                            fq1_report,
-                            fq2_report: Some(fq2_report),
-                            pair_errors: vec![],
-                        }
-                    }
-                    (Ok((_r1, _h1)), Err(e2)) => {
-                        let fq1_report = FileReport::new(
-                            &job.fq1_path,
-                            None,
-                            vec![format!(
-                                "R2 ({:?}) failed to parse; check aborted.",
-                                &job.fq2_path
-                            )],
-                            vec![],
-                        );
-                        let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
-                        PairReport {
-                            fq1_report,
-                            fq2_report: Some(fq2_report),
-                            pair_errors: vec![],
-                        }
-                    }
-                    (Err(e1), Err(e2)) => {
-                        let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
-                        let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
-                        PairReport {
-                            fq1_report,
-                            fq2_report: Some(fq2_report),
-                            pair_errors: vec![],
-                        }
-                    }
-                };
+                    let fq1_report = FileReport::new(
+                        &job.fq1_path,
+                        fq1_outcome.stats,
+                        fq1_outcome.errors,
+                        fq1_outcome.warnings,
+                    )
+                    .with_sha256(cs1);
+                    let fq2_report = FileReport::new(
+                        &job.fq2_path,
+                        fq2_outcome.stats,
+                        fq2_outcome.errors,
+                        fq2_outcome.warnings,
+                    )
+                    .with_sha256(cs2);
 
-                if report.is_ok() {
-                    fq1_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq1_path)));
-                    fq2_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq2_path)));
-                } else {
-                    fq1_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq1_path)));
-                    fq2_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq2_path)));
+                    PairReport {
+                        fq1_report,
+                        fq2_report: Some(fq2_report),
+                        pair_errors,
+                    }
                 }
-                CheckResult::PairedFastq(report)
-            }
-            Job::Bam(job) => {
-                let pb = m.add(ProgressBar::new(job.size));
-                pb.set_style(style.clone());
-                pb.set_prefix("BAM");
-                let report = bam::check_bam(&job.path, &pb, main_pb);
-                if report.is_ok() {
-                    pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
-                } else {
-                    pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
+                (Err(e1), Ok((_r2, _h2))) => {
+                    let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
+                    let fq2_report = FileReport::new(
+                        &job.fq2_path,
+                        None,
+                        vec![format!(
+                            "R1 ({:?}) failed to parse; check aborted.",
+                            &job.fq1_path
+                        )],
+                        vec![],
+                    );
+                    PairReport {
+                        fq1_report,
+                        fq2_report: Some(fq2_report),
+                        pair_errors: vec![],
+                    }
                 }
-                CheckResult::Bam(report)
-            }
-            Job::Raw(job) => {
-                let pb = m.add(ProgressBar::new(job.size));
-                pb.set_style(style.clone());
-                pb.set_prefix("RAW");
-                let report = raw::check_raw(&job.path, &pb, main_pb);
-                if report.is_ok() {
-                    pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
-                } else {
-                    pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
+                (Ok((_r1, _h1)), Err(e2)) => {
+                    let fq1_report = FileReport::new(
+                        &job.fq1_path,
+                        None,
+                        vec![format!(
+                            "R2 ({:?}) failed to parse; check aborted.",
+                            &job.fq2_path
+                        )],
+                        vec![],
+                    );
+                    let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
+                    PairReport {
+                        fq1_report,
+                        fq2_report: Some(fq2_report),
+                        pair_errors: vec![],
+                    }
                 }
-                CheckResult::Raw(report)
+                (Err(e1), Err(e2)) => {
+                    let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
+                    let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
+                    PairReport {
+                        fq1_report,
+                        fq2_report: Some(fq2_report),
+                        pair_errors: vec![],
+                    }
+                }
+            };
+
+            if report.is_ok() {
+                fq1_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq1_path)));
+                fq2_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq2_path)));
+            } else {
+                fq1_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq1_path)));
+                fq2_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq2_path)));
             }
+            CheckResult::PairedFastq(report)
         }
-    };
+        Job::Bam(job) => {
+            let pb = m.add(ProgressBar::new(job.size));
+            pb.set_style(style.clone());
+            pb.set_prefix("BAM");
+            let report = bam::check_bam(&job.path, &pb, main_pb);
+            if report.is_ok() {
+                pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
+            } else {
+                pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
+            }
+            CheckResult::Bam(report)
+        }
+        Job::Raw(job) => {
+            let pb = m.add(ProgressBar::new(job.size));
+            pb.set_style(style.clone());
+            pb.set_prefix("RAW");
+            let report = raw::check_raw(&job.path, &pb, main_pb);
+            if report.is_ok() {
+                pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
+            } else {
+                pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
+            }
+            CheckResult::Raw(report)
+        }
+    }
+}
 
-    let writer = Arc::new(Mutex::new(BufWriter::new(
-        fs::File::create(output)
-            .with_context(|| format!("Failed to create report file at {}", output.display()))?,
-    )));
-
+fn process_jobs(
+    jobs: Vec<Job>,
+    continue_on_error: bool,
+    shutdown_flag: Arc<AtomicBool>,
+    mpb: MultiProgress,
+    main_pb: ProgressBar,
+    file_style: ProgressStyle,
+    writer: Arc<Mutex<BufWriter<fs::File>>>,
+) -> Result<(), EarlyExitError> {
     if continue_on_error {
         let num_failed_jobs = Arc::new(AtomicUsize::new(0));
 
         jobs.into_par_iter().for_each_with(
             (
-                mpb.clone(),
+                mpb,
                 main_pb.clone(),
                 file_style,
-                writer.clone(),
+                writer,
                 num_failed_jobs.clone(),
             ),
             |(mpb, main_pb, style, writer, num_failed), job| {
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+
                 let report = process_job(&mut (mpb.clone(), main_pb.clone(), style.clone()), job);
 
                 if report.is_error() {
@@ -469,22 +450,24 @@ pub fn run_check(
         );
 
         let final_fail_count = num_failed_jobs.load(Ordering::SeqCst);
-        if final_fail_count > 0 {
+        if shutdown_flag.load(Ordering::SeqCst) {
+            main_pb.abandon_with_message("Operation cancelled by user.");
+        } else if final_fail_count > 0 {
             main_pb.abandon_with_message(format!(
-                "Processing complete. {} pairs/files failed. See report: {}",
-                final_fail_count,
-                output.display()
+                "Processing complete. {final_fail_count} pairs/files failed."
             ));
         } else {
-            main_pb.finish_with_message(format!(
-                "All checks passed! Report written to {}",
-                output.display()
-            ));
+            main_pb.finish_with_message("All checks passed!");
         }
+
+        Ok(())
     } else {
-        let result: Result<(), EarlyExitError> = jobs.into_par_iter().try_for_each_with(
-            (mpb.clone(), main_pb.clone(), file_style, writer.clone()),
+        jobs.into_par_iter().try_for_each_with(
+            (mpb, main_pb, file_style, writer),
             |(mpb, main_pb, style, writer), job| {
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    return Err(EarlyExitError(StopReason::Interrupted));
+                }
                 let report = process_job(&mut (mpb.clone(), main_pb.clone(), style.clone()), job);
 
                 let mut writer_guard = writer.lock().unwrap();
@@ -495,43 +478,120 @@ pub fn run_check(
                         e
                     );
                 }
+                writer_guard.flush().ok();
                 drop(writer_guard);
 
                 if report.is_error() {
-                    Err(EarlyExitError(report))
+                    Err(EarlyExitError(StopReason::Error(report)))
                 } else {
                     Ok(())
                 }
             },
-        );
+        )
+    }
+}
 
-        match result {
-            Ok(_) => {
+pub fn run_check(
+    paired_raw: Vec<String>,
+    single_raw: Vec<String>,
+    bam_raw: Vec<PathBuf>,
+    raw: Vec<PathBuf>,
+    output: &Path,
+    continue_on_error: bool,
+    show_progress: Option<bool>,
+) -> anyhow::Result<()> {
+    if paired_raw.is_empty() && single_raw.is_empty() && bam_raw.is_empty() && raw.is_empty() {
+        anyhow::bail!(
+            "No input files provided. Use --fastq-single, --fastq-paired, --bam, or --raw."
+        );
+    }
+
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let handler_flag = shutdown_flag.clone();
+    ctrlc::set_handler(move || {
+        if handler_flag.swap(true, Ordering::SeqCst) {
+            eprintln!("\nSecond interrupt received, exiting immediately.");
+            std::process::exit(130);
+        }
+        eprintln!("\nCtrl+C received, shutting down gracefully…");
+    })
+    .context("Error setting Ctrl-C handler")?;
+
+    let (jobs, total_bytes) = create_jobs(&paired_raw, &single_raw, &bam_raw, &raw)?;
+
+    let mpb = MultiProgress::new();
+    match show_progress {
+        Some(true) => {
+            mpb.set_draw_target(ProgressDrawTarget::stderr());
+        }
+        Some(false) => {
+            mpb.set_draw_target(ProgressDrawTarget::hidden());
+        }
+        _ => {}
+    }
+
+    let file_style = ProgressStyle::with_template(
+        "{prefix:10.bold} [{bar:50.cyan/blue}] {bytes:>10}/{total_bytes:<10} ({bytes_per_sec:>12}, ETA: {eta:>6}) {wide_msg}"
+    )?.progress_chars("█▒░");
+    let main_pb = mpb.add(ProgressBar::new(total_bytes));
+    main_pb.set_style(file_style.clone());
+    main_pb.set_prefix("Overall");
+
+    let writer = Arc::new(Mutex::new(BufWriter::new(
+        fs::File::create(output)
+            .with_context(|| format!("Failed to create report file at {}", output.display()))?,
+    )));
+
+    let processing_result = process_jobs(
+        jobs,
+        continue_on_error,
+        shutdown_flag.clone(),
+        mpb.clone(),
+        main_pb.clone(),
+        file_style,
+        writer.clone(),
+    );
+
+    if let Ok(mutex) = Arc::try_unwrap(writer) {
+        if let Ok(mut writer_guard) = mutex.into_inner() {
+            writer_guard
+                .flush()
+                .context("Failed to perform final flush of report file")?;
+        }
+    }
+    mpb.clear()?;
+
+    match processing_result {
+        Ok(()) => {
+            if shutdown_flag.load(Ordering::Relaxed) {
+                main_pb.abandon_with_message("Operation cancelled by user.");
+                std::process::exit(130);
+            } else if !continue_on_error {
                 main_pb.finish_with_message(format!(
                     "All checks passed! Report written to {}",
                     output.display()
                 ));
             }
-            Err(EarlyExitError(failed_report)) => {
-                let error_msg = format!(
-                    "An error occurred in {}. See report for details. Aborting due to fail-fast mode.",
+        }
+        Err(EarlyExitError(reason)) => match reason {
+            StopReason::Error(failed_report) => {
+                main_pb.abandon_with_message(format!(
+                    "Error in {}. See report: {}",
+                    failed_report.primary_path().display(),
+                    output.display()
+                ));
+                anyhow::bail!(
+                    "A validation error occurred in {}. Aborting.",
                     failed_report.primary_path().display()
                 );
-                main_pb
-                    .abandon_with_message(format!("Error found. See report: {}", output.display()));
-                mpb.clear()?;
-                anyhow::bail!(error_msg);
             }
-        }
+            StopReason::Interrupted => {
+                main_pb.abandon_with_message("Operation cancelled by user.");
+                std::process::exit(130);
+            }
+        },
     }
 
-    let mut writer_guard = Arc::try_unwrap(writer)
-        .expect("Writer Arc should not be in use after threads complete")
-        .into_inner()
-        .expect("Mutex should not be poisoned");
-
-    writer_guard.flush()?;
-    mpb.clear()?;
     Ok(())
 }
 
