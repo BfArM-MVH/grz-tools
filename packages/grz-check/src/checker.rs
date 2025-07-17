@@ -241,7 +241,7 @@ pub fn run_check(
     }
 
     let file_style = ProgressStyle::with_template(
-        "{prefix:15.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:<10} ({bytes_per_sec:>15}, ETA: {eta:>8}) {wide_msg}"
+        "{prefix:10.bold} [{bar:50.cyan/blue}] {bytes:>10}/{total_bytes:<10} ({bytes_per_sec:>12}, ETA: {eta:>6}) {wide_msg}"
     )?.progress_chars("█▒░");
     let main_pb = mpb.add(ProgressBar::new(total_bytes));
     main_pb.set_style(file_style.clone());
