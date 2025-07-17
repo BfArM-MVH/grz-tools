@@ -246,6 +246,14 @@ pub fn run_check(
     main_pb.set_style(file_style.clone());
     main_pb.set_prefix("Overall");
 
+    fn filename(path: impl AsRef<Path>) -> String {
+        path.as_ref()
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    }
+
     let process_job = |(m, main_pb, style): &mut (MultiProgress, ProgressBar, ProgressStyle),
                        job: Job|
      -> CheckResult {
@@ -257,9 +265,9 @@ pub fn run_check(
                 let fq1_report =
                     fastq::check_single_fastq(&job.fq1, job.fq1_length_check, &fq1_pb, main_pb);
                 if fq1_report.is_ok() {
-                    fq1_pb.finish_with_message(format!("✓ OK    {:?}", &job.fq1));
+                    fq1_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq1)));
                 } else {
-                    fq1_pb.abandon_with_message("✗ ERROR");
+                    fq1_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq1)));
                 }
 
                 if let (Some(fq2_path), Some(fq2_size), Some(fq2_len_check)) =
@@ -271,9 +279,15 @@ pub fn run_check(
                     let fq2_report =
                         fastq::check_single_fastq(fq2_path, fq2_len_check, &fq2_pb, main_pb);
                     if fq2_report.is_ok() {
-                        fq2_pb.finish_with_message("✓ OK");
+                        fq2_pb.finish_with_message(format!(
+                            "✓ OK    {}",
+                            job.fq2.as_ref().map(filename).unwrap_or_default()
+                        ));
                     } else {
-                        fq2_pb.abandon_with_message("✗ ERROR");
+                        fq2_pb.abandon_with_message(format!(
+                            "✗ ERROR {}",
+                            job.fq2.as_ref().map(filename).unwrap_or_default()
+                        ));
                     }
 
                     let mut pair_errors = Vec::new();
@@ -312,9 +326,9 @@ pub fn run_check(
                 pb.set_prefix("Checking BAM");
                 let report = bam::check_bam(&job.path, &pb, main_pb);
                 if report.is_ok() {
-                    pb.finish_with_message("✓ OK");
+                    pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
                 } else {
-                    pb.abandon_with_message("✗ ERROR");
+                    pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
                 }
                 CheckResult::Bam(report)
             }
@@ -324,9 +338,9 @@ pub fn run_check(
                 pb.set_prefix("Checksum");
                 let report = raw::check_raw(&job.path, &pb, main_pb);
                 if report.is_ok() {
-                    pb.finish_with_message("✓ OK");
+                    pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
                 } else {
-                    pb.abandon_with_message("✗ ERROR");
+                    pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
                 }
                 CheckResult::Raw(report)
             }
