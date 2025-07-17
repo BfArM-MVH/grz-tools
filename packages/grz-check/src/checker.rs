@@ -1,16 +1,19 @@
 use crate::checks::bam::BamCheckJob;
-use crate::checks::fastq::{FastqCheckJob, ReadLengthCheck};
+use crate::checks::common;
+use crate::checks::fastq::{PairedFastqJob, ReadLengthCheck, SingleFastqJob};
 use crate::checks::raw::RawJob;
 use crate::checks::{bam, fastq, raw};
 use anyhow::Context;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::error::Error as StdError;
 use std::fmt;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
 pub struct Stats {
@@ -71,16 +74,17 @@ pub struct PairReport {
 }
 
 impl PairReport {
-    fn is_error(&self) -> bool {
-        !self.fq1_report.is_ok()
-            || !self.pair_errors.is_empty()
-            || self.fq2_report.as_ref().is_some_and(|r2| !r2.is_ok())
+    fn is_ok(&self) -> bool {
+        self.fq1_report.is_ok()
+            && self.fq2_report.as_ref().is_some_and(|r2| r2.is_ok())
+            && self.pair_errors.is_empty()
     }
 }
 
 #[derive(Debug)]
 enum Job {
-    Fastq(FastqCheckJob),
+    SingleFastq(SingleFastqJob),
+    PairedFastq(PairedFastqJob),
     Bam(BamCheckJob),
     Raw(RawJob),
 }
@@ -96,7 +100,7 @@ enum CheckResult {
 impl CheckResult {
     fn is_error(&self) -> bool {
         match self {
-            CheckResult::PairedFastq(r) => r.is_error(),
+            CheckResult::PairedFastq(r) => !r.is_ok(),
             CheckResult::SingleFastq(r) => !r.is_ok(),
             CheckResult::Bam(r) => !r.is_ok(),
             CheckResult::Raw(r) => !r.is_ok(),
@@ -161,33 +165,30 @@ fn create_jobs(
         let fq1_size = fs::metadata(&fq1_path)?.len();
         let fq2_size = fs::metadata(&fq2_path)?.len();
         total_bytes += fq1_size + fq2_size;
-        jobs.push(Job::Fastq(FastqCheckJob {
-            fq1: fq1_path,
-            fq2: Some(fq2_path),
+        jobs.push(Job::PairedFastq(PairedFastqJob {
+            fq1_path,
+            fq2_path,
             fq1_length_check,
-            fq2_length_check: Some(fq2_length_check),
+            fq2_length_check,
             fq1_size,
-            fq2_size: Some(fq2_size),
+            fq2_size,
         }));
     }
 
     for chunk in single_raw.chunks_exact(2) {
         let path = PathBuf::from(&chunk[0]);
-        let fq1_length_check = parse_len(&chunk[1]).with_context(|| {
+        let length_check = parse_len(&chunk[1]).with_context(|| {
             format!(
                 "Invalid read length '{}' for file '{}'",
                 &chunk[1], &chunk[0]
             )
         })?;
-        let fq1_size = fs::metadata(&path)?.len();
-        total_bytes += fq1_size;
-        jobs.push(Job::Fastq(FastqCheckJob {
-            fq1: path,
-            fq2: None,
-            fq1_length_check,
-            fq2_length_check: None,
-            fq1_size,
-            fq2_size: None,
+        let size = fs::metadata(&path)?.len();
+        total_bytes += size;
+        jobs.push(Job::SingleFastq(SingleFastqJob {
+            path,
+            length_check,
+            size,
         }));
     }
 
@@ -258,72 +259,157 @@ pub fn run_check(
                        job: Job|
      -> CheckResult {
         match job {
-            Job::Fastq(job) => {
+            Job::SingleFastq(job) => {
+                let pb = m.add(ProgressBar::new(job.size));
+                pb.set_style(style.clone());
+                pb.set_prefix("FASTQ");
+                let report = fastq::check_single_fastq(&job.path, job.length_check, &pb, main_pb);
+                if report.is_ok() {
+                    pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
+                } else {
+                    pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
+                }
+                CheckResult::SingleFastq(report)
+            }
+            Job::PairedFastq(job) => {
                 let fq1_pb = m.add(ProgressBar::new(job.fq1_size));
                 fq1_pb.set_style(style.clone());
-                fq1_pb.set_prefix("Checking R1");
-                let fq1_report =
-                    fastq::check_single_fastq(&job.fq1, job.fq1_length_check, &fq1_pb, main_pb);
-                if fq1_report.is_ok() {
-                    fq1_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq1)));
-                } else {
-                    fq1_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq1)));
-                }
+                fq1_pb.set_prefix("FASTQ R1");
 
-                if let (Some(fq2_path), Some(fq2_size), Some(fq2_len_check)) =
-                    (&job.fq2, job.fq2_size, job.fq2_length_check)
-                {
-                    let fq2_pb = m.add(ProgressBar::new(fq2_size));
-                    fq2_pb.set_style(style.clone());
-                    fq2_pb.set_prefix("Checking R2");
-                    let fq2_report =
-                        fastq::check_single_fastq(fq2_path, fq2_len_check, &fq2_pb, main_pb);
-                    if fq2_report.is_ok() {
-                        fq2_pb.finish_with_message(format!(
-                            "✓ OK    {}",
-                            job.fq2.as_ref().map(filename).unwrap_or_default()
-                        ));
-                    } else {
-                        fq2_pb.abandon_with_message(format!(
-                            "✗ ERROR {}",
-                            job.fq2.as_ref().map(filename).unwrap_or_default()
-                        ));
-                    }
+                let fq2_pb = m.add(ProgressBar::new(job.fq2_size));
+                fq2_pb.set_style(style.clone());
+                fq2_pb.set_prefix("FASTQ R2");
 
-                    let mut pair_errors = Vec::new();
-                    if let (Some(fq1_stats), Some(fq2_stats)) = (fq1_report.stats, fq2_report.stats)
-                    {
-                        if fq1_stats.num_records != fq2_stats.num_records {
-                            pair_errors.push(format!(
-                                "Mismatched read counts: {} vs {}",
-                                fq1_stats.num_records, fq2_stats.num_records
-                            ));
-                        }
-                        if matches!(job.fq1_length_check, ReadLengthCheck::Auto)
-                            && job
-                                .fq2_length_check
-                                .is_some_and(|c| matches!(c, ReadLengthCheck::Auto))
-                            && fq1_stats.read_length != fq2_stats.read_length
-                        {
-                            pair_errors.push(format!(
-                                "Mismatched read lengths in auto-detect mode: {:?} vs {:?}",
-                                fq1_stats.read_length, fq2_stats.read_length
-                            ));
+                let fq1_setup = common::setup_file_reader(&job.fq1_path, &fq1_pb, main_pb, true);
+                let fq2_setup = common::setup_file_reader(&job.fq2_path, &fq2_pb, main_pb, true);
+
+                let report = match (fq1_setup, fq2_setup) {
+                    (Ok((reader1, hasher1)), Ok((reader2, hasher2))) => {
+                        let (fq1_outcome, fq2_outcome, pair_errors) =
+                            match fastq::process_paired_readers(
+                                reader1,
+                                reader2,
+                                job.fq1_length_check,
+                                job.fq2_length_check,
+                            ) {
+                                Ok(result) => result,
+                                Err(e) => {
+                                    let outcome1 = common::CheckOutcome {
+                                        errors: vec![e.clone()],
+                                        ..Default::default()
+                                    };
+                                    let outcome2 = common::CheckOutcome {
+                                        errors: vec![e],
+                                        ..Default::default()
+                                    };
+                                    return CheckResult::PairedFastq(PairReport {
+                                        fq1_report: FileReport::new(
+                                            &job.fq1_path,
+                                            None,
+                                            outcome1.errors,
+                                            outcome1.warnings,
+                                        ),
+                                        fq2_report: Some(FileReport::new(
+                                            &job.fq2_path,
+                                            None,
+                                            outcome2.errors,
+                                            outcome2.warnings,
+                                        )),
+                                        pair_errors: vec![
+                                            "Parsing error during paired fastq check.".to_string(),
+                                        ],
+                                    });
+                                }
+                            };
+
+                        let finalize = |hasher: Arc<Mutex<Sha256>>| match Arc::try_unwrap(hasher) {
+                            Ok(mutex) => {
+                                Some(format!("{:x}", mutex.into_inner().unwrap().finalize()))
+                            }
+                            Err(_) => None,
+                        };
+                        let cs1 = finalize(hasher1);
+                        let cs2 = finalize(hasher2);
+
+                        let fq1_report = FileReport::new(
+                            &job.fq1_path,
+                            fq1_outcome.stats,
+                            fq1_outcome.errors,
+                            fq1_outcome.warnings,
+                        )
+                        .with_sha256(cs1);
+                        let fq2_report = FileReport::new(
+                            &job.fq2_path,
+                            fq2_outcome.stats,
+                            fq2_outcome.errors,
+                            fq2_outcome.warnings,
+                        )
+                        .with_sha256(cs2);
+
+                        PairReport {
+                            fq1_report,
+                            fq2_report: Some(fq2_report),
+                            pair_errors,
                         }
                     }
-                    CheckResult::PairedFastq(PairReport {
-                        fq1_report,
-                        fq2_report: Some(fq2_report),
-                        pair_errors,
-                    })
+                    (Err(e1), Ok((_r2, _h2))) => {
+                        let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
+                        let fq2_report = FileReport::new(
+                            &job.fq2_path,
+                            None,
+                            vec![format!(
+                                "R1 ({:?}) failed to parse; check aborted.",
+                                &job.fq1_path
+                            )],
+                            vec![],
+                        );
+                        PairReport {
+                            fq1_report,
+                            fq2_report: Some(fq2_report),
+                            pair_errors: vec![],
+                        }
+                    }
+                    (Ok((_r1, _h1)), Err(e2)) => {
+                        let fq1_report = FileReport::new(
+                            &job.fq1_path,
+                            None,
+                            vec![format!(
+                                "R2 ({:?}) failed to parse; check aborted.",
+                                &job.fq2_path
+                            )],
+                            vec![],
+                        );
+                        let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
+                        PairReport {
+                            fq1_report,
+                            fq2_report: Some(fq2_report),
+                            pair_errors: vec![],
+                        }
+                    }
+                    (Err(e1), Err(e2)) => {
+                        let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
+                        let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
+                        PairReport {
+                            fq1_report,
+                            fq2_report: Some(fq2_report),
+                            pair_errors: vec![],
+                        }
+                    }
+                };
+
+                if report.is_ok() {
+                    fq1_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq1_path)));
+                    fq2_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq2_path)));
                 } else {
-                    CheckResult::SingleFastq(fq1_report)
+                    fq1_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq1_path)));
+                    fq2_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq2_path)));
                 }
+                CheckResult::PairedFastq(report)
             }
             Job::Bam(job) => {
                 let pb = m.add(ProgressBar::new(job.size));
                 pb.set_style(style.clone());
-                pb.set_prefix("Checking BAM");
+                pb.set_prefix("BAM");
                 let report = bam::check_bam(&job.path, &pb, main_pb);
                 if report.is_ok() {
                     pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
@@ -335,7 +421,7 @@ pub fn run_check(
             Job::Raw(job) => {
                 let pb = m.add(ProgressBar::new(job.size));
                 pb.set_style(style.clone());
-                pb.set_prefix("Checksum");
+                pb.set_prefix("RAW");
                 let report = raw::check_raw(&job.path, &pb, main_pb);
                 if report.is_ok() {
                     pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
