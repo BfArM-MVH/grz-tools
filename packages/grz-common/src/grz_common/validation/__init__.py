@@ -1,4 +1,5 @@
 """Validation package for grz-cli."""
+
 import logging
 import subprocess
 
