@@ -56,7 +56,7 @@ pub fn check_single_fastq(
                 num_reads += 1;
                 let record = match record {
                     Ok(rec) => rec,
-                    Err(e) => return Err(format!("Failed to parse record #{}: {}", i + 2, e)),
+                    Err(e) => return Err(format!("Failed to parse record #{}: {}", i, e)),
                 };
 
                 if record.sequence().len() != file_read_length {
@@ -67,7 +67,7 @@ pub fn check_single_fastq(
                         }),
                         errors: vec![format!(
                             "Found inconsistent read length at record #{}. Expected {}, but got {}.",
-                            i + 2,
+                            i,
                             file_read_length,
                             record.sequence().len()
                         )],
