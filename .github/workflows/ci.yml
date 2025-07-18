@@ -59,6 +59,7 @@ jobs:
           DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl"
           DEPENDENCY_GRAPH["grz-db"]="grzctl"
           DEPENDENCY_GRAPH["grz-cli"]="grzctl"
+          DEPENDENCY_GRAPH["grz-check"]="grz-cli"
           # Add other dependencies as needed: DEPENDENCY_GRAPH["pkg-x"]="pkg-y pkg-z"
 
           final_test_dirs=("${directly_changed_package_dirs[@]}")
@@ -177,9 +178,29 @@ jobs:
         run: |
           find packages -name Cargo.toml -print0 | xargs -0 -I {} bash -c 'cd "$(dirname {})" && cargo clippy --all-targets -- -D warnings'
 
+  build-grz-check-binary:
+    name: Build grz-check Binary
+    needs: [ quality-checks-rust ]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build grz-check debug binary
+        run: cargo build --manifest-path packages/grz-check/Cargo.toml --target-dir ./target
+
   test-changed-packages-rust:
     name: Test Changed Rust Packages
-    needs: [determine-changes, quality-checks-rust]
+    needs: [ determine-changes, quality-checks-rust ]
     if: needs.determine-changes.outputs.has_rust_changes == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -208,7 +229,7 @@ jobs:
   run-workspace-tests-python:
     name: Run workspace tests (Python)
     runs-on: ubuntu-latest
-    needs: [determine-changes, test-changed-packages-rust]
+    needs: [ build-grz-check-binary, test-changed-packages-rust ]
     strategy:
       fail-fast: false
       matrix:
@@ -217,6 +238,7 @@ jobs:
           - "3.13"
     if: |
       (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) &&
+      needs.build-rust-binary.result == 'success' &&
       (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped')
     steps:
       - name: Checkout code
@@ -224,8 +246,11 @@ jobs:
         with:
           lfs: true
 
-      - name: Rust Cache
+      - name: Restore Rust build cache
         uses: Swatinem/rust-cache@v2
+
+      - name: Add Rust debug binary to PATH
+        run: echo "${{ github.workspace }}/target/debug" >> $GITHUB_PATH
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -244,9 +269,10 @@ jobs:
 
   test-changed-packages-python:
     name: Test Changed Python Packages
-    needs: [determine-changes, quality-checks-python, test-changed-packages-rust]
+    needs: [ determine-changes, quality-checks-python, build-grz-check-binary, test-changed-packages-rust ]
     if: |
       needs.determine-changes.outputs.has_python_changes == 'true' &&
+      needs.build-rust-binary.result == 'success' &&
       (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
@@ -263,8 +289,11 @@ jobs:
         with:
           lfs: true
 
-      - name: Rust Cache
+      - name: Restore Rust build cache
         uses: Swatinem/rust-cache@v2
+
+      - name: Add Rust debug binary to PATH
+        run: echo "${{ github.workspace }}/target/debug" >> $GITHUB_PATH
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
