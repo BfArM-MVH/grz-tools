@@ -1,15 +1,20 @@
 import json
+import logging
 import shutil
 from pathlib import Path
 
 import grz_cli.cli
+import pytest
 from click.testing import CliRunner
 from grz_common.workers.submission import SubmissionValidationError
 
 
+@pytest.mark.parametrize("grz_check_flag", ["--with-grz-check", "--no-grz-check"])
 def test_validate_submission(
     temp_identifiers_config_file_path,
     working_dir_path,
+    grz_check_flag,
+    caplog,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
@@ -22,14 +27,29 @@ def test_validate_submission(
         temp_identifiers_config_file_path,
         "--submission-dir",
         str(working_dir_path),
+        grz_check_flag,
     ]
 
     runner = CliRunner()
     cli = grz_cli.cli.build_cli()
-    result = runner.invoke(cli, testargs, catch_exceptions=False)
+    with caplog.at_level(logging.INFO):
+        result = runner.invoke(cli, testargs, catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+
+        if grz_check_flag == "--no-grz-check":
+            assert "Starting checksum validation (fallback)..." in caplog.text
+        else:
+            assert "Starting file validation with `grz-check`..." in caplog.text
+    caplog.clear()
 
     # check if re-validation is skipped
-    result = runner.invoke(cli, testargs, catch_exceptions=False)
+    with caplog.at_level(logging.INFO):
+        result = runner.invoke(cli, testargs, catch_exceptions=False)
+
+        if grz_check_flag == "--no-grz-check":
+            assert "Starting checksum validation (fallback)..." in caplog.text
+        else:
+            assert "Starting file validation with `grz-check`..." in caplog.text
 
     # test if command has correctly checked for:
     # - mismatched md5sums
