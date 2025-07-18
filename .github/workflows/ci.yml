@@ -198,6 +198,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "packages/grz-check -> target"
+          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
       - name: Build grz-check debug binary
         run: cargo build --manifest-path packages/grz-check/Cargo.toml
@@ -224,6 +225,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "packages/grz-check -> target"
+          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+
 
       - name: Extract package name from path
         id: pkg_info
@@ -256,6 +259,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "packages/grz-check -> target"
+          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+
 
       - name: Add grz-check debug binary to PATH
         run: echo "${{ github.workspace }}/packages/grz-check/target/debug" >> $GITHUB_PATH
@@ -301,6 +306,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "packages/grz-check -> target"
+          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+
 
       - name: Add grz-check debug binary to PATH
         run: echo "${{ github.workspace }}/packages/grz-check/target/debug" >> $GITHUB_PATH
