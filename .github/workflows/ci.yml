@@ -158,6 +158,8 @@ jobs:
     name: Global Quality Checks (Rust)
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    env:
+      RUST_CACHE_KEY: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
