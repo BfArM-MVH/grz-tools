@@ -490,6 +490,33 @@ fn process_jobs(
     }
 }
 
+use std::sync::{LazyLock, Once};
+static SHUTDOWN_FLAG: LazyLock<Arc<AtomicBool>> =
+    LazyLock::new(|| Arc::new(AtomicBool::new(false)));
+
+static SET_HANDLER_ONCE: Once = Once::new();
+
+fn setup_signal_handler() -> anyhow::Result<()> {
+    let mut result = Ok(());
+
+    SET_HANDLER_ONCE.call_once(|| {
+        let handler_flag = SHUTDOWN_FLAG.clone();
+        let set_handler_result = ctrlc::set_handler(move || {
+            if handler_flag.swap(true, Ordering::SeqCst) {
+                eprintln!("\nSecond interrupt received, exiting immediately.");
+                std::process::exit(130);
+            }
+            eprintln!("\nCtrl+C received, shutting down gracefully…");
+        });
+
+        if let Err(e) = set_handler_result {
+            result = Err(e).context("Error setting Ctrl-C handler");
+        }
+    });
+
+    result
+}
+
 pub fn run_check(
     paired_raw: Vec<String>,
     single_raw: Vec<String>,
@@ -505,16 +532,8 @@ pub fn run_check(
         );
     }
 
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let handler_flag = shutdown_flag.clone();
-    ctrlc::set_handler(move || {
-        if handler_flag.swap(true, Ordering::SeqCst) {
-            eprintln!("\nSecond interrupt received, exiting immediately.");
-            std::process::exit(130);
-        }
-        eprintln!("\nCtrl+C received, shutting down gracefully…");
-    })
-    .context("Error setting Ctrl-C handler")?;
+    setup_signal_handler()?;
+    let shutdown_flag = SHUTDOWN_FLAG.clone();
 
     let (jobs, total_bytes) = create_jobs(&paired_raw, &single_raw, &bam_raw, &raw)?;
 
