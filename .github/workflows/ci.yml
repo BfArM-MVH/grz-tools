@@ -166,6 +166,9 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Check formatting for all Rust packages
         run: |
           find packages -name Cargo.toml -print0 | xargs -0 -I {} bash -c 'cd "$(dirname {})" && cargo fmt --all -- --check'
@@ -173,78 +176,6 @@ jobs:
       - name: Linting with Clippy for all Rust packages
         run: |
           find packages -name Cargo.toml -print0 | xargs -0 -I {} bash -c 'cd "$(dirname {})" && cargo clippy --all-targets -- -D warnings'
-
-  run-workspace-tests-python:
-    name: Run workspace tests (Python)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version:
-          - "3.12"
-          - "3.13"
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install project dev dependencies
-        run: uv sync --all-extras --all-groups --all-packages
-
-      - name: Test ${{ matrix.python-version }}
-        run: uv run tox -e ${{ matrix.python-version }}
-
-  test-changed-packages-python:
-    name: Test Changed Python Packages
-    needs: [determine-changes, quality-checks-python]
-    if: needs.determine-changes.outputs.has_python_changes == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJson(needs.determine-changes.outputs.python_matrix) }}
-        python-version:
-          - "3.12"
-          - "3.13"
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install project dev dependencies
-        run: uv sync --all-extras --all-groups
-
-      - name: Extract package name from path
-        id: pkg_info
-        run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
-
-      - name: Ensure package uv lockfile is up-to-date
-        run: cd ${{ matrix.package.path }} && uv lock --check
-
-      - name: Run tests for ${{ steps.pkg_info.outputs.name }}
-        run: cd ${{ matrix.package.path }} && uv run tox -e ${{ matrix.python-version }}
 
   test-changed-packages-rust:
     name: Test Changed Rust Packages
@@ -264,9 +195,95 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Extract package name from path
         id: pkg_info
-        run: echo "name=$(basename ${{ matrix.package_path }})" >> $GITHUB_OUTPUT
+        run: echo "name=$(basename ${{ matrix.package.path }})" >> $GITHUB_OUTPUT
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
         run: cd ${{ matrix.package.path }} && cargo test --all-features
+
+  run-workspace-tests-python:
+    name: Run workspace tests (Python)
+    runs-on: ubuntu-latest
+    needs: [determine-changes, test-changed-packages-rust]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+    if: |
+      (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) &&
+      (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install project dev dependencies
+        run: uv sync --all-extras --all-groups --all-packages
+
+      - name: Test ${{ matrix.python-version }}
+        run: uv run tox -e ${{ matrix.python-version }}
+
+  test-changed-packages-python:
+    name: Test Changed Python Packages
+    needs: [determine-changes, quality-checks-python, test-changed-packages-rust]
+    if: |
+      needs.determine-changes.outputs.has_python_changes == 'true' &&
+      (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.determine-changes.outputs.python_matrix) }}
+        python-version:
+          - "3.12"
+          - "3.13"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install project dev dependencies
+        run: uv sync --all-extras --all-groups
+
+      - name: Extract package name from path
+        id: pkg_info
+        run: echo "name=$(basename ${{ matrix.package.path }})" >> $GITHUB_OUTPUT
+
+      - name: Ensure package uv lockfile is up-to-date
+        run: cd ${{ matrix.package.path }} && uv lock --check
+
+      - name: Run tests for ${{ steps.pkg_info.outputs.name }}
+        run: cd ${{ matrix.package.path }} && uv run tox -e py${{ matrix.python-version }}
