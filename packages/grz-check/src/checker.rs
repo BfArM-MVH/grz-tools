@@ -450,13 +450,13 @@ fn process_jobs(
 
         let final_fail_count = num_failed_jobs.load(Ordering::SeqCst);
         if shutdown_flag.load(Ordering::SeqCst) {
-            main_pb.abandon_with_message("Operation cancelled by user.");
+            main_pb.abandon_with_message("✗ Operation cancelled by user.");
         } else if final_fail_count > 0 {
             main_pb.abandon_with_message(format!(
-                "Processing complete. {final_fail_count} pairs/files failed."
+                "✗ Processing complete. {final_fail_count} pairs/files failed."
             ));
         } else {
-            main_pb.finish_with_message("All checks passed!");
+            main_pb.finish_with_message("✓ All checks passed!");
         }
 
         Ok(())
@@ -530,7 +530,7 @@ pub fn run_check(
     }
 
     let file_style = ProgressStyle::with_template(
-        "{prefix:10.bold} [{bar:50.cyan/blue}] {bytes:>10}/{total_bytes:<10} ({bytes_per_sec:>12}, ETA: {eta:>6}) {wide_msg}"
+        "{prefix:8.bold} ▕{bar:50.cyan/blue}▏ {bytes:>10}/{total_bytes:<10} ({bytes_per_sec:>12}, ETA: {eta:>6}) {wide_msg}"
     )?.progress_chars("█▒░");
     let main_pb = mpb.add(ProgressBar::new(total_bytes));
     main_pb.set_style(file_style.clone());
@@ -563,11 +563,11 @@ pub fn run_check(
     match processing_result {
         Ok(()) => {
             if shutdown_flag.load(Ordering::Relaxed) {
-                main_pb.abandon_with_message("Operation cancelled by user.");
+                main_pb.abandon_with_message("✗ Operation cancelled by user.");
                 std::process::exit(130);
             } else if !continue_on_error {
                 main_pb.finish_with_message(format!(
-                    "All checks passed! Report written to {}",
+                    "✓ All checks passed! Report written to {}",
                     output.display()
                 ));
             }
@@ -575,7 +575,7 @@ pub fn run_check(
         Err(EarlyExitError(reason)) => match reason {
             StopReason::Error(failed_report) => {
                 main_pb.abandon_with_message(format!(
-                    "Error in {}. See report: {}",
+                    "✗ Error in {}. See report: {}",
                     failed_report.primary_path().display(),
                     output.display()
                 ));
@@ -585,7 +585,7 @@ pub fn run_check(
                 );
             }
             StopReason::Interrupted => {
-                main_pb.abandon_with_message("Operation cancelled by user.");
+                main_pb.abandon_with_message("✗ Operation cancelled by user.");
                 std::process::exit(130);
             }
         },
