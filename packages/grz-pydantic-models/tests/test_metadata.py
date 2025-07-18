@@ -49,6 +49,22 @@ def test_wgs_trio_special_consent():
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
+def test_wgs_trio_no_vcf():
+    """
+    VCFs were downgraded from required to recommended for all submissions.
+    """
+    metadata_str = (
+        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", "v1.1.7.json").read_text()
+    )
+    GrzSubmissionMetadata.model_validate_json(metadata_str)
+
+    metadata = json.loads(metadata_str)
+    # delete the VCF file for the index donor
+    del metadata["donors"][0]["labData"][0]["sequenceData"]["files"][2]
+
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
 def test_example_wgs_lr():
     metadata_str = (
         importlib.resources.files(resources).joinpath("example_metadata", "wgs_lr", "v1.1.4.json").read_text()

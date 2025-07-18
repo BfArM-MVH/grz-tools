@@ -30,8 +30,8 @@ def test_submission_metadata_fails():
     with pytest.raises(error_types, match="BED file missing for lab datum"):
         SubmissionMetadata(metadata_no_target_regions)
 
-    with pytest.raises(error_types, match="VCF file missing for lab datum"):
-        SubmissionMetadata(metadata_missing_vcf_file)
+    # missing VCF is allowed
+    SubmissionMetadata(metadata_missing_vcf_file)
 
     with pytest.raises(
         error_types, match="Paired end sequencing layout but not there is not exactly one R1 and one R2"
