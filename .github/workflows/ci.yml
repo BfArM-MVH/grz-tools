@@ -200,7 +200,7 @@ jobs:
 
   test-changed-packages-rust:
     name: Test Changed Rust Packages
-    needs: [ determine-changes, quality-checks-rust ]
+    needs: [ build-grz-check-binary, determine-changes, quality-checks-rust ]
     if: needs.determine-changes.outputs.has_rust_changes == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -238,7 +238,7 @@ jobs:
           - "3.13"
     if: |
       (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) &&
-      needs.build-rust-binary.result == 'success' &&
+      needs.build-grz-check-binary.result == 'success' &&
       (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped')
     steps:
       - name: Checkout code
@@ -272,7 +272,7 @@ jobs:
     needs: [ determine-changes, quality-checks-python, build-grz-check-binary, test-changed-packages-rust ]
     if: |
       needs.determine-changes.outputs.has_python_changes == 'true' &&
-      needs.build-rust-binary.result == 'success' &&
+      needs.build-grz-check-binary.result == 'success' &&
       (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
