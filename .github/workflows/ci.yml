@@ -205,6 +205,12 @@ jobs:
       - name: Build grz-check debug binary
         run: cargo build --manifest-path packages/grz-check/Cargo.toml
 
+      - name: Upload grz-check binary as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grz-check-binary
+          path: packages/grz-check/target/debug/grz-check
+
   test-changed-packages-rust:
     name: Test Changed Rust Packages
     needs: [ build-grz-check-binary, determine-changes, quality-checks-rust ]
@@ -256,19 +262,17 @@ jobs:
         with:
           lfs: true
 
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Download grz-check binary artifact
+        uses: actions/download-artifact@v4
         with:
-          toolchain: stable
+          name: grz-check-binary
+          path: ${{ github.workspace }}/bin
 
-      - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
-          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+      - name: Make grz-check executable
+        run: chmod +x ${{ github.workspace }}/bin/grz-check
 
-      - name: Add grz-check debug binary to PATH
-        run: echo "${{ github.workspace }}/packages/grz-check/target/debug" >> $GITHUB_PATH
+      - name: Add grz-check to PATH
+        run: echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -281,6 +285,9 @@ jobs:
 
       - name: Install project dev dependencies
         run: uv sync --all-extras --all-groups --all-packages
+
+      - name: Verify grz-check is available
+        run: which grz-check && grz-check --version
 
       - name: Test ${{ matrix.python-version }}
         run: uv run tox -e ${{ matrix.python-version }}
@@ -306,19 +313,17 @@ jobs:
         with:
           lfs: true
 
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Download grz-check binary artifact
+        uses: actions/download-artifact@v4
         with:
-          toolchain: stable
+          name: grz-check-binary
+          path: ${{ github.workspace }}/bin
 
-      - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
-          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+      - name: Make grz-check executable
+        run: chmod +x ${{ github.workspace }}/bin/grz-check
 
-      - name: Add grz-check debug binary to PATH
-        run: echo "${{ github.workspace }}/packages/grz-check/target/debug" >> $GITHUB_PATH
+      - name: Add grz-check to PATH
+        run: echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
