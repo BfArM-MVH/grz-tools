@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.1.0...grz-pydantic-models-v2.1.1) (2025-07-18)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** do not set a default schema URL ([#286](https://github.com/BfArM-MVH/grz-tools/issues/286)) ([4607dc2](https://github.com/BfArM-MVH/grz-tools/commit/4607dc2a0da0699594a3b5ff7ca219c1aca57638))
+* **grz-pydantic-models:** downgrade VCF from required to recommended ([#289](https://github.com/BfArM-MVH/grz-tools/issues/289)) ([9e5d3d1](https://github.com/BfArM-MVH/grz-tools/commit/9e5d3d1a109eb9b422570c860c7d5272c372c177))
+
 ## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.0.3...grz-pydantic-models-v2.1.0) (2025-07-14)
 
 
