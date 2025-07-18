@@ -585,10 +585,7 @@ pub fn run_check(
                 main_pb.abandon_with_message("✗ Operation cancelled by user.");
                 std::process::exit(130);
             } else if !continue_on_error {
-                main_pb.finish_with_message(format!(
-                    "✓ All checks passed! Report written to {}",
-                    output.display()
-                ));
+                main_pb.finish_with_message("✓ All checks passed!");
             }
         }
         Err(EarlyExitError(reason)) => match reason {
