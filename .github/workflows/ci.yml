@@ -169,6 +169,8 @@ jobs:
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages/grz-check -> target"
 
       - name: Check formatting for all Rust packages
         run: |
@@ -194,9 +196,11 @@ jobs:
 
       - name: Cache Rust dependencies and build output
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages/grz-check -> target"
 
       - name: Build grz-check debug binary
-        run: cargo build --manifest-path packages/grz-check/Cargo.toml --target-dir ./target
+        run: cargo build --manifest-path packages/grz-check/Cargo.toml
 
   test-changed-packages-rust:
     name: Test Changed Rust Packages
@@ -218,6 +222,8 @@ jobs:
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages/grz-check -> target"
 
       - name: Extract package name from path
         id: pkg_info
@@ -248,9 +254,11 @@ jobs:
 
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages/grz-check -> target"
 
-      - name: Add Rust debug binary to PATH
-        run: echo "${{ github.workspace }}/target/debug" >> $GITHUB_PATH
+      - name: Add grz-check debug binary to PATH
+        run: echo "${{ github.workspace }}/packages/grz-check/target/debug" >> $GITHUB_PATH
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -291,9 +299,11 @@ jobs:
 
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages/grz-check -> target"
 
-      - name: Add Rust debug binary to PATH
-        run: echo "${{ github.workspace }}/target/debug" >> $GITHUB_PATH
+      - name: Add grz-check debug binary to PATH
+        run: echo "${{ github.workspace }}/packages/grz-check/target/debug" >> $GITHUB_PATH
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
