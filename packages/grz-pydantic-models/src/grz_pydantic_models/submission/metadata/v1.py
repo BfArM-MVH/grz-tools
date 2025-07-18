@@ -975,8 +975,9 @@ class Donor(StrictBaseModel):
         """
         for lab_datum in self.lab_data:
             if lab_datum.sequence_data is not None and not lab_datum.sequence_data.contains_files(FileType.vcf):
-                raise ValueError(
+                log.warning(
                     f"VCF file missing for lab datum '{lab_datum.lab_data_name}' in donor '{self.donor_pseudonym}'."
+                    "VCF files are recommended, but not required."
                 )
 
         return self
