@@ -1,6 +1,6 @@
 use crate::checks::bam::BamCheckJob;
 use crate::checks::common;
-use crate::checks::fastq::{PairedFastqJob, ReadLengthCheck, SingleFastqJob};
+use crate::checks::fastq::{PairedFastqJob, SingleFastqJob};
 use crate::checks::raw::RawJob;
 use crate::checks::{bam, fastq, raw};
 use anyhow::Context;
@@ -81,7 +81,7 @@ impl PairReport {
 }
 
 #[derive(Debug)]
-enum Job {
+pub enum Job {
     SingleFastq(SingleFastqJob),
     PairedFastq(PairedFastqJob),
     Bam(BamCheckJob),
@@ -135,90 +135,6 @@ impl fmt::Display for EarlyExitError {
 }
 
 impl StdError for EarlyExitError {}
-
-fn create_jobs(
-    paired_raw: &[String],
-    single_raw: &[String],
-    bam_raw: &[PathBuf],
-    raw: &[PathBuf],
-) -> anyhow::Result<(Vec<Job>, u64)> {
-    let mut jobs = Vec::new();
-    let mut total_bytes: u64 = 0;
-
-    let parse_len = |len_str: &str| -> anyhow::Result<ReadLengthCheck> {
-        let len_val: i64 = len_str
-            .parse()
-            .context("Invalid read length. Must be an integer.")?;
-        Ok(match len_val {
-            v if v < 0 => ReadLengthCheck::Skip,
-            0 => ReadLengthCheck::Auto,
-            v => ReadLengthCheck::Fixed(v as usize),
-        })
-    };
-
-    for chunk in paired_raw.chunks_exact(4) {
-        let fq1_path = PathBuf::from(&chunk[0]);
-        let fq2_path = PathBuf::from(&chunk[1]);
-        let fq1_length_check = parse_len(&chunk[2]).with_context(|| {
-            format!(
-                "Invalid read length '{}' for file '{}'",
-                &chunk[2], &chunk[0]
-            )
-        })?;
-        let fq2_length_check = parse_len(&chunk[3]).with_context(|| {
-            format!(
-                "Invalid read length '{}' for file '{}'",
-                &chunk[3], &chunk[1]
-            )
-        })?;
-        let fq1_size = fs::metadata(&fq1_path)?.len();
-        let fq2_size = fs::metadata(&fq2_path)?.len();
-        total_bytes += fq1_size + fq2_size;
-        jobs.push(Job::PairedFastq(PairedFastqJob {
-            fq1_path,
-            fq2_path,
-            fq1_length_check,
-            fq2_length_check,
-            fq1_size,
-            fq2_size,
-        }));
-    }
-
-    for chunk in single_raw.chunks_exact(2) {
-        let path = PathBuf::from(&chunk[0]);
-        let length_check = parse_len(&chunk[1]).with_context(|| {
-            format!(
-                "Invalid read length '{}' for file '{}'",
-                &chunk[1], &chunk[0]
-            )
-        })?;
-        let size = fs::metadata(&path)?.len();
-        total_bytes += size;
-        jobs.push(Job::SingleFastq(SingleFastqJob {
-            path,
-            length_check,
-            size,
-        }));
-    }
-
-    for path_str in bam_raw {
-        let path = PathBuf::from(path_str);
-        let size = fs::metadata(&path)?.len();
-        total_bytes += size;
-        jobs.push(Job::Bam(BamCheckJob { path, size }));
-    }
-
-    for path_str in raw {
-        let path = PathBuf::from(path_str);
-        let size = fs::metadata(&path)
-            .with_context(|| format!("Could not get metadata for {}", path.display()))?
-            .len();
-        total_bytes += size;
-        jobs.push(Job::Raw(RawJob { path, size }));
-    }
-
-    Ok((jobs, total_bytes))
-}
 
 fn filename(path: impl AsRef<Path>) -> String {
     path.as_ref()
@@ -518,24 +434,14 @@ fn setup_signal_handler() -> anyhow::Result<()> {
 }
 
 pub fn run_check(
-    paired_raw: Vec<String>,
-    single_raw: Vec<String>,
-    bam_raw: Vec<PathBuf>,
-    raw: Vec<PathBuf>,
+    jobs: Vec<Job>,
+    total_bytes: u64,
     output: &Path,
     continue_on_error: bool,
     show_progress: Option<bool>,
 ) -> anyhow::Result<()> {
-    if paired_raw.is_empty() && single_raw.is_empty() && bam_raw.is_empty() && raw.is_empty() {
-        anyhow::bail!(
-            "No input files provided. Use --fastq-single, --fastq-paired, --bam, or --raw."
-        );
-    }
-
     setup_signal_handler()?;
     let shutdown_flag = SHUTDOWN_FLAG.clone();
-
-    let (jobs, total_bytes) = create_jobs(&paired_raw, &single_raw, &bam_raw, &raw)?;
 
     let mpb = MultiProgress::new();
     match show_progress {
@@ -732,6 +638,7 @@ mod tests {
     use flate2::write::GzEncoder;
     use noodles::bam;
 
+    use crate::checks::fastq::ReadLengthCheck;
     use noodles::sam::alignment::io::Write as SamWrite;
     use noodles::sam::alignment::record::Flags;
     use noodles::sam::alignment::record::cigar::op::{Kind, Op};
@@ -801,10 +708,6 @@ mod tests {
                 dir,
             })
         }
-
-        fn path_str(&self, filename: &str) -> String {
-            self.dir.join(filename).to_string_lossy().to_string()
-        }
     }
 
     #[allow(dead_code)]
@@ -867,14 +770,23 @@ mod tests {
     fn test_valid_pair_with_different_lengths() -> Result<()> {
         let fixture = TestFiles::new()?;
         let output = fixture.dir.join("report.jsonl");
-        let paired = vec![
-            fixture.path_str("ok_r1.fastq.gz"),
-            fixture.path_str("ok_r2_len5.fastq.gz"),
-            "4".to_string(),
-            "5".to_string(),
-        ];
 
-        run_check(paired, vec![], vec![], vec![], &output, false, Some(false))?;
+        let fq1_path = fixture.dir.join("ok_r1.fastq.gz");
+        let fq2_path = fixture.dir.join("ok_r2_len5.fastq.gz");
+        let fq1_size = fs::metadata(&fq1_path)?.len();
+        let fq2_size = fs::metadata(&fq2_path)?.len();
+        let total_bytes = fq1_size + fq2_size;
+
+        let jobs = vec![Job::PairedFastq(PairedFastqJob {
+            fq1_path,
+            fq2_path,
+            fq1_length_check: ReadLengthCheck::Fixed(4),
+            fq2_length_check: ReadLengthCheck::Fixed(5),
+            fq1_size,
+            fq2_size,
+        })];
+
+        run_check(jobs, total_bytes, &output, false, Some(false))?;
 
         let mut records = read_jsonl_report(&output)?;
         records.sort_by(|a, b| match (a, b) {
@@ -906,28 +818,47 @@ mod tests {
         let fixture = TestFiles::new()?;
         let output = fixture.dir.join("report.jsonl");
 
-        let all_paired = vec![
-            fixture.path_str("counts1.fastq.gz"),
-            fixture.path_str("counts2.fastq.gz"),
-            "0".to_string(),
-            "0".to_string(),
-            fixture.path_str("ok_r1.fastq.gz"),
-            fixture.path_str("ok_r2.fastq.gz"),
-            "4".to_string(),
-            "4".to_string(),
-        ];
+        let mut jobs = Vec::new();
+        let mut total_bytes = 0;
 
-        let all_single = vec![fixture.path_str("badlen.fastq.gz"), "0".to_string()];
+        let p1f1_path = fixture.dir.join("counts1.fastq.gz");
+        let p1f2_path = fixture.dir.join("counts2.fastq.gz");
+        let p1f1_size = fs::metadata(&p1f1_path)?.len();
+        let p1f2_size = fs::metadata(&p1f2_path)?.len();
+        total_bytes += p1f1_size + p1f2_size;
+        jobs.push(Job::PairedFastq(PairedFastqJob {
+            fq1_path: p1f1_path,
+            fq2_path: p1f2_path,
+            fq1_length_check: ReadLengthCheck::Auto,
+            fq2_length_check: ReadLengthCheck::Auto,
+            fq1_size: p1f1_size,
+            fq2_size: p1f2_size,
+        }));
 
-        run_check(
-            all_paired,
-            all_single,
-            vec![],
-            vec![],
-            &output,
-            true,
-            Some(false),
-        )?;
+        let p2f1_path = fixture.dir.join("ok_r1.fastq.gz");
+        let p2f2_path = fixture.dir.join("ok_r2.fastq.gz");
+        let p2f1_size = fs::metadata(&p2f1_path)?.len();
+        let p2f2_size = fs::metadata(&p2f2_path)?.len();
+        total_bytes += p2f1_size + p2f2_size;
+        jobs.push(Job::PairedFastq(PairedFastqJob {
+            fq1_path: p2f1_path,
+            fq2_path: p2f2_path,
+            fq1_length_check: ReadLengthCheck::Fixed(4),
+            fq2_length_check: ReadLengthCheck::Fixed(4),
+            fq1_size: p2f1_size,
+            fq2_size: p2f2_size,
+        }));
+
+        let s1_path = fixture.dir.join("badlen.fastq.gz");
+        let s1_size = fs::metadata(&s1_path)?.len();
+        total_bytes += s1_size;
+        jobs.push(Job::SingleFastq(SingleFastqJob {
+            path: s1_path,
+            length_check: ReadLengthCheck::Auto,
+            size: s1_size,
+        }));
+
+        run_check(jobs, total_bytes, &output, true, Some(false))?;
 
         let records = read_jsonl_report(&output)?;
         assert_eq!(records.len(), 5);
@@ -1002,16 +933,13 @@ mod tests {
         drop(writer);
 
         let output = dir.path().join("report.jsonl");
+        let bam_size = fs::metadata(&bam_path)?.len();
+        let jobs = vec![Job::Bam(BamCheckJob {
+            path: bam_path,
+            size: bam_size,
+        })];
 
-        run_check(
-            vec![],
-            vec![],
-            vec![bam_path],
-            vec![],
-            &output,
-            true,
-            Some(false),
-        )?;
+        run_check(jobs, bam_size, &output, true, Some(false))?;
 
         let records = read_jsonl_report(&output)?;
         assert_eq!(records.len(), 1);
@@ -1043,15 +971,13 @@ mod tests {
 
         let output = dir.path().join("report.jsonl");
 
-        run_check(
-            vec![],
-            vec![],
-            vec![],
-            vec![file_path],
-            &output,
-            true,
-            Some(false),
-        )?;
+        let file_size = fs::metadata(&file_path)?.len();
+        let jobs = vec![Job::Raw(RawJob {
+            path: file_path,
+            size: file_size,
+        })];
+
+        run_check(jobs, file_size, &output, true, Some(false))?;
 
         let records = read_jsonl_report(&output)?;
         assert_eq!(records.len(), 1);
@@ -1092,15 +1018,12 @@ mod tests {
         drop(writer);
 
         let output = dir.path().join("report.jsonl");
-        run_check(
-            vec![],
-            vec![],
-            vec![bam_path],
-            vec![],
-            &output,
-            true,
-            Some(false),
-        )?;
+        let bam_size = fs::metadata(&bam_path)?.len();
+        let jobs = vec![Job::Bam(BamCheckJob {
+            path: bam_path,
+            size: bam_size,
+        })];
+        run_check(jobs, bam_size, &output, true, Some(false))?;
 
         let records = read_jsonl_report(&output)?;
         assert_eq!(records.len(), 1);
@@ -1153,15 +1076,12 @@ mod tests {
         drop(writer);
 
         let output = dir.path().join("report.jsonl");
-        run_check(
-            vec![],
-            vec![],
-            vec![bam_path],
-            vec![],
-            &output,
-            true,
-            Some(false),
-        )?;
+        let bam_size = fs::metadata(&bam_path)?.len();
+        let jobs = vec![Job::Bam(BamCheckJob {
+            path: bam_path,
+            size: bam_size,
+        })];
+        run_check(jobs, bam_size, &output, true, Some(false))?;
 
         let records = read_jsonl_report(&output)?;
         assert_eq!(records.len(), 1);
@@ -1214,15 +1134,12 @@ mod tests {
         drop(writer);
 
         let output = dir.path().join("report.jsonl");
-        run_check(
-            vec![],
-            vec![],
-            vec![bam_path],
-            vec![],
-            &output,
-            true,
-            Some(false),
-        )?;
+        let bam_size = fs::metadata(&bam_path)?.len();
+        let jobs = vec![Job::Bam(BamCheckJob {
+            path: bam_path,
+            size: bam_size,
+        })];
+        run_check(jobs, bam_size, &output, true, Some(false))?;
 
         let records = read_jsonl_report(&output)?;
         assert_eq!(records.len(), 1);
