@@ -33,14 +33,14 @@ struct Args {
     #[arg(long, global = true)]
     show_progress: Option<bool>,
 
-    /// A paired-end FASTQ sample. Provide FQ1, FQ2, FQ1 read length, and FQ2 read length.
+    /// A paired-end FASTQ sample. Provide FQ1, FQ1 read length, FQ2 and FQ2 read length.
     /// Read Length: >0 for fixed, 0 for auto-detect, <0 to skip length check.
     #[arg(
         long,
         action = clap::ArgAction::Append,
         allow_hyphen_values = true,
         num_args = 4,
-        value_names = ["FQ1_PATH", "FQ2_PATH", "FQ1_READ_LEN", "FQ2_READ_LEN"],
+        value_names = ["FQ1_PATH", "FQ1_READ_LEN", "FQ2_PATH", "FQ2_READ_LEN"],
         group = "input_files"
     )]
     fastq_paired: Vec<String>,
@@ -112,17 +112,17 @@ fn create_jobs(
 
     for chunk in paired_raw.chunks_exact(4) {
         let fq1_path = PathBuf::from(&chunk[0]);
-        let fq2_path = PathBuf::from(&chunk[1]);
-        let fq1_length_check = parse_len(&chunk[2]).with_context(|| {
+        let fq1_length_check = parse_len(&chunk[1]).with_context(|| {
             format!(
                 "Invalid read length '{}' for file '{}'",
-                &chunk[2], &chunk[0]
+                &chunk[1], &chunk[0]
             )
         })?;
+        let fq2_path = PathBuf::from(&chunk[2]);
         let fq2_length_check = parse_len(&chunk[3]).with_context(|| {
             format!(
                 "Invalid read length '{}' for file '{}'",
-                &chunk[3], &chunk[1]
+                &chunk[3], &chunk[2]
             )
         })?;
         let fq1_size = fs::metadata(&fq1_path)?.len();

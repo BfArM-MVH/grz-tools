@@ -253,7 +253,7 @@ class Submission:
                                 r1_read_len = -1  # disable read length check for now; r1_meta.read_length
                                 r2_read_len = -1  # disable read length check for now; r2_meta.read_length
                                 grz_check_args.extend(
-                                    ["--fastq-paired", str(r1_path), str(r2_path), str(r1_read_len), str(r2_read_len)]
+                                    ["--fastq-paired", str(r1_path), str(r1_read_len), str(r2_path), str(r2_read_len)]
                                 )
                             checked_files.add(r1_path)
                             checked_files.add(r2_path)
