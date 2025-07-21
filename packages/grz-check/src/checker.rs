@@ -304,7 +304,7 @@ fn process_job(
         Job::Raw(job) => {
             let pb = m.add(ProgressBar::new(job.size));
             pb.set_style(style.clone());
-            pb.set_prefix("RAW");
+            pb.set_prefix("OTHER");
             let report = raw::check_raw(&job.path, &pb, main_pb);
             let filename = filename(&job.path);
             finish_pb(pb, filename, &report);
