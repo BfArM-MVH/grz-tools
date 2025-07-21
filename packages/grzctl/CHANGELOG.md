@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.4...grzctl-v0.2.5) (2025-07-21)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** bump deps to make VCFs optional ([#291](https://github.com/BfArM-MVH/grz-tools/issues/291)) ([fe4ac2f](https://github.com/BfArM-MVH/grz-tools/commit/fe4ac2f8230b804ad9ec2c6d2102207ab97b0365))
+
 ## [0.2.4](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.3...grzctl-v0.2.4) (2025-07-14)
 
 
