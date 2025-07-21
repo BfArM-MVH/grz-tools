@@ -285,25 +285,20 @@ fn process_job(
                 }
             };
 
-            if report.is_ok() {
-                fq1_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq1_path)));
-                fq2_pb.finish_with_message(format!("✓ OK    {}", filename(&job.fq2_path)));
-            } else {
-                fq1_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq1_path)));
-                fq2_pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.fq2_path)));
-            }
+            let fq1_filename = filename(&job.fq1_path);
+            let fq2_filename = filename(&job.fq2_path);
+            finish_pb(fq1_pb, fq1_filename, &report.fq1_report);
+            finish_pb(fq2_pb, fq2_filename, &report.fq1_report);
+
             CheckResult::PairedFastq(report)
         }
         Job::Bam(job) => {
             let pb = m.add(ProgressBar::new(job.size));
             pb.set_style(style.clone());
             pb.set_prefix("BAM");
+            let filename = filename(&job.path);
             let report = bam::check_bam(&job.path, &pb, main_pb);
-            if report.is_ok() {
-                pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
-            } else {
-                pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
-            }
+            finish_pb(pb, filename, &report);
             CheckResult::Bam(report)
         }
         Job::Raw(job) => {
@@ -311,13 +306,18 @@ fn process_job(
             pb.set_style(style.clone());
             pb.set_prefix("RAW");
             let report = raw::check_raw(&job.path, &pb, main_pb);
-            if report.is_ok() {
-                pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
-            } else {
-                pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
-            }
+            let filename = filename(&job.path);
+            finish_pb(pb, filename, &report);
             CheckResult::Raw(report)
         }
+    }
+}
+
+fn finish_pb(pb: ProgressBar, filename: String, report: &FileReport) {
+    if report.is_ok() {
+        pb.finish_with_message(format!("✓ OK    {filename}"));
+    } else {
+        pb.abandon_with_message(format!("✗ ERROR {filename}"));
     }
 }
 
