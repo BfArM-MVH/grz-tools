@@ -88,7 +88,7 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False, threads=1, with_grz_check=True):
+    def validate(self, identifiers: IdentifiersModel, force=False, with_grz_check=True):
         """
         Validate this submission
 
