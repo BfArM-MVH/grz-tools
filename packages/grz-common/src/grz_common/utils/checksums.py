@@ -8,7 +8,7 @@ from pathlib import Path
 
 from tqdm.auto import tqdm
 
-from ..constants import TQDM_SMOOTHING
+from ..constants import TQDM_DEFAULTS
 
 log = logging.getLogger(__name__)
 
@@ -27,13 +27,7 @@ def calculate_sha256(file_path: str | PathLike, chunk_size=2**16, progress=True)
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
         if progress and (total_size > chunk_size):
-            with tqdm(
-                total=total_size,
-                unit="B",
-                unit_scale=True,
-                desc=f"Calculating SHA256 {file_path.name}",
-                smoothing=TQDM_SMOOTHING,
-            ) as pbar:
+            with tqdm(total=total_size, desc="SHA256  ", postfix=f"{file_path.name}", **TQDM_DEFAULTS) as pbar:  # type: ignore[call-overload]
                 while chunk := f.read(chunk_size):
                     sha256_hash.update(chunk)
                     pbar.update(len(chunk))
