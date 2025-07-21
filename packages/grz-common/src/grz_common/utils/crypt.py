@@ -16,7 +16,7 @@ import crypt4gh.lib
 from nacl.public import PrivateKey
 from tqdm.auto import tqdm
 
-from ..constants import TQDM_SMOOTHING
+from ..constants import TQDM_DEFAULTS
 from .io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
@@ -76,15 +76,7 @@ class Crypt4GH:
             open(output_path, "wb") as out_fd,
             TqdmIOWrapper(
                 typing.cast(io.RawIOBase, in_fd),
-                tqdm(
-                    total=total_size,
-                    desc=f"Encrypting: '{input_path.name}'",
-                    unit="B",
-                    unit_scale=True,
-                    # unit_divisor=1024,  # make use of standard units e.g. KB, MB, etc.
-                    miniters=1,
-                    smoothing=TQDM_SMOOTHING,
-                ),
+                tqdm(total=total_size, desc="ENCRYPT ", postfix=f"{input_path.name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
             ) as pbar_in_fd,
         ):
             crypt4gh.lib.encrypt(
@@ -121,19 +113,13 @@ class Crypt4GH:
         :param private_key: The private key
         """
         total_size = getsize(input_path)
+        file_name = input_path.name
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
             TqdmIOWrapper(
                 typing.cast(io.RawIOBase, in_fd),
-                tqdm(
-                    total=total_size,
-                    desc=f"Decrypting: '{input_path.name}'",
-                    unit="B",
-                    unit_scale=True,
-                    # unit_divisor=1024,  # make use of standard units e.g. KB, MB, etc.
-                    miniters=1,
-                ),
+                tqdm(total=total_size, desc="DECRYPT ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
             ) as pbar_in_fd,
         ):
             crypt4gh.lib.decrypt(

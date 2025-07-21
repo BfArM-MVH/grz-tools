@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.0.3...grz-cli-v1.1.0) (2025-07-21)
+
+
+### Features
+
+* **grz-cli,grzctl,grz-check:** Add grz-check ([#240](https://github.com/BfArM-MVH/grz-tools/issues/240)) ([57048f6](https://github.com/BfArM-MVH/grz-tools/commit/57048f66888cb566887e627a2b973c3f8b1b83c5))
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** bump deps to make VCFs optional ([#291](https://github.com/BfArM-MVH/grz-tools/issues/291)) ([fe4ac2f](https://github.com/BfArM-MVH/grz-tools/commit/fe4ac2f8230b804ad9ec2c6d2102207ab97b0365))
+
 ## [1.0.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.0.2...grz-cli-v1.0.3) (2025-07-14)
 
 

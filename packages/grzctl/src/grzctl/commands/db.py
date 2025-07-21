@@ -158,7 +158,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         return
 
     table = rich.table.Table(title="All Submissions")
-    table.add_column("ID", style="dim", width=12)
+    table.add_column("ID", style="dim", min_width=29, width=29)
     table.add_column("tanG", style="cyan")
     table.add_column("Pseudonym", style="magenta")
     table.add_column("Latest State", style="green")

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
+from ..validation import UserInterruptException
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
 
@@ -87,12 +88,13 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False):
+    def validate(self, identifiers: IdentifiersModel, force=False, with_grz_check=True):
         """
         Validate this submission
 
         :param identifiers: IdentifiersModel containing GRZ and LE identifiers.
         :param force: Force validation of already validated files
+        :param with_grz_check: If True, use the grz-check tool for validation.
         :raises SubmissionValidationError: if the validation fails
         """
         submission = self.parse_submission()
@@ -111,22 +113,47 @@ class Worker:
             self.progress_file_checksum_validation.unlink(missing_ok=True)
             self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
 
-        self.__log.info("Starting checksum validation...")
-        if errors := list(submission.validate_checksums(progress_log_file=self.progress_file_checksum_validation)):
+        if with_grz_check:
+            try:
+                self.__log.info("Starting file validation with `grz-check`...")
+                errors = list(
+                    submission.validate_files_with_grz_check(
+                        checksum_progress_file=self.progress_file_checksum_validation,
+                        seq_data_progress_file=self.progress_file_sequencing_data_validation,
+                        threads=self._threads,
+                    )
+                )
+                if errors:
+                    error_msg = "\n".join(["File validation failed! Errors:", *errors])
+                    self.__log.error(error_msg)
+                    raise SubmissionValidationError(error_msg)
+                else:
+                    self.__log.info("File validation successful!")
+                return
+            except UserInterruptException as e:
+                error_msg = "Validation was cancelled by the user and is incomplete."
+                self.__log.error(error_msg)
+                raise SubmissionValidationError(error_msg) from e
+
+        # Fallback validation
+        self.__log.info("Starting checksum validation (fallback)...")
+        if errors := list(
+            submission._validate_checksums_fallback(progress_log_file=self.progress_file_checksum_validation)
+        ):
             error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
             self.__log.error(error_msg)
-
             raise SubmissionValidationError(error_msg)
         else:
             self.__log.info("Checksum validation successful!")
 
-        self.__log.info("Starting sequencing data validation...")
+        self.__log.info("Starting sequencing data validation (fallback)...")
         if errors := list(
-            submission.validate_sequencing_data(progress_log_file=self.progress_file_sequencing_data_validation)
+            submission._validate_sequencing_data_fallback(
+                progress_log_file=self.progress_file_sequencing_data_validation
+            )
         ):
             error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
             self.__log.error(error_msg)
-
             raise SubmissionValidationError(error_msg)
         else:
             self.__log.info("Sequencing data validation successful!")
@@ -163,8 +190,7 @@ class Worker:
     def decrypt(self, recipient_private_key_path: str | PathLike, force: bool = False) -> Submission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
-        :param recipient_public_key_path: Path to the public key file of the recipient.
-        :param submitter_private_key_path: Path to the private key file of the submitter.
+        :param recipient_private_key_path: Path to the private key file of the recipient.
         :param force: Force decryption of already decrypted files
         :return: EncryptedSubmission instance
         """

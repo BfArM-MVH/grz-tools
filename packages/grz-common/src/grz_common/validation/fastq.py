@@ -9,11 +9,12 @@ from contextlib import contextmanager
 from gzip import GzipFile
 from io import RawIOBase
 from os import PathLike
+from pathlib import Path
 from typing import TextIO
 
 from tqdm.auto import tqdm
 
-from ..constants import TQDM_SMOOTHING
+from ..constants import TQDM_DEFAULTS
 from ..utils.io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
@@ -39,21 +40,14 @@ def open_fastq(file_path: str | PathLike, progress=True) -> Generator[TextIO, No
     :return: A file object opened in the appropriate mode (gzipped or plain text)
     """
     handle: TqdmIOWrapper | GzipFile | typing.BinaryIO | None = None
+    file_name = Path(file_path).name
     with open(file_path, "rb") as fd:
         # Open FASTQ
         total_size = os.stat(file_path).st_size
         if progress:
             handle = TqdmIOWrapper(
                 typing.cast(RawIOBase, fd),
-                tqdm(
-                    total=total_size,
-                    desc="Reading FASTQ: ",
-                    unit="B",
-                    unit_scale=True,
-                    # unit_divisor=1024,  # make use of standard units e.g. KB, MB, etc.
-                    miniters=1,
-                    smoothing=TQDM_SMOOTHING,
-                ),
+                tqdm(total=total_size, desc="FASTQ   ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
             )
         else:
             handle = fd

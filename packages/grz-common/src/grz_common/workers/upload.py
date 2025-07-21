@@ -17,7 +17,7 @@ import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from tqdm.auto import tqdm
 
-from ..constants import TQDM_SMOOTHING
+from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client
@@ -127,7 +127,7 @@ class S3BotoUploadWorker(UploadWorker):
         )
 
         transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        progress_bar = tqdm(total=filesize, unit="B", unit_scale=True, unit_divisor=1024, smoothing=TQDM_SMOOTHING)
+        progress_bar = tqdm(total=filesize, desc="UPLOAD  ", **TQDM_DEFAULTS, postfix=f"{s3_object_id}")  # type: ignore[call-overload]
         transfer.upload_file(
             str(local_file_path),
             self._s3_options.bucket,
