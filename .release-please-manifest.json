@@ -3,6 +3,6 @@
   "packages/grz-pydantic-models": "2.1.2",
   "packages/grz-db": "0.2.1",
   "packages/grz-common": "1.1.1",
-  "packages/grzctl": "0.2.5",
+  "packages/grzctl": "0.2.6",
   "packages/grz-check": "0.1.0"
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.6](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.5...grzctl-v0.2.6) (2025-07-23)
+
+
+### Bug Fixes
+
+* **grzctl,grz-cli:** bump dependencies ([#303](https://github.com/BfArM-MVH/grz-tools/issues/303)) ([cf12d35](https://github.com/BfArM-MVH/grz-tools/commit/cf12d35a7a20dcb5494a3576ccc06c393f763367))
+
 ## [0.2.5](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.4...grzctl-v0.2.5) (2025-07-21)
 
 
