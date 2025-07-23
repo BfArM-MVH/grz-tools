@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 @click.option(
     "--with-grz-check/--no-grz-check",
     "with_grz_check",
-    default=False,
+    default=True,
     hidden=True,
     help="Whether to use grz-check to perform validation",
 )
