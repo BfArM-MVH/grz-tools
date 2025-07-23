@@ -16,6 +16,8 @@ def test_validate_submission(
     grz_check_flag,
     caplog,
 ):
+    if (grz_check_flag == "--with-grz-check") and (shutil.which('grz-check') is None):
+        pytest.skip(reason="grz-check not available on $PATH")
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
