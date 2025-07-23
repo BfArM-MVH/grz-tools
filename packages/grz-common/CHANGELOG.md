@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.1.0...grz-common-v1.1.1) (2025-07-23)
+
+
+### Bug Fixes
+
+* **grz-common:** correctly fallback without grz-check ([#298](https://github.com/BfArM-MVH/grz-tools/issues/298)) ([1ca0b20](https://github.com/BfArM-MVH/grz-tools/commit/1ca0b20a7f2b57f5e49144956fb86d9de1b4301c))
+
 ## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.0.3...grz-common-v1.1.0) (2025-07-21)
 
 
