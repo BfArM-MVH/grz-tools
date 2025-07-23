@@ -246,6 +246,7 @@ def test_valid_submission_multiple_library_types(
             # set only ONE libary type to WGS
             # should sort higher than the other WES data and therefore WGS is sent in Pruefbericht
             metadata["donors"][0]["labData"][0]["libraryType"] = "wgs"
+            metadata["donors"][0]["labData"][0]["sequenceData"]["minCoverage"] = 20
 
             metadata_file.seek(0)
             json.dump(metadata, metadata_file)

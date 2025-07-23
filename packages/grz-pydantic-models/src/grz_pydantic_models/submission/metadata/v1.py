@@ -1221,7 +1221,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
 
-def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):  # noqa: C901
+def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):  # noqa: C901, PLR0912
     if lab_datum.sequence_data is None:
         # Skip if no sequence data is present; warning issues in the validator `warn_empty_sequence_data` of `Donor`.
         return
@@ -1232,34 +1232,45 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
     mean_depth_of_coverage_t = thresholds.get("meanDepthOfCoverage")
     mean_depth_of_coverage_v = sequence_data.mean_depth_of_coverage
     if mean_depth_of_coverage_t and mean_depth_of_coverage_v < mean_depth_of_coverage_t:
-        raise ValueError(
+        message = (
             f"Mean depth of coverage for donor '{pseudonym}', lab datum '{lab_data_name}' "
             f"below threshold: {mean_depth_of_coverage_v} < {mean_depth_of_coverage_t}"
         )
+        if donor.relation == Relation.index_:
+            raise ValueError(message)
+        else:
+            log.warning(message)
 
     read_length_t = thresholds.get("readLength")
     for f in sequence_data.list_files(FileType.fastq) + sequence_data.list_files(FileType.bam):
         read_length_v = f.read_length
         if read_length_t and read_length_v < read_length_t:
-            raise ValueError(
+            message = (
                 f"Read length for donor '{pseudonym}', lab datum '{lab_data_name}' "
                 f"below threshold: {read_length_v} < {read_length_t}"
             )
+            if donor.relation == Relation.index_:
+                raise ValueError(message)
+            else:
+                log.warning(message)
 
     if percent_bases_above_quality_threshold_t := thresholds.get("percentBasesAboveQualityThreshold"):
         minimum_quality_t = percent_bases_above_quality_threshold_t.get("qualityThreshold")
         minimum_quality_v = sequence_data.percent_bases_above_quality_threshold.minimum_quality
         if minimum_quality_t and (minimum_quality_t != minimum_quality_v):
             # TODO also print out genomic study subtype because that determines thresholds, but is defined at submission level
+            # this should error regardless of relation because it should match the official threshold
             raise ValueError(
                 f"Expected minimumQuality '{minimum_quality_t}' for library type '{lab_datum.library_type}' and sequence subtype '{lab_datum.sequence_subtype}'. Got '{minimum_quality_v}' instead."
             )
         percent_t = percent_bases_above_quality_threshold_t.get("percentBasesAbove")
         percent_v = sequence_data.percent_bases_above_quality_threshold.percent
         if percent_t and (percent_v < percent_t):
-            raise ValueError(
-                f"Percentage of bases above quality threshold are below threshold: {percent_v} < {percent_t}"
-            )
+            message = f"Percentage of bases above quality threshold are below threshold: {percent_v} < {percent_t}"
+            if donor.relation == Relation.index_:
+                raise ValueError(message)
+            else:
+                log.warning(message)
 
     if t := thresholds.get("targetedRegionsAboveMinCoverage"):
         min_coverage_t = t.get("minCoverage")
@@ -1268,17 +1279,22 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
         fraction_above_t = t.get("fractionAbove")
         fraction_above_v = sequence_data.targeted_regions_above_min_coverage
 
-        if min_coverage_t and min_coverage_v < min_coverage_t:
+        if min_coverage_t and min_coverage_v != min_coverage_t:
+            # this should error regardless of relation because it should match the official threshold
             raise ValueError(
                 f"Minimum coverage for donor '{pseudonym}', lab datum '{lab_data_name}' "
-                f"below threshold: {min_coverage_v} < {min_coverage_t}"
+                f"not equal to expected threshold: {min_coverage_v} != {min_coverage_t}"
             )
         if fraction_above_t and fraction_above_v < fraction_above_t:
-            raise ValueError(
+            message = (
                 f"Fraction of targeted regions above minimum coverage for donor '{pseudonym}', "
                 f"lab datum '{lab_data_name}' below threshold: "
                 f"{fraction_above_v} < {fraction_above_t}"
             )
+            if donor.relation == Relation.index_:
+                raise ValueError(message)
+            else:
+                log.warning(message)
 
 
 type Thresholds = dict[tuple[str, str, str], dict[str, Any]]
