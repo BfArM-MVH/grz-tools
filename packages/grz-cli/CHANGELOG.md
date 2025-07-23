@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.1.0...grz-cli-v1.1.1) (2025-07-23)
+
+
+### Bug Fixes
+
+* **grzctl,grz-cli:** bump dependencies ([#303](https://github.com/BfArM-MVH/grz-tools/issues/303)) ([cf12d35](https://github.com/BfArM-MVH/grz-tools/commit/cf12d35a7a20dcb5494a3576ccc06c393f763367))
+
 ## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.0.3...grz-cli-v1.1.0) (2025-07-21)
 
 
