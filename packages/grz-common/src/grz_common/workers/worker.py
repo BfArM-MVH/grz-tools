@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from os import PathLike
 from pathlib import Path
-import shutil
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
