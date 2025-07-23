@@ -35,12 +35,9 @@ from ..models.config import DbConfig
 console = rich.console.Console()
 log = logging.getLogger(__name__)
 
-DATABASE_URL = "sqlite:///test.sqlite"
 
-
-def get_submission_db_instance(db_url: str | None, author: Author | None = None) -> SubmissionDb:
+def get_submission_db_instance(db_url: str, author: Author | None = None) -> SubmissionDb:
     """Creates and returns an instance of SubmissionDb."""
-    db_url = db_url or DATABASE_URL
     return SubmissionDb(db_url=db_url, author=author)
 
 
@@ -93,7 +90,7 @@ def submission(ctx: click.Context):
 @db.command()
 @click.pass_context
 def init(ctx: click.Context):
-    """Initializes or upgrades the database schema using Alembic."""
+    """Initializes the database schema using Alembic."""
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
     console.print(f"[cyan]Initializing database {db}[/cyan]")
@@ -102,17 +99,10 @@ def init(ctx: click.Context):
 
 @db.command()
 @click.option("--revision", default="head", help="Alembic revision to upgrade to (default: 'head').")
-@click.option(
-    "--alembic-ini",
-    type=click.Path(exists=True, dir_okay=False, resolve_path=True),
-    default="alembic.ini",
-    help="Override path to alembic.ini file.",
-)
 @click.pass_context
 def upgrade(
     ctx: click.Context,
     revision: str,
-    alembic_ini: str,
 ):
     """
     Upgrades the database schema using Alembic.
@@ -120,21 +110,14 @@ def upgrade(
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
 
-    console.print(f"[cyan]Using alembic configuration: {alembic_ini}[/cyan]")
-
     try:
         console.print(f"[cyan]Attempting to upgrade database to revision: {revision}...[/cyan]")
-        _ = submission_db.upgrade_schema(
-            alembic_ini_path=alembic_ini,
-            revision=revision,
-        )
+        _ = submission_db.upgrade_schema(revision=revision)
 
     except (DatabaseConfigurationError, RuntimeError) as e:
         console.print(f"[red]Error during schema initialization: {e}[/red]")
         if isinstance(e, RuntimeError):
-            console.print(
-                "[yellow]Ensure your database is running and accessible, and alembic.ini is configured correctly.[/yellow]"
-            )
+            console.print("[yellow]Ensure your database is running and accessible.[/yellow]")
             console.print(
                 "[yellow]You might need to create an initial migration if this is the first time: 'alembic revision -m \"initial\" --autogenerate'[/yellow]"
             )
@@ -151,7 +134,11 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
     """Lists all submissions in the database with their latest state."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
-    submissions = db_service.list_submissions()
+
+    try:
+        submissions = db_service.list_submissions()
+    except RuntimeError as e:
+        raise click.ClickException(str(e)) from e
 
     if not submissions:
         console.print("[yellow]No submissions found in the database.[/yellow]")
@@ -416,11 +403,11 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
 
 @submission.command()
 @click.argument("submission_id", type=str)
-@click.argument("key", metavar="KEY", type=click.Choice(["tanG", "pseudonym"], case_sensitive=False))
+@click.argument("key", metavar="KEY", type=str)
 @click.argument("value", metavar="VALUE", type=str)
 @click.pass_context
 def modify(ctx: click.Context, submission_id: str, key: str, value: str):
-    """Modify a submission's tanG or index donor pseudonym."""
+    """Modify a submission's database properties."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
 
