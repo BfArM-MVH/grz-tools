@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.1.1...grz-pydantic-models-v2.1.2) (2025-07-23)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** warn if non-index donors do not pass thresholds ([#300](https://github.com/BfArM-MVH/grz-tools/issues/300)) ([00505a4](https://github.com/BfArM-MVH/grz-tools/commit/00505a486dad0062e7149135d63818a948c0e927))
+
 ## [2.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.1.0...grz-pydantic-models-v2.1.1) (2025-07-18)
 
 
