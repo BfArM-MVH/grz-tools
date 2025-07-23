@@ -30,13 +30,14 @@ def test_validate_submission(
         grz_check_flag,
     ]
 
+    have_grz_check = shutil.which("grz-check") is not None
     runner = CliRunner()
     cli = grz_cli.cli.build_cli()
     with caplog.at_level(logging.INFO):
         result = runner.invoke(cli, testargs, catch_exceptions=False)
         assert result.exit_code == 0, result.output
 
-        if grz_check_flag == "--no-grz-check":
+        if grz_check_flag == "--no-grz-check" or not have_grz_check:
             assert "Starting checksum validation (fallback)..." in caplog.text
         else:
             assert "Starting file validation with `grz-check`..." in caplog.text
@@ -46,7 +47,7 @@ def test_validate_submission(
     with caplog.at_level(logging.INFO):
         result = runner.invoke(cli, testargs, catch_exceptions=False)
 
-        if grz_check_flag == "--no-grz-check":
+        if grz_check_flag == "--no-grz-check" or not have_grz_check:
             assert "Starting checksum validation (fallback)..." in caplog.text
         else:
             assert "Starting file validation with `grz-check`..." in caplog.text
