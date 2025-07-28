@@ -52,9 +52,9 @@ def upgrade() -> None:
             ),
         ),
     )
-    op.add_column("submissions", sa.Column("pruefbericht_qc_pass", sa.Boolean()))
+    op.add_column("submissions", sa.Column("basic_qc_passed", sa.Boolean()))
     op.add_column("submissions", sa.Column("consented", sa.Boolean()))
-    op.add_column("submissions", sa.Column("internal_qc_pass", sa.Boolean()))
+    op.add_column("submissions", sa.Column("detailed_qc_passed", sa.Boolean()))
 
 
 def downgrade() -> None:

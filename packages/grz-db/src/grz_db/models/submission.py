@@ -70,11 +70,11 @@ class SubmissionBase(SQLModel):
     data_node_id: GenomicDataCenterId | None = None
     disease_type: DiseaseType | None = None
     library_type: LibraryType | None = None
-    pruefbericht_qc_pass: bool | None = None
+    basic_qc_passed: bool | None = None
 
     # fields also for Tätigkeitsbericht
     consented: bool | None = None
-    internal_qc_pass: bool | None = None
+    detailed_qc_passed: bool | None = None
 
 
 class Submission(SubmissionBase, table=True):
