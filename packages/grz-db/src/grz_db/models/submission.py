@@ -10,6 +10,7 @@ from alembic.script import ScriptDirectory as AlembicScriptDirectory
 from grz_pydantic_models.submission.metadata import (
     DiseaseType,
     GenomicDataCenterId,
+    GrzSubmissionMetadata,
     LibraryType,
     SubmissionType,
     SubmitterId,
@@ -342,6 +343,9 @@ class SubmissionDb:
             except Exception:
                 session.rollback()
                 raise
+
+    def populate_submission(self, submission_id: str, metadata: GrzSubmissionMetadata) -> Submission:
+        raise NotImplementedError
 
     def update_submission_state(
         self,

@@ -6,11 +6,13 @@ import logging
 import sys
 import traceback
 from collections import namedtuple
+from datetime import date
 from typing import Any
 
 import click
 import rich.console
 import rich.table
+import rich.text
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from grz_common.cli import config_file, output_json
 from grz_db.errors import (
@@ -29,8 +31,10 @@ from grz_db.models.submission import (
     SubmissionStateEnum,
     SubmissionStateLog,
 )
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, LibraryType, Relation
 
 from ..models.config import DbConfig
+from .pruefbericht import get_pruefbericht_library_type
 
 console = rich.console.Console()
 log = logging.getLogger(__name__)
@@ -393,7 +397,7 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
 
     except SubmissionNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
-        console.print(f"You might need to add it first: grz-cli db add-submission {submission_id}")
+        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -417,15 +421,103 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
             raise SubmissionNotFoundError(submission_id)
         _ = db_service.modify_submission(submission_id, key, value)
         console.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
-
     except SubmissionNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
-        console.print(f"You might need to add it first: grz-cli db add-submission {submission_id}")
+        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
+def _diff_metadata(
+    submission: Submission, metadata: GrzSubmissionMetadata, ignore_fields: set[str]
+) -> list[tuple[str, Any, Any]]:
+    changes = []
+
+    simple_fields = {"tan_g", "submission_date", "submission_type", "submitter_id", "disease_type"}
+
+    for field in simple_fields - ignore_fields:
+        submission_attr = getattr(submission, field)
+        metadata_attr = getattr(metadata.submission, field)
+        if submission_attr != metadata_attr:
+            changes.append((field, submission_attr, metadata_attr))
+
+    # populate pseudonym
+    # TODO: change after phase 0
+    if "pseudonym" not in ignore_fields and (submission.pseudonym != metadata.submission.local_case_id):
+        changes.append(("pseudonym", submission.pseudonym, metadata.submission.local_case_id))
+
+    if "data_node_id" not in ignore_fields and (submission.data_node_id != metadata.submission.genomic_data_center_id):
+        changes.append(("data_node_id", submission.data_node_id, metadata.submission.genomic_data_center_id))
+
+    # populate library type
+    metadata_library_type = LibraryType(get_pruefbericht_library_type(metadata))
+    if "library_type" not in ignore_fields and (submission.library_type != metadata_library_type):
+        changes.append(("library_type", submission.library_type, metadata_library_type))
+
+    # populate consented
+    donor_index = next(filter(lambda d: d.relation == Relation.index_, metadata.donors))
+    consented = donor_index.consents_to_research(date=date.today())
+    if submission.consented != consented:
+        changes.append(("consented", submission.consented, consented))
+
+    return changes
+
+
+@submission.command()
+@click.argument("submission_id", type=str)
+@click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
+@click.option(
+    "--accept-changes/--confirm-changes", help="Ask to confirm changes before committing to database. (Default: yes)"
+)
+@click.option(
+    "--ignore-field",
+    help="Do not populate the given key from the metadata to the database. Can be specified multiple times to ignore multiple keys.",
+    multiple=True,
+)
+@click.pass_context
+def populate(ctx: click.Context, submission_id: str, metadata_path: str, accept_changes: bool, ignore_field: list[str]):
+    """Populate the submission database from a metadata JSON file."""
+    log.debug(f"Ignored fields for populate: {ignore_field}")
+
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    try:
+        submission = db_service.get_submission(submission_id)
+        if not submission:
+            raise SubmissionNotFoundError(submission_id)
+    except SubmissionNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        raise click.Abort() from e
+    except Exception as e:
+        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        traceback.print_exc()
+        raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+    with open(metadata_path) as metadata_file:
+        metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
+
+    changes = _diff_metadata(submission, metadata, set(ignore_field))
+    if not changes:
+        console.print("[green]Database is already up to date with the provided metadata![/green]")
+        ctx.exit()
+
+    console.print("Changes to be made:")
+    for key, before, after in changes:
+        console.print(f"{key}: {before} -> {after}")
+
+    if accept_changes or click.confirm(
+        "Are you sure you want to commit these changes to the database?",
+        default=False,
+        show_default=True,
+    ):
+        for key, _before, after in changes:
+            _ = db_service.modify_submission(submission_id, key=key, value=after)
+        console.print("[green]Database populated successfully.[/green]")
 
 
 @submission.command()
@@ -460,7 +552,7 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
 
     except SubmissionNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
-        console.print(f"You might need to add it first: grz-cli db add-submission {submission_id}")
+        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -483,8 +575,25 @@ def show(ctx: click.Context, submission_id: str):
         raise click.Abort()
 
     console.print(f"\n[bold blue]Submission Details for ID: {submission.id}[/bold blue]")
-    console.print(f"  tanG: {submission.tan_g if submission.tan_g is not None else 'N/A'}")
-    console.print(f"  Pseudonym: {submission.pseudonym if submission.pseudonym is not None else 'N/A'}")
+    for label, attr_name in (
+        ("tanG", "tan_g"),
+        ("Pseudonym", "pseudonym"),
+        ("Submission Date", "submission_date"),
+        ("Submission Type", "submission_type"),
+        ("Submitter ID", "submitter_id"),
+        ("Data Node ID", "data_node_id"),
+        ("Disease Type", "disease_type"),
+        ("Library Type", "library_type"),
+        ("Basic QC Passed", "basic_qc_passed"),
+        ("Consented", "consented"),
+        ("Detailed QC Passed", "detailed_qc_passed"),
+    ):
+        attr = getattr(submission, attr_name)
+        console.print(
+            rich.text.Text.assemble(
+                f"  {label}: ", str(attr) if attr is not None else rich.text.Text("missing", style="italic yellow")
+            )
+        )
 
     if submission.states:
         table = rich.table.Table(title=f"State History for Submission {submission.id}")

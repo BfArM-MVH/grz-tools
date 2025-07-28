@@ -62,7 +62,7 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
         response.raise_for_status()
 
 
-def _get_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryType:
+def get_pruefbericht_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryType:
     # pydantic model ensures one and only one index patient
     index_patient = next(donor for donor in metadata.donors if donor.relation == Relation.index_)
 
@@ -122,7 +122,7 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
             dataNodeId=metadata.submission.genomic_data_center_id,
             diseaseType=metadata.submission.disease_type,
             dataCategory="genomic",
-            libraryType=_get_library_type(metadata),
+            libraryType=get_pruefbericht_library_type(metadata),
             coverageType=metadata.submission.coverage_type,
             dataQualityCheckPassed=not failed,
         )
