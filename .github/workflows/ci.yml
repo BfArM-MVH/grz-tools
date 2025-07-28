@@ -10,7 +10,7 @@ on:
 
 env:
   UV_VERSION: '0.7.21'
-  GRZ_CHECK_WORKSPACE: "packages/grz-check -> target"
+  GRZ_CHECK_WORKSPACE: "packages/grz-check"
 
 jobs:
   determine-changes:
@@ -167,12 +167,8 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
-          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+          cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
+          cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
       - name: Check formatting for all Rust packages
         run: |
@@ -195,12 +191,8 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-
-      - name: Cache Rust dependencies and build output
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
-          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+          cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
+          cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
       - name: Build grz-check debug binary
         run: cargo build --manifest-path packages/grz-check/Cargo.toml
@@ -228,12 +220,8 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
-          shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
+          cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
+          cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
       - name: Extract package name from path
         id: pkg_info
