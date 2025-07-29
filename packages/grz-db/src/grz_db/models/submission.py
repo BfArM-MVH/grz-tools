@@ -31,6 +31,10 @@ from .author import Author
 from .base import BaseSignablePayload, VerifiableLog
 
 
+class OutdatedDatabaseSchemaError(Exception):
+    pass
+
+
 class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Submission state enum."""
 
@@ -231,7 +235,9 @@ class SubmissionDb:
     def _get_session(self) -> Generator[Session, Any, None]:
         """Get an sqlmodel session."""
         if not self._at_latest_schema():
-            raise RuntimeError("Database not at latest schema. Please migrate before running any commands.")
+            raise OutdatedDatabaseSchemaError(
+                "Database not at latest schema. Please migrate before running any commands."
+            )
         with Session(self.engine) as session:
             yield session
 
