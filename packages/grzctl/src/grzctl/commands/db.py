@@ -439,25 +439,35 @@ def _diff_metadata(
     simple_fields = {"tan_g", "submission_date", "submission_type", "submitter_id", "disease_type"}
 
     for field in simple_fields - ignore_fields:
+        if field == "tan_g" and metadata.submission.tan_g == ["0"] * 64:
+            raise ValueError(
+                "Refusing to populate a seemingly-redacted TAN (all zeros). "
+                "Add 'tan_g' to --ignore-field or use 'grzctl db submission modify' directly."
+            )
         submission_attr = getattr(submission, field)
         metadata_attr = getattr(metadata.submission, field)
         if submission_attr != metadata_attr:
             changes.append((field, submission_attr, metadata_attr))
 
-    # populate pseudonym
-    # TODO: change after phase 0
+    # pseudonym (TODO: change after phase 0)
     if "pseudonym" not in ignore_fields and (submission.pseudonym != metadata.submission.local_case_id):
+        if not metadata.submission.local_case_id:
+            raise ValueError(
+                "Refusing to populate a seemingly-redacted local case ID (empty). "
+                "Add 'pseudonym' to --ignore-field or use 'grzctl db submission modify' directly."
+            )
         changes.append(("pseudonym", submission.pseudonym, metadata.submission.local_case_id))
 
+    # data node id
     if "data_node_id" not in ignore_fields and (submission.data_node_id != metadata.submission.genomic_data_center_id):
         changes.append(("data_node_id", submission.data_node_id, metadata.submission.genomic_data_center_id))
 
-    # populate library type
+    # library type
     metadata_library_type = LibraryType(get_pruefbericht_library_type(metadata))
     if "library_type" not in ignore_fields and (submission.library_type != metadata_library_type):
         changes.append(("library_type", submission.library_type, metadata_library_type))
 
-    # populate consented
+    # consent state
     donor_index = next(filter(lambda d: d.relation == Relation.index_, metadata.donors))
     consented = donor_index.consents_to_research(date=date.today())
     if submission.consented != consented:
@@ -470,7 +480,8 @@ def _diff_metadata(
 @click.argument("submission_id", type=str)
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
 @click.option(
-    "--accept-changes/--confirm-changes", help="Ask to confirm changes before committing to database. (Default: yes)"
+    "--accept-changes/--confirm-changes",
+    help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
 @click.option(
     "--ignore-field",
