@@ -10,6 +10,8 @@ import cryptography.hazmat.primitives.serialization as cryptser
 import grzctl.cli
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from grz_db.models.submission import OutdatedDatabaseSchemaError
+from grzctl.models.config import DbConfig
 
 _INITIAL_SCHEMA = """\
 CREATE TABLE submissions (
@@ -97,7 +99,29 @@ def blank_initial_database_config_path(tmp_path):
 
 def test_all_migrations(blank_initial_database_config_path):
     """Database migrations should work all the way from the oldest supported to the latest version."""
+    # add some test data
+    config = DbConfig.from_path(blank_initial_database_config_path)
+    tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
+    pseudonym = "CASE12345"
+    submission_id = "123456789_2024-11-08_d0f805c5"
+    with sqlite3.connect(config.db.database_url[len("sqlite:///") :]) as connection:
+        connection.execute(
+            "INSERT INTO submissions(tan_g, pseudonym, id) VALUES(:tan_g, :pseudonym, :id)",
+            {"tan_g": tan_g, "pseudonym": pseudonym, "id": submission_id},
+        )
+
+    # ensure db command raises appropriate error before migration
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    result = runner.invoke(cli, ["db", "--config-file", blank_initial_database_config_path, "upgrade"])
-    assert result.exit_code == 0, result.stderr
+    args_common = ["db", "--config-file", blank_initial_database_config_path]
+    with pytest.raises(OutdatedDatabaseSchemaError):
+        _ = runner.invoke(cli, [*args_common, "list"], catch_exceptions=False)
+
+    # run the migration
+    result_upgrade = runner.invoke(cli, [*args_common, "upgrade"])
+    assert result_upgrade.exit_code == 0, result_upgrade.stderr
+
+    # check the test data
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+    assert f"tanG: {tan_g}" in result_show.stdout
