@@ -10,7 +10,6 @@ from alembic.script import ScriptDirectory as AlembicScriptDirectory
 from grz_pydantic_models.submission.metadata import (
     DiseaseType,
     GenomicDataCenterId,
-    GrzSubmissionMetadata,
     LibraryType,
     SubmissionType,
     SubmitterId,
