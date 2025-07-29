@@ -350,9 +350,6 @@ class SubmissionDb:
                 session.rollback()
                 raise
 
-    def populate_submission(self, submission_id: str, metadata: GrzSubmissionMetadata) -> Submission:
-        raise NotImplementedError
-
     def update_submission_state(
         self,
         submission_id: str,
