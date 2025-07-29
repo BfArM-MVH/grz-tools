@@ -37,6 +37,7 @@ from ..models.config import DbConfig
 from .pruefbericht import get_pruefbericht_library_type
 
 console = rich.console.Console()
+console_err = rich.console.Console(stderr=True)
 log = logging.getLogger(__name__)
 
 
@@ -97,7 +98,7 @@ def init(ctx: click.Context):
     """Initializes the database schema using Alembic."""
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
-    console.print(f"[cyan]Initializing database {db}[/cyan]")
+    console_err.print(f"[cyan]Initializing database {db}[/cyan]")
     submission_db.initialize_schema()
 
 
@@ -115,19 +116,19 @@ def upgrade(
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
 
     try:
-        console.print(f"[cyan]Attempting to upgrade database to revision: {revision}...[/cyan]")
+        console_err.print(f"[cyan]Attempting to upgrade database to revision: {revision}...[/cyan]")
         _ = submission_db.upgrade_schema(revision=revision)
 
     except (DatabaseConfigurationError, RuntimeError) as e:
-        console.print(f"[red]Error during schema initialization: {e}[/red]")
+        console_err.print(f"[red]Error during schema initialization: {e}[/red]")
         if isinstance(e, RuntimeError):
-            console.print("[yellow]Ensure your database is running and accessible.[/yellow]")
-            console.print(
+            console_err.print("[yellow]Ensure your database is running and accessible.[/yellow]")
+            console_err.print(
                 "[yellow]You might need to create an initial migration if this is the first time: 'alembic revision -m \"initial\" --autogenerate'[/yellow]"
             )
         raise click.ClickException(str(e)) from e
     except Exception as e:
-        console.print(f"[red]An unexpected error occurred during 'db init': {type(e).__name__} - {e}[/red]")
+        console_err.print(f"[red]An unexpected error occurred during 'db init': {type(e).__name__} - {e}[/red]")
         raise click.ClickException(str(e)) from e
 
 
@@ -145,7 +146,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         raise click.ClickException(str(e)) from e
 
     if not submissions:
-        console.print("[yellow]No submissions found in the database.[/yellow]")
+        console_err.print("[yellow]No submissions found in the database.[/yellow]")
         return
 
     table = rich.table.Table(title="All Submissions")
@@ -212,7 +213,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
     submissions = db_service.list_change_requests()
 
     if not submissions:
-        console.print("[yellow]No submissions found in the database.[/yellow]")
+        console_err.print("[yellow]No submissions found in the database.[/yellow]")
         return
 
     table = rich.table.Table(title="Submissions with change requests")
@@ -356,12 +357,12 @@ def add(ctx: click.Context, submission_id: str):
     db_service = get_submission_db_instance(db)
     try:
         db_submission = db_service.add_submission(submission_id)
-        console.print(f"[green]Submission '{db_submission.id}' added successfully.[/green]")
+        console_err.print(f"[green]Submission '{db_submission.id}' added successfully.[/green]")
     except (DuplicateSubmissionError, DuplicateTanGError) as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console_err.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
     except Exception as e:
-        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         raise click.ClickException(f"Failed to add submission: {e}") from e
 
 
@@ -377,7 +378,7 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
     try:
         state_enum = SubmissionStateEnum(state_str)
     except ValueError as e:
-        console.print(f"[red]Error: Invalid state value '{state_str}'.[/red]")
+        console_err.print(f"[red]Error: Invalid state value '{state_str}'.[/red]")
         raise click.Abort() from e
 
     parsed_data = None
@@ -385,22 +386,22 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
         try:
             parsed_data = json.loads(data_json)
         except json.JSONDecodeError as e:
-            console.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
+            console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
             raise click.Abort() from e
     try:
         new_state_log = db_service.update_submission_state(submission_id, state_enum, parsed_data)
-        console.print(
+        console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
         )
         if new_state_log.data:
-            console.print(f"  Data: {new_state_log.data}")
+            console_err.print(f"  Data: {new_state_log.data}")
 
     except SubmissionNotFoundError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"[red]Error: {e}[/red]")
+        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
-        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
@@ -420,13 +421,13 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         if not submission:
             raise SubmissionNotFoundError(submission_id)
         _ = db_service.modify_submission(submission_id, key, value)
-        console.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
+        console_err.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
     except SubmissionNotFoundError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"[red]Error: {e}[/red]")
+        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
-        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
@@ -501,11 +502,11 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, accept_
         if not submission:
             raise SubmissionNotFoundError(submission_id)
     except SubmissionNotFoundError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"[red]Error: {e}[/red]")
+        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
-        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
@@ -514,12 +515,12 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, accept_
 
     changes = _diff_metadata(submission, metadata, set(ignore_field))
     if not changes:
-        console.print("[green]Database is already up to date with the provided metadata![/green]")
+        console_err.print("[green]Database is already up to date with the provided metadata![/green]")
         ctx.exit()
 
-    console.print("Changes to be made:")
+    console_err.print("Changes to be made:")
     for key, before, after in changes:
-        console.print(f"{key}: {before} -> {after}")
+        console_err.print(f"{key}: {before} -> {after}")
 
     if accept_changes or click.confirm(
         "Are you sure you want to commit these changes to the database?",
@@ -528,7 +529,7 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, accept_
     ):
         for key, _before, after in changes:
             _ = db_service.modify_submission(submission_id, key=key, value=after)
-        console.print("[green]Database populated successfully.[/green]")
+        console_err.print("[green]Database populated successfully.[/green]")
 
 
 @submission.command()
@@ -543,7 +544,7 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
     try:
         change_request_enum = ChangeRequestEnum(change_str)
     except ValueError as e:
-        console.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
+        console_err.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
         raise click.Abort() from e
 
     parsed_data = None
@@ -551,22 +552,22 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
         try:
             parsed_data = json.loads(data_json)
         except json.JSONDecodeError as e:
-            console.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
+            console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
             raise click.Abort() from e
     try:
         new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, parsed_data)
-        console.print(
+        console_err.print(
             f"[green]Submission '{submission_id}' has undergone a change request of '{new_change_request_log.change.value}'. Log ID: {new_change_request_log.id}[/green]"
         )
         if new_change_request_log.data:
-            console.print(f"  Data: {new_change_request_log.data}")
+            console_err.print(f"  Data: {new_change_request_log.data}")
 
     except SubmissionNotFoundError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        console.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"[red]Error: {e}[/red]")
+        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
-        console.print(f"[red]An unexpected error occurred: {e}[/red]")
+        console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
@@ -582,7 +583,7 @@ def show(ctx: click.Context, submission_id: str):
     db_service = get_submission_db_instance(db)
     submission = db_service.get_submission(submission_id)
     if not submission:
-        console.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
+        console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
 
     console.print(f"\n[bold blue]Submission Details for ID: {submission.id}[/bold blue]")
@@ -636,4 +637,4 @@ def show(ctx: click.Context, submission_id: str):
             )
         console.print(table)
     else:
-        console.print("[yellow]No state history found for this submission.[/yellow]")
+        console_err.print("[yellow]No state history found for this submission.[/yellow]")
