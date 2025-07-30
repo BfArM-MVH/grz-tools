@@ -1063,6 +1063,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
             raise ValueError("Multiple index donors found! Exactly one index donor required.")
         return value
 
+    @property
+    def index_donor(self) -> Donor:
+        """The index patient of the submission."""
+        # note: this is valid because the above field_validator ensures only one index patient
+        return next(donor for donor in self.donors if donor.relation == Relation.index_)
+
     @field_validator("donors", mode="after")
     @classmethod
     def ensure_unique_donor_pseudonyms(cls, value: list[Donor]) -> list[Donor]:

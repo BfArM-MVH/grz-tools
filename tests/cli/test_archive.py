@@ -67,7 +67,6 @@ def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_
         assert not metadata.submission.local_case_id
 
         # ensure index patient donor pseudonym is redacted
-        index_patient = next(donor for donor in metadata.donors if donor.relation == Relation.index_)
-        assert index_patient.donor_pseudonym == "index"
+        assert metadata.index_donor.donor_pseudonym == "index"
 
     assert result.exit_code == 0, result.output
