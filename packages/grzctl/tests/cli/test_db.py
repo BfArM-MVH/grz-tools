@@ -14,6 +14,7 @@ import grzctl.cli
 import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from grz_common.constants import REDACTED_TAN
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
 
@@ -153,7 +154,7 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
     assert result_add.exit_code == 0, result_add.stderr
 
     # redact the tanG
-    metadata.submission.tan_g = "0" * 64
+    metadata.submission.tan_g = REDACTED_TAN
     metadata_path = tmp_path / "metadata.json"
     with open(metadata_path, "w") as metadata_file:
         json.dump(metadata.model_dump(mode="json"), metadata_file)

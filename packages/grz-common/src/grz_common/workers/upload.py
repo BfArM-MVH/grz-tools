@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, override
 
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
+from grz_common.constants import REDACTED_TAN
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
@@ -266,7 +267,7 @@ class S3BotoUploadWorker(UploadWorker):
         with open(metadata_file_path, mode="r+") as metadata_file:
             metadata = json.load(metadata_file)
             # redact tanG as all zeros
-            metadata["submission"]["tanG"] = "".join(["0"] * 64)
+            metadata["submission"]["tanG"] = REDACTED_TAN
 
             # redact local case ID
             metadata["submission"]["localCaseId"] = ""

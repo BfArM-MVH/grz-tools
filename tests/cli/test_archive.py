@@ -8,6 +8,7 @@ import shutil
 
 import click.testing
 import grzctl
+from grz_common.constants import REDACTED_TAN
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, Relation
 
 from .. import mock_files
@@ -60,7 +61,7 @@ def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_
         metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
 
         # ensure tanG is redacted
-        assert metadata.submission.tan_g == "".join(["0"] * 64)
+        assert metadata.submission.tan_g == REDACTED_TAN
 
         # ensure local case ID is redacted
         assert not metadata.submission.local_case_id

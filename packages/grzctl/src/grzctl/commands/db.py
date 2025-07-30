@@ -15,6 +15,7 @@ import rich.table
 import rich.text
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from grz_common.cli import config_file, output_json
+from grz_common.constants import REDACTED_TAN
 from grz_db.errors import (
     DatabaseConfigurationError,
     DuplicateSubmissionError,
@@ -446,7 +447,7 @@ def _diff_metadata(
     simple_fields = {"tan_g", "submission_date", "submission_type", "submitter_id", "disease_type"}
 
     for field in simple_fields - ignore_fields:
-        if field == "tan_g" and metadata.submission.tan_g == ["0"] * 64:
+        if field == "tan_g" and metadata.submission.tan_g == REDACTED_TAN:
             raise ValueError(
                 "Refusing to populate a seemingly-redacted TAN (all zeros). "
                 "Add 'tan_g' to --ignore-field or use 'grzctl db submission modify' directly."
