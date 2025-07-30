@@ -128,7 +128,7 @@ def upgrade(
             )
         raise click.ClickException(str(e)) from e
     except Exception as e:
-        console_err.print(f"[red]An unexpected error occurred during 'db init': {type(e).__name__} - {e}[/red]")
+        console_err.print(f"[red]An unexpected error occurred during 'db upgrade': {type(e).__name__} - {e}[/red]")
         raise click.ClickException(str(e)) from e
 
 
@@ -435,6 +435,7 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
 def _diff_metadata(
     submission: Submission, metadata: GrzSubmissionMetadata, ignore_fields: set[str]
 ) -> list[tuple[str, Any, Any]]:
+    """Given a database submission and a metadata.json file, report changed fields and their before/after values if they are not in ignore_fields."""
     changes = []
 
     simple_fields = {"tan_g", "submission_date", "submission_type", "submitter_id", "disease_type"}
@@ -481,7 +482,8 @@ def _diff_metadata(
 @click.argument("submission_id", type=str)
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
 @click.option(
-    "--accept-changes/--confirm-changes",
+    "--confirm/--no-confirm",
+    default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
 @click.option(
@@ -490,7 +492,7 @@ def _diff_metadata(
     multiple=True,
 )
 @click.pass_context
-def populate(ctx: click.Context, submission_id: str, metadata_path: str, accept_changes: bool, ignore_field: list[str]):
+def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm: bool, ignore_field: list[str]):
     """Populate the submission database from a metadata JSON file."""
     log.debug(f"Ignored fields for populate: {ignore_field}")
 
@@ -522,7 +524,7 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, accept_
     for key, before, after in changes:
         console_err.print(f"{key}: {before} -> {after}")
 
-    if accept_changes or click.confirm(
+    if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?",
         default=False,
         show_default=True,

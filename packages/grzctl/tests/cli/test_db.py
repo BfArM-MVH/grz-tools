@@ -14,7 +14,6 @@ import grzctl.cli
 import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from grz_db.models.submission import OutdatedDatabaseSchemaError
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
 
@@ -82,8 +81,9 @@ def test_all_migrations(blank_initial_database_config_path):
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     args_common = ["db", "--config-file", blank_initial_database_config_path]
-    with pytest.raises(OutdatedDatabaseSchemaError):
-        _ = runner.invoke(cli, [*args_common, "list"], catch_exceptions=False)
+    result_premature_list = runner.invoke(cli, [*args_common, "list"])
+    assert result_premature_list.exit_code != 0
+    assert "Database not at latest schema" in result_premature_list.stderr
 
     # run the migration
     result_upgrade = runner.invoke(cli, [*args_common, "upgrade"])
@@ -131,7 +131,7 @@ def test_populate(blank_database_config_path: Path):
 
     with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
         result_populate = runner.invoke(
-            cli, [*args_common, "submission", "populate", submission_id, str(metadata_path), "--accept-changes"]
+            cli, [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"]
         )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -161,6 +161,6 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
     with pytest.raises(ValueError):
         _ = runner.invoke(
             cli,
-            [*args_common, "submission", "populate", submission_id, str(metadata_path), "--accept-changes"],
+            [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],
             catch_exceptions=False,
         )

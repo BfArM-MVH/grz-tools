@@ -63,6 +63,10 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
 
 
 def get_pruefbericht_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryType:
+    """
+    Determine the singular representative library type of a submission to submit with the Prüfbericht.
+    This should be library type of the index patient with the highest reimbursement value.
+    """
     # pydantic model ensures one and only one index patient
     index_patient = next(donor for donor in metadata.donors if donor.relation == Relation.index_)
 

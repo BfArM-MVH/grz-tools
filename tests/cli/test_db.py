@@ -29,7 +29,7 @@ def test_db(
     assert result.exit_code == 0, result.output
 
     # then update the submission's tanG and/or pseudonym
-    modify_args = [*args_prefix, "submission", "modify", "S01", "tanG", "foo"]
+    modify_args = [*args_prefix, "submission", "modify", "S01", "tan_g", "foo"]
     result = execute(modify_args)
     assert result.exit_code == 0, result.output
     modify_args = [*args_prefix, "submission", "modify", "S01", "pseudonym", "bar"]

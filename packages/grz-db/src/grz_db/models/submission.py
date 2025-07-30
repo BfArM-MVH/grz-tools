@@ -313,12 +313,6 @@ class SubmissionDb:
                 raise
 
     def modify_submission(self, submission_id: str, key: str, value: str) -> Submission:
-        key = key.casefold()
-        if key in {"tan-g", "tan_g", "tang"}:
-            key = "tan_g"
-        elif key in {"pseudonym", "donor-pseudonym", "donor_pseudonym"}:
-            key = "pseudonym"
-
         modifiable_fields = SubmissionBase.model_fields.keys() - {"id"}
         if key not in SubmissionBase.model_fields:
             raise ValueError(f"Unknown column key '{key}'. Known column keys: '{','.join(modifiable_fields)}'")
