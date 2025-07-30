@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import subprocess
@@ -755,20 +754,9 @@ class EncryptedSubmission:
 
         return retval
 
-    _submission_id: str | None = None
-
     @property
     def submission_id(self) -> str:
-        """ID to refer to an individual submission to a GRZ"""
-        if self._submission_id is None:
-            # generate a submission ID once
-            submitter_id = self.metadata.content.submission.submitter_id
-            submission_date = self.metadata.content.submission.submission_date
-            # use first 8 characters of SHA256 hash of transaction ID to virtually prevent collisions
-            suffix = hashlib.sha256(self.metadata.transaction_id.encode("utf-8")).hexdigest()[:8]
-            self._submission_id = f"{submitter_id}_{submission_date}_{suffix}"
-
-        return self._submission_id
+        return self.metadata.content.submission_id
 
     def get_metadata_file_path_and_object_id(self) -> tuple[Path, str]:
         """

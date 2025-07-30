@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 from datetime import date
 from enum import StrEnum
+from functools import cached_property
 from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
@@ -1035,6 +1037,21 @@ class GrzSubmissionMetadata(StrictBaseModel):
     """
     List of donors including the index patient.
     """
+
+    @cached_property
+    def submission_id(self) -> str:
+        """
+        A deterministic metadata-derived submission identifier for long-term use within GRZs.
+
+        Uses the first 8 characters of the SHA256 hash of the tanG to virtually prevent collisions.
+        """
+        return "_".join(
+            (
+                self.submission.submitter_id,
+                self.submission.submission_date.isoformat(),
+                hashlib.sha256(self.submission.tan_g.encode("utf-8")).hexdigest()[:8],
+            )
+        )
 
     @field_validator("donors", mode="after")
     @classmethod

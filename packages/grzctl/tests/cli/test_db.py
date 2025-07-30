@@ -2,7 +2,6 @@
 Tests for grzctl db subcommand
 """
 
-import hashlib
 import importlib.resources
 import json
 import sqlite3
@@ -109,34 +108,24 @@ def blank_database_config_path(tmp_path: Path, blank_database_config: DbConfig) 
     return config_path
 
 
-def _generate_submission_id(metadata: GrzSubmissionMetadata) -> str:
-    # generate a submission ID once
-    submitter_id = metadata.submission.submitter_id
-    submission_date = metadata.submission.submission_date
-    # use first 8 characters of SHA256 hash of transaction ID to virtually prevent collisions
-    suffix = hashlib.sha256(metadata.submission.tan_g.encode("utf-8")).hexdigest()[:8]
-    return f"{submitter_id}_{submission_date}_{suffix}"
-
-
 def test_populate(blank_database_config_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(
         (importlib.resources.files(test_resources) / "metadata.json").read_text()
     )
-    submission_id = _generate_submission_id(metadata)
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
 
     with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
         result_populate = runner.invoke(
-            cli, [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"]
+            cli, [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"]
         )
     assert result_populate.exit_code == 0, result_populate.stderr
 
-    result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
     assert result_show.exit_code == 0, result_show.stderr
     assert f"tanG: {metadata.submission.tan_g}" in result_show.stdout
 
@@ -146,11 +135,10 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
     metadata = GrzSubmissionMetadata.model_validate_json(
         (importlib.resources.files(test_resources) / "metadata.json").read_text()
     )
-    submission_id = _generate_submission_id(metadata)
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
 
     # redact the tanG
@@ -162,6 +150,6 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
     with pytest.raises(ValueError):
         _ = runner.invoke(
             cli,
-            [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],
+            [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"],
             catch_exceptions=False,
         )
