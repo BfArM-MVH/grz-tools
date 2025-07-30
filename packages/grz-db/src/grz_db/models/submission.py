@@ -1,7 +1,7 @@
 import datetime
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, ClassVar
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
@@ -62,6 +62,7 @@ class SubmissionBase(SQLModel):
     """Submission base model."""
 
     model_config = ConfigDict(validate_assignment=True)  # type: ignore
+    immutable_fields: ClassVar[set[str]] = {"id"}
 
     id: str
     tan_g: str | None = Field(default=None, unique=True, index=True, alias="tanG")
@@ -313,10 +314,9 @@ class SubmissionDb:
                 raise
 
     def modify_submission(self, submission_id: str, key: str, value: str) -> Submission:
-        modifiable_fields = SubmissionBase.model_fields.keys() - {"id"}
         if key not in SubmissionBase.model_fields:
-            raise ValueError(f"Unknown column key '{key}'. Known column keys: '{','.join(modifiable_fields)}'")
-        elif key not in modifiable_fields:
+            raise ValueError(f"Unknown column key '{key}'")
+        elif key in SubmissionBase.immutable_fields:
             raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
 
         with self._get_session() as session:

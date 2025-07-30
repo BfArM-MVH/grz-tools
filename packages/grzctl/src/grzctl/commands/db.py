@@ -406,13 +406,18 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-@submission.command()
+@submission.command(
+    epilog="Currently available KEYs are: "
+    + ", ".join(sorted(Submission.model_fields.keys() - Submission.immutable_fields))
+)
 @click.argument("submission_id", type=str)
-@click.argument("key", metavar="KEY", type=str)
+@click.argument("key", metavar="KEY", type=click.Choice(Submission.model_fields.keys()))
 @click.argument("value", metavar="VALUE", type=str)
 @click.pass_context
 def modify(ctx: click.Context, submission_id: str, key: str, value: str):
-    """Modify a submission's database properties."""
+    """
+    Modify a submission's database properties.
+    """
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
 
