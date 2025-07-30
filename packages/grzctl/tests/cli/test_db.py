@@ -20,46 +20,6 @@ from grzctl.models.config import DbConfig
 
 from .. import resources as test_resources
 
-_INITIAL_SCHEMA = """\
-CREATE TABLE submissions (
- tan_g VARCHAR,
- pseudonym VARCHAR,
- id VARCHAR NOT NULL,
- PRIMARY KEY (id)
-);
-CREATE UNIQUE INDEX ix_submissions_tan_g ON submissions (tan_g);
-CREATE INDEX ix_submissions_id ON submissions (id);
-CREATE INDEX ix_submissions_pseudonym ON submissions (pseudonym);
-CREATE TABLE submission_states (
- state VARCHAR(11) NOT NULL,
- data JSON,
- timestamp DATETIME NOT NULL,
- id INTEGER NOT NULL,
- submission_id VARCHAR NOT NULL,
- author_name VARCHAR NOT NULL,
- signature VARCHAR NOT NULL,
- PRIMARY KEY (id),
- FOREIGN KEY(submission_id) REFERENCES submissions (id)
-);
-CREATE INDEX ix_submission_states_author_name ON submission_states (author_name);
-CREATE INDEX ix_submission_states_submission_id ON submission_states (submission_id);
-CREATE INDEX ix_submission_states_id ON submission_states (id);
-CREATE TABLE submission_change_requests (
- change VARCHAR(8) NOT NULL,
- data JSON,
- timestamp DATETIME NOT NULL,
- id INTEGER NOT NULL,
- submission_id VARCHAR NOT NULL,
- author_name VARCHAR NOT NULL,
- signature VARCHAR NOT NULL,
- PRIMARY KEY (id),
- FOREIGN KEY(submission_id) REFERENCES submissions (id)
-);
-CREATE INDEX ix_submission_change_requests_author_name ON submission_change_requests (author_name);
-CREATE INDEX ix_submission_change_requests_id ON submission_change_requests (id);
-CREATE INDEX ix_submission_change_requests_submission_id ON submission_change_requests (submission_id);
-"""
-
 
 @pytest.fixture
 def blank_database_config(tmp_path: Path) -> DbConfig:
@@ -94,13 +54,13 @@ def blank_database_config(tmp_path: Path) -> DbConfig:
 
 @pytest.fixture
 def blank_initial_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
-    conn = sqlite3.connect(blank_database_config.db.database_url[len("sqlite:///") :])
-    conn.executescript(_INITIAL_SCHEMA)
-    conn.close()
-
     config_path = tmp_path / "config.db.yaml"
     with open(config_path, "w") as config_file:
         config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _ = runner.invoke(cli, ["db", "--config-file", str(config_path), "upgrade", "--revision", "1a9bd994df1b"])
 
     return config_path
 

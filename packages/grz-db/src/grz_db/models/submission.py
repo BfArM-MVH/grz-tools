@@ -260,11 +260,7 @@ class SubmissionDb:
 
     def initialize_schema(self):
         """Initialize the database."""
-        SQLModel.metadata.create_all(self.engine, checkfirst=True)
-
-        # stamp database with latest Alembic version marker
-        alembic_cfg = self._get_alembic_config()
-        alembic_command.stamp(alembic_cfg, "head")
+        self.upgrade_schema()
 
     def upgrade_schema(self, revision: str = "head"):
         """

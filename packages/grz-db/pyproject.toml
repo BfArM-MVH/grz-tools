@@ -15,10 +15,14 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "alembic[tz]>=1.16.1",
-    "cryptography>=45.0.3",
-    "sqlmodel>=0.0.24",
+    "alembic[tz] >=1.16.1",
+    "cryptography >=45.0.3",
+    "sqlmodel >=0.0.24",
+    "grz-pydantic-models >=2,<3"
 ]
+
+[tool.uv.sources]
+grz-pydantic-models = { path = "../grz-pydantic-models", editable = true}
 
 [dependency-groups]
 dev = ["tox", "tox-uv"]

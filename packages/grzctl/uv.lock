@@ -479,6 +479,7 @@ source = { editable = "../grz-db" }
 dependencies = [
     { name = "alembic", extra = ["tz"] },
     { name = "cryptography" },
+    { name = "grz-pydantic-models" },
     { name = "sqlmodel" },
 ]
 
@@ -486,6 +487,7 @@ dependencies = [
 requires-dist = [
     { name = "alembic", extras = ["tz"], specifier = ">=1.16.1" },
     { name = "cryptography", specifier = ">=45.0.3" },
+    { name = "grz-pydantic-models", editable = "../grz-pydantic-models" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
 ]
 
