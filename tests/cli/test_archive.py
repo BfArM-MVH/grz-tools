@@ -9,7 +9,7 @@ import shutil
 import click.testing
 import grzctl
 from grz_common.constants import REDACTED_TAN
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, Relation
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 from .. import mock_files
 

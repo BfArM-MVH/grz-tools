@@ -12,10 +12,7 @@ from grz_common.cli import config_file, output_json, submission_dir
 from grz_common.workers.submission import Submission
 from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
 from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
-from grz_pydantic_models.submission.metadata.v1 import (
-    GrzSubmissionMetadata,
-    Relation,
-)
+from grz_pydantic_models.submission.metadata.v1 import GrzSubmissionMetadata
 from pydantic_core import to_jsonable_python
 
 from ..models.config import PruefberichtConfig
