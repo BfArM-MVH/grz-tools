@@ -71,7 +71,7 @@
                                 "percent": 88
                         },
                         "meanDepthOfCoverage": 40,
-                        "minCoverage": 30,
+                        "minCoverage": 20,
                         "targetedRegionsAboveMinCoverage": 0.9,
                         "nonCodingVariants": true,
                         "callerUsed": [
