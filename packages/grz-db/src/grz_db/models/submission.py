@@ -235,7 +235,7 @@ class SubmissionDb:
         """Get an sqlmodel session."""
         if not self._at_latest_schema():
             raise OutdatedDatabaseSchemaError(
-                "Database not at latest schema. Please migrate before running any commands."
+                "Database not at latest schema. Please backup the database and then attempt a migration with `grzctl db upgrade`."
             )
         with Session(self.engine) as session:
             yield session

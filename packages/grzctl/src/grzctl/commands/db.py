@@ -142,7 +142,7 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
 
     try:
         submissions = db_service.list_submissions()
-    except RuntimeError as e:
+    except Exception as e:
         raise click.ClickException(str(e)) from e
 
     if not submissions:
