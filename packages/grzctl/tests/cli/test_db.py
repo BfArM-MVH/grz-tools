@@ -3,7 +3,6 @@ Tests for grzctl db subcommand
 """
 
 import importlib.resources
-import json
 import sqlite3
 from pathlib import Path
 
@@ -136,20 +135,23 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
         (importlib.resources.files(test_resources) / "metadata.json").read_text()
     )
 
+    # compute submission ID _before_ tanG is redacted (changing the property return value)
+    submission_id = metadata.submission_id
+
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
     assert result_add.exit_code == 0, result_add.stderr
 
     # redact the tanG
     metadata.submission.tan_g = REDACTED_TAN
     metadata_path = tmp_path / "metadata.json"
     with open(metadata_path, "w") as metadata_file:
-        json.dump(metadata.model_dump(mode="json"), metadata_file)
+        metadata_file.write(metadata.model_dump_json(by_alias=True))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Refusing to populate a seemingly-redacted TAN"):
         _ = runner.invoke(
             cli,
-            [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"],
+            [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],
             catch_exceptions=False,
         )
