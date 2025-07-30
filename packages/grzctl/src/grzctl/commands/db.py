@@ -32,7 +32,7 @@ from grz_db.models.submission import (
     SubmissionStateEnum,
     SubmissionStateLog,
 )
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, LibraryType, Relation
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, LibraryType
 
 from ..models.config import DbConfig
 from .pruefbericht import get_pruefbericht_library_type
@@ -476,8 +476,7 @@ def _diff_metadata(
         changes.append(("library_type", submission.library_type, metadata_library_type))
 
     # consent state
-    donor_index = next(filter(lambda d: d.relation == Relation.index_, metadata.donors))
-    consented = donor_index.consents_to_research(date=date.today())
+    consented = metadata.consents_to_research(date=date.today())
     if submission.consented != consented:
         changes.append(("consented", submission.consented, consented))
 

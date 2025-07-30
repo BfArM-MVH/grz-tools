@@ -6,7 +6,6 @@ import logging
 import re
 from datetime import date
 from enum import StrEnum
-from functools import cached_property
 from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
@@ -1038,7 +1037,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
     List of donors including the index patient.
     """
 
-    @cached_property
+    @property
     def submission_id(self) -> str:
         """
         A deterministic metadata-derived submission identifier for long-term use within GRZs.
@@ -1052,6 +1051,9 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 hashlib.sha256(self.submission.tan_g.encode("utf-8")).hexdigest()[:8],
             )
         )
+
+    def consents_to_research(self, date: date) -> bool:
+        return all(donor.consents_to_research(date) for donor in self.donors)
 
     @field_validator("donors", mode="after")
     @classmethod

@@ -33,7 +33,7 @@ def consent(submission_dir, output_json, show_details, date):
 
     date = datetime.date.today() if date is None else datetime.date.fromisoformat(date)
     consents = _gather_consent_information(metadata, date)
-    overall_consent = _submission_has_research_consent(consents)
+    overall_consent = metadata.consents_to_research(date)
 
     match output_json, show_details:
         case True, True:
@@ -44,10 +44,6 @@ def consent(submission_dir, output_json, show_details, date):
             _print_rich_table(consents)
         case False, False:
             click.echo(str(overall_consent).lower())
-
-
-def _submission_has_research_consent(consents):
-    return all(consents.values())
 
 
 def _print_rich_table(consents: dict[str, bool]):
