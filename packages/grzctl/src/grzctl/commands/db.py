@@ -611,11 +611,7 @@ def show(ctx: click.Context, submission_id: str):
         ("Detailed QC Passed", "detailed_qc_passed"),
     ):
         attr = getattr(submission, attr_name)
-        console.print(
-            rich.text.Text.assemble(
-                f"  {label}: ", str(attr) if attr is not None else _TEXT_MISSING
-            )
-        )
+        console.print(rich.text.Text.assemble(f"  {label}: ", str(attr) if attr is not None else _TEXT_MISSING))
 
     if submission.states:
         table = rich.table.Table(title=f"State History for Submission {submission.id}")
