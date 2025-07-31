@@ -117,9 +117,10 @@ def upgrade(
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
 
     try:
-        console_err.print(f"[cyan]Attempting to upgrade database to revision '{revision}'...[/cyan]")
+        revision_desc = "latest revision" if revision == "head" else f"revision '{revision}'"
+        console_err.print(f"[cyan]Attempting to upgrade database to {revision_desc}...[/cyan]")
         _ = submission_db.upgrade_schema(revision=revision)
-        console_err.print(f"[green]Successfully upgraded database to revision '{revision}'![/green]")
+        console_err.print(f"[green]Successfully upgraded database to {revision_desc}![/green]")
 
     except (DatabaseConfigurationError, RuntimeError) as e:
         console_err.print(f"[red]Error during schema initialization: {e}[/red]")
