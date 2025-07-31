@@ -13,6 +13,7 @@ from grz_pydantic_models.submission.metadata import (
     LibraryType,
     SubmissionType,
     SubmitterId,
+    Tan,
 )
 from pydantic import ConfigDict
 from sqlalchemy import JSON, Column
@@ -65,7 +66,7 @@ class SubmissionBase(SQLModel):
     immutable_fields: ClassVar[set[str]] = {"id"}
 
     id: str
-    tan_g: str | None = Field(default=None, unique=True, index=True, alias="tanG")
+    tan_g: Tan | None = Field(default=None, unique=True, index=True, alias="tanG")
     pseudonym: str | None = Field(default=None, index=True)
 
     # fields from Prüfbericht

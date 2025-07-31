@@ -29,7 +29,14 @@ def test_db(
     assert result.exit_code == 0, result.output
 
     # then update the submission's tanG and/or pseudonym
-    modify_args = [*args_prefix, "submission", "modify", "S01", "tan_g", "foo"]
+    modify_args = [
+        *args_prefix,
+        "submission",
+        "modify",
+        "S01",
+        "tan_g",
+        "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    ]
     result = execute(modify_args)
     assert result.exit_code == 0, result.output
     modify_args = [*args_prefix, "submission", "modify", "S01", "pseudonym", "bar"]
@@ -64,7 +71,7 @@ def test_db(
     expected_output = [
         {
             "id": "S01",
-            "tan_g": "foo",
+            "tan_g": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
             "pseudonym": "bar",
             "latest_state": {
                 "state": "Downloaded",
