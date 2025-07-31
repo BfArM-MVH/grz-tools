@@ -11,6 +11,8 @@ from typing import Any
 
 import click
 import rich.console
+import rich.padding
+import rich.panel
 import rich.table
 import rich.text
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -528,9 +530,14 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
         ctx.exit()
 
-    console_err.print("Changes to be made:")
+    diff_table = rich.table.Table()
+    diff_table.add_column("Key")
+    diff_table.add_column("Before")
+    diff_table.add_column("After")
     for key, before, after in changes:
-        console_err.print(f"{key}: {before} -> {after}")
+        diff_table.add_row(key, str(before) if before is not None else _TEXT_MISSING, str(after))
+    panel = rich.panel.Panel.fit(diff_table, title="Pending Changes")
+    console.print(panel)
 
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?",
@@ -596,7 +603,9 @@ def show(ctx: click.Context, submission_id: str):
         console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
 
-    console.print(f"\n[bold blue]Submission Details for ID: {submission.id}[/bold blue]")
+    attribute_table = rich.table.Table(box=None)
+    attribute_table.add_column("Attribute", justify="right")
+    attribute_table.add_column("Value")
     for label, attr_name in (
         ("tanG", "tan_g"),
         ("Pseudonym", "pseudonym"),
@@ -611,16 +620,19 @@ def show(ctx: click.Context, submission_id: str):
         ("Detailed QC Passed", "detailed_qc_passed"),
     ):
         attr = getattr(submission, attr_name)
-        console.print(rich.text.Text.assemble(f"  {label}: ", str(attr) if attr is not None else _TEXT_MISSING))
+        attribute_table.add_row(
+            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
+        )
 
+    renderables: list[rich.console.RenderableType] = [rich.padding.Padding(attribute_table, (1, 0))]
     if submission.states:
-        table = rich.table.Table(title=f"State History for Submission {submission.id}")
-        table.add_column("Log ID", style="dim", width=12)
-        table.add_column("Timestamp (UTC)", style="yellow")
-        table.add_column("State", style="green")
-        table.add_column("Data", style="cyan", overflow="ellipsis")
-        table.add_column("Data Steward", style="magenta")
-        table.add_column("Signature Status")
+        state_table = rich.table.Table(title="State History")
+        state_table.add_column("Log ID", style="dim", width=12)
+        state_table.add_column("Timestamp (UTC)", style="yellow")
+        state_table.add_column("State", style="green")
+        state_table.add_column("Data", style="cyan", overflow="ellipsis")
+        state_table.add_column("Data Steward", style="magenta")
+        state_table.add_column("Signature Status")
 
         sorted_states = sorted(submission.states, key=lambda s: s.timestamp)
         for state_log in sorted_states:
@@ -633,7 +645,7 @@ def show(ctx: click.Context, submission_id: str):
             )
             signature_status_str = signature_status.rich_display(verifying_key_comment)
 
-            table.add_row(
+            state_table.add_row(
                 str(state_log.id),
                 state_log.timestamp.isoformat(),
                 state_str,
@@ -641,6 +653,12 @@ def show(ctx: click.Context, submission_id: str):
                 data_steward_str,
                 signature_status_str,
             )
-        console.print(table)
+        renderables.append(state_table)
     else:
-        console_err.print("[yellow]No state history found for this submission.[/yellow]")
+        renderables.append(rich.text.Text("No state history found for this submission.", style="yellow"))
+
+    panel = rich.panel.Panel.fit(
+        rich.console.Group(*renderables),
+        title=f"Submission {submission.id}",
+    )
+    console.print(panel)
