@@ -28,7 +28,8 @@ dependencies = [
     "grz-db >=0.3.0",
     "grz-common >=1.2.0,<2",
     "grz-cli >=1.0.0",
-    "grz-pydantic-models >=2.2.0,<3"
+    "grz-pydantic-models >=2.1.2,<3",
+    "textual>=5.0.1",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

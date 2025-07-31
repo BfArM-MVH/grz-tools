@@ -1,0 +1,21 @@
+Screen {
+    layout: vertical;
+}
+
+#filter-input {
+    dock: top;
+    margin: 0 0 1 0;
+}
+
+#list-table {
+    height: 1fr;
+    width: 2fr;
+}
+
+#history-table {
+    height: 1fr;
+}
+
+#details-view {
+    width: 1fr;
+}
