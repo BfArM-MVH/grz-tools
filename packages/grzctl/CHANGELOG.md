@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.6...grzctl-v0.3.0) (2025-07-31)
+
+
+### Features
+
+* **grzctl,grz-db,grz-common,grz-pydantic-models:** add columns, migration, and populate ([#306](https://github.com/BfArM-MVH/grz-tools/issues/306)) ([c158fa0](https://github.com/BfArM-MVH/grz-tools/commit/c158fa0cfe47ddacd66947dd57b814f43cfaefdc))
+
+
+### Bug Fixes
+
+* **grzctl:** bump dependencies for migrations ([#317](https://github.com/BfArM-MVH/grz-tools/issues/317)) ([3f2e529](https://github.com/BfArM-MVH/grz-tools/commit/3f2e52976bcedfb7e355b58972e7860b586243af))
+
 ## [0.2.6](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.5...grzctl-v0.2.6) (2025-07-23)
 
 
