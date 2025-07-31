@@ -68,7 +68,7 @@ def db(ctx: click.Context, config_file: str):
 
     from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 
-    log.info("Reading known public keys")
+    log.debug("Reading known public keys...")
     KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])
     with open(db_config.known_public_keys) as f:
         public_key_list = list(map(lambda v: KnownKeyEntry(*v), map(lambda s: s.strip().split(), f.readlines())))
