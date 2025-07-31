@@ -91,7 +91,8 @@ def test_all_migrations(blank_initial_database_config_path):
     # check the test data
     result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
     assert result_show.exit_code == 0, result_show.stderr
-    assert str(tan_g) in result_show.stdout, result_show.stdout
+    # shorter than tanG and less likely to be truncated in various terminal widths
+    assert pseudonym in result_show.stdout, result_show.stdout
 
 
 @pytest.fixture
@@ -126,7 +127,8 @@ def test_populate(blank_database_config_path: Path):
 
     result_show = runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
     assert result_show.exit_code == 0, result_show.stderr
-    assert str(metadata.submission.tan_g) in result_show.stdout, result_show.stdout
+    # shorter than tanG and less likely to be truncated in various terminal widths
+    assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
 
 def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
