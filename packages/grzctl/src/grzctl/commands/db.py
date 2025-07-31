@@ -40,6 +40,7 @@ from .pruefbericht import get_pruefbericht_library_type
 console = rich.console.Console()
 console_err = rich.console.Console(stderr=True)
 log = logging.getLogger(__name__)
+_TEXT_MISSING = rich.text.Text("missing", style="italic yellow")
 
 
 def get_submission_db_instance(db_url: str, author: Author | None = None) -> SubmissionDb:
@@ -192,8 +193,8 @@ def list_submissions(ctx: click.Context, output_json: bool = False):
         else:
             table.add_row(
                 submission.id,
-                submission.tan_g if submission.tan_g is not None else "N/A",
-                submission.pseudonym if submission.pseudonym is not None else "N/A",
+                submission.tan_g[:8] + "…" if submission.tan_g is not None else _TEXT_MISSING,
+                submission.pseudonym if submission.pseudonym is not None else _TEXT_MISSING,
                 latest_state_str,
                 latest_timestamp_str,
                 author_name_str,
@@ -252,8 +253,8 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
             else:
                 table.add_row(
                     submission.id,
-                    submission.tan_g if submission.tan_g is not None else "N/A",
-                    submission.pseudonym if submission.pseudonym is not None else "N/A",
+                    submission.tan_g[:8] + "…" if submission.tan_g is not None else _TEXT_MISSING,
+                    submission.pseudonym if submission.pseudonym is not None else _TEXT_MISSING,
                     latest_change_str,
                     latest_timestamp_str,
                     author_name_str,
@@ -612,7 +613,7 @@ def show(ctx: click.Context, submission_id: str):
         attr = getattr(submission, attr_name)
         console.print(
             rich.text.Text.assemble(
-                f"  {label}: ", str(attr) if attr is not None else rich.text.Text("missing", style="italic yellow")
+                f"  {label}: ", str(attr) if attr is not None else _TEXT_MISSING
             )
         )
 
