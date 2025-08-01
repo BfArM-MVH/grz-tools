@@ -10,16 +10,12 @@ import logging
 from os import PathLike
 from pathlib import Path
 
-from .constants import LOGGING_DATEFMT, LOGGING_FORMAT, PACKAGE_ROOT
+from .constants import LOGGING_DATEFMT, LOGGING_FORMAT
 
 log = logging.getLogger(__name__)
 
 
-def add_filelogger(
-    file_path: str | PathLike | None = None,
-    level: str = "INFO",
-    logger_name: str = PACKAGE_ROOT,
-) -> None:
+def add_filelogger(file_path: str | PathLike, level: str = "INFO", logger_name: str | None = None) -> None:
     """
     Add file logging for the specified package.
 
@@ -33,28 +29,36 @@ def add_filelogger(
     :param level: Optional; the logging level. Default is 'INFO'.
                   Must be a valid logging level name (e.g., 'DEBUG', 'INFO').
     :param logger_name: Optional; the name of the logger to add the file handler to.
-                        Default is PACKAGE_ROOT.
+                        Default is the root logger.
     """
+    # passing None to getLogger gets the root logger
     logger = logging.getLogger(logger_name)
 
-    if file_path is None:
-        default_log_dir = Path.home() / "logs"
-        default_log_dir.mkdir(parents=True, exist_ok=True)
-        file_path = default_log_dir / f"{logger_name}.log"
-        log.warning("No log file path provided, using default: %s", file_path)
-    else:
-        file_path = Path(file_path)
+    file_path = Path(file_path)
 
-    try:
-        fh = logging.FileHandler(file_path)
-        fh.setLevel(level.upper())
-        fh.setFormatter(logging.Formatter(LOGGING_FORMAT, LOGGING_DATEFMT))
-        logger.addHandler(fh)
-        log.info(
-            "File logger added for %s at %s with level %s.",
-            logger.name,
-            file_path,
-            level.upper(),
+    file_handler = logging.FileHandler(file_path)
+    file_handler.setLevel(level.upper())
+    file_handler.setFormatter(logging.Formatter(fmt=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT))
+    logger.addHandler(file_handler)
+    log.info(
+        "File logger added for %s at %s with level %s.",
+        logger.name,
+        file_path,
+        level.upper(),
+    )
+
+
+def setup_cli_logging(log_file: str | None, log_level: str):
+    # set the root log level since this is the CLI interface
+    logging.getLogger().setLevel(log_level.upper())
+
+    logging.basicConfig(level=log_level.upper(), format=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT)
+
+    if log_file:
+        # add file handler to root logger
+        add_filelogger(
+            log_file,
+            log_level.upper(),
         )
-    except Exception as e:
-        log.error("Failed to add file logger: %s", e)
+
+    log.debug("Logging setup complete.")
