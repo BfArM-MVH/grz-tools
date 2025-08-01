@@ -189,7 +189,16 @@ Alternatively, install `uv` and `tox` and run `uv run tox`.
 
 ## Contributing
 
-<!-- Add details about how others can contribute to the project -->
+### Running unreleased/development versions
+
+First, install `uv`.
+We recommend using Conda or [Pixi](https://pixi.sh/latest).
+
+After cloning the desired branch of the `grz-tools` repo locally, you can run `grz-cli` directly from the repo using:
+
+```
+uv run --project path/to/cloned/grz-tools grz-cli --help
+```
 
 ## License
 
