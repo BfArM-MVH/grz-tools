@@ -5,6 +5,23 @@ from pydantic import AnyHttpUrl, AnyUrl
 from .base import IgnoringBaseModel, IgnoringBaseSettings
 
 
+class ProxyOptions(IgnoringBaseModel):
+    proxy_ca_bundle: str | None = None
+    """
+    The path to a custom certificate bundle to use when establishing SSL/TLS connections with proxy (optional).
+    """
+
+    proxy_client_cert: str | None = None
+    """
+    The path to a certificate for proxy TLS client authentication  (optional).
+    """
+
+    proxy_use_forwarding_for_https: bool = False
+    """
+    For HTTPS proxies, forward your requests to HTTPS destinations with an absolute URI. We strongly recommend you only use this option with trusted or corporate proxies.
+    """
+
+
 class S3Options(IgnoringBaseModel):
     endpoint_url: AnyHttpUrl
     """
@@ -52,6 +69,9 @@ class S3Options(IgnoringBaseModel):
     """
     The proxy URL for S3 operations (optional).
     """
+
+    proxy_config: ProxyOptions | None = None
+    """Proxy configuration for S3 operations."""
 
     request_checksum_calculation: Literal["when_supported", "when_required"] | None = None
     """
