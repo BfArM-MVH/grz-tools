@@ -18,7 +18,7 @@ from grz_common.logging_setup import add_filelogger
 from .commands.archive import archive
 from .commands.clean import clean
 from .commands.consent import consent
-from .commands.db import db
+from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.list_submissions import list_submissions
