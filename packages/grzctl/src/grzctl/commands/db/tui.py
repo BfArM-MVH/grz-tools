@@ -65,7 +65,10 @@ class SubmissionBrowser(App):
         yield Header()
         yield Input(placeholder="Filter submissions...", id="filter-input")
         with Horizontal():
-            yield DataTable(id="list-table", cursor_type="cell")
+            table = DataTable(id="list-table", cursor_type="cell")
+            # start the app with focus on the table
+            table.focus()
+            yield table
             with Vertical(id="details-view"):
                 yield Static(id="details-panel", expand=True)
                 yield DataTable(id="history-table", cursor_type="row")
@@ -239,9 +242,9 @@ class SubmissionBrowser(App):
             return
 
         def filterable_values(submission: Submission):
-            values = set(submission.model_dump().values()) | set(submission.states[0].model_dump().values())
+            values = set(submission.model_dump().values())
             if submission.states:
-                values |= {submission.states[0].author_name}
+                values |= set(submission.states[0].model_dump().values()) | {submission.states[0].author_name}
             return values
 
         filtered = [
