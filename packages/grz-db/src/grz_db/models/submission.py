@@ -65,7 +65,7 @@ class SubmissionBase(SQLModel):
     model_config = ConfigDict(validate_assignment=True)  # type: ignore
     immutable_fields: ClassVar[set[str]] = {"id"}
 
-    id: Annotated[str, StringConstraints(pattern=r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$")]
+    id: str
     tan_g: Tan | None = Field(default=None, unique=True, index=True, alias="tanG")
     pseudonym: str | None = Field(default=None, index=True)
 
@@ -88,7 +88,9 @@ class Submission(SubmissionBase, table=True):
 
     __tablename__ = "submissions"
 
-    id: str = Field(primary_key=True, index=True)
+    id: Annotated[str, StringConstraints(pattern=r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$")] = Field(
+        primary_key=True, index=True
+    )
 
     states: list["SubmissionStateLog"] = Relationship(back_populates="submission")
 
