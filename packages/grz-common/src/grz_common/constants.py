@@ -1,4 +1,4 @@
-"""Constants for logging configuration, JSON schema validation, and other settings."""
+"""Constants for progress bars, JSON schema validation, and other settings."""
 
 TQDM_BAR_FORMAT = "{desc} ▕{bar:50}▏ {n_fmt:>10}/{total_fmt:<10} ({rate_fmt:>12}, ETA: {remaining:>6}) {postfix}"
 TQDM_DEFAULTS = {

@@ -1,5 +1,5 @@
 """
-Module: logging_setup
+Module: logging
 
 This module provides functions for setting up logging configuration.
 """
