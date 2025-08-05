@@ -23,8 +23,11 @@ def test_db(
     result = execute(init_args)
     assert result.exit_code == 0, result.output
 
+    submission_id = "123456789_1970-01-01_a0b1c2d3"
+    tan_g = "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+
     # then add a submission
-    add_args = [*args_prefix, "submission", "add", "S01"]
+    add_args = [*args_prefix, "submission", "add", submission_id]
     result = execute(add_args)
     assert result.exit_code == 0, result.output
 
@@ -33,29 +36,29 @@ def test_db(
         *args_prefix,
         "submission",
         "modify",
-        "S01",
+        submission_id,
         "tan_g",
-        "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+        tan_g,
     ]
     result = execute(modify_args)
     assert result.exit_code == 0, result.output
-    modify_args = [*args_prefix, "submission", "modify", "S01", "pseudonym", "bar"]
+    modify_args = [*args_prefix, "submission", "modify", submission_id, "pseudonym", "bar"]
     result = execute(modify_args)
     assert result.exit_code == 0, result.output
 
     # then update a submission
     # … downloading …
-    update_args = [*args_prefix, "submission", "update", "S01", "Downloading"]
+    update_args = [*args_prefix, "submission", "update", submission_id, "Downloading"]
     result = execute(update_args)
     assert result.exit_code == 0, result.output
 
     # … downloaded …
-    update_args = [*args_prefix, "submission", "update", "S01", "Downloaded"]
+    update_args = [*args_prefix, "submission", "update", submission_id, "Downloaded"]
     result = execute(update_args)
     assert result.exit_code == 0, result.output
 
     # then show details for the submission
-    show_args = [*args_prefix, "submission", "show", "S01"]
+    show_args = [*args_prefix, "submission", "show", submission_id]
     result = execute(show_args)
     assert result.exit_code == 0, result.output
 
@@ -70,8 +73,8 @@ def test_db(
     assert result.exit_code == 0, result.output
     expected_output = [
         {
-            "id": "S01",
-            "tan_g": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+            "id": submission_id,
+            "tan_g": tan_g,
             "pseudonym": "bar",
             "latest_state": {
                 "state": "Downloaded",

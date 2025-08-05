@@ -8,15 +8,14 @@ from importlib.metadata import version
 
 import click
 import grz_pydantic_models.submission.metadata
+from grz_common.logging import setup_cli_logging
 
 from .commands.encrypt import encrypt
 from .commands.submit import submit
 from .commands.upload import upload
 from .commands.validate import validate
-from .constants import PACKAGE_ROOT
-from .logging_setup import add_filelogger
 
-log = logging.getLogger(PACKAGE_ROOT + ".cli")
+log = logging.getLogger(__name__)
 
 
 class OrderedGroup(click.Group):
@@ -58,21 +57,7 @@ def build_cli():
         :param log_level: Log level for the logger. It should be one of the following:
                            DEBUG, INFO, WARNING, ERROR, CRITICAL.
         """
-        if log_file:
-            add_filelogger(
-                log_file,
-                log_level.upper(),
-            )  # Add file logger
-
-        # show only time and log level in STDOUT
-        logging.basicConfig(
-            format="%(asctime)s - %(levelname)s - %(message)s",
-        )
-
-        # set the log level for this package
-        logging.getLogger(PACKAGE_ROOT).setLevel(log_level.upper())
-
-        log.debug("Logging setup complete.")
+        setup_cli_logging(log_file, log_level)
 
     cli.add_command(validate)
     cli.add_command(encrypt)
