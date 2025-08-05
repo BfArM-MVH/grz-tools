@@ -1,7 +1,8 @@
 import datetime
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from typing import Annotated, Any, ClassVar
+from operator import attrgetter
+from typing import Annotated, Any, ClassVar, Optional
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
@@ -95,6 +96,11 @@ class Submission(SubmissionBase, table=True):
     states: list["SubmissionStateLog"] = Relationship(back_populates="submission")
 
     changes: list["ChangeRequestLog"] = Relationship(back_populates="submission")
+
+    def get_latest_state(self, filter_to_type: SubmissionStateEnum | None = None) -> Optional["SubmissionStateLog"]:
+        states = filter(lambda state: state.state == filter_to_type, self.states) if filter_to_type else self.states
+        states = sorted(states, key=attrgetter("timestamp"))
+        return states[-1] if states else None
 
 
 class SubmissionStateLogBase(SQLModel):
