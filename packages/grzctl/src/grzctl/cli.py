@@ -21,6 +21,7 @@ from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
+from .commands.report import report
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,7 @@ def build_cli():
     cli.add_command(consent)
     cli.add_command(pruefbericht)
     cli.add_command(db)
+    cli.add_command(report)
 
     return cli
 

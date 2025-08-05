@@ -25,7 +25,7 @@ dependencies = [
     "pysam ==0.23.*",
     "rich ==13.*",
     "requests >=2.32.3,<3",
-    "grz-db >=0.3.0",
+    "grz-db >=0.4.0",
     "grz-common >=1.2.1,<2",
     "grz-cli >=1.0.0",
     "grz-pydantic-models >=2.2.0,<3"
