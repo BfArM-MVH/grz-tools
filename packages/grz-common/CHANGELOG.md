@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.2.0...grz-common-v1.2.1) (2025-08-05)
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common,grzctl:** fix logging and migrate to grz-common ([#319](https://github.com/BfArM-MVH/grz-tools/issues/319)) ([51ada07](https://github.com/BfArM-MVH/grz-tools/commit/51ada073a2af93ba1a1c48f069b4546ce9bd2975))
+
 ## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.1.1...grz-common-v1.2.0) (2025-07-31)
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.3.0...grz-db-v0.4.0) (2025-08-05)
+
+
+### Features
+
+* **grzctl:** add reporting for processed submissions ([#320](https://github.com/BfArM-MVH/grz-tools/issues/320)) ([d44aead](https://github.com/BfArM-MVH/grz-tools/commit/d44aeade809e39693360b577e5482873ae975709))
+
+
+### Bug Fixes
+
+* **grz-db:** add StringConstraints to SubmissionBase.id ([#323](https://github.com/BfArM-MVH/grz-tools/issues/323)) ([0ac80fb](https://github.com/BfArM-MVH/grz-tools/commit/0ac80fbb4e68957bb9b59a395c90bc2bdf67e02d))
+
 ## [0.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.2.1...grz-db-v0.3.0) (2025-07-31)
 
 
