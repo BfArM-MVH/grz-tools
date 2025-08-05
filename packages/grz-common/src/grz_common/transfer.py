@@ -16,7 +16,7 @@ else:
     S3Client = object
     S3ServiceResource = object
 
-from .models.s3 import S3Options, ProxyOptions
+from .models.s3 import S3Options
 
 
 def _empty_str_to_none(string: str | None) -> str | None:
@@ -38,8 +38,10 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
         proxy_client_cert = proxy_config_options.proxy_client_cert
         proxy_use_forwarding_for_https = proxy_config_options.proxy_use_forwarding_for_https
         proxies_config={"proxy_use_forwarding_for_https": proxy_use_forwarding_for_https}
-        if proxy_ca_bundle is not None: proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
-        if proxy_client_cert is not None: proxies_config["proxy_client_cert"] = str(proxy_client_cert)
+        if proxy_ca_bundle is not None: 
+            proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
+        if proxy_client_cert is not None: 
+            proxies_config["proxy_client_cert"] = str(proxy_client_cert)
     s3_config = Boto3Config(
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config if proxies_config is not None else None,
@@ -72,8 +74,10 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
         proxy_client_cert = proxy_config_options.proxy_client_cert
         proxy_use_forwarding_for_https = proxy_config_options.proxy_use_forwarding_for_https
         proxies_config={"proxy_use_forwarding_for_https": proxy_use_forwarding_for_https}
-        if proxy_ca_bundle is not None: proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
-        if proxy_client_cert is not None: proxies_config["proxy_client_cert"] = str(proxy_client_cert)
+        if proxy_ca_bundle is not None: 
+            proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
+        if proxy_client_cert is not None: 
+            proxies_config["proxy_client_cert"] = str(proxy_client_cert)
     s3_config = Boto3Config(
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config if proxies_config is not None else None,
