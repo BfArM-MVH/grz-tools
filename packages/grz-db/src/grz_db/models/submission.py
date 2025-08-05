@@ -455,6 +455,27 @@ class SubmissionDb:
             submissions = session.exec(statement).all()
             return submissions
 
+    def list_processed_between(self, start: datetime.date, end: datetime.date) -> Sequence[Submission]:
+        """
+        Lists all submissions processed between the given start and end dates, inclusive.
+        Processed is defined as either reported (Prüfbericht submitted) or detailed QC finished.
+        """
+        with self._get_session() as session:
+            reported_within_window = (
+                select(SubmissionStateLog.submission_id)
+                .where(SubmissionStateLog.state.in_([SubmissionStateEnum.REPORTED, SubmissionStateEnum.QCED]))  # type: ignore[attr-defined]
+                .where(SubmissionStateLog.timestamp.between(start, end))  # type: ignore[attr-defined]
+                .subquery()
+            )
+            statement = (
+                select(Submission)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .join(reported_within_window, Submission.id == reported_within_window.c.submission_id)  # type: ignore[arg-type]
+                .distinct()
+            )
+            submissions = session.exec(statement).all()
+            return submissions
+
     def list_change_requests(self) -> Sequence[Submission]:
         """
         Lists all submissions in the database.
