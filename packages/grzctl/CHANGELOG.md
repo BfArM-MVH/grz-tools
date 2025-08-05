@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.3.0...grzctl-v0.4.0) (2025-08-05)
+
+
+### Features
+
+* **grzctl:** add reporting for processed submissions ([#320](https://github.com/BfArM-MVH/grz-tools/issues/320)) ([d44aead](https://github.com/BfArM-MVH/grz-tools/commit/d44aeade809e39693360b577e5482873ae975709))
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common,grzctl:** fix logging and migrate to grz-common ([#319](https://github.com/BfArM-MVH/grz-tools/issues/319)) ([51ada07](https://github.com/BfArM-MVH/grz-tools/commit/51ada073a2af93ba1a1c48f069b4546ce9bd2975))
+
 ## [0.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.2.6...grzctl-v0.3.0) (2025-07-31)
 
 
