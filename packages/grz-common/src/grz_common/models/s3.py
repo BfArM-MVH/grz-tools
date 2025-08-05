@@ -73,9 +73,7 @@ class S3Options(IgnoringBaseModel):
     proxy_config: ProxyOptions | None = None
     """Proxy configuration for S3 operations."""
 
-    request_checksum_calculation: Literal["when_supported", "when_required"] | None = (
-        None
-    )
+    request_checksum_calculation: Literal["when_supported", "when_required"] | None = None
     """
     Whether to calculate checksums for S3 request payloads (optional).
     Valid values are:
