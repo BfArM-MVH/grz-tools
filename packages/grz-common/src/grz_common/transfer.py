@@ -16,7 +16,7 @@ else:
     S3Client = object
     S3ServiceResource = object
 
-from .models.s3 import S3Options
+from .models.s3 import S3Options, ProxyOptions
 
 
 def _empty_str_to_none(string: str | None) -> str | None:
@@ -31,15 +31,18 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
     """Create a boto3 Client from a grz-cli configuration."""
     # configure proxies if proxy_url is defined
     proxy_url = s3_options.proxy_url
-    proxy_ca_bundle = s3_options.proxy_ca_bundle
-    proxy_client_cert = s3_options.proxy_client_cert
-    proxy_use_forwarding_for_https = s3_options.proxy_use_forwarding_for_https
-    proxies_config={"proxy_use_forwarding_for_https": proxy_use_forwarding_for_https}
-    if proxy_ca_bundle is not None: proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
-    if proxy_client_cert is not None: proxies_config["proxy_client_cert"] = str(proxy_client_cert)
+    proxy_config_options = s3_options.proxy_config
+    proxies_config = None
+    if proxy_config_options is not None:
+        proxy_ca_bundle = proxy_config_options.proxy_ca_bundle
+        proxy_client_cert = proxy_config_options.proxy_client_cert
+        proxy_use_forwarding_for_https = proxy_config_options.proxy_use_forwarding_for_https
+        proxies_config={"proxy_use_forwarding_for_https": proxy_use_forwarding_for_https}
+        if proxy_ca_bundle is not None: proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
+        if proxy_client_cert is not None: proxies_config["proxy_client_cert"] = str(proxy_client_cert)
     s3_config = Boto3Config(
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
-        proxies_config=proxies_config,
+        proxies_config=proxies_config if proxies_config is not None else None,
         request_checksum_calculation=s3_options.request_checksum_calculation,
     )
 
@@ -62,15 +65,18 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
 def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     """Create a boto3 Resource from a grz-cli configuration."""
     proxy_url = s3_options.proxy_url
-    proxy_ca_bundle = s3_options.proxy_ca_bundle
-    proxy_client_cert = s3_options.proxy_client_cert
-    proxy_use_forwarding_for_https = s3_options.proxy_use_forwarding_for_https
-    proxies_config={"proxy_use_forwarding_for_https": proxy_use_forwarding_for_https}
-    if proxy_ca_bundle is not None: proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
-    if proxy_client_cert is not None: proxies_config["proxy_client_cert"] = str(proxy_client_cert)
+    proxy_config_options = s3_options.proxy_config
+    proxies_config = None
+    if proxy_config_options is not None:
+        proxy_ca_bundle = proxy_config_options.proxy_ca_bundle
+        proxy_client_cert = proxy_config_options.proxy_client_cert
+        proxy_use_forwarding_for_https = proxy_config_options.proxy_use_forwarding_for_https
+        proxies_config={"proxy_use_forwarding_for_https": proxy_use_forwarding_for_https}
+        if proxy_ca_bundle is not None: proxies_config["proxy_ca_bundle"] = str(proxy_ca_bundle)
+        if proxy_client_cert is not None: proxies_config["proxy_client_cert"] = str(proxy_client_cert)
     s3_config = Boto3Config(
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
-        proxies_config=proxies_config,
+        proxies_config=proxies_config if proxies_config is not None else None,
         request_checksum_calculation=s3_options.request_checksum_calculation,
     )
     s3_resource = boto3.resource(
