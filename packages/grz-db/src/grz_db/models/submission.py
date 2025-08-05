@@ -1,7 +1,7 @@
 import datetime
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
@@ -15,7 +15,7 @@ from grz_pydantic_models.submission.metadata import (
     SubmitterId,
     Tan,
 )
-from pydantic import ConfigDict
+from pydantic import ConfigDict, StringConstraints
 from sqlalchemy import JSON, Column
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -65,7 +65,7 @@ class SubmissionBase(SQLModel):
     model_config = ConfigDict(validate_assignment=True)  # type: ignore
     immutable_fields: ClassVar[set[str]] = {"id"}
 
-    id: str
+    id: Annotated[str, StringConstraints(pattern=r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$")]
     tan_g: Tan | None = Field(default=None, unique=True, index=True, alias="tanG")
     pseudonym: str | None = Field(default=None, index=True)
 
