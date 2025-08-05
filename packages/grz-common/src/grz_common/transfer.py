@@ -37,8 +37,10 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
         else None
     )
     s3_config = Boto3Config(
-        proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
-        proxies_config=proxies_config if proxies_config is not None else None,
+        proxies={"http": str(proxy_url), "https": str(proxy_url)}
+        if proxy_url is not None
+        else None,
+        proxies_config=proxies_config,
         request_checksum_calculation=s3_options.request_checksum_calculation,
     )
 
@@ -67,8 +69,10 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
         else None
     )
     s3_config = Boto3Config(
-        proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
-        proxies_config=proxies_config if proxies_config is not None else None,
+        proxies={"http": str(proxy_url), "https": str(proxy_url)}
+        if proxy_url is not None
+        else None,
+        proxies_config=proxies_config,
         request_checksum_calculation=s3_options.request_checksum_calculation,
     )
     s3_resource = boto3.resource(
