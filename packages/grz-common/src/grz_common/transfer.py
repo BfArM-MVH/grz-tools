@@ -2,11 +2,12 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import boto3
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
-from botocore.config import Config as Boto3Config  # type: ignore[import-untyped]
+from botocore.config import Config as Boto3Config, _ProxiesConfigDict as ProxiesConfigDict
+
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -31,7 +32,7 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
     """Create a boto3 Client from a grz-cli configuration."""
     # configure proxies if proxy_url is defined
     proxy_url = s3_options.proxy_url
-    proxies_config = s3_options.proxy_config.model_dump(exclude_none=True) if s3_options.proxy_config else None
+    proxies_config = cast(ProxiesConfigDict, s3_options.proxy_config.model_dump(exclude_none=True)) if s3_options.proxy_config else None
     s3_config = Boto3Config(
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config,
@@ -57,7 +58,7 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
 def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     """Create a boto3 Resource from a grz-cli configuration."""
     proxy_url = s3_options.proxy_url
-    proxies_config = s3_options.proxy_config.model_dump(exclude_none=True) if s3_options.proxy_config else None
+    proxies_config = cast(ProxiesConfigDict, s3_options.proxy_config.model_dump(exclude_none=True)) if s3_options.proxy_config else None
     s3_config = Boto3Config(
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config,
