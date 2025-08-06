@@ -6,6 +6,9 @@ on:
     tags:
       - '*-v[0-9]+.[0-9]+.[0-9]+*'
 
+env:
+  UV_VERSION: '0.8.5'
+
 jobs:
   build-and-publish-package:
     name: Build & Publish Package from tag
@@ -45,7 +48,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: '0.7.9'
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
 
       - name: Set up Python
