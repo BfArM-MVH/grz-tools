@@ -45,9 +45,9 @@ def build_cli():
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(
         "--log-level",
-        default="INFO",
+        default="WARNING",
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
-        help="Set the log level (default: INFO)",
+        help="Set the log level (default: WARNING)",
     )
     def cli(log_file: str | None = None, log_level: str = "INFO"):
         """
