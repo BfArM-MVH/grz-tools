@@ -96,6 +96,11 @@ class S3Options(IgnoringBaseModel):
     The size of the chunks to use for multipart uploads in bytes.
     """
 
+    api_base_url: AnyHttpUrl | None = None
+    """
+    The base URL for the grz-gatekeeper API.
+    """
+
 
 class S3ConfigModel(IgnoringBaseSettings):
     s3: S3Options

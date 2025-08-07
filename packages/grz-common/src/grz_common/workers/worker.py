@@ -6,12 +6,18 @@ import logging
 import shutil
 from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..validation import UserInterruptException
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
+
+if TYPE_CHECKING:
+    from .upload import UploadWorker
+else:
+    UploadWorker = object
 
 log = logging.getLogger(__name__)
 
@@ -210,16 +216,10 @@ class Worker:
 
         return submission
 
-    def upload(self, s3_options: S3Options) -> str:
+    def upload(self, upload_worker: UploadWorker) -> str:
         """
         Upload an encrypted submission and return the generated submission ID
         """
-        from .upload import S3BotoUploadWorker
-
-        upload_worker = S3BotoUploadWorker(
-            s3_options, status_file_path=self.progress_file_upload, threads=self._threads
-        )
-
         encrypted_submission = self.parse_encrypted_submission()
 
         upload_worker.upload(encrypted_submission)
@@ -230,7 +230,7 @@ class Worker:
         """
         Archive an encrypted submission at a GRZ.
         """
-        from .upload import S3BotoUploadWorker
+        from .upload.boto import S3BotoUploadWorker
 
         upload_worker = S3BotoUploadWorker(
             s3_options, status_file_path=self.progress_file_upload, threads=self._threads

@@ -8,4 +8,5 @@ class StrictBaseModel(BaseModel):
         validate_assignment=True,
         use_enum_values=True,
         alias_generator=to_camel,
+        populate_by_name=True,
     )

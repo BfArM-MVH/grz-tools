@@ -1,0 +1,68 @@
+[project]
+name = "grz-gatekeeper"
+description = "API Service for GDCs."
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Till Hartmann", email = "till.hartmann@bih-charite.de" },
+]
+dynamic = ["version"]
+dependencies = [
+    "boto3 >=1.36,<2",
+    "grz-db >=0.4.0",
+    "grz-common >=1.2.1,<2",
+    "grz-pydantic-models >=2.2.0,<3",
+    "grzctl>=0.4.0,<1",
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent"
+]
+requires-python = ">=3.12"
+keywords = ["GRZ", "GDC", "S3"]
+
+[tool.uv.sources]
+grz-common = { path = "../grz-common", editable = true }
+grz-db = { path = "../grz-db", editable = true }
+grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
+
+[tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
+description = "run unit tests"
+dependency_groups = ["test"]
+commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
+
+[project.urls]
+Homepage = "https://github.com/BfArM-MVH/grz-tools"
+Repository = "https://github.com/BfArM-MVH/grz-tools"
+Documentation = "https://github.com/BfArM-MVH/grz-tools/tree/main/packages/grz-gatekeeper"
+Issues = "https://github.com/BfArM-MVH/grz-tools/issues"
+
+[project.scripts]
+grz-gatekeeper = "grz_gatekeeper.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/grz_gatekeeper/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grz_gatekeeper"]
+
+[dependency-groups]
+dev = ["tox", "tox-uv"]
+test = [
+    "pytest",
+    "pytest-mock",
+    "pytest-cov",
+    "pytest-sugar",
+    "moto[s3]",
+    "numpy",
+    "grz-common",
+    "grzctl",
+    "grz-gatekeeper",
+]
