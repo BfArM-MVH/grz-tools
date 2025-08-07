@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from grz_common.utils.checksums import calculate_sha256
-from grz_common.workers.upload import S3BotoUploadWorker
+from grz_common.workers.upload.boto import S3BotoUploadWorker
 
 
 @pytest.fixture(scope="module")
