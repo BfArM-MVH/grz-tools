@@ -167,7 +167,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: RUST_TOOLCHAIN_VERSION
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
           components: rustfmt, clippy
           cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
           cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
@@ -192,7 +192,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: RUST_TOOLCHAIN_VERSION
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
           cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
           cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
@@ -221,7 +221,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: RUST_TOOLCHAIN_VERSION
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
           cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
           cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
