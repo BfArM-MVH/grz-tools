@@ -4,7 +4,7 @@
   "release-type": "python",
   "separate-pull-requests": false,
   "component-no-space": true,
-  "pull-request-title-pattern": "chore(${component}): release v${version}",
+  "group-pull-request-title-pattern": "chore(release): release ${branch}",
   "packages": {
     "packages/grz-cli": {
       "package-name": "grz-cli"
