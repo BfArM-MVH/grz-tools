@@ -12,6 +12,7 @@ on:
 env:
   UV_VERSION: '0.8.5'
   GRZ_CHECK_WORKSPACE: "packages/grz-check"
+  RUST_TOOLCHAIN_VERSION: "1.89.0"
 
 jobs:
   determine-changes:
@@ -166,7 +167,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: RUST_TOOLCHAIN_VERSION
           components: rustfmt, clippy
           cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
           cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
@@ -191,7 +192,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: RUST_TOOLCHAIN_VERSION
           cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
           cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
@@ -220,7 +221,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: RUST_TOOLCHAIN_VERSION
           cache-workspaces: ${{ env.GRZ_CHECK_WORKSPACE }}
           cache-shared-key: grz-check-binary-${{ runner.os }}-${{ hashFiles('packages/grz-check/Cargo.lock', 'packages/grz-check/src/**/*.rs') }}
 
