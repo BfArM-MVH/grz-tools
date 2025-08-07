@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.2.1...grz-common-v1.3.0) (2025-08-07)
+
+
+### Features
+
+* **grz-common:** Add proxy options to config ([#335](https://github.com/BfArM-MVH/grz-tools/issues/335)) ([a9acc4e](https://github.com/BfArM-MVH/grz-tools/commit/a9acc4ee487de19cc29965aff1d1b10a32f174f7))
+
 ## [1.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.2.0...grz-common-v1.2.1) (2025-08-05)
 
 
