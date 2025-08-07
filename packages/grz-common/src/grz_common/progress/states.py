@@ -29,6 +29,18 @@ class UploadState(State):
     upload_successful: bool
 
 
+class MultipartUploadState(State):
+    """
+    State for a potentially resumable multipart upload.
+    Stores the parameters of the upload session and the progress.
+    """
+
+    upload_id: str
+    chunk_size: int
+    total_parts: int
+    completed_parts: dict[int, str]  # Maps part number to ETag
+
+
 class EncryptionState(State):
     """
     State for encryption progress.
