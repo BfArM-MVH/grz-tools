@@ -476,12 +476,12 @@ pub fn run_check(
         writer.clone(),
     );
 
-    if let Ok(mutex) = Arc::try_unwrap(writer) {
-        if let Ok(mut writer_guard) = mutex.into_inner() {
-            writer_guard
-                .flush()
-                .context("Failed to perform final flush of report file")?;
-        }
+    if let Ok(mutex) = Arc::try_unwrap(writer)
+        && let Ok(mut writer_guard) = mutex.into_inner()
+    {
+        writer_guard
+            .flush()
+            .context("Failed to perform final flush of report file")?;
     }
     mpb.clear()?;
 

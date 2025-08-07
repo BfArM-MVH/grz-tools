@@ -77,12 +77,12 @@ impl FastqCheckProcessor {
             }
         } else {
             self.detected_read_length = Some(current_len);
-            if let ReadLengthCheck::Fixed(expected) = self.length_check {
-                if current_len != expected {
-                    self.errors.push(format!(
+            if let ReadLengthCheck::Fixed(expected) = self.length_check
+                && current_len != expected
+            {
+                self.errors.push(format!(
                         "Provided read length ({expected}) does not match first read's length ({current_len})."
                     ));
-                }
             }
         }
         Ok(())
