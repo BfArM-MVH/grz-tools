@@ -37,20 +37,45 @@ class GrzGatekeeperUploadWorker(UploadWorker):
         self,
         api_base_url: str,
         status_file_path: str | PathLike,
+        username: str,
+        password: str,
         threads: int = 1,
     ):
         super().__init__()
         self._api_base_url = api_base_url
         self._threads = threads
         self._progress_logger = FileProgressLogger[MultipartUploadState](status_file_path)
+        self._username = username
+        self._password = password
+        self._auth_token: str | None = None
 
-    @override
-    def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):
-        raise NotImplementedError("GrzGatekeeperUploadWorker does not support direct single-file uploads.")
+    def _get_auth_token(self) -> str:
+        if self._auth_token:
+            # TODO: check for expiry
+            return self._auth_token
 
-    @override
-    def archive(self, encrypted_submission: EncryptedSubmission):
-        raise NotImplementedError("archive is not yet implemented.")
+        self.__log.info("Authenticating with the gatekeeper API to get access token…")
+        token_url = f"{self._api_base_url}/v1/token"
+        try:
+            response = requests.post(
+                token_url,
+                data={"username": self._username, "password": self._password},
+                timeout=30,
+            )
+            response.raise_for_status()
+            token_data = response.json()
+            self._auth_token = token_data["access_token"]
+            self.__log.info("Successfully authenticated.")
+            return self._auth_token
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                self.__log.error("Authentication failed: Incorrect username or password.")
+                raise UploadError("Authentication failed: Incorrect username or password.") from e
+            self.__log.error(f"Failed to get auth token. Status: {e.response.status_code}, Response: {e.response.text}")
+            raise UploadError(f"Failed to get auth token from {token_url}") from e
+        except Exception as e:
+            self.__log.error(f"An unexpected error occurred during authentication: {e}")
+            raise UploadError(f"Failed to get auth token from {token_url}") from e
 
     @classmethod
     def _upload_chunk_worker(cls, chunk_data: bytes, part_info: dict) -> dict:
@@ -68,6 +93,13 @@ class GrzGatekeeperUploadWorker(UploadWorker):
 
     def _initiate_upload(self, encrypted_submission: EncryptedSubmission) -> InitiateUploadResponse:
         self.__log.info("Initiating upload via grz-gatekeeper API…")
+
+        auth_token = self._get_auth_token()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {auth_token}",
+        }
+
         metadata: GrzSubmissionMetadata = encrypted_submission.metadata.content
 
         encrypted_files_info = [
@@ -81,7 +113,7 @@ class GrzGatekeeperUploadWorker(UploadWorker):
         response = requests.post(
             initiate_url,
             data=initiate_request.model_dump_json(by_alias=True),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             timeout=60,
         )
 
@@ -162,13 +194,20 @@ class GrzGatekeeperUploadWorker(UploadWorker):
 
     def _complete_upload(self, submission_id: str, completed_files: list[CompletedFileUpload]) -> None:
         self.__log.info("All parts uploaded. Finalizing submission with the API…")
+
+        auth_token = self._get_auth_token()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {auth_token}",
+        }
+
         complete_payload = CompleteUploadRequest(files=completed_files)
         complete_url = f"{self._api_base_url}/v1/submissions/{submission_id}/complete"
         response = requests.post(
             complete_url,
             data=complete_payload.model_dump_json(by_alias=True),
             timeout=60,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         response.raise_for_status()
 
@@ -246,3 +285,11 @@ class GrzGatekeeperUploadWorker(UploadWorker):
                 pbar_total.close()
 
         self.__log.info("Upload finished successfully for submission %s!", submission_id)
+
+    @override
+    def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):
+        raise NotImplementedError("GrzGatekeeperUploadWorker does not support direct single-file uploads.")
+
+    @override
+    def archive(self, encrypted_submission: EncryptedSubmission):
+        raise NotImplementedError("archive is not yet implemented.")

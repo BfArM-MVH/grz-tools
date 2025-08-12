@@ -37,8 +37,10 @@ def upload(submission_dir, config_file, threads):
         log.info(f"API endpoint configured. Using GrzGatekeeperUploadWorker with {api_base_url}")
         upload_worker = GrzGatekeeperUploadWorker(
             api_base_url=api_base_url,
-            status_file_path=log_dir / "progress_upload.cjson",  # or use different file?
+            status_file_path=log_dir / "progress_upload.cjson",
             threads=threads,
+            username=config.s3.access_key,
+            password=config.s3.secret,
         )
     else:
         log.info("No API endpoint configured. Falling back to direct S3BotoUploadWorker.")
