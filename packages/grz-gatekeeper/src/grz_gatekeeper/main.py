@@ -1,12 +1,16 @@
 import logging
 import math
 import threading
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import click
+import jwt
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from grz_common.models.base import IgnoringBaseSettings
 from grz_common.models.s3 import S3ConfigModel, S3Options
 from grz_common.transfer import init_s3_client
 from grz_db.models.author import Author
@@ -20,6 +24,9 @@ from grz_pydantic_models.gatekeeper import (
 )
 from grz_pydantic_models.submission.metadata.v1 import File, GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
+from jwt import PyJWTError
+from passlib.context import CryptContext
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -44,8 +51,20 @@ app = FastAPI(
 )
 
 
+class AuthUserConfig(IgnoringBaseSettings):
+    hashed_password: str
+    disabled: bool = False
+
+
+class AuthConfig(IgnoringBaseSettings):
+    secret_key: str
+    algorithm: str
+    access_token_expire_minutes: int
+    users: dict[str, AuthUserConfig] = Field(default_factory=dict)
+
+
 class GatekeeperConfig(DbConfig, S3ConfigModel):
-    pass
+    auth: AuthConfig
 
 
 @lru_cache
@@ -62,6 +81,102 @@ def get_gatekeeper_config() -> GatekeeperConfig:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server configuration is missing."
         ) from e
+
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/v1/token")
+
+
+class TokenData(BaseModel):
+    username: str | None = None
+
+
+class AuthUser(BaseModel):
+    username: str
+    disabled: bool | None = None
+
+
+class UserInDB(AuthUser):
+    hashed_password: str
+
+
+def get_user_from_config(config: GatekeeperConfig, username: str) -> UserInDB | None:
+    """Fetches user details from the loaded configuration."""
+    if username in config.auth.users:
+        user_config = config.auth.users[username]
+        return UserInDB(username=username, hashed_password=user_config.hashed_password, disabled=user_config.disabled)
+    return None
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def authenticate_user(config: GatekeeperConfig, username: str, password: str) -> AuthUser | None:
+    user = get_user_from_config(config, username)
+    if not user:
+        return None
+    if not verify_password(password, user.hashed_password):
+        return None
+    return AuthUser(username=user.username, disabled=user.disabled)
+
+
+def create_access_token(data: dict, config: GatekeeperConfig) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(UTC) + timedelta(minutes=config.auth.access_token_expire_minutes)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, config.auth.secret_key, algorithm=config.auth.algorithm)
+    return encoded_jwt
+
+
+async def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)], config: GatekeeperConfig = Depends(get_gatekeeper_config)
+) -> AuthUser:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, config.auth.secret_key, algorithms=[config.auth.algorithm])
+        username: str | None = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except PyJWTError as e:
+        raise credentials_exception from e
+
+    user_config = get_user_from_config(config, token_data.username)
+    if user_config is None:
+        raise credentials_exception
+    return AuthUser(username=user_config.username, disabled=user_config.disabled)
+
+
+async def get_current_active_user(current_user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
+    if current_user.disabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+    return current_user
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+@app.post("/v1/token", response_model=Token)
+async def login_for_access_token(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    config: GatekeeperConfig = Depends(get_gatekeeper_config),
+) -> Token:
+    user = authenticate_user(config, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = create_access_token(data={"sub": user.username}, config=config)
+    return Token(access_token=access_token, token_type="bearer")  # noqa: S106
 
 
 def get_submission_db(config: GatekeeperConfig = Depends(get_gatekeeper_config)) -> SubmissionDb:
@@ -210,9 +325,13 @@ def generate_presigned_urls_for_file(  # noqa: PLR0913
 @app.post("/v1/submissions/upload", response_model=InitiateUploadResponse, status_code=status.HTTP_201_CREATED)
 async def initiate_upload(
     request: GatekeeperInitiateUploadRequest,
+    current_user: Annotated[AuthUser, Depends(get_current_active_user)],
     db: SubmissionDb = Depends(get_submission_db),
     s3_options: S3Options = Depends(get_s3_options),
 ):
+    log.info(
+        f"Authenticated user '{current_user.username}' initiated upload for submission '{request.metadata.submission_id}'"
+    )
     metadata = request.metadata
     # run basic checks
     await gatekeep(metadata, db)
@@ -287,9 +406,11 @@ async def initiate_upload(
 async def complete_upload(
     submission_id: str,
     completed_request: CompleteUploadRequest,
+    current_user: Annotated[AuthUser, Depends(get_current_active_user)],
     db: SubmissionDb = Depends(get_submission_db),
     s3_options: S3Options = Depends(get_s3_options),
 ):
+    log.info(f"Authenticated user '{current_user.username}' is completing upload for submission '{submission_id}'")
     s3_client: S3Client = init_s3_client(s3_options)
     bucket_name = s3_options.bucket
 
@@ -343,9 +464,8 @@ async def complete_upload(
 def run(config_file, host, port):
     global CONFIG_FILE_PATH
     CONFIG_FILE_PATH = config_file
-    # validate config file on startup (otherwise will only fail on first request)
-    _ = GatekeeperConfig.from_path(CONFIG_FILE_PATH)
-
+    # validate config file on startup
+    _ = get_gatekeeper_config()
     log.info(f"Starting server with config from: {CONFIG_FILE_PATH}")
     uvicorn.run(app, host=host, port=port)
 
