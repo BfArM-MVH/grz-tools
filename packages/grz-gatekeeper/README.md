@@ -7,8 +7,9 @@ An API server for the GRZ submission process.
 
 ## Overview
 
-Example config:
+Example GRZ side config:
 ```yaml
+# gatekeeper.yaml
 identifiers:
   grz: "GRZM00123"                                     # from the WES_tumor+germline example
   le: "123456789"                                      # from the WES_tumor+germline example
@@ -19,8 +20,8 @@ keys:
 s3:
   api_base_url: "http://127.0.0.1:54321"                # default
   endpoint_url: "http://localhost:9000"                 # default in grz-watchdog testbed
-  access_key: "Gd4G0VqhHTmi28twgsmF"                    # default in grz-watchdog testbed
-  secret: "KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f"    # default in grz-watchdog testbed
+  access_key: "Gd4G0VqhHTmi28twgsmF"                    # for the GRZ S3 user responsible for inbox access
+  secret: "KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f"    # for the GRZ S3 user responsible for inbox access
   bucket: test1                                         # default in grz-watchdog testbed
 
 db:
@@ -40,6 +41,16 @@ db:
       -----END OPENSSH PRIVATE KEY-----
 
     private_key_passphrase: "test"                      # default in grz-watchdog testbed
+
+# new section for managing authentication
+auth:
+  secret_key: "f06adaba52642bd9178619fe8f615caf6a152a41b9061caa1ff022c8868185f1"  # used for jwt encoding
+  algorithm: "HS256"
+  access_token_expire_minutes: 120
+  users:
+    le-123456789:
+      hashed_password: "$2b$12$sxNbW88d2o0aPK7kAMcGl.9dr1xlL57XNg2mWBV3YTOxFBNx9lzOm"  # as produced by `passlib.context.CryptContext(schemes=["bcrypt"], deprecated="auto").hash($SECRET)`
+      disabled: false
 ```
 
 Run on the GRZ side
@@ -47,7 +58,24 @@ Run on the GRZ side
 grz-gatekeeper run --config-file gatekeeper.yaml
 ```
 
+Example LE side config:
+```yaml
+# GRZM00123.config.yaml
+identifiers:
+  grz: "GRZM00123"                                     # from the WES_tumor+germline example
+  le: "123456789"                                      # from the WES_tumor+germline example
+
+keys:
+  grz_public_key_path: '/path/to/inbox.pub'
+s3:
+  api_base_url: "http://127.0.0.1:54321"
+  endpoint_url: "http://127.0.0.1:54321"  # unused if api_base_url is defined
+  access_key: "le-123456789"              # re-use access_key as username for oauth2
+  secret: "a_very_secret_password"        # re-use secret as password for oauth2; use envvars instead!
+  bucket: test1                           # unused if api_base_url is defined
+```
+
 Upload to the GRZ via grz-cli
 ```sh
-grz-cli upload --config-file inbox.yaml --submission-dir /path/to/submission/dir
+grz-cli upload --config-file GRZM00123.config.yaml --submission-dir /path/to/submission/dir
 ```
