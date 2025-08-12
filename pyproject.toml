@@ -26,6 +26,7 @@ test = [
     "grz-cli",
     "grz-db",
     "grzctl",
+    "grz-gatekeeper",
 ]
 
 [dependency-groups]
