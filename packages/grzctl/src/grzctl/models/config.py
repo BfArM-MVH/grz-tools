@@ -31,4 +31,4 @@ class DbConfig(IgnoringBaseSettings):
 
 
 class ListConfig(S3ConfigModel):
-    pass
+    db: DbModel | None = None
