@@ -180,6 +180,20 @@ Example usage:
 grz-cli upload --submission-dir foo
 ```
 
+### get-id
+
+*Available in grz-cli v1.2.0 or higher.*
+
+Compute and print the submission ID from a submission's JSON metadata.
+
+This is useful in case you forget to store the ID printed during upload.
+
+Example usage:
+
+```bash
+grz-cli get-id path/to/metadata.json
+```
+
 ## Testing
 
 Please note that binary files used for testing are managed with [Git LFS](https://git-lfs.com), which will be needed to clone them locally with the git repository.
