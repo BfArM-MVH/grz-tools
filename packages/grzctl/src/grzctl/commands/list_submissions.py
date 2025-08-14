@@ -15,6 +15,7 @@ from grz_db.models.submission import SubmissionDb
 from pydantic_core import to_jsonable_python
 
 from ..models.config import ListConfig
+from . import limit
 from .db import get_submission_db_instance
 
 log = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def _prepare_table(summaries: list[InboxSubmissionSummary], database_states: dic
 @config_file
 @output_json
 @click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
-@click.option("--limit", type=click.IntRange(min=0), default=10)
+@limit
 def list_submissions(config_file: Path, output_json: bool, show_cleaned: bool, limit: int):
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.

@@ -449,15 +449,19 @@ class SubmissionDb:
             submission = session.exec(statement).first()
             return submission
 
-    def list_submissions(self) -> Sequence[Submission]:
+    def list_submissions(self, limit: int | None) -> Sequence[Submission]:
         """
         Lists all submissions in the database.
 
         Returns:
-            A list of all submissions in the database, ordered by their ID.
+            A list of all submissions in the database, ordered by their submission date, latest first.
         """
         with self._get_session() as session:
-            statement = select(Submission).options(selectinload(Submission.states)).order_by(Submission.id)  # type: ignore[arg-type]
+            statement = (
+                select(Submission).options(selectinload(Submission.states)).order_by(Submission.submission_date.desc())  # type: ignore[arg-type,union-attr]
+            )
+            if limit is not None:
+                statement = statement.limit(limit)
             submissions = session.exec(statement).all()
             return submissions
 

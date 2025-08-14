@@ -37,6 +37,7 @@ from grz_db.models.submission import (
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, LibraryType
 
 from ..models.config import DbConfig
+from . import limit
 from .pruefbericht import get_pruefbericht_library_type
 
 console = rich.console.Console()
@@ -140,14 +141,15 @@ def upgrade(
 
 @db.command("list")
 @output_json
+@limit
 @click.pass_context
-def list_submissions(ctx: click.Context, output_json: bool = False):
+def list_submissions(ctx: click.Context, output_json: bool, limit: int):
     """Lists all submissions in the database with their latest state."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
 
     try:
-        submissions = db_service.list_submissions()
+        submissions = db_service.list_submissions(limit=limit)
     except Exception as e:
         raise click.ClickException(str(e)) from e
 
