@@ -11,6 +11,7 @@ import grz_pydantic_models.submission.metadata
 from grz_common.logging import setup_cli_logging
 
 from .commands.encrypt import encrypt
+from .commands.get_id import get_id
 from .commands.submit import submit
 from .commands.upload import upload
 from .commands.validate import validate
@@ -63,6 +64,7 @@ def build_cli():
     cli.add_command(encrypt)
     cli.add_command(upload)
     cli.add_command(submit)
+    cli.add_command(get_id)
 
     return cli
 
