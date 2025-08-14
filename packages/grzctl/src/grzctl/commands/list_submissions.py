@@ -68,14 +68,16 @@ def _format_upload_duration(duration: datetime.timedelta) -> rich.text.Text:
     )
 
 
-def _prepare_table(summaries: list[InboxSubmissionSummary], database_states: dict[str, str | None]) -> rich.table.Table:
+def _prepare_table(
+    summaries: list[InboxSubmissionSummary], database_states: dict[str, str | None] | None
+) -> rich.table.Table:
     """
     Constructs a nice Rich Table to display inbox status and database state of submissions in the inbox.
     """
     table = rich.table.Table()
     table.add_column("ID", no_wrap=True)
     table.add_column("Inbox Status", no_wrap=True, justify="center")
-    if database_states:
+    if database_states is not None:
         table.add_column("Database State", no_wrap=True, justify="center", style="green")
     table.add_column("Upload Duration", overflow="fold", justify="center")
     table.add_column("Newest Upload", overflow="fold")
@@ -119,8 +121,9 @@ def list_submissions(config_file: Path, output_json: bool, show_cleaned: bool, l
     config = ListConfig.from_path(config_file)
     submissions = query_submissions(config.s3, show_cleaned)
 
-    database_states: dict[str, str | None] = {}
+    database_states: dict[str, str | None] | None = None
     if config.db is not None:
+        database_states = {}
         submission_db = get_submission_db_instance(db_url=config.db.database_url)
         # query latest database state for submissions
         for submission in submissions:
@@ -128,7 +131,7 @@ def list_submissions(config_file: Path, output_json: bool, show_cleaned: bool, l
 
     if output_json:
         submissions_jsonable = to_jsonable_python(submissions[:limit])
-        if database_states:
+        if database_states is not None:
             for submission in submissions_jsonable:
                 submission["database_state"] = database_states[submission["submission_id"]]
         json.dump(submissions_jsonable, sys.stdout)
