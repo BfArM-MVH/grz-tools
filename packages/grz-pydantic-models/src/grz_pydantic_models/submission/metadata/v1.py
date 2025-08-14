@@ -1021,6 +1021,18 @@ class Donor(StrictBaseModel):
 
         return self
 
+    @model_validator(mode="after")
+    def ensure_rna_only_with_dna(self):
+        rna_library_types = {LibraryType.wxs, LibraryType.wxs_lr}
+        donor_library_types = {datum.library_type for datum in self.lab_data}
+        donor_has_rna_libraries = rna_library_types & donor_library_types
+        donor_dna_library_types = donor_library_types - rna_library_types - {LibraryType.other, LibraryType.unknown}
+        if donor_has_rna_libraries and not donor_dna_library_types:
+            # donors must have a known DNA library type in addition to RNA data
+            raise ValueError("Donors must not have only RNA data.")
+
+        return self
+
 
 class GrzSubmissionMetadata(StrictBaseModel):
     """

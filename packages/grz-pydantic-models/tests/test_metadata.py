@@ -1,3 +1,4 @@
+import copy
 import importlib.resources
 import itertools
 import json
@@ -155,3 +156,37 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
         consents.append(ResearchConsent(schemaVersion="2025.0.1", scope=consent))
 
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
+
+
+def test_rna_without_dna():
+    """Donors can only have RNA data if DNA data also present."""
+    metadata = json.loads(
+        importlib.resources.files(resources)
+        .joinpath("example_metadata", "wes_tumor_germline", "v1.1.4.json")
+        .read_text()
+    )
+    # reduce to a single lab datum
+    metadata["donors"][0]["labData"] = [metadata["donors"][0]["labData"][0]]
+    # set the library type to RNA
+    metadata["donors"][0]["labData"][0]["libraryType"] = "wxs"
+    metadata["donors"][0]["labData"][0]["sequenceType"] = "rna"
+
+    with pytest.raises(ValidationError, match="Donors must not have only RNA data."):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+def test_rna_with_dna():
+    """Donors can only have RNA data if DNA data also present."""
+    metadata = json.loads(
+        importlib.resources.files(resources)
+        .joinpath("example_metadata", "wes_tumor_germline", "v1.1.4.json")
+        .read_text()
+    )
+    # duplicate the last lab datum
+    metadata["donors"][0]["labData"].append(copy.deepcopy(metadata["donors"][0]["labData"][-1]))
+    # set the library type to RNA
+    metadata["donors"][0]["labData"][-1]["libraryType"] = "wxs"
+    metadata["donors"][0]["labData"][-1]["sequenceType"] = "rna"
+    metadata["donors"][0]["labData"][-1]["labDataName"] = metadata["donors"][0]["labData"][-2]["labDataName"] + " RNA"
+
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
