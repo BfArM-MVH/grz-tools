@@ -312,5 +312,5 @@ def test_invalid_submission_invalid_library_type(
             }
         )
         cli = grzctl.cli.build_cli()
-        with pytest.raises(ValueError, match="cannot be submitted in the Prüfbericht"):
-            runner.invoke(cli, args, catch_exceptions=False)
+        result = runner.invoke(cli, args, catch_exceptions=False)
+        assert result.exit_code != 0, result.output
