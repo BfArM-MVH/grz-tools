@@ -1022,14 +1022,15 @@ class Donor(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
-    def ensure_rna_only_with_dna(self):
-        rna_library_types = {LibraryType.wxs, LibraryType.wxs_lr}
+    def ensure_index_has_dna_data(self):
+        # index donors must have a known DNA library type submittable in a Prüfbericht
+        pruefbericht_library_types = {"panel", "wes", "wgs", "wgs_lr"}
         donor_library_types = {datum.library_type for datum in self.lab_data}
-        donor_has_rna_libraries = rna_library_types & donor_library_types
-        donor_dna_library_types = donor_library_types - rna_library_types - {LibraryType.other, LibraryType.unknown}
-        if donor_has_rna_libraries and not donor_dna_library_types:
-            # donors must have a known DNA library type in addition to RNA data
-            raise ValueError("Donors must not have only RNA data.")
+        if self.relation == Relation.index_ and not (donor_library_types & pruefbericht_library_types):
+            raise ValueError(
+                "Index donor must have at least one lab datum with one of the following library types: "
+                f"{', '.join(pruefbericht_library_types)}."
+            )
 
         return self
 

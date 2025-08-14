@@ -158,7 +158,7 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
 
 
-def test_rna_without_dna():
+def test_index_rna_without_dna():
     """Donors can only have RNA data if DNA data also present."""
     metadata = json.loads(
         importlib.resources.files(resources)
@@ -171,11 +171,13 @@ def test_rna_without_dna():
     metadata["donors"][0]["labData"][0]["libraryType"] = "wxs"
     metadata["donors"][0]["labData"][0]["sequenceType"] = "rna"
 
-    with pytest.raises(ValidationError, match="Donors must not have only RNA data."):
+    with pytest.raises(
+        ValidationError, match="Index donor must have at least one lab datum with one of the following library types"
+    ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
-def test_rna_with_dna():
+def test_index_rna_with_dna():
     """Donors can only have RNA data if DNA data also present."""
     metadata = json.loads(
         importlib.resources.files(resources)
