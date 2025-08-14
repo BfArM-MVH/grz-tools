@@ -1,5 +1,6 @@
 """Command for listing submissions."""
 
+import datetime
 import json
 import logging
 import sys
@@ -48,6 +49,25 @@ def _get_latest_state_txt(latest_state: str | None) -> rich.text.Text:
     return latest_state_txt
 
 
+def _format_upload_duration(duration: datetime.timedelta) -> rich.text.Text:
+    upload_hours_remainder = duration.seconds // 3600
+    upload_minutes_remainder, upload_seconds_remainder = divmod(duration.seconds - (upload_hours_remainder * 3600), 60)
+
+    upload_duration_str = f"{duration.days}D" if duration.days else ""
+    if upload_hours_remainder or upload_duration_str:
+        upload_duration_str += f"{upload_hours_remainder}H"
+    if upload_minutes_remainder or upload_duration_str:
+        upload_duration_str += f"{upload_minutes_remainder}M"
+    if upload_seconds_remainder or upload_duration_str:
+        upload_duration_str += f"{upload_seconds_remainder}S"
+
+    return (
+        rich.text.Text(upload_duration_str)
+        if upload_duration_str
+        else rich.text.Text("Instantaneous 🚀", style="sky_blue1")
+    )
+
+
 def _prepare_table(summaries: list[InboxSubmissionSummary], database_states: dict[str, str | None]) -> rich.table.Table:
     """
     Constructs a nice Rich Table to display inbox status and database state of submissions in the inbox.
@@ -57,7 +77,7 @@ def _prepare_table(summaries: list[InboxSubmissionSummary], database_states: dic
     table.add_column("Inbox Status", no_wrap=True, justify="center")
     if database_states:
         table.add_column("Database State", no_wrap=True, justify="center", style="green")
-    table.add_column("Oldest Upload", overflow="fold")
+    table.add_column("Upload Duration", overflow="fold", justify="center")
     table.add_column("Newest Upload", overflow="fold")
     for summary in summaries:
         match summary.state:
@@ -73,10 +93,11 @@ def _prepare_table(summaries: list[InboxSubmissionSummary], database_states: dic
                 status_text = rich.text.Text("Error", style="red")
             case _:
                 status_text = rich.text.Text("Unknown", style="red")
+
         row: list[rich.console.RenderableType] = [
             summary.submission_id,
             status_text,
-            summary.oldest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+            _format_upload_duration(summary.newest_upload - summary.oldest_upload),
             summary.newest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         ]
         if database_states:
