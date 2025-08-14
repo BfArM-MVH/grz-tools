@@ -1,4 +1,4 @@
-"""Command for submitting (validating, encrypting, and uploading) a submission."""
+"""Command for computing the submission ID from the submission metadata."""
 
 import io
 import logging
