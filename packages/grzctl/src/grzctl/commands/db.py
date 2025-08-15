@@ -378,8 +378,9 @@ def add(ctx: click.Context, submission_id: str):
 @click.argument("submission_id", type=str)
 @click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.option("--ignore-error-state/--confirm-error-state")
 @click.pass_context
-def update(ctx: click.Context, submission_id: str, state_str: str, data_json: str | None):
+def update(ctx: click.Context, submission_id: str, state_str: str, data_json: str | None, ignore_error_state: bool):  # noqa: C901
     """Update a submission to the given state. Optionally accepts additional JSON data to associate with the log entry."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -397,6 +398,23 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
             raise click.Abort() from e
     try:
+        submission = db_service.get_submission(submission_id)
+        if not submission:
+            raise SubmissionNotFoundError(submission_id)
+        latest_state = submission.get_latest_state()
+        latest_state_is_error = latest_state is not None and latest_state.state == SubmissionStateEnum.ERROR
+        if (
+            latest_state_is_error
+            and not ignore_error_state
+            and not click.confirm(
+                f"Submission is currently in an 'Error' state. Are you sure you want to set it to '{state_enum}'?",
+                default=False,
+                show_default=True,
+            )
+        ):
+            console_err.print(f"[yellow]Not modifying state of errored submission '{submission_id}'.[/yellow]")
+            ctx.exit()
+
         new_state_log = db_service.update_submission_state(submission_id, state_enum, parsed_data)
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
@@ -408,6 +426,9 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
         console_err.print(f"[red]Error: {e}[/red]")
         console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
         raise click.Abort() from e
+    except click.exceptions.Exit as e:
+        if e.exit_code != 0:
+            raise e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()

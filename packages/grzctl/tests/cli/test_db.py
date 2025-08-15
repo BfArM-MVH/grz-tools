@@ -44,7 +44,11 @@ def blank_database_config(tmp_path: Path) -> DbConfig:
     return DbConfig(
         db={
             "database_url": "sqlite:///" + str((tmp_path / "submission.db.sqlite").resolve()),
-            "author": {"name": "alice", "private_key_path": str(private_key_path.resolve())},
+            "author": {
+                "name": "alice",
+                "private_key_path": str(private_key_path.resolve()),
+                "private_key_passphrase": "",
+            },
             "known_public_keys": str(public_key_path.resolve()),
         }
     )
@@ -157,3 +161,31 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
             [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],
             catch_exceptions=False,
         )
+
+
+def test_update_error_confirm(blank_database_config_path: Path):
+    """Database should confirm before updating a submission from an Error state."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(
+        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    )
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_update1 = runner.invoke(cli, [*args_common, "submission", "update", metadata.submission_id, "Error"])
+    assert result_update1.exit_code == 0, result_update1.output
+
+    result_update2 = runner.invoke(cli, [*args_common, "submission", "update", metadata.submission_id, "Validated"])
+    assert result_update2.exit_code != 0, result_update2.output
+    assert (
+        "Submission is currently in an 'Error' state. Are you sure you want to set it to 'Validated'?"
+        in result_update2.output
+    )
+
+    result_update3 = runner.invoke(
+        cli, [*args_common, "submission", "update", "--ignore-error-state", metadata.submission_id, "Validated"]
+    )
+    assert result_update3.exit_code == 0, result_update3.output
