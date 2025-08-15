@@ -142,6 +142,19 @@ grz-cli upload --submission-dir EXAMPLE_SUBMISSION
 
 `grz-cli` provides a command-line interface with the following subcommands:
 
+### submit
+
+The `submit` command is the recommended command for submitting data to genome data centers.
+It combines the `validate`, `encrypt`, and `upload` commands (see below).
+
+- `-s, --submission-dir`: Path to the submission directory containing both 'metadata/' and 'files/' directories [**Required**]
+- `-c, --config-file`: Path to config file [_optional_]
+
+```bash
+grz-cli submit --submission-dir foo
+```
+
+
 ### validate
 
 It is recommended to run this command before continuing with encryption and upload.
