@@ -6,6 +6,7 @@ import logging
 import logging.config
 import shutil
 import subprocess
+import sys
 from importlib.metadata import version
 from textwrap import dedent
 
@@ -72,6 +73,8 @@ def build_cli():
                            DEBUG, INFO, WARNING, ERROR, CRITICAL.
         """
         setup_cli_logging(log_file, log_level)
+
+        log.info(f"Running command: {' '.join(sys.argv)}")
 
     cli.add_command(validate)
     cli.add_command(encrypt)
