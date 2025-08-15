@@ -5,6 +5,7 @@ CLI module for handling command-line interface operations.
 import logging
 import logging.config
 from importlib.metadata import version
+from textwrap import dedent
 
 import click
 import grz_pydantic_models.submission.metadata
@@ -41,7 +42,12 @@ def build_cli():
     @click.version_option(
         version=version("grz-cli"),
         prog_name="grz-cli",
-        message=f"%(prog)s v%(version)s (currently accepted metadata schema versions: {', '.join(grz_pydantic_models.submission.metadata.get_accepted_versions())})",
+        message=dedent(f"""\
+        %(prog)s v%(version)s
+        Currently accepted metadata schema versions: {", ".join(grz_pydantic_models.submission.metadata.get_accepted_versions())}
+        grz-common v{version("grz-common")}
+        grz-pydantic-models v{version("grz-pydantic-models")}\
+        """),
     )
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(
