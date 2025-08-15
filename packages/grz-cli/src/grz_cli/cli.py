@@ -4,6 +4,7 @@ CLI module for handling command-line interface operations.
 
 import logging
 import logging.config
+import sys
 from importlib.metadata import version
 
 import click
@@ -59,6 +60,8 @@ def build_cli():
                            DEBUG, INFO, WARNING, ERROR, CRITICAL.
         """
         setup_cli_logging(log_file, log_level)
+
+        log.info(f"Running command: {' '.join(sys.argv)}")
 
     cli.add_command(validate)
     cli.add_command(encrypt)
