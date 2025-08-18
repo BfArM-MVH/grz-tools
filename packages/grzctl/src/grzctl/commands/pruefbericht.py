@@ -101,15 +101,6 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
     """
     Submit a Prüfbericht to BfArM.
     """
-    config = PruefberichtConfig.from_path(config_file)
-
-    if config.pruefbericht.authorization_url is None:
-        raise ValueError("pruefbericht.auth_url must be provided to submit Prüfberichte")
-    if config.pruefbericht.client_id is None:
-        raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
-    if config.pruefbericht.client_secret is None:
-        raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
-
     submission = Submission(metadata_dir=f"{submission_dir}/metadata", files_dir=f"{submission_dir}/files")
 
     metadata = submission.metadata.content
@@ -134,6 +125,15 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
         else:
             rich.print(pruefbericht.submitted_case)
         sys.exit(0)
+
+    config = PruefberichtConfig.from_path(config_file)
+
+    if config.pruefbericht.authorization_url is None:
+        raise ValueError("pruefbericht.auth_url must be provided to submit Prüfberichte")
+    if config.pruefbericht.client_id is None:
+        raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
+    if config.pruefbericht.client_secret is None:
+        raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
 
     if token:
         # replace newlines in token if accidentally present from pasting
