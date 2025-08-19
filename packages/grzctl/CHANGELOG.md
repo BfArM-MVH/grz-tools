@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.4.0...grzctl-v0.5.0) (2025-08-19)
+
+
+### Features
+
+* **grz-cli,grzctl:** bump grz dependencies to latest ([#359](https://github.com/BfArM-MVH/grz-tools/issues/359)) ([b31c88b](https://github.com/BfArM-MVH/grz-tools/commit/b31c88bfa32cf257e6db9b2bb80d302493dbd469))
+* **grz-cli:** also report grz library versions ([#355](https://github.com/BfArM-MVH/grz-tools/issues/355)) ([58d047e](https://github.com/BfArM-MVH/grz-tools/commit/58d047ec3492df172067312203da49c8af83a1a8))
+* **grz-db:** add limit parameter to database list_submissions ([e2eebda](https://github.com/BfArM-MVH/grz-tools/commit/e2eebdaaaa524cfeacb97f9717ba85bd74b2c8a6))
+* **grzctl:** add configurable display limit for db list command ([#344](https://github.com/BfArM-MVH/grz-tools/issues/344)) ([e2eebda](https://github.com/BfArM-MVH/grz-tools/commit/e2eebdaaaa524cfeacb97f9717ba85bd74b2c8a6))
+* **grzctl:** add configurable display limit to list command ([9279364](https://github.com/BfArM-MVH/grz-tools/commit/927936449f3d9e1707e631f343222b53b33b9862))
+* **grzctl:** also report grz library versions ([58d047e](https://github.com/BfArM-MVH/grz-tools/commit/58d047ec3492df172067312203da49c8af83a1a8))
+* **grzctl:** confirm before updating submission from error state ([#357](https://github.com/BfArM-MVH/grz-tools/issues/357)) ([25e6cb6](https://github.com/BfArM-MVH/grz-tools/commit/25e6cb62130cf926a9c77d5232bc39d3ecb91c66))
+* **grzctl:** optionally add database state to list output ([#341](https://github.com/BfArM-MVH/grz-tools/issues/341)) ([9279364](https://github.com/BfArM-MVH/grz-tools/commit/927936449f3d9e1707e631f343222b53b33b9862))
+* **grzctl:** replace oldest upload with duration in inbox list ([#345](https://github.com/BfArM-MVH/grz-tools/issues/345)) ([e16f796](https://github.com/BfArM-MVH/grz-tools/commit/e16f796251db490a9e08b79ac01b1e110e3a318b))
+
+
+### Bug Fixes
+
+* **grz-db:** allow empty author private key passphrases ([25e6cb6](https://github.com/BfArM-MVH/grz-tools/commit/25e6cb62130cf926a9c77d5232bc39d3ecb91c66))
+* **grzctl:** `pruefbericht --dry-run` does not require ([4183595](https://github.com/BfArM-MVH/grz-tools/commit/4183595dabf9324fe81a2767b93c5be03b674d60))
+* **grzctl:** `pruefbericht --dry-run` does not require config/credentials ([#358](https://github.com/BfArM-MVH/grz-tools/issues/358)) ([4183595](https://github.com/BfArM-MVH/grz-tools/commit/4183595dabf9324fe81a2767b93c5be03b674d60)), closes [#176](https://github.com/BfArM-MVH/grz-tools/issues/176)
+* **grzctl:** display database state column if table empty but config ([e16f796](https://github.com/BfArM-MVH/grz-tools/commit/e16f796251db490a9e08b79ac01b1e110e3a318b))
+
 ## [0.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.3.0...grzctl-v0.4.0) (2025-08-05)
 
 

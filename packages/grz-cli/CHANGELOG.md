@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.1.2...grz-cli-v1.2.0) (2025-08-19)
+
+
+### Features
+
+* **grz-cli,grzctl:** bump grz dependencies to latest ([#359](https://github.com/BfArM-MVH/grz-tools/issues/359)) ([b31c88b](https://github.com/BfArM-MVH/grz-tools/commit/b31c88bfa32cf257e6db9b2bb80d302493dbd469))
+* **grz-cli:** add command to compute submission ID from metadata ([#348](https://github.com/BfArM-MVH/grz-tools/issues/348)) ([674d0f1](https://github.com/BfArM-MVH/grz-tools/commit/674d0f1acb3b048cdbde2eb10056faf74033c309))
+* **grz-cli:** also report grz library versions ([#355](https://github.com/BfArM-MVH/grz-tools/issues/355)) ([58d047e](https://github.com/BfArM-MVH/grz-tools/commit/58d047ec3492df172067312203da49c8af83a1a8))
+* **grz-cli:** also write submission ID to logs on upload ([#347](https://github.com/BfArM-MVH/grz-tools/issues/347)) ([1de43aa](https://github.com/BfArM-MVH/grz-tools/commit/1de43aa5807f22bff47683c2da356f607180ef51))
+* **grz-cli:** write command line to logs ([#354](https://github.com/BfArM-MVH/grz-tools/issues/354)) ([bc28b23](https://github.com/BfArM-MVH/grz-tools/commit/bc28b23ae617d7c8837e872c24858b50d35bf25a))
+* **grzctl:** also report grz library versions ([58d047e](https://github.com/BfArM-MVH/grz-tools/commit/58d047ec3492df172067312203da49c8af83a1a8))
+
+
+### Documentation
+
+* **grz-cli:** add docs for submit command to README ([#351](https://github.com/BfArM-MVH/grz-tools/issues/351)) ([8d4b138](https://github.com/BfArM-MVH/grz-tools/commit/8d4b13850da435dfee60060caf4a47ddbe59a4d4))
+* **grz-cli:** clean and update README ([#352](https://github.com/BfArM-MVH/grz-tools/issues/352)) ([5c037b7](https://github.com/BfArM-MVH/grz-tools/commit/5c037b749b5cd97b44a53c61618e35787ab11f2a))
+
 ## [1.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.1.1...grz-cli-v1.1.2) (2025-08-05)
 
 

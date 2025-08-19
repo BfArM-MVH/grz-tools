@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.2.1...grz-common-v1.3.0) (2025-08-19)
+
+
+### Features
+
+* **grz-common:** add extra warnings for BAM files ([#356](https://github.com/BfArM-MVH/grz-tools/issues/356)) ([6c3b62a](https://github.com/BfArM-MVH/grz-tools/commit/6c3b62a6ada98e7a7ad4bb15b6ad86cf7c27c5c1))
+* **grz-common:** Add proxy options to config ([#335](https://github.com/BfArM-MVH/grz-tools/issues/335)) ([a9acc4e](https://github.com/BfArM-MVH/grz-tools/commit/a9acc4ee487de19cc29965aff1d1b10a32f174f7))
+
 ## [1.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.2.0...grz-common-v1.2.1) (2025-08-05)
 
 

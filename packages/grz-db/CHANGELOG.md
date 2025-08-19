@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.4.0...grz-db-v0.5.0) (2025-08-19)
+
+
+### Features
+
+* **grz-db:** add limit parameter to database list_submissions ([e2eebda](https://github.com/BfArM-MVH/grz-tools/commit/e2eebdaaaa524cfeacb97f9717ba85bd74b2c8a6))
+* **grzctl:** add configurable display limit for db list command ([#344](https://github.com/BfArM-MVH/grz-tools/issues/344)) ([e2eebda](https://github.com/BfArM-MVH/grz-tools/commit/e2eebdaaaa524cfeacb97f9717ba85bd74b2c8a6))
+* **grzctl:** confirm before updating submission from error state ([#357](https://github.com/BfArM-MVH/grz-tools/issues/357)) ([25e6cb6](https://github.com/BfArM-MVH/grz-tools/commit/25e6cb62130cf926a9c77d5232bc39d3ecb91c66))
+
+
+### Bug Fixes
+
+* **grz-db:** allow empty author private key passphrases ([25e6cb6](https://github.com/BfArM-MVH/grz-tools/commit/25e6cb62130cf926a9c77d5232bc39d3ecb91c66))
+
 ## [0.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.3.0...grz-db-v0.4.0) (2025-08-05)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.0...grz-pydantic-models-v2.2.1) (2025-08-19)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** require at least one DNA library for index donor ([#342](https://github.com/BfArM-MVH/grz-tools/issues/342)) ([14b3b93](https://github.com/BfArM-MVH/grz-tools/commit/14b3b934a4d221b004a8a781c51bc066f6798452))
+
 ## [2.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.1.2...grz-pydantic-models-v2.2.0) (2025-07-31)
 
 
