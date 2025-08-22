@@ -1,7 +1,6 @@
 """Tests for grzctl report."""
 
 import datetime
-import os
 
 import grzctl.cli
 from click.testing import CliRunner
@@ -9,7 +8,6 @@ from click.testing import CliRunner
 
 def test_report_processed(temp_db_config_file_path):
     env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
-    os.environ.update(env)
 
     runner = CliRunner(env=env)
     cli = grzctl.cli.build_cli()

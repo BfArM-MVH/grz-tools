@@ -1,7 +1,6 @@
 """Tests for the db subcommand."""
 
 import json
-import os
 
 import grzctl.cli
 from click.testing import CliRunner
@@ -11,9 +10,8 @@ def test_db(
     temp_db_config_file_path,
 ):
     env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
-    os.environ.update(env)
 
-    runner = CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    runner = CliRunner(env=env)
     cli = grzctl.cli.build_cli()
     execute = lambda args: runner.invoke(cli, args, catch_exceptions=False)
 
