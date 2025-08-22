@@ -16,6 +16,7 @@ from grz_db.models.submission import SubmissionDb
 from pydantic_core import to_jsonable_python
 
 from ..models.config import ListConfig
+from ..models.db import DbModel
 from . import limit
 from .db import get_submission_db_instance
 
@@ -123,12 +124,15 @@ def list_submissions(config_file: Path, output_json: bool, show_cleaned: bool, l
     submissions = query_submissions(config.s3, show_cleaned)
 
     database_states: dict[str, str | None] | None = None
-    if config.db is not None:
+    if isinstance(config.db, DbModel):
         database_states = {}
         submission_db = get_submission_db_instance(db_url=config.db.database_url)
         # query latest database state for submissions
         for submission in submissions:
             database_states[submission.submission_id] = _get_latest_state_str(submission_db, submission.submission_id)
+    elif isinstance(config.db, dict):
+        # this can happen if environment variables partially populate DbModel but it's missing from the passed config file
+        log.debug("Ignoring partial/invalid database configuration.")
 
     if output_json:
         submissions_jsonable = to_jsonable_python(submissions[:limit])
