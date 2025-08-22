@@ -28,7 +28,7 @@ class IgnoringBaseModel(BaseModel):
         import yaml
 
         with open(path, encoding="utf-8") as f:
-            config = cls(**yaml.safe_load(f))  # noqa:
+            config = cls(**yaml.safe_load(f))
 
         return config
 
@@ -54,6 +54,6 @@ class IgnoringBaseSettings(BaseSettings):
         import yaml
 
         with open(path, encoding="utf-8") as f:
-            config = cls(**yaml.safe_load(f))  # noqa:
+            config = cls(**yaml.safe_load(f))
 
         return config
