@@ -68,4 +68,5 @@ test = [
     "grz-common",
     "grzctl",
     "grz-gatekeeper",
+    "httpx",
 ]
