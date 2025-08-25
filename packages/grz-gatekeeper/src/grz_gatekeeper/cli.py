@@ -1,14 +1,10 @@
-"""
-CLI module for handling command-line interface operations.
-"""
-
-import logging.config
+import logging
 from importlib.metadata import version
 
 import click
 from grz_common.logging import setup_cli_logging
 
-from .main import run
+from .commands import run
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +26,7 @@ def build_cli():
 
     @click.group(
         cls=OrderedGroup,
-        help="Validate, encrypt, decrypt and upload submissions to a GRZ/GDC.",
+        help="API Service for GDCs.",
     )
     @click.version_option(
         version=version("grz-gatekeeper"),
