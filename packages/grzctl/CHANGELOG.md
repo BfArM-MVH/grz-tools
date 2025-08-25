@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.5.0...grzctl-v0.5.1) (2025-08-25)
+
+
+### Bug Fixes
+
+* **grzctl:** fix list crash with partial db config ([#362](https://github.com/BfArM-MVH/grz-tools/issues/362)) ([0d89514](https://github.com/BfArM-MVH/grz-tools/commit/0d895149603c9690d4312891aadefd1e2fc0a317))
+
 ## [0.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.4.0...grzctl-v0.5.0) (2025-08-19)
 
 
