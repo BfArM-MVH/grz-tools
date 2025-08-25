@@ -4,7 +4,7 @@ from importlib.metadata import version
 import click
 from grz_common.logging import setup_cli_logging
 
-from .commands import run
+from .commands import clean_stale_sessions, run
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ def build_cli():
         setup_cli_logging(log_file, log_level)
 
     cli.add_command(run)
+    cli.add_command(clean_stale_sessions)
 
     return cli
 

@@ -1,7 +1,10 @@
 import logging
 import math
+from datetime import datetime, UTC, timedelta
 
 from fastapi import HTTPException, status
+from sqlmodel import select, Session
+
 from grz_common.transfer import S3Client
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.gatekeeper import FileUploadInfo, PresignedUrlPart
@@ -72,6 +75,7 @@ def regenerate_presigned_urls(
             PresignedUrlPart(part_number=part.part_number, presigned_url=new_url, size=part.size, offset=part.offset)
         )
     file_info.parts = new_parts
+    file_info.last_modified_at = datetime.now(UTC)
     return file_info
 
 
@@ -107,3 +111,27 @@ def generate_presigned_urls_for_file(  # noqa: PLR0913
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not generate S3 pre-signed URLs."
         ) from e
+
+
+def session_cleanup(session: Session, s3_client: S3Client, bucket_name: str, older_than_days: int = 10):
+    """
+    Find and remove stale upload sessions from the database and aborts them.
+    """
+    stale_threshold = datetime.now(UTC) - timedelta(days=older_than_days)
+    log.info(f"Searching for sessions not modified since {stale_threshold.isoformat()}")
+
+    statement = select(UploadSession).where(UploadSession.last_modified_at < stale_threshold)
+    stale_sessions = session.exec(statement).all()
+
+    if not stale_sessions:
+        log.info("No stale sessions found.")
+        return
+
+    log.warning(f"Found {len(stale_sessions)} stale session(s) to clean up.")
+    abort_s3_upload_session(s3_client, bucket_name, list(stale_sessions))
+
+    for stale_session in stale_sessions:
+        session.delete(stale_session)
+
+    session.commit()
+    log.info("Finished cleaning stale sessions.")
