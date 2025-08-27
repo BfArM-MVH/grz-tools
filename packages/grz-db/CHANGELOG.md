@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.5.0...grz-db-v0.6.0) (2025-08-27)
+
+
+### Features
+
+* **grz-db,grzctl:** sort submission db list by latest state with fallbacks ([#370](https://github.com/BfArM-MVH/grz-tools/issues/370)) ([fdc521b](https://github.com/BfArM-MVH/grz-tools/commit/fdc521bcc28af3c036aea7fa89837fa078eec25f))
+
 ## [0.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.4.0...grz-db-v0.5.0) (2025-08-19)
 
 
