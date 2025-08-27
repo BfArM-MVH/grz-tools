@@ -3,6 +3,7 @@ Tests for grzctl db subcommand
 """
 
 import importlib.resources
+import json
 import sqlite3
 from pathlib import Path
 
@@ -189,3 +190,22 @@ def test_update_error_confirm(blank_database_config_path: Path):
         cli, [*args_common, "submission", "update", "--ignore-error-state", metadata.submission_id, "Validated"]
     )
     assert result_update3.exit_code == 0, result_update3.output
+
+
+def test_list_has_new_submission(blank_database_config_path: Path):
+    """List command should include a newly-added submission."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(
+        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    )
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_list = runner.invoke(cli, [*args_common, "list", "--json"])
+    assert result_list.exit_code == 0, result_list.stderr
+
+    result_list_parsed = json.loads(result_list.stdout)
+    assert result_list_parsed[0]["id"] == metadata.submission_id

@@ -18,6 +18,7 @@ from grz_pydantic_models.submission.metadata import (
 )
 from pydantic import ConfigDict, StringConstraints
 from sqlalchemy import JSON, Column
+from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import DateTime, Field, Relationship, Session, SQLModel, create_engine, select
@@ -454,11 +455,32 @@ class SubmissionDb:
         Lists all submissions in the database.
 
         Returns:
-            A list of all submissions in the database, ordered by their submission date, latest first.
+            A list of all submissions in the database. Ordered by latest
+            submission state timestamp if not null, otherwise use submission
+            date, with submissions missing both of these sorting first.
         """
         with self._get_session() as session:
+            latest_state_per_submission = (
+                select(
+                    SubmissionStateLog.submission_id.label("submission_id"),  # type: ignore[attr-defined]
+                    sqlfn.max(SubmissionStateLog.timestamp).label("timestamp"),
+                )
+                .group_by(SubmissionStateLog.submission_id)
+                .subquery("latest_states")
+            )
             statement = (
-                select(Submission).options(selectinload(Submission.states)).order_by(Submission.submission_date.desc())  # type: ignore[arg-type,union-attr]
+                select(Submission)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .join(
+                    latest_state_per_submission,
+                    Submission.id == latest_state_per_submission.c.submission_id,  # type: ignore[arg-type]
+                    isouter=True,
+                )
+                .order_by(
+                    sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_date)
+                    .desc()
+                    .nulls_first()
+                )
             )
             if limit is not None:
                 statement = statement.limit(limit)
