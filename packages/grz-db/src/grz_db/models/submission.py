@@ -466,7 +466,7 @@ class SubmissionDb:
                     sqlfn.max(SubmissionStateLog.timestamp).label("timestamp"),
                 )
                 .group_by(SubmissionStateLog.submission_id)
-                .subquery("latest_states")
+                .subquery("latest_state_per_submission")
             )
             statement = (
                 select(Submission)

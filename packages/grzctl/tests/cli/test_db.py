@@ -192,20 +192,39 @@ def test_update_error_confirm(blank_database_config_path: Path):
     assert result_update3.exit_code == 0, result_update3.output
 
 
-def test_list_has_new_submission(blank_database_config_path: Path):
-    """List command should include a newly-added submission."""
+def test_list_sort(blank_database_config_path: Path):
+    """
+    List command should sort in the expected order:
+    0. null latest state timestamp and null submission date
+    1. latest state timestamp if not null, otherwise submission date
+    """
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+
+    expected_ordering = [
+        {"id": "123456789_2025-07-01_a1b2c3d4"},
+        {"id": "123456789_2025-07-01_a1b2c3d6", "date": "2025-07-01", "add_a_state": True},
+        {"id": "123456789_2025-07-01_a1b2c3d5", "date": "2025-07-05"},
+    ]
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
-    assert result_add.exit_code == 0, result_add.stderr
+    for submission in expected_ordering:
+        result_add = runner.invoke(cli, [*args_common, "submission", "add", submission["id"]])
+        assert result_add.exit_code == 0, result_add.stderr
+
+        if (submission_date := submission.get("date", None)) is not None:
+            result_modify = runner.invoke(
+                cli, [*args_common, "submission", "modify", submission["id"], "submission_date", submission_date]
+            )
+            assert result_modify.exit_code == 0, result_modify.stderr
+
+        if submission.get("add_a_state", False):
+            result_modify = runner.invoke(cli, [*args_common, "submission", "update", submission["id"], "Uploaded"])
+            assert result_modify.exit_code == 0, result_modify.stderr
 
     result_list = runner.invoke(cli, [*args_common, "list", "--json"])
     assert result_list.exit_code == 0, result_list.stderr
 
     result_list_parsed = json.loads(result_list.stdout)
-    assert result_list_parsed[0]["id"] == metadata.submission_id
+    for i, submission in enumerate(expected_ordering):
+        assert submission["id"] == result_list_parsed[i]["id"]
