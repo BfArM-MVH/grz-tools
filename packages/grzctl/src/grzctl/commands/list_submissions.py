@@ -18,7 +18,7 @@ from pydantic_core import to_jsonable_python
 from ..models.config import ListConfig
 from ..models.db import DbModel
 from . import limit
-from .db import get_submission_db_instance
+from .db.cli import get_submission_db_instance
 
 log = logging.getLogger(__name__)
 

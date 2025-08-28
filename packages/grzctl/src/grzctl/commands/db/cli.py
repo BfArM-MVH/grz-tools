@@ -1,6 +1,5 @@
 """Command for managing a submission database"""
 
-import enum
 import json
 import logging
 import sys
@@ -15,7 +14,6 @@ import rich.padding
 import rich.panel
 import rich.table
 import rich.text
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from grz_common.cli import config_file, output_json
 from grz_common.constants import REDACTED_TAN
 from grz_db.errors import (
@@ -25,7 +23,6 @@ from grz_db.errors import (
     SubmissionNotFoundError,
 )
 from grz_db.models.author import Author
-from grz_db.models.base import VerifiableLog
 from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -36,9 +33,11 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, LibraryType
 
-from ..models.config import DbConfig
-from . import limit
-from .pruefbericht import get_pruefbericht_library_type
+from ...models.config import DbConfig
+from .. import limit
+from ..pruefbericht import get_pruefbericht_library_type
+from . import SignatureStatus, _verify_signature
+from .tui import DatabaseBrowser
 
 console = rich.console.Console()
 console_err = rich.console.Console(stderr=True)
@@ -271,52 +270,16 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
         console.print(table)
 
 
-class SignatureStatus(enum.StrEnum):
-    """Enum for signature status."""
+@db.command("tui")
+@click.pass_context
+def tui(ctx: click.Context):
+    """Starts the interactive terminal user interface to the database."""
+    db_url = ctx.obj["db_url"]
+    public_keys = ctx.obj["public_keys"]
+    database = get_submission_db_instance(db_url)
 
-    VERIFIED = "Verified"
-    FAILED = "Failed"
-    ERROR = "Error"
-    UNKNOWN = "Unknown"
-
-    def rich_display(self, comment: str | None) -> str:
-        """Displays the signature status in rich format."""
-        match self:
-            case "Verified":
-                return "[green]Verified[/green]" if comment is None else f"[green]Verified ({comment})[/green]"
-            case "Failed":
-                return "[red]Failed[/red]"
-            case "Error":
-                return "[red]Error[/red]"
-            case "Unknown" | _:
-                return "[yellow]Unknown Key[/yellow]"
-
-
-def _verify_signature(
-    public_keys: dict[str, Ed25519PublicKey], expected_key_comment: str, verifiable_log: VerifiableLog
-) -> tuple[SignatureStatus, str | None]:
-    signature_status = SignatureStatus.UNKNOWN
-    verifying_key_comment = None
-    if public_key := public_keys.get(expected_key_comment):
-        try:
-            signature_status = SignatureStatus.VERIFIED if verifiable_log.verify(public_key) else SignatureStatus.FAILED
-        except Exception as e:
-            signature_status = SignatureStatus.ERROR
-            log.error(e)
-    else:
-        log.info("Found no key with matching username in comment, trying all keys")
-        for comment, public_key in public_keys.items():
-            try:
-                if verifiable_log.verify(public_key):
-                    signature_status = SignatureStatus.VERIFIED
-                    verifying_key_comment = comment
-                    # stop trying after first verification success
-                    break
-            except Exception as e:
-                signature_status = SignatureStatus.ERROR
-                log.error(e)
-
-    return signature_status, verifying_key_comment
+    app = DatabaseBrowser(database=database, public_keys=public_keys)
+    app.run()
 
 
 def _build_submission_dict_from(
