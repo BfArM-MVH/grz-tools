@@ -1,0 +1,22 @@
+#pane-overview > HorizontalScroll > Static {
+  height: auto;
+  width: auto;
+  content-align: center middle;
+}
+
+TabPane > * {
+  height: 1fr;
+}
+
+#container-search-inputs {
+  height: 1fr;
+}
+
+#container-search-inputs > Input {
+  width: 40;
+  border-title-color: $foreground;
+}
+
+#table-search-results {
+  height: 3fr;
+}

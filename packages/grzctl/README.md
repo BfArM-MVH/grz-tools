@@ -23,3 +23,19 @@ uv run tox -e 3.12
 
 Some packages have their own unit tests.
 Run the same command above while inside a specific package directory to run that package's unit tests, if it has any.
+
+
+## Debugging Textual
+
+Start the remote Textual debugging console on the machine you will use to debug the Textual app.
+
+```
+uv run textual console
+```
+
+Use the `TEXTUAL=devtools` environment variable to instruct Textual to connect to the remote debug console.
+
+``` shell
+TEXTUAL=devtools uv run grzctl db --config-file config.db.yaml tui
+```
+

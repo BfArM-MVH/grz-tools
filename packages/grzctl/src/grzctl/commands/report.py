@@ -8,7 +8,7 @@ from grz_common.cli import config_file
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..models.config import DbConfig
-from .db import get_submission_db_instance
+from .db.cli import get_submission_db_instance
 
 log = logging.getLogger(__name__)
 
