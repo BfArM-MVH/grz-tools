@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.2.1/GRZ/grz-schema.json",
   "submission": {
     "submissionDate": "2024-07-15",
-    "submissionType": "initial",
+    "submissionType": "test",
     "submitterId": "260914050",
     "labName": "Institute für Humangenetik am Klinikum rechts der Isar",
     "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
