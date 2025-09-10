@@ -179,7 +179,7 @@ plugins = "pydantic.mypy"
 packages = "grz_cli,grzctl,grz_pydantic_models,grz_db,grz_common"
 
 [[tool.mypy.overrides]]
-module = ["crypt4gh.*", "plotext.*"]
+module = "crypt4gh.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
