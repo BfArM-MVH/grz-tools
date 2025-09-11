@@ -66,6 +66,55 @@ def test_wgs_trio_no_vcf():
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
+def test_wgs_trio_1_3():
+    """
+    v1.3 was a breaking change regarding research consents.
+    """
+    metadata_str = (
+        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", "v1.3.json").read_text()
+    )
+    GrzSubmissionMetadata.model_validate_json(metadata_str)
+
+
+def test_wgs_trio_1_3_fail_empty_consent_list():
+    """As of v1.3, empty consent lists are no longer allowed."""
+    metadata_str = (
+        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", "v1.3.json").read_text()
+    )
+    metadata = json.loads(metadata_str)
+    metadata["donors"][0]["researchConsents"] = []
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(metadata)
+
+
+def test_wgs_trio_1_3_fail_malformed_consent():
+    """As of v1.3, non-empty scope or noScopeJustification must be provided."""
+    metadata_str = (
+        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", "v1.3.json").read_text()
+    )
+    metadata = json.loads(metadata_str)
+    metadata["donors"][0]["researchConsents"][0]["scope"] = {}
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    metadata["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient unable to consent"
+    # scope, even if an empty dict, can't be provided along with noScopeJustification
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    del metadata["donors"][0]["researchConsents"][0]["scope"]
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # schemaVersion can be missing now
+    del metadata["donors"][0]["researchConsents"][0]["schemaVersion"]
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # but presentationDate no longer can
+    del metadata["donors"][0]["researchConsents"][0]["presentationDate"]
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
 def test_example_wgs_lr():
     metadata_str = (
         importlib.resources.files(resources).joinpath("example_metadata", "wgs_lr", "v1.1.4.json").read_text()

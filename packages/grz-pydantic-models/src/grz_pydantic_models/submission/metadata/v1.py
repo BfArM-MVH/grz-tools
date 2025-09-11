@@ -25,8 +25,9 @@ from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel
 from ...mii.consent import Consent, ProvisionType
+from .versioning import Version
 
-SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)\.([0-9]+)/GRZ/grz-schema\.json"
+SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
 
 log = logging.getLogger(__name__)
 
@@ -38,9 +39,7 @@ ClinicalDataNodeId = Annotated[str, StringConstraints(pattern=r"^KDK[A-Z0-9]{3}[
 
 
 def is_supported_version(version: str) -> bool:
-    major, minor, patch = (int(part) for part in version.split("."))
-    # 1.1.1 <= v <= 1.2.1
-    return (major == 1) and ((minor == 1 and 1 <= patch <= 9) or (minor == 2 and 0 <= patch <= 1))
+    return Version("1.1.1") <= Version(version) <= Version("1.3")
 
 
 class ResearchConsentCodes(StrEnum):
@@ -269,12 +268,21 @@ class ResearchConsentSchemaVersion(StrEnum):
     v_2025_0_1 = "2025.0.1"
 
 
+class ResearchConsentNoScopeJustification(StrEnum):
+    UNABLE = "patient unable to consent"
+    REFUSED = "patient refuses to sign consent"
+    NO_RETURN = "patient did not return consent documents"
+    OTHER = "other patient-related reason"
+    LE_TECH = "consent information cannot be submitted by LE due to technical reason"
+    LE_ORG = "consent is not implemented at LE due to organizational issues"
+
+
 class ResearchConsent(StrictBaseModel):
     """
     Research consents. Multiple declarations of consent are possible! Must be assigned to the respective data sets.
     """
 
-    schema_version: ResearchConsentSchemaVersion
+    schema_version: ResearchConsentSchemaVersion | None = None
     """
     Schema version of de.medizininformatikinitiative.kerndatensatz.consent
     """
@@ -285,12 +293,20 @@ class ResearchConsent(StrictBaseModel):
     """
 
     # try Consent model first, falling back to dict
-    scope: Annotated[Consent | dict, Field(union_mode="left_to_right")]
+    scope: Annotated[Consent | dict | None, Field(union_mode="left_to_right")] = None
     """
     Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
     See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
     'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
     """
+
+    no_scope_justification: ResearchConsentNoScopeJustification | None = None
+
+    @model_validator(mode="after")
+    def ensure_scope_xor_justification(self):
+        if (self.scope is None) != (self.no_scope_justification is None):
+            return self
+        raise ValueError("Either scope or noScopeJustification must be provided, but not both.")
 
     @model_validator(mode="after")
     def ensure_top_level_provision_deny(self):
@@ -1096,10 +1112,28 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
     def get_schema_version(self) -> str:
         if match := re.fullmatch(SCHEMA_URL_PATTERN, self.schema_):
-            schema_version = ".".join(match.groups())
+            schema_version = ".".join(match.groups(default="0"))
         else:
             raise ValueError("Schema URL should have matched pattern but didn't")
         return schema_version
+
+    @model_validator(mode="after")
+    def validate_research_consent_after_minor_version_3(self):
+        if Version(self.get_schema_version()) >= Version("1.3"):
+            for donor in self.donors:
+                if len(donor.research_consents) < 1:
+                    raise ValueError("Donors must have research consent as of metadata schema v1.3")
+                for consent in donor.research_consents:
+                    if consent.presentation_date is None:
+                        raise ValueError("Research consents must have presentationDate as of metadata schema v1.3")
+                    if consent.no_scope_justification is None and not consent.scope:
+                        raise ValueError("Either a non-empty scope must be provided or a noScopeJustification")
+        else:
+            for donor in self.donors:
+                for consent in donor.research_consents:
+                    if consent.schema_version is None:
+                        raise ValueError("schemaVersion is required in researchConsent before metadata schema v1.3")
+        return self
 
     @model_validator(mode="after")
     def ensure_supported_schema_version(self):
