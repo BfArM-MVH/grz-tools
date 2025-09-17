@@ -1,24 +1,10 @@
-"""
-CLI module for handling command-line interface operations.
-"""
-
 import logging
-import logging.config
-import shutil
-import subprocess
-import sys
 from importlib.metadata import version
-from textwrap import dedent
 
 import click
-import grz_pydantic_models.submission.metadata
 from grz_common.logging import setup_cli_logging
 
-from .commands.encrypt import encrypt
-from .commands.get_id import get_id
-from .commands.submit import submit
-from .commands.upload import upload
-from .commands.validate import validate
+from .commands import clean_stale_sessions, run
 
 log = logging.getLogger(__name__)
 
@@ -40,22 +26,12 @@ def build_cli():
 
     @click.group(
         cls=OrderedGroup,
-        help="Validate, encrypt, decrypt and upload submissions to a GRZ/GDC.",
+        help="API Service for GDCs.",
     )
     @click.version_option(
-        version=version("grz-cli"),
-        prog_name="grz-cli",
-        message=dedent(f"""\
-        %(prog)s v%(version)s
-        Currently accepted metadata schema versions: {", ".join(grz_pydantic_models.submission.metadata.get_accepted_versions())}
-        grz-common v{version("grz-common")}
-        grz-pydantic-models v{version("grz-pydantic-models")}
-        """)
-        + (
-            subprocess.run(["grz-check", "--version"], capture_output=True, text=True).stdout.strip()  # noqa: S607
-            if shutil.which("grz-check") is not None
-            else ""
-        ),
+        version=version("grz-gatekeeper"),
+        prog_name="grz-gatekeeper",
+        message="%(prog)s v%(version)s",
     )
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(
@@ -74,13 +50,8 @@ def build_cli():
         """
         setup_cli_logging(log_file, log_level)
 
-        log.info(f"Running command: {' '.join(sys.argv)}")
-
-    cli.add_command(validate)
-    cli.add_command(encrypt)
-    cli.add_command(upload)
-    cli.add_command(submit)
-    cli.add_command(get_id)
+    cli.add_command(run)
+    cli.add_command(clean_stale_sessions)
 
     return cli
 

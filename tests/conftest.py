@@ -411,3 +411,61 @@ def working_dir(tmpdir_factory: pytest.TempdirFactory):
 @pytest.fixture
 def working_dir_path(working_dir) -> Path:
     return Path(working_dir.strpath)
+
+
+@pytest.fixture
+def auth_config_content():
+    """Provides the 'auth' section for the gatekeeper test configuration."""
+    return {
+        "auth": {
+            "secret_key": "test-secret-key-for-jwt-hs256",
+            "algorithm": "HS256",
+            "access_token_expire_minutes": 15,
+            "users": {
+                "le-123456789": {
+                    "hashed_password": "$2b$12$sxNbW88d2o0aPK7kAMcGl.9dr1xlL57XNg2mWBV3YTOxFBNx9lzOm",  # pass: a_very_secret_password
+                    "disabled": False,
+                }
+            },
+        }
+    }
+
+
+@pytest.fixture
+def temp_gatekeeper_config_file_path(temp_data_dir_path, s3_config_content, db_config_content, auth_config_content):
+    """Create a temporary gatekeeper.yaml config file for testing."""
+    import yaml
+    from grz_gatekeeper import config as gatekeeper_config
+
+    config_data = {**s3_config_content, **db_config_content, **auth_config_content}
+    config_path = temp_data_dir_path / "gatekeeper.test.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config_data, f)
+
+    # set global config path for test session
+    gatekeeper_config.CONFIG_FILE_PATH = str(config_path)
+    return config_path
+
+
+@pytest.fixture
+def mock_submission_db(mocker):
+    """Mock submission database dependency for gatekeeper API tests."""
+    from unittest.mock import MagicMock
+
+    from grz_gatekeeper import main as gatekeeper_main
+
+    mock_db = MagicMock()
+    app = gatekeeper_main.app
+    app.dependency_overrides[gatekeeper_main.get_submission_db] = lambda: mock_db
+    yield mock_db
+    app.dependency_overrides = {}
+
+
+@pytest.fixture
+def test_app_client(temp_gatekeeper_config_file_path, mock_submission_db):
+    """Provides a FastAPI TestClient with mocked dependencies."""
+    from fastapi.testclient import TestClient
+    from grz_gatekeeper.main import app
+
+    with TestClient(app) as client:
+        yield client

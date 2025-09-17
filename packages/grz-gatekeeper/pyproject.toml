@@ -1,35 +1,23 @@
 [project]
-name = "grzctl"
-description = "Control CLI for GRZ administrators."
+name = "grz-gatekeeper"
+description = "API Service for GDCs."
 readme = "README.md"
 license = "MIT"
 authors = [
-    { name = "Koray Kirli", email = "koraykirli@gmail.com" },
-    { name = "Mathias Lesche", email = "mathias.lesche@tu-dresden.de" },
-    { name = "Florian R. Hölzlwimmer", email = "git.ich@frhoelzlwimmer.de" },
     { name = "Till Hartmann", email = "till.hartmann@bih-charite.de" },
-    { name = "Thomas Sell", email = "thomas.sell@bih-charite.de" },
-    { name = "Travis Wrightsman", email = "travis.wrightsman@uni-tuebingen.de" }
 ]
 dynamic = ["version"]
 dependencies = [
     "boto3 >=1.36,<2",
-    "click >=8.2,<9",
-    "crypt4gh >=1.7,<2",
-    "jsonschema >=4.23.0,<5",
-    "pyyaml >=6.0.2,<7",
-    "tqdm >=4.66.5,<5",
-    "pydantic >=2.9.2,<2.10",
-    "pydantic-settings >=2.9.0,<2.10",
-    "platformdirs >=4.3.6,<5",
-    "pysam ==0.23.*",
-    "rich ==13.*",
-    "requests >=2.32.3,<3",
-    "grz-db >=0.5.0",
-    "grz-common >=1.3.0,<2",
-    "grz-cli >=1.2.0,<2",
-    "grz-pydantic-models >=2.2.1,<3",
-    "textual~=5.3"
+    "grz-db >=0.4.0",
+    "grz-common >=1.2.1,<2",
+    "grz-pydantic-models >=2.2.0,<3",
+    "grzctl>=0.4.0,<1",
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+    "pyjwt>=2.10.1",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.20",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -40,7 +28,6 @@ keywords = ["GRZ", "GDC", "S3"]
 
 [tool.uv.sources]
 grz-common = { path = "../grz-common", editable = true }
-grz-cli = { path = "../grz-cli", editable = true }
 grz-db = { path = "../grz-db", editable = true }
 grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
 
@@ -53,21 +40,21 @@ commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"
 Repository = "https://github.com/BfArM-MVH/grz-tools"
-Documentation = "https://github.com/BfArM-MVH/grz-tools/tree/main/packages/grzctl"
+Documentation = "https://github.com/BfArM-MVH/grz-tools/tree/main/packages/grz-gatekeeper"
 Issues = "https://github.com/BfArM-MVH/grz-tools/issues"
 
 [project.scripts]
-grzctl = "grzctl.cli:main"
+grz-gatekeeper = "grz_gatekeeper.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = "src/grzctl/__init__.py"
+path = "src/grz_gatekeeper/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/grzctl"]
+packages = ["src/grz_gatekeeper"]
 
 [dependency-groups]
 dev = ["tox", "tox-uv"]
@@ -80,5 +67,6 @@ test = [
     "numpy",
     "grz-common",
     "grzctl",
-    "grz-cli"
+    "grz-gatekeeper",
+    "httpx",
 ]
