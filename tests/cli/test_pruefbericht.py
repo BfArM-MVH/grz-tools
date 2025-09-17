@@ -56,7 +56,7 @@ def bfarm_submit_api(requests_mock):
                 {
                     "SubmittedCase": {
                         "submissionDate": "2024-07-15",
-                        "submissionType": "initial",
+                        "submissionType": "test",
                         "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
                         "submitterId": "260914050",
                         "dataNodeId": "GRZK00007",
@@ -80,7 +80,7 @@ def bfarm_submit_api(requests_mock):
                 {
                     "SubmittedCase": {
                         "submissionDate": "2024-07-15",
-                        "submissionType": "initial",
+                        "submissionType": "test",
                         "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000001",
                         "submitterId": "260914050",
                         "dataNodeId": "GRZK00007",
@@ -104,7 +104,7 @@ def bfarm_submit_api(requests_mock):
                 {
                     "SubmittedCase": {
                         "submissionDate": "2024-07-15",
-                        "submissionType": "initial",
+                        "submissionType": "test",
                         "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
                         "submitterId": "260914050",
                         "dataNodeId": "GRZK00007",
