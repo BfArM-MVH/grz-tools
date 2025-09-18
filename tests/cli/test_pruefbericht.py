@@ -349,5 +349,5 @@ def test_refuse_redacted_tang(bfarm_auth_api, bfarm_submit_api, temp_pruefberich
             }
         )
         cli = grzctl.cli.build_cli()
-        result = runner.invoke(cli, args, catch_exceptions=False)
-        assert result.exit_code == 1, result.output
+        with pytest.raises(ValueError, match="Refusing to submit a Prüfbericht with a redacted TAN"):
+            runner.invoke(cli, args, catch_exceptions=False)
