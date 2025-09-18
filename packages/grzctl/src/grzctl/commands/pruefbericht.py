@@ -9,6 +9,7 @@ import click
 import requests
 import rich
 from grz_common.cli import config_file, output_json, submission_dir
+from grz_common.constants import REDACTED_TAN
 from grz_common.workers.submission import Submission
 from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
 from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
@@ -134,6 +135,10 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
         raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
     if config.pruefbericht.client_secret is None:
         raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
+
+    if metadata.submission.tan_g == REDACTED_TAN and not "test" in config.pruefbericht.api_base_url:
+        log.error("Refusing to submit a pruefbericht with a redacted TAN")
+        sys.exit(1)
 
     if token:
         # replace newlines in token if accidentally present from pasting

@@ -11,6 +11,7 @@ import click.testing
 import grzctl.cli
 import pytest
 import responses
+from grz_common.constants import REDACTED_TAN
 
 from .. import mock_files
 
@@ -314,3 +315,39 @@ def test_invalid_submission_invalid_library_type(
         cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
         assert result.exit_code != 0, result.output
+
+
+def test_refuse_redacted_tang(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        # create and modify a temporary copy of the metadata JSON
+        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
+            metadata = json.load(metadata_file)
+
+            # set tanG to REDACTED_TAN
+            metadata["tanG"] = REDACTED_TAN
+
+            metadata_file.seek(0)
+            json.dump(metadata, metadata_file)
+            metadata_file.truncate()
+
+        args = [
+            "pruefbericht",
+            "--config-file",
+            temp_pruefbericht_config_file_path,
+            "--submission-dir",
+            str(tmp_path),
+        ]
+
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grzctl.cli.build_cli()
+        result = runner.invoke(cli, args, catch_exceptions=False)
+        assert result.exit_code == 1, result.output
