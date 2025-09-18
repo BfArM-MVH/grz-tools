@@ -326,7 +326,7 @@ def test_refuse_redacted_tang(bfarm_auth_api, bfarm_submit_api, temp_pruefberich
             metadata = json.load(metadata_file)
 
             # set tanG to REDACTED_TAN
-            metadata["tanG"] = REDACTED_TAN
+            metadata["submission"]["tanG"] = REDACTED_TAN
 
             metadata_file.seek(0)
             json.dump(metadata, metadata_file)

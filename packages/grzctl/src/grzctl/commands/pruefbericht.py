@@ -136,7 +136,7 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
     if config.pruefbericht.client_secret is None:
         raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
 
-    if metadata.submission.tan_g == REDACTED_TAN and not "test" in config.pruefbericht.api_base_url:
+    if metadata.submission.tan_g == REDACTED_TAN:
         log.error("Refusing to submit a Prüfbericht with a redacted TAN")
         sys.exit(1)
 
