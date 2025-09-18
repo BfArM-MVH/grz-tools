@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.6.0...grzctl-v0.7.0) (2025-09-18)
+
+
+### Features
+
+* **grzctl:** add TUI for browsing submission database ([#371](https://github.com/BfArM-MVH/grz-tools/issues/371)) ([c296a30](https://github.com/BfArM-MVH/grz-tools/commit/c296a30676adcc01281affb024da26d260476442))
+
+
+### Bug Fixes
+
+* **grzctl:** refuse submission of pruefbericht with redacted tanG ([#380](https://github.com/BfArM-MVH/grz-tools/issues/380)) ([6b6272e](https://github.com/BfArM-MVH/grz-tools/commit/6b6272e18a51d8aaf3559a3f22173852b4ce06d6))
+
 ## [0.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.5.0...grzctl-v0.6.0) (2025-08-27)
 
 

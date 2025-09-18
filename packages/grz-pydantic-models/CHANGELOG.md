@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.1...grz-pydantic-models-v2.3.0) (2025-09-18)
+
+
+### Features
+
+* **grz-pydantic-models:** support metadata schema v1.3 ([#378](https://github.com/BfArM-MVH/grz-tools/issues/378)) ([21a1ad5](https://github.com/BfArM-MVH/grz-tools/commit/21a1ad53eec40c554f6e1b3205620f6e0cb5033d))
+
 ## [2.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.0...grz-pydantic-models-v2.2.1) (2025-08-19)
 
 
