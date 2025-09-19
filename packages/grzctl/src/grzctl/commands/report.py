@@ -2,6 +2,7 @@
 
 import datetime
 import logging
+from pathlib import Path
 
 import click
 from grz_common.cli import config_file
@@ -82,3 +83,51 @@ def processed(ctx: click.Context, since: datetime.date | None, until: datetime.d
                 ]
             )
         )
+
+
+@report.command()
+@click.option(
+    "--quarter",
+    "quarter",
+    type=click.IntRange(min=1, max=4),
+    help="Quarter to generate report for.",
+)
+@click.option(
+    "--year",
+    "year",
+    type=click.IntRange(min=2025),
+    help="Year to generate report for.",
+)
+@click.option(
+    "--outdir",
+    "output_directory",
+    type=click.Path(
+        exists=True, file_okay=False, dir_okay=True, readable=True, writable=True, resolve_path=True, path_type=Path
+    ),
+    default=Path.cwd(),
+    help="Directory to output TSV files. Defaults to current directory.",
+)
+@click.pass_context
+def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_directory: Path):
+    """
+    Generate the tables for the quarterly report.
+    """
+    db = ctx.obj["db_url"]
+    submission_db = get_submission_db_instance(db)
+
+    if bool(year) != bool(quarter):
+        raise click.UsageError("Both year and quarter must be provided or omitted.")
+    elif (year and quarter) is None:
+        today = datetime.date.today()
+        quarter = ((today.month - 1) % 3) + 1
+        # default to last quarter if ended less than 15 days ago otherwise current quarter
+        if today <= datetime.date(year=today.year, month=1, day=15):
+            year = today.year - 1
+            quarter = 4
+        else:
+            year = today.year
+
+        if (today.month in {4, 7, 10}) and (today.day <= 15):
+            quarter -= 1
+
+    log.info("Generating quarterly report for Q%d %d", quarter, year)

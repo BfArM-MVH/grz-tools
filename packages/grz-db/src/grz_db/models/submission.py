@@ -11,7 +11,13 @@ from alembic.script import ScriptDirectory as AlembicScriptDirectory
 from grz_pydantic_models.submission.metadata import (
     DiseaseType,
     GenomicDataCenterId,
+    GenomicStudySubtype,
+    GenomicStudyType,
     LibraryType,
+    Relation,
+    ResearchConsentNoScopeJustification,
+    SequenceSubtype,
+    SequenceType,
     SubmissionType,
     SubmitterId,
     Tan,
@@ -83,6 +89,8 @@ class SubmissionBase(SQLModel):
     # fields also for Tätigkeitsbericht
     consented: bool | None = None
     detailed_qc_passed: bool | None = None
+    genomic_study_type: GenomicStudyType | None = None
+    genomic_study_subtype: GenomicStudySubtype | None = None
 
 
 class Submission(SubmissionBase, table=True):
@@ -223,6 +231,43 @@ class ChangeRequestLogCreate(ChangeRequestLogBase):
     submission_id: str
     author_name: str
     signature: str
+
+
+class ConsentRecord(SQLModel, table=True):
+    """Donor consent record model."""
+
+    __tablename__ = "consent_records"
+
+    submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
+    pseudonym: str = Field(foreign_key="submissions.pseudonym", primary_key=True)
+    relation: Relation
+    mv_consented: bool
+    research_consented: bool | None = None
+    research_consent_missing_justification: ResearchConsentNoScopeJustification | None = None
+
+
+class DetailedQCResult(SQLModel, table=True):
+    """Detailed QC pipeline result model."""
+
+    __tablename__ = "detailed_qc_results"
+
+    submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
+    lab_datum_id: str = Field(primary_key=True)
+    timestamp: datetime.datetime = Field(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    sequence_type: SequenceType
+    sequence_subtype: SequenceSubtype
+    library_type: LibraryType
+    percent_bases_above_quality_threshold: float
+    mean_depth_of_coverage: float
+    targeted_regions_above_min_coverage: float
+
+    model_config = ConfigDict(  # type: ignore
+        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
+        populate_by_name=True,
+    )
 
 
 class SubmissionDb:
@@ -389,6 +434,59 @@ class SubmissionDb:
             except Exception:
                 session.rollback()
                 raise
+
+    def get_consent_records(self, submission_id: str, pseudonym: str | None = None) -> tuple[ConsentRecord, ...]:
+        """Retrieve all consent records for a given submission, or, optionally, only for a specific pseudonym."""
+        with self._get_session() as session:
+            statement = select(ConsentRecord).where(ConsentRecord.submission_id == submission_id)
+            if pseudonym is not None:
+                statement = statement.where(ConsentRecord.pseudonym == pseudonym)
+            records = tuple(session.exec(statement).all())
+        return records
+
+    def add_consent_record(self, record: ConsentRecord) -> ConsentRecord:
+        """Add or update a consent record to/in the database."""
+        with self._get_session() as session:
+            session.add(record)
+
+            try:
+                session.commit()
+                session.refresh(record)
+                return record
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    def delete_consent_record(self, record: ConsentRecord) -> None:
+        """Delete a consent record from the database."""
+        with self._get_session() as session:
+            session.delete(record)
+
+            try:
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    def get_detailed_qc_results(self, submission_id: str) -> tuple[DetailedQCResult, ...]:
+        """Retrieve all detailed QC results for a given submission."""
+        with self._get_session() as session:
+            statement = select(DetailedQCResult).where(DetailedQCResult.submission_id == submission_id)
+            results = tuple(session.exec(statement).all())
+        return results
+
+    def add_detailed_qc_result(self, result: DetailedQCResult) -> DetailedQCResult:
+        """Add or update a detailed QC result to/in the database."""
+        with self._get_session() as session:
+            session.add(result)
+
+            try:
+                session.commit()
+                session.refresh(result)
+                return result
+            except Exception as e:
+                session.rollback()
+                raise e
 
     def add_change_request(
         self,

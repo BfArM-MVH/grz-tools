@@ -1,11 +1,14 @@
 """Command for managing a submission database"""
 
+import csv
 import json
 import logging
 import sys
 import traceback
 from collections import namedtuple
-from datetime import date
+from datetime import UTC, date, datetime
+from operator import itemgetter
+from pathlib import Path
 from typing import Any
 
 import click
@@ -15,7 +18,7 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from grz_common.cli import config_file, output_json
+from grz_common.cli import FILE_R_E, config_file, output_json
 from grz_common.constants import REDACTED_TAN
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_db.errors import (
@@ -28,12 +31,14 @@ from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
+    ConsentRecord,
+    DetailedQCResult,
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
     SubmissionStateLog,
 )
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, LibraryType
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, LibraryType, SequenceSubtype, SequenceType
 
 from ...models.config import DbConfig
 from .. import limit
@@ -449,7 +454,15 @@ def _diff_metadata(
     """Given a database submission and a metadata.json file, report changed fields and their before/after values if they are not in ignore_fields."""
     changes = []
 
-    simple_fields = {"tan_g", "submission_date", "submission_type", "submitter_id", "disease_type"}
+    simple_fields = {
+        "tan_g",
+        "submission_date",
+        "submission_type",
+        "submitter_id",
+        "disease_type",
+        "genomic_study_type",
+        "genomic_study_subtype",
+    }
 
     for field in simple_fields - ignore_fields:
         if field == "tan_g" and metadata.submission.tan_g == REDACTED_TAN:
@@ -488,6 +501,50 @@ def _diff_metadata(
     return changes
 
 
+def _diff_consent_records(
+    records_in_db: tuple[ConsentRecord, ...], metadata: GrzSubmissionMetadata
+) -> tuple[tuple[ConsentRecord, ...], tuple[ConsentRecord, ...], tuple[rich.console.RenderableType, ...]]:
+    pseudonym2before = {record.pseudonym: record for record in records_in_db}
+
+    updated_records = []
+    pending_pseudonyms = set()
+    consent_diff_tables: list[rich.console.RenderableType] = []
+    for donor in metadata.donors:
+        record_after = ConsentRecord(
+            submission_id=metadata.submission_id,
+            pseudonym=donor.donor_pseudonym,
+            relation=donor.relation,
+            mv_consented=True,  # currently must be true to validate, revisit this to allow revocation
+            research_consented=donor.consents_to_research(date=date.today()),
+            research_consent_missing_justification=donor.research_consents[0].no_scope_justification
+            if donor.research_consents
+            else None,
+        )
+        record_before = pseudonym2before.get(record_after.pseudonym, None)
+        pending_pseudonyms.add(record_after.pseudonym)
+        if record_before == record_after:
+            continue
+        updated_records.append(record_after)
+
+        table_title = f"[green]Donor {record_after.pseudonym} added/updated[/green]"
+        diff_table = rich.table.Table(title=table_title, min_width=len(table_title), title_justify="left")
+        diff_table.add_column("Key")
+        diff_table.add_column("Before")
+        diff_table.add_column("After")
+        for field in sorted(record_after.model_fields.keys() - {"submission_id", "pseudonym"}):
+            before = rich.pretty.Pretty(getattr(record_before, field)) if record_before else _TEXT_MISSING
+            after = rich.pretty.Pretty(getattr(record_after, field))
+            if before != after:
+                diff_table.add_row(field, before, after)
+        consent_diff_tables.append(diff_table)
+
+    deleted_records = tuple(filter(lambda r: r.pseudonym not in pending_pseudonyms, pseudonym2before.values()))
+    for deleted_record in deleted_records:
+        consent_diff_tables.append(rich.text.Text(f"Donor {deleted_record.pseudonym} deleted", style="red"))
+
+    return tuple(updated_records), deleted_records, tuple(consent_diff_tables)
+
+
 @submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
@@ -502,7 +559,7 @@ def _diff_metadata(
     multiple=True,
 )
 @click.pass_context
-def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm: bool, ignore_field: list[str]):
+def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm: bool, ignore_field: list[str]):  # noqa: C901
     """Populate the submission database from a metadata JSON file."""
     log.debug(f"Ignored fields for populate: {ignore_field}")
 
@@ -526,17 +583,30 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
         metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
 
     changes = _diff_metadata(submission, metadata, set(ignore_field))
-    if not changes:
+
+    # consent records
+    updated_records, deleted_records, consent_diff_tables = _diff_consent_records(
+        records_in_db=db_service.get_consent_records(submission_id=Submission.id), metadata=metadata
+    )
+
+    if (not changes) and (not updated_records) and (not deleted_records):
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
         ctx.exit()
 
-    diff_table = rich.table.Table()
-    diff_table.add_column("Key")
-    diff_table.add_column("Before")
-    diff_table.add_column("After")
-    for key, before, after in changes:
-        diff_table.add_row(key, str(before) if before is not None else _TEXT_MISSING, str(after))
-    panel = rich.panel.Panel.fit(diff_table, title="Pending Changes")
+    diff_table: rich.console.RenderableType
+    if changes:
+        diff_table = rich.table.Table(title="Submission Metadata")
+        diff_table.add_column("Key")
+        diff_table.add_column("Before")
+        diff_table.add_column("After")
+        for key, before, after in sorted(changes, key=itemgetter(0)):
+            diff_table.add_row(key, str(before) if before is not None else _TEXT_MISSING, str(after))
+    else:
+        diff_table = rich.padding.Padding(rich.text.Text("No changes to submission-level metadata."), pad=(0, 0, 1, 0))
+
+    panel = rich.panel.Panel.fit(
+        rich.console.Group(diff_table, *consent_diff_tables, fit=True), title="Pending Changes"
+    )
     console.print(panel)
 
     if not confirm or click.confirm(
@@ -546,7 +616,80 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
     ):
         for key, _before, after in changes:
             _ = db_service.modify_submission(submission_id, key=key, value=after)
+        for updated_record in updated_records:
+            _ = db_service.add_consent_record(updated_record)
+        for deleted_record in deleted_records:
+            db_service.delete_consent_record(deleted_record)
         console_err.print("[green]Database populated successfully.[/green]")
+
+
+@submission.command()
+@click.argument("submission_id", type=str)
+@click.argument("report_csv_path", metavar="path/to/report.csv", type=FILE_R_E)
+@click.option(
+    "--confirm/--no-confirm",
+    default=True,
+    help="Whether to confirm changes before committing to database. (Default: confirm)",
+)
+@click.pass_context
+def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, confirm: bool):
+    """Populate the submission database from a detailed QC pipeline report."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    with open(report_csv_path, encoding="utf-8", newline="") as report_csv_file:
+        reader = csv.reader(report_csv_file)
+        rows = list(reader)
+    QCReportRow = namedtuple("QCResult", rows[0])  # type: ignore[misc]
+    reports = [QCReportRow(*row) for row in rows[1:]]
+
+    report_mtime = datetime.fromtimestamp(Path(report_csv_path).stat().st_mtime, tz=UTC)
+    results = []
+    for report in reports:
+        results.append(
+            DetailedQCResult(
+                submission_id=submission_id,
+                lab_datum_id=report.sampleId,  # type: ignore[attr-defined]
+                timestamp=report_mtime,
+                sequence_type=SequenceType.dna,  # pipeline only supports DNA and doesn't pass type to report.csv
+                sequence_subtype=SequenceSubtype(report.sequenceSubtype),  # type: ignore[attr-defined]
+                library_type=LibraryType(report.libraryType),  # type: ignore[attr-defined]
+                percent_bases_above_quality_threshold=float(report.percentBasesAboveQualityThreshold),  # type: ignore[attr-defined]
+                mean_depth_of_coverage=float(report.meanDepthOfCoverage),  # type: ignore[attr-defined]
+                targeted_regions_above_min_coverage=float(report.targetedRegionsAboveMinCoverage),  # type: ignore[attr-defined]
+            )
+        )
+    table = rich.table.Table(
+        "Submission ID",
+        "Lab Datum ID",
+        "Timestamp",
+        "Sequence Type",
+        "Sequence Subtype",
+        "Library Type",
+        "PBaQT",
+        "MDoC",
+        "TRaMC",
+        title="New Detailed QC Results",
+    )
+    for result in results:
+        table.add_row(
+            result.submission_id,
+            result.lab_datum_id,
+            f"{result.timestamp:%c}",
+            result.sequence_type,
+            result.sequence_subtype,
+            result.library_type,
+            rich.pretty.Pretty(result.percent_bases_above_quality_threshold),
+            rich.pretty.Pretty(result.mean_depth_of_coverage),
+            rich.pretty.Pretty(result.targeted_regions_above_min_coverage),
+        )
+    console.print(table)
+
+    if not confirm or click.confirm(
+        "Are you sure you want to commit these changes to the database?", default=False, show_default=True
+    ):
+        for result in results:
+            db_service.add_detailed_qc_result(result)
 
 
 @submission.command()
