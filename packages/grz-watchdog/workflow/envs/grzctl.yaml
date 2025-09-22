@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - grzctl =0.3
+  - grz-check =0.1
+  - jq =1.8
