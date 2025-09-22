@@ -1,0 +1,76 @@
+services:
+  s3service:
+    image: quay.io/minio/minio:latest
+    volumes:
+      - ./data:/data
+    command: server --console-address ":9001" /data
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+
+  initialize-s3service:
+    image: quay.io/minio/mc
+    depends_on:
+      s3service:
+        condition: service_started
+    env_file: tests/minio.env
+    volumes:
+      - ./data:/data
+    entrypoint: |
+      /bin/sh -c '
+      until (/usr/bin/mc alias set s3service http://s3service:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}") do echo '...waiting...' && sleep 1; done;
+      for bucket in $${BUCKET_NAMES}; do
+        if ! /usr/bin/mc ls s3service/"$${bucket}" > /dev/null 2>&1; then
+          /usr/bin/mc mb s3service/"$${bucket}";
+        else
+          echo "Bucket ''$${bucket}'' already exists.";
+        fi
+      done;
+
+      /usr/bin/mc mirror --overwrite '/data/123456789_1970-01-01_a0b1c2d3' s3service/test1/123456789_1970-01-01_a0b1c2d3;
+
+      if ! /usr/bin/mc admin user info s3service "$${ACCESS_KEY}" > /dev/null 2>&1; then
+        /usr/bin/mc admin user add s3service "$${ACCESS_KEY}" "$${SECRET_KEY}";
+        /usr/bin/mc admin policy attach s3service readwrite --user "$${ACCESS_KEY}";
+      else
+        echo "User ''$${ACCESS_KEY}'' already exists.";
+      fi
+      '
+    restart: "no"
+
+  bfarm-mock-api:
+    build:
+      context: ./bfarm_mock_api
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - ./local-certs:/certs:ro
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 5000
+      --ssl-keyfile=/certs/key.pem
+      --ssl-certfile=/certs/cert.pem
+
+  grz-watchdog:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GRZ_PRUEFBERICHT_MOCK=1
+    volumes:
+      - ./tests/workflow-workdir:/app/workdir
+      - ./tests/config:/app/workdir/config
+      - ./local-certs/cert.pem:/app/workdir/config/cert.pem:ro
+    depends_on:
+      s3service:
+        condition: service_started
+      initialize-s3service:
+        condition: service_completed_successfully
+      bfarm-mock-api:
+        condition: service_started
+    command: pending
