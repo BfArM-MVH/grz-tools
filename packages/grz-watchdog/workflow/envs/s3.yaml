@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - s5cmd =2.3
+  - minio-client =2025.07.*
