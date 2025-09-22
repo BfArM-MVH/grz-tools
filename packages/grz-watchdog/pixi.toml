@@ -8,9 +8,9 @@ version = "0.1.0"
 [tasks]
 
 [dependencies]
-snakemake = "=9.9"
-snakefmt = "=0.11"
-snakemake-storage-plugin-s3 = "=0.3"
-snakemake-executor-plugin-slurm = "=1.5"
-conda = "=25.5"
-grz-pydantic-models = "=2.2"
+snakemake = ">=9.11.4,<10"
+snakefmt = ">=0.11.2,<0.12"
+snakemake-storage-plugin-s3 = ">=0.3.6,<0.4"
+snakemake-executor-plugin-slurm = ">=1.8.0,<2"
+conda = ">=25.7.0,<26"
+grz-pydantic-models = ">=2.2.1,<3"
