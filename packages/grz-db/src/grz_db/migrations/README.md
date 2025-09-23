@@ -17,7 +17,7 @@ Finally, Alembic's migration script [tutorial](https://alembic.sqlalchemy.org/en
 
 ## General Tips
 
-To easily find the appropriate SQLAlchemy column type for a migration operation, try the following in a REPL:
+To easily find the appropriate SQLAlchemy column type for a migration operation, try the following in a REPL after adding the new fields to the particular object:
 
 ```py
 import sqlmodel.main

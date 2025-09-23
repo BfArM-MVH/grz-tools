@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.3/GRZ/grz-schema.json",
   "submission": {
-    "submissionDate": "2024-10-28",
+    "submissionDate": "2025-09-15",
     "submissionType": "initial",
     "tanG": "9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30",
     "localCaseId": "CASE12345",
