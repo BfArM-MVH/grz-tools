@@ -1,17 +1,11 @@
-import queue
 import os
-import json
-import sys
-from datetime import datetime
 from operator import itemgetter
 
-from snakemake.io import temp, directory, from_queue, touch
+from snakemake.io import temp, directory, touch
 from snakemake.utils import min_version
 
 
 min_version("9.9.0")
-print("Starting grz-watchdog", file=sys.stderr)
-
 
 # container: "docker://condaforge/miniforge3:24.11.3-2"
 
