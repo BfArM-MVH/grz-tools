@@ -1,4 +1,5 @@
-cores: 8
+cores: all
+printshellcmds: true
 sdm:
  - conda
  - apptainer
