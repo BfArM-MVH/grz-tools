@@ -3,6 +3,7 @@ channels:
   - bioconda
   - nodefaults
 dependencies:
-  - grzctl =0.3
-  - grz-check =0.1
-  - jq =1.8
+  - grzctl =0.6.0
+  - grz-check =0.1.0
+  - jq =1.8.1
+  - ripgrep =14.1.1
