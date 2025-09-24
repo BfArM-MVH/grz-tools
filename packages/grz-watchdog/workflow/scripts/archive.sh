@@ -19,6 +19,7 @@ submission_id="${snakemake_wildcards[submission_id]}"
 db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
+submission_dir="${snakemake_input[data]}"
 
 CONSENT=$(cat "${snakemake_input[consent_flag]}")
 if [[ "$CONSENT" == "true" ]]; then
@@ -27,13 +28,35 @@ else
 	CONFIG_FILE="${snakemake_input[nonconsented_config_path]}"
 fi
 
-echo "Consent: $CONSENT. Using config file for archiving: $CONFIG_FILE" >"$log_stdout" 2>"$log_stderr"
+echo "Consent: $CONSENT. Using config file for archiving: $CONFIG_FILE" >>"$log_stdout" 2>>"$log_stderr"
+
+echo "Redacting sensitive data from logs before archiving..." >>"$log_stdout" 2>>"$log_stderr"
+metadata_file="${submission_dir}/metadata/metadata.json"
+logs_dir="${submission_dir}/logs"
+
+if [ -f "$metadata_file" ] && [ -d "$logs_dir" ]; then
+    tanG=$(jq --raw-output '.submission.tanG' "$metadata_file" || true)
+    localCaseId=$(jq --raw-output '.submission.localCaseId' "$metadata_file" || true)
+
+    if [ -n "$tanG" ] && [ "$tanG" != "null" ]; then
+        echo "Redacting tanG..." >>"$log_stdout" 2>>"$log_stderr"
+        rg --files-with-matches --fixed-strings "$tanG" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$tanG/REDACTED_TAN_G/g" || true
+    fi
+
+    if [ -n "$localCaseId" ] && [ "$localCaseId" != "null" ]; then
+        echo "Redacting localCaseId..." >>"$log_stdout" 2>>"$log_stderr"
+        rg --files-with-matches --fixed-strings "$localCaseId" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$localCaseId/REDACTED_LOCAL_CASE_ID/g" || true
+    fi
+    echo "Redaction complete." >>"$log_stdout" 2>>"$log_stderr"
+else
+    echo "[WARNING] metadata.json or logs directory not found. Skipping log redaction." >>"$log_stdout" 2>>"$log_stderr"
+fi
 
 grzctl db --config-file "$db_config" submission update "$submission_id" archiving >>"$log_stdout" 2>>"$log_stderr"
 
 grzctl archive \
 	--config-file "$CONFIG_FILE" \
-	--submission-dir "${snakemake_input[data]}" \
+	--submission-dir "${submission_dir}" \
 	>>"$log_stdout" 2>>"$log_stderr"
 
 grzctl db --config-file "$db_config" submission update "$submission_id" archived >>"$log_stdout" 2>>"$log_stderr"
