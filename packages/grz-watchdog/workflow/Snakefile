@@ -7,8 +7,7 @@ from snakemake.utils import min_version
 
 min_version("9.9.0")
 
-# TODO: 1) run "snakemake --containerize > Dockerfile", 2) build docker image and make available, 3) use the respective container, i.e., adapt line below accordingly:
-# containerized: "docker://TODO/"
+containerized: "docker://grz-watchdog:latest"
 
 
 configfile: "config/config.yaml"
