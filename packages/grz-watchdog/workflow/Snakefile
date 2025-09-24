@@ -7,7 +7,8 @@ from snakemake.utils import min_version
 
 min_version("9.9.0")
 
-# container: "docker://condaforge/miniforge3:24.11.3-2"
+# TODO: 1) run "snakemake --containerize > Dockerfile", 2) build docker image and make available, 3) use the respective container, i.e., adapt line below accordingly:
+# containerized: "docker://TODO/"
 
 
 configfile: "config/config.yaml"
