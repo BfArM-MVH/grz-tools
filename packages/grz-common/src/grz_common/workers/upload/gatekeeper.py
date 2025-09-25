@@ -176,12 +176,16 @@ class GrzGatekeeperUploadWorker(UploadWorker):
         parts_to_upload.sort(key=lambda p: p["offset"])
 
         with ThreadPoolExecutor(max_workers=self._threads) as executor, open(local_file_path, "rb") as f:
-            futures = {
-                executor.submit(GrzGatekeeperUploadWorker._upload_chunk_worker, f.read(part["size"]), part): part
-                for part in parts_to_upload
-                if f.seek(part["offset"]) == part["offset"]
-            }
-
+            futures = {}
+            for part in parts_to_upload:
+                seeked_to_offset = f.seek(part["offset"])
+                if seeked_to_offset != part["offset"]:
+                    raise ValueError(f"Failed to seek to offset {part['offset']} for part {part['part_number']}")
+                part_bytes = f.read(part["size"])
+                if len(part_bytes) != part["size"]:
+                    raise ValueError(f"Failed to read {part['size']} bytes for part {part['part_number']}")
+                future = executor.submit(GrzGatekeeperUploadWorker._upload_chunk_worker, part_bytes, part)
+                futures[future] = part
             try:
                 for future in as_completed(futures):
                     result = future.result()
