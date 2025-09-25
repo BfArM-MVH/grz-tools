@@ -35,21 +35,21 @@ metadata_file="${submission_dir}/metadata/metadata.json"
 logs_dir="${submission_dir}/logs"
 
 if [ -f "$metadata_file" ] && [ -d "$logs_dir" ]; then
-    tanG=$(jq --raw-output '.submission.tanG' "$metadata_file" || true)
-    localCaseId=$(jq --raw-output '.submission.localCaseId' "$metadata_file" || true)
+	tanG=$(jq --raw-output '.submission.tanG' "$metadata_file" || true)
+	localCaseId=$(jq --raw-output '.submission.localCaseId' "$metadata_file" || true)
 
-    if [ -n "$tanG" ] && [ "$tanG" != "null" ]; then
-        echo "Redacting tanG..." >>"$log_stdout" 2>>"$log_stderr"
-        rg --files-with-matches --fixed-strings "$tanG" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$tanG/REDACTED_TAN_G/g" || true
-    fi
+	if [ -n "$tanG" ] && [ "$tanG" != "null" ]; then
+		echo "Redacting tanG..." >>"$log_stdout" 2>>"$log_stderr"
+		rg --files-with-matches --fixed-strings "$tanG" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$tanG/REDACTED_TAN_G/g" || true
+	fi
 
-    if [ -n "$localCaseId" ] && [ "$localCaseId" != "null" ]; then
-        echo "Redacting localCaseId..." >>"$log_stdout" 2>>"$log_stderr"
-        rg --files-with-matches --fixed-strings "$localCaseId" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$localCaseId/REDACTED_LOCAL_CASE_ID/g" || true
-    fi
-    echo "Redaction complete." >>"$log_stdout" 2>>"$log_stderr"
+	if [ -n "$localCaseId" ] && [ "$localCaseId" != "null" ]; then
+		echo "Redacting localCaseId..." >>"$log_stdout" 2>>"$log_stderr"
+		rg --files-with-matches --fixed-strings "$localCaseId" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$localCaseId/REDACTED_LOCAL_CASE_ID/g" || true
+	fi
+	echo "Redaction complete." >>"$log_stdout" 2>>"$log_stderr"
 else
-    echo "[WARNING] metadata.json or logs directory not found. Skipping log redaction." >>"$log_stdout" 2>>"$log_stderr"
+	echo "[WARNING] metadata.json or logs directory not found. Skipping log redaction." >>"$log_stdout" 2>>"$log_stderr"
 fi
 
 grzctl db --config-file "$db_config" submission update "$submission_id" archiving >>"$log_stdout" 2>>"$log_stderr"
