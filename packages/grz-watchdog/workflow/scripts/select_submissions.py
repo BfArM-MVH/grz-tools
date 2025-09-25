@@ -60,6 +60,6 @@ with (
             origin = submission["origin"]
             # TODO implement selection strategy for with_qc/without_qc
             target_path = (
-                f"results/{origin['submitter_id']}/{origin['inbox']}/{submission['submission_id']}/target/without_qc"
+                f"results/{origin['submitter_id']}/{origin['inbox']}/{submission['submission_id']}/processed/without_qc"
             )
             f.write(f"{target_path}\n")
