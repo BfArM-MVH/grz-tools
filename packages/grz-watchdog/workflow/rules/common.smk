@@ -76,6 +76,13 @@ def get_failed_finalize_inputs(wildcards):
 ## PARAMETER / HELPER FUNCTIONS
 
 
+def perhaps_temp(f):
+    if config.get("temp-outputs", "False"):
+        return f
+    else:
+        return temp(f)
+
+
 def get_endpoint_url(wildcards: Wildcards, input: InputFiles) -> str:
     """
     Get the endpoint URL from the inbox config file.
