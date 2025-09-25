@@ -100,6 +100,15 @@ def get_endpoint_url(wildcards: Wildcards, input: InputFiles) -> str:
         return endpoint_url
 
 
+def get_s3_bucket(wildcards: Wildcards, input: InputFiles) -> str:
+    """
+    Get the S3 bucket name from the inbox config file.
+    """
+    with open(input.inbox_config_path, "rt") as f:
+        bucket = yaml.safe_load(f)["s3"]["bucket"]
+        return bucket
+
+
 def get_s3_metadata_key(wildcards: Wildcards) -> str:
     """
     Get the key pointing to the metadata.json file in S3.
