@@ -80,7 +80,9 @@ class GrzGatekeeperUploadWorker(UploadWorker):
     @classmethod
     def _upload_chunk_worker(cls, chunk_data: bytes, part_info: dict) -> dict:
         try:
-            response = requests.put(part_info["presigned_url"], data=chunk_data, timeout=300)
+            # timeout should depend on the size of the chunk, assuming at least 5MB/s upload speed
+            timeout = max(len(chunk_data) / (5 * 1024**2) + 60, 300)
+            response = requests.put(part_info["presigned_url"], data=chunk_data, timeout=timeout)
             response.raise_for_status()
             etag = response.headers.get("ETag")
             if not etag:
