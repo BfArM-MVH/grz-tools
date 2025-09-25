@@ -8,7 +8,16 @@ GRZ_WATCHDOG_WORKFLOW_IMAGE="grz-watchdog:latest"
 SNAKEMAKE_CONTAINERIZED_ENVS_IMAGE="grz-watchdog-conda-envs:latest"
 
 # generate dockerfile from snakemake
-snakemake --containerize >Dockerfile.snake
+snakemake --containerize > Dockerfile.snake.tmp
+
+# check if an old Dockerfile exists and if it's identical to the new one
+if [ -f Dockerfile.snake ] && cmp -s Dockerfile.snake Dockerfile.snake.tmp; then
+  rm Dockerfile.snake.tmp
+else
+  mv Dockerfile.snake.tmp Dockerfile.snake
+fi
+
+
 
 # build intermediate image
 podman build -t "${SNAKEMAKE_CONTAINERIZED_ENVS_IMAGE}" -f Dockerfile.snake .

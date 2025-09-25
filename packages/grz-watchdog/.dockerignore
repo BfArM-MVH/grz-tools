@@ -1,0 +1,12 @@
+.git
+.gitignore
+.containerignore
+Dockerfile.snake
+Dockerfile.snake.tmp
+
+__pycache__/
+*.pyc
+
+results/
+logs/
+.snakemake/
