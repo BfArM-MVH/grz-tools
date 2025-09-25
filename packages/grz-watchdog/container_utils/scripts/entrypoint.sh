@@ -1,4 +1,4 @@
 #!/bin/bash
 set -euo pipefail
 
-pixi run -- "$@"
+pixi run --manifest-path /grz-watchdog/pixi.toml -- "$@"
