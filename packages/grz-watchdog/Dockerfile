@@ -17,16 +17,22 @@ ENV PATH="${PIXI_HOME}/bin:${PATH}"
 
 # install pixi-based runtime environment
 # provides snakemake and global dependencies
-WORKDIR /app
+WORKDIR /grz-watchdog
 COPY pixi.toml pixi.lock ./
 RUN pixi install
 
-# copy workflow and configuration files
+# copy actual workflow definition
 COPY workflow/ workflow/
-COPY config/ workdir/config/
 
-# set final entrypoint, use snakemake from pixi env
-# overrides base image entrypoint
-ENTRYPOINT ["pixi", "run", "snakemake", "--sdm", "conda", "--conda-prefix", "/conda-envs", "--directory", "/app/workdir"]
+# copy container scripts / entrypoint
+COPY container_utils/scripts/ /usr/local/bin/
+RUN chmod +x /usr/local/bin/*
 
-CMD []
+# ensure workdir and config dirs exists
+RUN mkdir /config /workdir
+
+WORKDIR /workdir
+
+# use custom entrypoint script (basically just does `pixi run -- …`)
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["process-batch"]
