@@ -2,16 +2,19 @@ import os
 from operator import itemgetter
 
 from snakemake.io import temp, directory, touch
-from snakemake.utils import min_version
+from snakemake.utils import min_version, validate
 
 
 min_version("9.9.0")
+
 
 containerized: "docker://grz-watchdog:latest"
 
 
 configfile: "config/config.yaml"
 
+
+validate(config, schema="schemas/config.schema.yaml")
 
 ALL_INBOX_PAIRS = [
     (submitter, inbox)
@@ -27,13 +30,6 @@ wildcard_constraints:
 
 
 include: "rules/common.smk"
-
-
-cfg_path = lambda dpath: lambda wildcards: (
-    lookup(dpath=dpath, within=config)(wildcards)
-    if "{" in dpath
-    else lookup(dpath=dpath, within=config)
-)
 
 
 rule init_db:
@@ -118,13 +114,6 @@ checkpoint select_submissions:
         "scripts/select_submissions.py"
 
 
-def all_pending_submissions(wildcards):
-    batch_file = checkpoints.select_submissions.get().output["submissions_batch"]
-    with open(batch_file) as f:
-        targets = [line.strip() for line in f if line.strip()]
-    return targets
-
-
 rule pending:
     input:
         all_pending_submissions,
@@ -206,9 +195,11 @@ rule decrypt:
         "scripts/decrypt.sh"
 
 
-rule validate:
+checkpoint validate:
     """
     Validate a decrypted submission.
+
+    This is a checkpoint because the downstream workflow (success path vs. failure path) depends on its output.
     """
     input:
         data=rules.download.output.data,
@@ -372,23 +363,21 @@ rule qc:
 
 rule clean:
     """
-    Clean up a submission after reporting the Prüfbericht / performing QC.
+    Clean up a submission after reporting the Prüfbericht / performing QC, or after a failed validation.
     This entails removing the data from the inbox S3 bucket.
     It will, however, leave the respective metadata.json in place to prevent an LE from uploading the same
     submission_id multiple times.
     """
     input:
-        ready_marker=branch(
-            lambda wildcards: wildcards.qc_status == "with_qc",
-            then=rules.qc.output.qc_results,
-            otherwise=rules.report_pruefbericht.output.answer,
-        ),
+        ready_marker=get_cleanup_prerequisite,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
         clean_results=temp(
             "results/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}"
         ),
+    params:
+        mode=config.get("auto-cleanup", "none"),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stderr.log",
@@ -417,9 +406,34 @@ rule clean:
 #         """
 
 
-rule finalize:
+rule finalize_fail:
     """
-    Target rule for each submission.
+    Target rule for each _failed_ submission.
+    """
+    input:
+        unpack(get_failed_finalize_inputs),
+    output:
+        target=touch(
+            "results/{submitter_id}/{inbox}/{submission_id}/target/failed_validation.{qc_status}"
+        ),
+    log:
+        stdout="logs/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stdout.log",
+        stderr="logs/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stderr.log",
+    conda:
+        "envs/grzctl.yaml"
+    shell:
+        """
+        (
+        echo "Submission {wildcards.submission_id} failed validation."
+        grzctl db --config-file {input.db_config_path} submission update {wildcards.submission_id} error --data '{{"reason": "validation failed"}}'
+        echo "Submission {wildcards.submission_id} processing finished due to validation failure." > {output.target}
+        ) > {log.stdout} 2> {log.stderr}
+        """
+
+
+rule finalize_success:
+    """
+    Target rule for each _valid_ submission.
     This explicitly states what needs to happen (which inputs are required)
     in order for a submission to be considered "finished".
     Will update the submission status in the database accordingly.
@@ -433,8 +447,8 @@ rule finalize:
     output:
         target="results/{submitter_id}/{inbox}/{submission_id}/target/{qc_status}",
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/finalize/{qc_status}.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/finalize/{qc_status}.stderr.log",
+        stdout="logs/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stdout.log",
+        stderr="logs/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stderr.log",
     conda:
         "envs/grzctl.yaml"
     shell:
@@ -450,3 +464,10 @@ rule finalize:
             grzctl db --config-file {input.db_config_path} submission update {wildcards.submission_id} finished
         ) > {log.stdout} 2> {log.stderr}
         """
+
+
+rule process_submission:
+    input:
+        get_final_submission_target,
+    output:
+        touch("results/{submitter_id}/{inbox}/{submission_id}/processed/{qc_status}"),

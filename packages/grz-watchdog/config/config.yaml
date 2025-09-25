@@ -3,6 +3,9 @@ monitor:
 batch:
   limit: 2
 
+on-failed-validation: "do-nothing"  # "cleanup" or "do-nothing"
+auto-cleanup: "inbox+storage"  # "inbox", "storage", "inbox+storage", "none"
+
 config_paths:
   inbox:
     "123456789":
