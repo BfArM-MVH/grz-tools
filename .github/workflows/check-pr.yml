@@ -24,6 +24,7 @@ jobs:
             grz-db
             grz-tools
             grz-check
+            grz-gatekeeper
             repo
             release
             other
