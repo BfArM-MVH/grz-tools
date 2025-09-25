@@ -2,4 +2,4 @@
 set -euo pipefail
 
 # run the 'pending' rule, passing all args to snakemake
-snakemake --profile /etc/snakemake/container-profile --snakefile /grz-watchdog/workflow/Snakefile --directory /workdir pending "$@"
+snakemake --snakefile /grz-watchdog/workflow/Snakefile --directory /workdir pending "$@"
