@@ -20,4 +20,4 @@ echo "Processing single submission. Target: ${target_path}"
 
 # run snakemake with the constructed target
 # pass any extra arguments to snakemake
-snakemake --directory /workdir "${target_path}" "${@:5}"
+snakemake --profile /etc/snakemake/container-profile --snakefile /grz-watchdog/workflow/Snakefile --directory /workdir "${target_path}" "${@:5}"
