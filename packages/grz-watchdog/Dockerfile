@@ -23,7 +23,6 @@ RUN pixi install
 
 # copy actual workflow definition
 COPY workflow/ workflow/
-COPY container_utils/profile/ /etc/snakemake/container-profile/
 
 # copy container scripts / entrypoint
 COPY container_utils/scripts/ /usr/local/bin/
