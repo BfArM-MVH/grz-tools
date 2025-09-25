@@ -14,10 +14,10 @@ submission_id="$3"
 qc_target="$4"
 
 # construct snakemake target
-target_path="results/${submitter_id}/${inbox}/${submission_id}/target/${qc_target}"
+target_path="results/${submitter_id}/${inbox}/${submission_id}/processed/${qc_target}"
 
 echo "Processing single submission. Target: ${target_path}"
 
 # run snakemake with the constructed target
 # pass any extra arguments to snakemake
-snakemake "${target_path}" "${@:5}"
+snakemake --directory /workdir "${target_path}" "${@:5}"
