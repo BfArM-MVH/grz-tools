@@ -20,6 +20,7 @@ inbox_config="${snakemake_input[inbox_config_path]}"
 db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
+mode="${snakemake_params[mode]}"  # TODO actually respect the mode
 
 grzctl db --config-file "$db_config" submission update "$submission_id" cleaning >"$log_stdout" 2>"$log_stderr"
 grzctl clean --config-file "$inbox_config" --submission-id "$submission_id" --yes-i-really-mean-it >>"$log_stdout" 2>>"$log_stderr"
