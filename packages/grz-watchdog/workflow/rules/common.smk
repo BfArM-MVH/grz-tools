@@ -121,7 +121,7 @@ def get_s3_metadata_key(wildcards: Wildcards) -> str:
         i.e., "{inbox}/{submission_id}/metadata/metadata.json"
     """
 
-    return f"{wildcards.inbox}/{wildcards.submission_id}/metadata/metadata.json"
+    return f"{wildcards.submission_id}/metadata/metadata.json"
 
 
 def register_s3_access_key(
