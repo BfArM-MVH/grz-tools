@@ -56,7 +56,9 @@ rule scan_inbox:
     input:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
     output:
-        submissions=temp("results/scan_inbox/{submitter_id}/{inbox}/submissions.json"),
+        submissions=perhaps_temp(
+            "results/scan_inbox/{submitter_id}/{inbox}/submissions.json"
+        ),
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY", ""),
         s3_secret=os.environ.get("GRZ_S3__SECRET", ""),
@@ -84,7 +86,7 @@ rule sync_database:
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:
-        submissions=temp("results/sync_database/submissions.json"),
+        submissions=perhaps_temp("results/sync_database/submissions.json"),
     log:
         stdout="logs/sync_database.stdout.log",
         stderr="logs/sync_database.stderr.log",
@@ -129,7 +131,9 @@ rule metadata:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        metadata=temp("results/{submitter_id}/{inbox}/{submission_id}.metadata.json"),
+        metadata=perhaps_temp(
+            "results/{submitter_id}/{inbox}/{submission_id}.metadata.json"
+        ),
     params:
         s3_access_key=register_s3_access_key,
         s3_secret=register_s3_secret,
@@ -155,7 +159,9 @@ rule download:
         metadata=rules.metadata.output.metadata,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        data=temp(directory("results/{submitter_id}/{inbox}/{submission_id}/data")),
+        data=perhaps_temp(
+            directory("results/{submitter_id}/{inbox}/{submission_id}/data")
+        ),
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY", ""),
         s3_secret=os.environ.get("GRZ_S3__SECRET", ""),
@@ -207,10 +213,10 @@ checkpoint validate:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        validation_flag=temp(
+        validation_flag=perhaps_temp(
             "results/{submitter_id}/{inbox}/{submission_id}/validation_flag"
         ),
-        validation_errors=temp(
+        validation_errors=perhaps_temp(
             "results/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"
         ),
     threads: 4
@@ -231,7 +237,9 @@ rule consent:
         data=rules.download.output.data,
         decrypted_marker=rules.decrypt.output.marker,
     output:
-        consent_flag=temp("results/{submitter_id}/{inbox}/{submission_id}/consent_flag"),
+        consent_flag=perhaps_temp(
+            "results/{submitter_id}/{inbox}/{submission_id}/consent_flag"
+        ),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
@@ -298,7 +306,9 @@ rule pruefbericht:
         archived_marker=rules.archive.output.marker,
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
     output:
-        pruefbericht=temp("results/{submitter_id}/{inbox}/{submission_id}/pruefbericht"),
+        pruefbericht=perhaps_temp(
+            "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht"
+        ),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/pruefbericht.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/pruefbericht.stderr.log",
@@ -318,7 +328,7 @@ rule report_pruefbericht:
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        answer=temp(
+        answer=perhaps_temp(
             "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"
         ),
     params:
@@ -346,7 +356,7 @@ rule qc:
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        qc_results=temp("results/{submitter_id}/{inbox}/{submission_id}/qc"),
+        qc_results=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc"),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
@@ -370,10 +380,11 @@ rule clean:
     """
     input:
         ready_marker=get_cleanup_prerequisite,
+        data=rules.download.output.data,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        clean_results=temp(
+        clean_results=perhaps_temp(
             "results/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}"
         ),
     params:
@@ -392,7 +403,7 @@ rule clean:
 #     Update the Taetigkeitsbericht with information from the submission DB.
 #     """
 #     output:
-#         taetigkeitsbericht=temp(
+#         taetigkeitsbericht=perhaps_temp(
 #             "results/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.pdf"
 #         ),
 #     params:
