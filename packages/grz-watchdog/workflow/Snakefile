@@ -137,6 +137,7 @@ rule metadata:
     params:
         s3_access_key=register_s3_access_key,
         s3_secret=register_s3_secret,
+        s3_bucket=get_s3_bucket,
         s3_metadata_key=get_s3_metadata_key,
         s3_endpoint_url=get_endpoint_url,
     log:
@@ -146,7 +147,7 @@ rule metadata:
         "envs/s3.yaml"
     shell:
         """(
-        s5cmd --endpoint-url {params.s3_endpoint_url} cp s3://{params.s3_metadata_key} {output.metadata}
+        s5cmd --endpoint-url {params.s3_endpoint_url} cp s3://{params.s3_bucket}/{params.s3_metadata_key} {output.metadata}
         ) >{log.stdout} 2> {log.stderr}"""
 
 
