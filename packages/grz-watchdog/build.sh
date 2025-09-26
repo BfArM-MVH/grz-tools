@@ -30,5 +30,4 @@ podman build \
 	-f Dockerfile .
 
 # clean up intermediate artifacts
-rm Dockerfile.snake
 podman rmi "${SNAKEMAKE_CONTAINERIZED_ENVS_IMAGE}"

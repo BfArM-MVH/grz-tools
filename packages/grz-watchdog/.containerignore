@@ -1,7 +1,8 @@
 .git
 .gitignore
 .containerignore
-Dockerfile.snake
+.dockerignore
+
 Dockerfile.snake.tmp
 
 __pycache__/
@@ -10,3 +11,9 @@ __pycache__/
 results/
 logs/
 .snakemake/
+
+.pixi/
+.conda/
+.vscode/
+.idea/
+
