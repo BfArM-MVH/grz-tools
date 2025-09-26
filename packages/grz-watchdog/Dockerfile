@@ -1,0 +1,38 @@
+# receive intermediate image name via build-arg
+ARG SNAKEMAKE_BASE_IMAGE
+# use intermediate image as foundation
+# inherits all files, directories, and metadata (labels) (hopefully)
+FROM ${SNAKEMAKE_BASE_IMAGE}
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# install pixi into image
+ENV PIXI_HOME="/root/.pixi"
+ENV PIXI_VERSION="0.55.0"
+RUN curl -fsSL https://pixi.sh/install.sh | bash
+
+ENV PATH="${PIXI_HOME}/bin:${PATH}"
+
+# install pixi-based runtime environment
+# provides snakemake and global dependencies
+WORKDIR /grz-watchdog
+COPY pixi.toml pixi.lock ./
+RUN pixi install
+
+# copy actual workflow definition
+COPY workflow/ workflow/
+
+# copy container scripts / entrypoint
+COPY container_utils/scripts/ /usr/local/bin/
+RUN chmod +x /usr/local/bin/*
+
+# ensure workdir and config dirs exists
+RUN mkdir /config /workdir
+
+WORKDIR /workdir
+
+# use custom entrypoint script (basically just does `pixi run -- …`)
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["process-batch"]
