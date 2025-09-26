@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from contextlib import redirect_stderr, redirect_stdout
 
 
@@ -32,30 +33,34 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
 
         try:
             print(f"Adding submission {submission_id} to database…")
-            subprocess.run(
+            result = subprocess.run(
                 ["grzctl", "db", "--config-file", db_config_path, "submission", "add", submission_id],
                 check=True,
                 capture_output=True,
                 text=True,
             )
+            print(result.stdout)
             print(f"Added submission {submission_id} to database.")
         except subprocess.CalledProcessError as e:
             if "Duplicate submission ID " in e.stderr:
                 print(f"Submission {submission_id} already exists in database. Skipping.")
             else:
+                print(e.stderr, file=sys.stderr)
                 raise e
 
         try:
             print(f"Updating state for {submission_id} to {db_state}…")
-            subprocess.run(
+            result = subprocess.run(
                 ["grzctl", "db", "--config-file", db_config_path, "submission", "update", submission_id, db_state],
                 check=True,
                 capture_output=True,
                 text=True,
             )
+            print(result.stdout)
             available_submissions.append(submission)
             print(f"Updated state for {submission_id} to {db_state}.")
         except subprocess.CalledProcessError as e:
+            print(e.stderr, file=sys.stderr)
             raise e
 
     return available_submissions
