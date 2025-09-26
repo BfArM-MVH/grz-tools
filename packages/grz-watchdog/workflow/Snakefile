@@ -86,7 +86,7 @@ rule sync_database:
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:
-        submissions=perhaps_temp("results/sync_database/submissions.json"),
+        submissions=temp("results/sync_database/submissions.json"), # should always be transient
     log:
         stdout="logs/sync_database.stdout.log",
         stderr="logs/sync_database.stderr.log",
@@ -130,6 +130,7 @@ rule metadata:
     input:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
+        db_sync_marker=rules.sync_database.output.submissions,
     output:
         metadata=perhaps_temp(
             "results/{submitter_id}/{inbox}/{submission_id}.metadata.json"
