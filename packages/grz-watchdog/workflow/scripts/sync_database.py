@@ -68,24 +68,36 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
 
         try:
             log_print(f"Updating state for {submission_id} to {db_state}…")
-            subprocess.run(
+            result = subprocess.run(
                 ["grzctl", "db", "--config-file", db_config_path, "submission", "update", submission_id, db_state],
                 check=True,
                 text=True,
-                stdout=sys.stdout,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 timeout=SUBPROCESS_TIMEOUT,
             )
+            log_print(result.stdout)
+
             available_submissions.append(submission)
             log_print(f"Updated state for {submission_id} to {db_state}.")
+
         except subprocess.CalledProcessError as e:
-            error_print(e.stderr)
-            error_print(f"Error updating state for {submission_id}.")
-            raise e
+            prompt_text = "Submission is currently in an 'Error' state"
+            if prompt_text in e.stderr:
+                error_print(
+                    f"The database state for {submission_id} cannot be updated from 'Error' in non-interactive mode."
+                )
+                error_print(f"Captured error:\n{e.stderr}")
+                raise e
+            else:
+                error_print(e.stderr)
+                error_print(f"Error updating state for {submission_id}.")
+                raise e
         except subprocess.TimeoutExpired as e:
             error_print(
                 f"Timeout: 'grzctl submission update' for {submission_id} exceeded {SUBPROCESS_TIMEOUT} seconds."
             )
+            if e.stderr:
+                error_print(e.stderr)
             raise e
 
     return available_submissions
