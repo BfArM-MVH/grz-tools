@@ -34,6 +34,8 @@ def get_current_db_states(db_config_path: PathLike | str) -> dict[str, str]:
             capture_output=True,
             timeout=SUBPROCESS_TIMEOUT,
         )
+        if not result.stdout:
+            return {}
         db_submissions = json.loads(result.stdout)
 
         db_states = {}
@@ -79,7 +81,7 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
             log_print(f"Skipping submission {submission_id} with state {s3_state}.")
             continue
 
-        current_db_state = current_db_states.get(submission_id)
+        current_db_state = current_db_states.get(submission_id, None)
 
         match (current_db_state, target_db_state):
             # A new, incomplete submission is found.
