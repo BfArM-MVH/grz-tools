@@ -71,18 +71,36 @@ rule scan_inbox:
         "scripts/scan_inbox.py"
 
 
+rule filter_single_submission:
+    """
+    Takes a JSON file from scan_inbox and filters it to contain only the single submission specified by the wildcards.
+    """
+    input:
+        submissions=rules.scan_inbox.output.submissions,
+    output:
+        filtered_submission=temp(
+            "results/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.json"
+        ),
+    params:
+        submission_id=lambda wildcards: wildcards.submission_id,
+    conda:
+        "envs/grzctl.yaml"
+    log:
+        stderr="logs/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.stderr.log",
+    shell:
+        """(
+        jq --arg sid "{params.submission_id}" '[.[] | select(.submission_id == $sid)]' {input.submissions} > {output.filtered_submission}
+        ) >{log.stderr} 2>&1
+        """
+
+
 rule sync_database:
     """
     Extend the submission database with new submissions (as obtained from `scan_inbox`)
     or update states of submissions that already exist in the database to 'uploading' or 'uploaded'.
     """
     input:
-        submissions=expand(
-            "results/scan_inbox/{submitter}/{inbox}/submissions.json",
-            zip,
-            submitter=map(itemgetter(0), ALL_INBOX_PAIRS),
-            inbox=map(itemgetter(1), ALL_INBOX_PAIRS),
-        ),
+        submissions=get_submission_to_sync,
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:

@@ -1,16 +1,23 @@
 import shutil
+from operator import itemgetter
 from typing import Literal
 
 import humanfriendly
 import yaml
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
-from snakemake.io import Wildcards, InputFiles
+from snakemake.io import InputFiles, Wildcards
 
 cfg_path = lambda dpath: lambda wildcards: (
     lookup(dpath=dpath, within=config)(wildcards)
     if "{" in dpath
     else lookup(dpath=dpath, within=config)
 )
+
+ALL_INBOX_PAIRS = [
+    (submitter, inbox)
+    for submitter, inboxes in config["config_paths"]["inbox"].items()
+    for inbox in inboxes.keys()
+]
 
 ## RULE INPUT FUNCTIONS
 
@@ -20,6 +27,18 @@ def all_pending_submissions(wildcards):
     with open(batch_file) as f:
         targets = [line.strip() for line in f if line.strip()]
     return targets
+
+
+def get_submission_to_sync(wildcards):
+    if hasattr(wildcards, "submission_id"):
+        return [rules.filter_single_submission.output.filtered_submission]
+    else:
+        return expand(
+            "results/scan_inbox/{submitter}/{inbox}/submissions.json",
+            zip,
+            submitter=map(itemgetter(0), ALL_INBOX_PAIRS),
+            inbox=map(itemgetter(1), ALL_INBOX_PAIRS),
+        )
 
 
 def get_cleanup_prerequisite(wildcards):
@@ -34,7 +53,7 @@ def get_cleanup_prerequisite(wildcards):
         submission_id=wildcards.submission_id,
     ).output.validation_flag
 
-    with open(validation_flag_file, "r") as f:
+    with open(validation_flag_file) as f:
         is_valid = f.read().strip() == "true"
 
     if is_valid:
@@ -53,7 +72,7 @@ def get_final_submission_target(wildcards):
         submission_id=wildcards.submission_id,
     ).output.validation_flag
 
-    with open(validation_flag_file, "r") as f:
+    with open(validation_flag_file) as f:
         is_valid = f.read().strip() == "true"
 
     if is_valid:
@@ -95,7 +114,7 @@ def get_endpoint_url(wildcards: Wildcards, input: InputFiles) -> str:
         A string with describing an endpoint URL, e.g.
         "https://localhost:port".
     """
-    with open(input.inbox_config_path, "rt") as f:
+    with open(input.inbox_config_path) as f:
         endpoint_url = yaml.safe_load(f)["s3"]["endpoint_url"].rstrip("/")
         return endpoint_url
 
@@ -104,7 +123,7 @@ def get_s3_bucket(wildcards: Wildcards, input: InputFiles) -> str:
     """
     Get the S3 bucket name from the inbox config file.
     """
-    with open(input.inbox_config_path, "rt") as f:
+    with open(input.inbox_config_path) as f:
         bucket = yaml.safe_load(f)["s3"]["bucket"]
         return bucket
 
@@ -120,7 +139,6 @@ def get_s3_metadata_key(wildcards: Wildcards) -> str:
         A string with the S3 key pointing to the metadata.json file,
         i.e., "{inbox}/{submission_id}/metadata/metadata.json"
     """
-
     return f"{wildcards.submission_id}/metadata/metadata.json"
 
 
@@ -143,12 +161,11 @@ def register_s3_access_key(
     Raises:
         ValueError: If no S3 access key is found.
     """
-
     if access_key := os.environ.get("GRZ_S3__ACCESS_KEY", ""):
         os.environ["AWS_ACCESS_KEY_ID"] = access_key
         return "success"
 
-    with open(input.inbox_config_path, "rt") as f:
+    with open(input.inbox_config_path) as f:
         access_key = yaml.safe_load(f).get("s3", {}).get("access_key", "")
         if not access_key:
             raise ValueError("No S3 access_key found.")
@@ -173,12 +190,11 @@ def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["succ
     Raises:
         ValueError: If no S3 secret is found.
     """
-
     if secret := os.environ.get("GRZ_S3__SECRET", ""):
         os.environ["AWS_SECRET_ACCESS_KEY"] = secret
         return "success"
 
-    with open(input.inbox_config_path, "rt") as f:
+    with open(input.inbox_config_path) as f:
         secret = yaml.safe_load(f).get("s3", {}).get("secret", "")
         if not secret:
             raise ValueError("No S3 secret found.")
@@ -203,7 +219,7 @@ def estimate_download_size(wildcards: Wildcards, input: InputFiles) -> str:
         A humanfriendly string to be used with snakemake's "disk"
         resource (not "disk_mb"!)
     """
-    with open(input.metadata, "rt") as f:
+    with open(input.metadata) as f:
         json_str = f.read()
         metadata: GrzSubmissionMetadata = GrzSubmissionMetadata.model_validate_json(
             json_str
