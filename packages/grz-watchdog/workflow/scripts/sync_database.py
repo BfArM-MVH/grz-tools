@@ -79,36 +79,49 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
             log_print(f"Skipping submission {submission_id} with state {s3_state}.")
             continue
 
-        current_state = current_db_states.get(submission_id)
+        current_db_state = current_db_states.get(submission_id)
 
-        match (current_state, target_db_state):
+        match (current_db_state, target_db_state):
+            # A new, incomplete submission is found.
             case None, "uploading":
                 log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploading'.")
-                s = add_submission(db_config_path, submission, submission_id)
-                s = update_submission(db_config_path, s, submission_id, "uploaded")
-                available_submissions.append(s)
+                add_submission(db_config_path, submission_id)
+                update_submission(db_config_path, submission_id, "uploading")
+                available_submissions.append(submission)
 
+            # A new, already complete submission is found.
+            case None, "uploaded":
+                log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploaded'.")
+                add_submission(db_config_path, submission_id)
+                update_submission(db_config_path, submission_id, "uploaded")
+                available_submissions.append(submission)
+
+            # An existing incomplete submission is now complete.
             case "uploading", "uploaded":
-                log_print(f"Updating state for {submission_id} to 'uploaded'…")
-                s = update_submission(db_config_path, submission, submission_id, "uploaded")
-                available_submissions.append(s)
+                log_print(f"Updating state for {submission_id} from 'uploading' to 'uploaded'.")
+                update_submission(db_config_path, submission_id, "uploaded")
+                available_submissions.append(submission)
 
+            # "no-op" cases for clarity, nothing to be done here
+            case "uploading", "uploading" | "uploaded", "uploaded":
+                continue
+
+            # catch-all for any other transition, which should be skipped.
             case from_state, to_state:
                 log_print(
-                    f"Skipping update for {submission_id}: Its current DB state '{from_state}' cannot be changed to '{to_state}' by the sync process."
+                    f"Skipping update for {submission_id}: No transition defined from '{from_state}' to '{to_state}'."
                 )
                 continue
 
     return available_submissions
 
 
-def add_submission(db_config_path, submission, submission_id):
+def add_submission(db_config_path: PathLike | str, submission_id: str):
     cmd = ["grzctl", "db", "--config-file", db_config_path, "submission", "add", submission_id]
     try:
         result = subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
         log_print(result.stdout)
         log_print(f"Successfully added {submission_id}.")
-        return submission
 
     except subprocess.CalledProcessError as e:
         error_print(f"An unexpected error occurred for {submission_id}:")
@@ -121,13 +134,12 @@ def add_submission(db_config_path, submission, submission_id):
         raise e
 
 
-def update_submission(db_config_path, submission, submission_id, target_state: str):
+def update_submission(db_config_path: PathLike | str, submission_id: str, target_state: str):
     cmd = ["grzctl", "db", "--config-file", db_config_path, "submission", "update", submission_id, target_state]
     try:
         result = subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
         log_print(result.stdout)
         log_print(f"Updated state for {submission_id} to {target_state}.")
-        return submission
     except subprocess.CalledProcessError as e:
         if "Submission is currently in an 'Error' state" in e.stderr:
             error_print(f"The state for {submission_id} cannot be updated from 'Error' in non-interactive mode.")
