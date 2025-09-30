@@ -325,8 +325,26 @@ jobs:
         id: pkg_info
         run: echo "name=$(basename ${{ matrix.package.path }})" >> $GITHUB_OUTPUT
 
+      - name: Install Pixi
+        if: steps.pkg_info.outputs.name == 'grz-watchdog'
+        uses: prefix-dev/setup-pixi@v0.9.1
+        with:
+          pixi-version: v0.55.0
+          cache: true
+
+      - name: Run grz-watchdog specific checks
+        if: steps.pkg_info.outputs.name == 'grz-watchdog'
+        run: |
+          cd ${{ matrix.package.path }}
+          pixi install --frozen
+          pixi run snakemake --lint    # TODO: check output and error if there are recommendations left
+          pixi run snakefmt --check workflow
+
+
       - name: Ensure package uv lockfile is up-to-date
+        if: steps.pkg_info.outputs.name != 'grz-watchdog'
         run: cd ${{ matrix.package.path }} && uv lock --check
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
+        if: steps.pkg_info.outputs.name != 'grz-watchdog'
         run: cd ${{ matrix.package.path }} && uv run tox -e py${{ matrix.python-version }}
