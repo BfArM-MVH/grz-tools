@@ -3,6 +3,7 @@ import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from os import PathLike
+from typing import Any
 
 SUBPROCESS_TIMEOUT = 120
 
@@ -79,85 +80,67 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
             continue
 
         current_state = current_db_states.get(submission_id)
-        # A submission can be new (then its state is None) or in the process of being uploaded.
-        allowed_previous_states = {None, "uploading"}
 
-        if current_state not in allowed_previous_states:
-            log_print(
-                f"Skipping update for {submission_id}: "
-                f"Its current DB state '{current_state}' is not in {allowed_previous_states}."
-            )
-            continue
+        match (current_state, target_db_state):
+            case None, "uploading":
+                log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploading'.")
+                s = add_submission(db_config_path, submission, submission_id)
+                s = update_submission(db_config_path, s, submission_id, "uploaded")
+                available_submissions.append(s)
 
-        if current_state is None:
-            try:
-                log_print(f"Adding new submission {submission_id} to database…")
-                subprocess.run(
-                    ["grzctl", "db", "--config-file", db_config_path, "submission", "add", submission_id],
-                    check=True,
-                    text=True,
-                    stdout=sys.stdout,
-                    stderr=subprocess.PIPE,
-                    timeout=SUBPROCESS_TIMEOUT,
+            case "uploading", "uploaded":
+                log_print(f"Updating state for {submission_id} to 'uploaded'…")
+                s = update_submission(db_config_path, submission, submission_id, "uploaded")
+                available_submissions.append(s)
+
+            case from_state, to_state:
+                log_print(
+                    f"Skipping update for {submission_id}: Its current DB state '{from_state}' cannot be changed to '{to_state}' by the sync process."
                 )
-                log_print(f"Successfully added {submission_id}.")
-            except subprocess.CalledProcessError as e:
-                if "Duplicate submission ID" in e.stderr:
-                    log_print(f"Submission {submission_id} already exists. Skipping add.")
-                else:
-                    error_print(e.stderr)
-                    raise e
-            except subprocess.TimeoutExpired as e:
-                error_print(
-                    f"Timeout: 'grzctl submission add' for {submission_id} exceeded {SUBPROCESS_TIMEOUT} seconds."
-                )
-                if e.stderr:
-                    error_print(e.stderr)
-                raise e
-
-        try:
-            log_print(f"Updating state for {submission_id} to '{target_db_state}'…")
-            result = subprocess.run(
-                [
-                    "grzctl",
-                    "db",
-                    "--config-file",
-                    db_config_path,
-                    "submission",
-                    "update",
-                    submission_id,
-                    target_db_state,
-                ],
-                check=True,
-                text=True,
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-            log_print(result.stdout)
-
-            available_submissions.append(submission)
-            log_print(f"Updated state for {submission_id} to {target_db_state}.")
-        except subprocess.CalledProcessError as e:
-            prompt_text = "Submission is currently in an 'Error' state"
-            if prompt_text in e.stderr:
-                error_print(
-                    f"The database state for {submission_id} cannot be updated from 'Error' in non-interactive mode."
-                )
-                error_print(f"Captured error:\n{e.stderr}")
-                raise e
-            else:
-                error_print(e.stderr)
-                error_print(f"Error updating state for {submission_id}.")
-                raise e
-        except subprocess.TimeoutExpired as e:
-            error_print(
-                f"Timeout: 'grzctl submission update' for {submission_id} exceeded {SUBPROCESS_TIMEOUT} seconds."
-            )
-            if e.stderr:
-                error_print(e.stderr)
-            raise e
+                continue
 
     return available_submissions
+
+
+def add_submission(db_config_path, submission, submission_id):
+    cmd = ["grzctl", "db", "--config-file", db_config_path, "submission", "add", submission_id]
+    try:
+        result = subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
+        log_print(result.stdout)
+        log_print(f"Successfully added {submission_id}.")
+        return submission
+
+    except subprocess.CalledProcessError as e:
+        error_print(f"An unexpected error occurred for {submission_id}:")
+        error_print(e.stderr)
+        raise e
+    except subprocess.TimeoutExpired as e:
+        error_print(f"Timeout occurred while processing {submission_id}.")
+        if e.stderr:
+            error_print(e.stderr)
+        raise e
+
+
+def update_submission(db_config_path, submission, submission_id, target_state: str):
+    cmd = ["grzctl", "db", "--config-file", db_config_path, "submission", "update", submission_id, target_state]
+    try:
+        result = subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
+        log_print(result.stdout)
+        log_print(f"Updated state for {submission_id} to {target_state}.")
+        return submission
+    except subprocess.CalledProcessError as e:
+        if "Submission is currently in an 'Error' state" in e.stderr:
+            error_print(f"The state for {submission_id} cannot be updated from 'Error' in non-interactive mode.")
+            error_print(f"Captured error:\n{e.stderr}")
+        else:
+            error_print(f"An unexpected error occurred for {submission_id}:")
+            error_print(e.stderr)
+        raise e
+    except subprocess.TimeoutExpired as e:
+        error_print(f"Timeout occurred while updating {submission_id}.")
+        if e.stderr:
+            error_print(e.stderr)
+        raise e
 
 
 submissions_json_list = snakemake.input.submissions
