@@ -21,9 +21,9 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
 
     for file_path in submissions_json_list:
         try:
-            with open(file_path, "r") as f:
+            with open(file_path) as f:
                 all_submissions.extend(json.load(f))
-        except (IOError, json.JSONDecodeError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             raise e
 
     if not all_submissions:
