@@ -1,8 +1,8 @@
-# receive intermediate image name via build-arg
-ARG SNAKEMAKE_BASE_IMAGE
-# use intermediate image as foundation
-# inherits all files, directories, and metadata (labels) (hopefully)
-FROM ${SNAKEMAKE_BASE_IMAGE}
+# This placeholder will be replaced by the content of Dockerfile.snake
+# --- SNAKEMAKE-CONTAINERIZE-CONTENT-GOES-HERE ---
+
+FROM conda-base
+
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
