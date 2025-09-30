@@ -63,7 +63,7 @@ exclude = [
     "dist",
     "out"
 ]
-extend-exclude = ["alembic"]
+extend-exclude = ["alembic", "packages/grz-watchdog"]
 
 line-length = 120
 src = [
@@ -177,6 +177,7 @@ commands = [["mypy"]]
 python_version = "3.12"
 plugins = "pydantic.mypy"
 packages = "grz_cli,grzctl,grz_pydantic_models,grz_db,grz_common"
+exclude = "packages/grz-watchdog"
 
 [[tool.mypy.overrides]]
 module = "crypt4gh.*"
