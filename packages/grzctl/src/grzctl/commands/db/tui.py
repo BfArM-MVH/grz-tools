@@ -1,3 +1,4 @@
+import calendar
 import datetime
 import itertools
 import logging
@@ -116,9 +117,13 @@ class SubmissionCountByDetailedQCByLETable(Static):
 
         today = datetime.date.today()
         quarter = ((today.month - 1) // 3) + 1
-        quarter_end = datetime.date(year=today.year, month=(quarter * 3) + 1, day=1) - datetime.timedelta(days=1)
-        quarter_start = datetime.date(year=today.year, month=quarter_end.month - 2, day=1)
-        logger.debug("Quarter: %s to %s", quarter_start, quarter_end)
+        quarter_start_date = datetime.date(year=today.year, month=((quarter - 1) * 3) + 1, day=1)
+        quarter_end_month = quarter_start_date.month + 2
+        _quarter_end_month_first_weekday, days_in_quarter_end_month = calendar.monthrange(
+            quarter_start_date.year, quarter_end_month
+        )
+        quarter_end_date = quarter_start_date.replace(month=quarter_end_month, day=days_in_quarter_end_month)
+        logger.debug("Quarter: %s to %s", quarter_start_date, quarter_end_date)
         rows = []
         for submitter_id, group in itertools.groupby(
             sorted(submission_qc_states, key=itemgetter(0)), key=itemgetter(0)
@@ -136,7 +141,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
                 if (
                     (submission_date is not None)
                     and (submission_date.year == today.year)
-                    and (quarter_start <= submission_date <= quarter_end)
+                    and (quarter_start_date <= submission_date <= quarter_end_date)
                 ):
                     if detailed_qc_passed is not None:
                         qced_quarter += 1
@@ -156,22 +161,28 @@ class SubmissionCountByDetailedQCByLETable(Static):
             rich.table.Column(header=today.strftime("%B"), justify="center"),
         )
         for submitter_id, qced, total, qced_quarter, total_quarter, qced_month, total_month in rows:
-            qced_prop = qced / total
-            qced_prop_text = (
-                rich.text.Text(f"{qced}/{total} (")
-                + rich.text.Text(f"{qced_prop:.1%}", style="green" if qced_prop >= 0.02 else "red")
-                + rich.text.Text(")")
+            qced_prop = qced / total if total else None
+            qced_prop_perc_text = (
+                rich.text.Text("")
+                if qced_prop is None
+                else rich.text.Text(f" ({qced_prop:.1%})", style="green" if qced_prop >= 0.02 else "red")
             )
-            qced_prop_quarter = qced_quarter / total_quarter
-            qced_quarter_prop_text = (
-                rich.text.Text(f"{qced_quarter}/{total_quarter} (")
-                + rich.text.Text(f"{qced_prop_quarter:.1%}", style="green" if qced_prop_quarter >= 0.02 else "red")
-                + rich.text.Text(")")
+            qced_prop_text = rich.text.Text(f"{qced}/{total}") + qced_prop_perc_text
+
+            qced_prop_quarter = qced_quarter / total_quarter if total_quarter else None
+            qced_prop_quarter_text = (
+                rich.text.Text("")
+                if qced_prop_quarter is None
+                else rich.text.Text(
+                    f" ({qced_prop_quarter:.1%})", style="green" if qced_prop_quarter >= 0.02 else "red"
+                )
             )
+            qced_quarter_text = rich.text.Text(f"{qced_quarter}/{total_quarter}") + qced_prop_quarter_text
+
             table.add_row(
                 str(submitter_id),
                 qced_prop_text,
-                qced_quarter_prop_text,
+                qced_quarter_text,
                 rich.text.Text(
                     f"{qced_month}/{total_month}", style="red" if not qced_month and total_month else "green"
                 ),
