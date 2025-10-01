@@ -1,9 +1,9 @@
-import sys  
-from importlib.metadata import version  
-  
-import click  
-from grz_common.models.s3 import S3Options  
-  
+import sys
+from importlib.metadata import version
+
+import click
+from grz_common.models.s3 import S3Options
+
 
 def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: str = "version.json") -> None:
     """Check grz-cli version against requirements and exit if update is required"""

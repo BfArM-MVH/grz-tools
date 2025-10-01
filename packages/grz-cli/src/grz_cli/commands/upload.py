@@ -10,10 +10,10 @@ import sys
 log = logging.getLogger(__name__)
 
 from grz_common.cli import config_file, submission_dir, threads
-from grz_common.utils.version_check import check_version_and_exit_if_needed  
+from grz_common.utils.version_check import check_version_and_exit_if_needed
 
 from ..models.config import UploadConfig
-from importlib.metadata import version  
+from importlib.metadata import version
 
 
 @click.command()
@@ -29,7 +29,7 @@ def upload(
     Upload a submission to a GRZ/GDC.
     """
     config = UploadConfig.from_path(config_file)
-    check_version_and_exit_if_needed(config.s3)    
+    check_version_and_exit_if_needed(config.s3)
 
     log.info("Starting upload...")
 

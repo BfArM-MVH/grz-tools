@@ -7,7 +7,7 @@ import click
 from .encrypt import encrypt
 from .upload import upload
 from .validate import validate
-from grz_common.utils.version_check import check_version_and_exit_if_needed  
+from grz_common.utils.version_check import check_version_and_exit_if_needed
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def submit(ctx, submission_dir, config_file, threads, force):
 
     config = UploadConfig.from_path(config_file)
     check_version_and_exit_if_needed(config.s3)
-    
+
     click.echo("Starting submission process...")
     ctx.invoke(validate, submission_dir=submission_dir, config_file=config_file, force=force)
     ctx.invoke(encrypt, submission_dir=submission_dir, config_file=config_file, force=force)
