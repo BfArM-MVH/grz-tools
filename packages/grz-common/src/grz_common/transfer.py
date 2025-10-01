@@ -2,11 +2,13 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
+import json
 from typing import TYPE_CHECKING
 
 import boto3
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
+from packaging import version
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -76,3 +78,26 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     )
 
     return s3_resource
+
+
+def get_version_info(s3_options: S3Options, version_file_path: str) -> str | None:
+    """Download the version file from S3 and return its contents."""
+    try:
+        s3_client = init_s3_client(s3_options)
+
+        # download the version file content directly to memory
+        response = s3_client.get_object(Bucket=s3_options.bucket, Key=version_file_path)
+        version_content = response["Body"].read().decode("utf-8").strip()
+        version_data = json.loads(version_content)
+
+        # extract values
+        minimal_version = version.parse(version_data["minimal_version"])
+        latest_version = version.parse(version_data["latest_version"])
+        return minimal_version, latest_version
+
+    except s3_client.exceptions.NoSuchKey:
+        # file does not exist so just return None
+        return None, None
+    except Exception:
+        # return None to fail gracefully for any other exception
+        return None, None
