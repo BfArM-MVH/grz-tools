@@ -117,7 +117,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
 
         today = datetime.date.today()
         quarter = ((today.month - 1) // 3) + 1
-        quarter_start_date = quarter_start_date = datetime.date(year=today.year, month=((quarter - 1) * 3) + 1, day=1)
+        quarter_start_date = datetime.date(year=today.year, month=((quarter - 1) * 3) + 1, day=1)
         quarter_end_month = quarter_start_date.month + 2
         _quarter_end_month_first_weekday, days_in_quarter_end_month = calendar.monthrange(
             quarter_start_date.year, quarter_end_month
