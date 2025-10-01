@@ -2,13 +2,14 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
-from typing import TYPE_CHECKING
-from packaging import version
 import json
+from typing import TYPE_CHECKING
 
 import boto3
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
+from packaging import version
+from pydantic import BaseModel, Field, ValidationError
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -82,6 +83,11 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
 
 def get_version_info(s3_options: S3Options, version_file_path: str) -> str | None:
     """Download the version file from S3 and return its contents."""
+
+    class VersionFile(BaseModel):
+        minimal_version: version.Version = Field(..., description="Minimum supported version")
+        latest_version: version.Version = Field(..., description="Latest available version")
+
     try:
         s3_client = init_s3_client(s3_options)
 
@@ -90,14 +96,9 @@ def get_version_info(s3_options: S3Options, version_file_path: str) -> str | Non
         version_content = response["Body"].read().decode("utf-8").strip()
         version_data = json.loads(version_content)
 
-        # extract values
-        minimal_version = version.parse(version_data["minimal_version"])
-        latest_version = version.parse(version_data["latest_version"])
-        return minimal_version, latest_version
-
-    except s3_client.exceptions.NoSuchKey:
-        # file does not exist so just return None
-        return None, None
-    except Exception:
-        # return None to fail gracefully for any other exception
-        return None, None
+        version_file = VersionFile(**version_data)
+        return version_file
+    
+    except (KeyError, ValidationError, json.JSONDecodeError) as e:
+        print(f"Error reading version file: {e}")
+        return None
