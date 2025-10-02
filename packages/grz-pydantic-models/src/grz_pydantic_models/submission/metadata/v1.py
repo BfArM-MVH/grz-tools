@@ -1002,24 +1002,21 @@ class Donor(StrictBaseModel):
     def consents_to_research(self, date: date) -> bool:
         return ResearchConsent.consents_to_research(self.research_consents, date)
 
-    @model_validator(mode="after")
-    def ensure_mv_consented(self):
+    def consents_to_mv(self) -> bool:
         if self.mv_consent.scope:
-            if not any(
+            return any(
                 scope.domain == MvConsentScopeDomain.mv_sequencing and scope.type_ == MvConsentScopeType.permit
                 for scope in self.mv_consent.scope
-            ):
-                raise ValueError("Must have at least a permit of mvSequencing")
+            )
         else:
             if self.relation not in {Relation.mother, Relation.father}:
-                raise ValueError(
-                    "Donors must have at least a permit of mvSequencing. Exemptions only apply to parents."
-                )
-
+                log.warning("Donors must have at least a permit of mvSequencing. Exemptions only apply to parents.")
+                return False
             if not self.research_consents:
-                raise ValueError(
+                log.warning(
                     "Neither mvConsent nor researchConsent provided. Cannot confirm donor consented to participation."
                 )
+                return False
 
             mv_consent_exempt = False
             for research_consent in self.research_consents:
@@ -1031,11 +1028,13 @@ class Donor(StrictBaseModel):
                     mv_consent_exempt = True
 
             if not mv_consent_exempt:
-                raise ValueError(
+                log.warning(
                     "mvConsent not provided and researchConsent does not specify broad consent presented before 2025-06-15. Cannot confirm donor consented to participation."
                 )
 
-        return self
+            return mv_consent_exempt
+
+        return False
 
     @model_validator(mode="after")
     def ensure_index_has_dna_data(self):
@@ -1163,6 +1162,13 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 if len(self.donors) < 3:
                     raise ValueError("At least three donors are required for a trio study.")
 
+        return self
+
+    @model_validator(mode="after")
+    def ensure_all_donors_mv_consented_if_initial(self):
+        all_donors_mv_consented = all(donor.consents_to_mv() for donor in self.donors)
+        if (self.submission.submission_type == SubmissionType.initial) and not all_donors_mv_consented:
+            raise ValueError("All donors must consent to model project participation for initial submissions.")
         return self
 
     @model_validator(mode="after")

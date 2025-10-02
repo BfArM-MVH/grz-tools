@@ -6,66 +6,18 @@ import importlib.resources
 import json
 import sqlite3
 from pathlib import Path
+from textwrap import dedent
 
 import click.testing
-import cryptography.hazmat.primitives.serialization as cryptser
 import grzctl.cli
 import pytest
 import yaml
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from grz_common.constants import REDACTED_TAN
+from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
 
 from .. import resources as test_resources
-
-
-@pytest.fixture
-def blank_database_config(tmp_path: Path) -> DbConfig:
-    private_key = Ed25519PrivateKey.generate()
-    private_key_path = tmp_path / "alice.sec"
-    with open(private_key_path, "wb") as private_key_file:
-        private_key_file.write(
-            private_key.private_bytes(
-                encoding=cryptser.Encoding.PEM,
-                format=cryptser.PrivateFormat.OpenSSH,
-                encryption_algorithm=cryptser.NoEncryption(),
-            )
-        )
-
-    public_key = private_key.public_key()
-    public_key_path = tmp_path / "alice.pub"
-    with open(public_key_path, "wb") as public_key_file:
-        public_key_file.write(
-            public_key.public_bytes(encoding=cryptser.Encoding.OpenSSH, format=cryptser.PublicFormat.OpenSSH)
-        )
-        # add the comment too
-        public_key_file.write(b" alice")
-
-    return DbConfig(
-        db={
-            "database_url": "sqlite:///" + str((tmp_path / "submission.db.sqlite").resolve()),
-            "author": {
-                "name": "alice",
-                "private_key_path": str(private_key_path.resolve()),
-                "private_key_passphrase": "",
-            },
-            "known_public_keys": str(public_key_path.resolve()),
-        }
-    )
-
-
-@pytest.fixture
-def blank_initial_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
-    config_path = tmp_path / "config.db.yaml"
-    with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
-
-    runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
-    _ = runner.invoke(cli, ["db", "--config-file", str(config_path), "upgrade", "--revision", "1a9bd994df1b"])
-
-    return config_path
 
 
 def test_all_migrations(blank_initial_database_config_path):
@@ -100,19 +52,6 @@ def test_all_migrations(blank_initial_database_config_path):
     assert pseudonym in result_show.stdout, result_show.stdout
 
 
-@pytest.fixture
-def blank_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
-    config_path = tmp_path / "config.db.yaml"
-    with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
-
-    runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
-    _ = runner.invoke(cli, ["db", "--config-file", str(config_path), "init"])
-
-    return config_path
-
-
 def test_populate(blank_database_config_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(
@@ -134,6 +73,20 @@ def test_populate(blank_database_config_path: Path):
     assert result_show.exit_code == 0, result_show.stderr
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    submission = db.get_submission(metadata.submission_id)
+    assert submission.pseudonym == metadata.submission.local_case_id
+
+    # check that the consent records were populated
+    meta_father = metadata.donors[1]
+    db_father = db.get_donors(submission_id=metadata.submission_id, pseudonym=meta_father.donor_pseudonym)[0]
+    assert {
+        consent.no_scope_justification for consent in meta_father.research_consents
+    } == db_father.research_consent_missing_justifications
 
 
 def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
@@ -162,6 +115,42 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
             [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],
             catch_exceptions=False,
         )
+
+
+def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(
+        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    )
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            mother1_germline0,9e107d9d372bb6826bd81l3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30,Blood DNA normal,wgs,germline,germline-only,PASS,37.4,37.0,30.0,1.0810810810810774,PASS,91.672363717605,30,88.0,85,4.17314058818751,PASS,1.0,20,1.0,0.8,0.0,PASS
+            father2_germline0,9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32ezf8f7b77c61cbe3f30,Blood DNA normal,wgs,germline,germline-only,FAIL,19.94,30.0,30.0,-33.53333333333333,TOO LOW,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
+            index0_germline0,index,Blood DNA normal,wgs,germline,germline-only,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate-qc", metadata.submission_id, str(report_csv_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 3
 
 
 def test_update_error_confirm(blank_database_config_path: Path):
