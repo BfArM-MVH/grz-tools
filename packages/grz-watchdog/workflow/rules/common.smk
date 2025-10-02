@@ -1,5 +1,6 @@
 import shutil
 from operator import itemgetter
+from os import PathLike
 from typing import Literal
 
 import humanfriendly
@@ -205,6 +206,25 @@ def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["succ
 ## RESOURCE ESTIMATION FUNCTIONS
 
 
+def parse_metadata(metadata_path: PathLike | str) -> GrzSubmissionMetadata:
+    with open(metadata_path) as f:
+        json_str = f.read()
+        metadata: GrzSubmissionMetadata = GrzSubmissionMetadata.model_validate_json(
+            json_str
+        )
+    return metadata
+
+
+def dataset_size(metadata: GrzSubmissionMetadata) -> int:
+    bytes = 0
+    for donor in metadata.donors:
+        for lab_datum in donor.lab_data:
+            if sequence_data := lab_datum.sequence_data:
+                for file in sequence_data.files:
+                    bytes += file.file_size_in_bytes
+    return bytes
+
+
 def estimate_download_size(wildcards: Wildcards, input: InputFiles) -> str:
     """
     Estimate the total size of the files to be downloaded.
@@ -219,17 +239,7 @@ def estimate_download_size(wildcards: Wildcards, input: InputFiles) -> str:
         A humanfriendly string to be used with snakemake's "disk"
         resource (not "disk_mb"!)
     """
-    with open(input.metadata) as f:
-        json_str = f.read()
-        metadata: GrzSubmissionMetadata = GrzSubmissionMetadata.model_validate_json(
-            json_str
-        )
-    bytes = 0
-    for donor in metadata.donors:
-        for lab_datum in donor.lab_data:
-            if sequence_data := lab_datum.sequence_data:
-                for file in sequence_data.files:
-                    bytes += file.file_size_in_bytes
+    bytes = dataset_size(parse_metadata(input.metadata))
     return humanfriendly.format_size(bytes)
 
 
@@ -237,35 +247,31 @@ def estimate_decrypt_size(wildcards: Wildcards, input: InputFiles) -> str:
     """
     Estimate the total size of the files to be decrypted (plus the original files).
 
-    Delegates to shutil.disk_usage on the downloaded/encrypted files.
-
     Args:
         wildcards: Unused.
-        input: InputFiles with attribute `data` pointing to the data directory.
+        input: InputFiles with attribute `data` pointing to the data directory and `metadata` pointing to the metadata.json file.
 
     Returns:
         A humanfriendly string to be used with snakemake's "disk"
         resource (not "disk_mb"!)
     """
-    _total_bytes, used_bytes, _free_bytes = shutil.disk_usage(Path(input.data))
+    bytes = dataset_size(parse_metadata(input.metadata))
     # TODO: check: returning double the size here because we double the files?
-    return humanfriendly.format_size(2 * used_bytes)
+    return humanfriendly.format_size(2 * bytes)
 
 
 def estimate_re_encrypt_size(wildcards: Wildcards, input: InputFiles) -> str:
     """
     Estimate the total size of the files to be re-encrypted (plus the original files).
 
-    Delegates to shutil.disk_usage on the downloaded/encrypted files.
-
     Args:
         wildcards: Unused.
-        input: InputFiles with attribute `data` pointing to the data directory.
+        input: InputFiles with attribute `data` pointing to the data directory and `metadata` pointing to the metadata.json file.
 
     Returns:
         A humanfriendly string to be used with snakemake's "disk"
         resource (not "disk_mb"!)
     """
-    _total_bytes, used_bytes, _free_bytes = shutil.disk_usage(Path(input.data))
+    bytes = dataset_size(parse_metadata(input.metadata))
     # TODO: check: returning double the size here because we double the files?
-    return humanfriendly.format_size(2 * used_bytes)
+    return humanfriendly.format_size(2 * bytes)
