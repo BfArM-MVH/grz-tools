@@ -208,6 +208,7 @@ rule decrypt:
     """
     input:
         data=rules.download.output.data,
+        metadata=rules.metadata.output.metadata,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
@@ -281,6 +282,7 @@ rule re_encrypt:
     """
     input:
         data=rules.download.output.data,
+        metadata=rules.metadata.output.metadata,
         consent_flag=rules.consent.output.consent_flag,
         validation_flag=rules.validate.output.validation_flag,
         decrypted_marker=rules.decrypt.output.marker,
