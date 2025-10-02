@@ -1,1 +1,509 @@
-../../../../tests/mock_files/submissions/valid_submission/metadata/metadata.json
+{
+  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.3/GRZ/grz-schema.json",
+  "submission": {
+    "submissionDate": "2025-09-15",
+    "submissionType": "test",
+    "submitterId": "260914050",
+    "labName": "Institute für Humangenetik am Klinikum rechts der Isar",
+    "tanG": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+    "localCaseId": "valid_submission",
+    "genomicDataCenterId": "GRZK00007",
+    "clinicalDataNodeId": "KDKK00007",
+    "genomicStudyType": "duo",
+    "genomicStudySubtype": "tumor+germline",
+    "coverageType": "GKV",
+    "diseaseType": "oncological"
+  },
+  "donors": [
+    {
+      "donorPseudonym": "index",
+      "gender": "female",
+      "relation": "index",
+      "mvConsent": {
+        "presentationDate": "2024-07-15",
+        "version": "1.7.1b",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "mvSequencing"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "reIdentification"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "caseIdentification"
+          }
+        ]
+      },
+      "researchConsents": [
+        {
+          "schemaVersion": "2025.0.1",
+          "presentationDate": "2024-07-15",
+          "scope": {
+            "resourceType": "Consent",
+            "id": "89f494a3-cd75-44f5-a78a-581dfdd47a94",
+            "meta": {
+              "lastUpdated": "12/11/2020 09:39:07",
+              "profile": [
+                "https://www.medizininformatik-initiative.de/fhir/modul-consent/StructureDefinition/mii-pr-consent-einwilligung"
+              ]
+            },
+            "extension": [
+              {
+                "extension": [
+                  {
+                    "url": "domain",
+                    "valueReference": {
+                      "reference": "ResearchStudy/d7a65ce8-2810-401a-b0db-70782a7b19a6"
+                    }
+                  },
+                  {
+                    "url": "status",
+                    "valueCoding": {
+                      "system": "http://hl7.org/fhir/publication-status",
+                      "code": "active"
+                    }
+                  }
+                ],
+                "url": "http://fhir.de/ConsentManagement/StructureDefinition/DomainReference"
+              }
+            ],
+            "status": "active",
+            "scope": {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/consentscope",
+                  "code": "research"
+                }
+              ]
+            },
+            "category": [
+              {
+                "coding": [
+                  {
+                    "system": "http://loinc.org",
+                    "code": "57016-8"
+                  }
+                ]
+              },
+              {
+                "coding": [
+                  {
+                    "system": "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
+                    "code": "2.16.840.1.113883.3.1937.777.24.2.184"
+                  }
+                ]
+              }
+            ],
+            "patient": {
+              "reference": "Patient/9b4a702d-162c-428a-8c5d-8b98af21b693"
+            },
+            "dateTime": "2020-09-01",
+            "organization": [
+              {
+                "display": "Klinikum Musterstadt"
+              }
+            ],
+            "policy": [
+              {
+                "uri": "urn:oid:2.16.840.1.113883.3.1937.777.24.2.1791"
+              }
+            ],
+            "policyRule": {
+              "extension": [
+                {
+                  "url": "http://fhir.de/ConsentManagement/StructureDefinition/Xacml",
+                  "valueBase64Binary": "TUlJIEJDIEV4YW1wbGUgWEFDTUw="
+                }
+              ],
+              "text": "siehe eingebettetes XACML"
+            },
+            "provision": {
+              "type": "deny",
+              "period": {
+                "start": "2020-09-01",
+                "end": "2050-08-31"
+              },
+              "provision": [
+                {
+                  "type": "permit",
+                  "period": {
+                    "start": "2020-09-01",
+                    "end": "2025-08-31"
+                  },
+                  "code": [
+                    {
+                      "coding": [
+                        {
+                          "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                          "code": "2.16.840.1.113883.3.1937.777.24.5.3.6",
+                          "display": "MDAT_erheben"
+                        }
+                      ]
+                    },
+                    {
+                      "coding": [
+                        {
+                          "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                          "code": "2.16.840.1.113883.3.1937.777.24.5.3.7",
+                          "display": "MDAT_speichern_verarbeiten"
+                        }
+                      ]
+                    },
+                    {
+                      "coding": [
+                        {
+                          "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                          "code": "2.16.840.1.113883.3.1937.777.24.5.3.19",
+                          "display": "BIOMAT_erheben"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "permit",
+                  "period": {
+                    "start": "2020-09-01",
+                    "end": "2050-08-31"
+                  },
+                  "code": [
+                    {
+                      "coding": [
+                        {
+                          "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                          "code": "2.16.840.1.113883.3.1937.777.24.5.3.8",
+                          "display": "MDAT_wissenschaftlich_nutzen_EU_DSGVO_NIVEAU"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "permit",
+                  "period": {
+                    "start": "2020-09-01",
+                    "end": "2050-08-31"
+                  },
+                  "code": [
+                    {
+                      "coding": [
+                        {
+                          "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                          "code": "2.16.840.1.113883.3.1937.777.24.5.3.20",
+                          "display": "BIOMAT_lagern_verarbeiten"
+                        }
+                      ]
+                    },
+                    {
+                      "coding": [
+                        {
+                          "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                          "code": "2.16.840.1.113883.3.1937.777.24.5.3.22",
+                          "display": "BIOMAT_wissenschaftlich_nutzen_EU_DSGVO_NIVEAU"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "labData": [
+        {
+          "labDataName": "Blut DNA normal",
+          "tissueOntology": {
+            "name": "Human Tissue Ontology",
+            "version": "v1.2.3"
+          },
+          "tissueTypeId": "HTO:0000171",
+          "tissueTypeName": "Blood",
+          "sampleConservation": "fresh-tissue",
+          "sequenceType": "dna",
+          "sequenceSubtype": "germline",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wes",
+          "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
+          "libraryPrepKitManufacturer": "Agilent",
+          "sequencerModel": "Illumina HiSeq X",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Illumina NovaSeq S4 flow cell",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "Illumina",
+          "enrichmentKitDescription": "TruSeq RNA Access Library Prep Kit v2.0",
+          "barcode": "ATCACG",
+          "sequencingLayout": "paired-end",
+          "sequenceData": {
+            "bioinformaticsPipelineName": "In-House Pipeline",
+            "referenceGenome": "GRCh38",
+            "bioinformaticsPipelineVersion": "2e70912",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 30,
+              "percent": 95.4
+            },
+            "meanDepthOfCoverage": 102.4,
+            "minCoverage": 30,
+            "targetedRegionsAboveMinCoverage": 0.96,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "Mutect2",
+                "version": "v4.1.8.1"
+              },
+              {
+                "name": "Strelka2",
+                "version": "v2.9.10"
+              },
+              {
+                "name": "VarScan",
+                "version": "v2.4.3"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "target_regions.bed",
+                "fileType": "bed",
+                "fileChecksum": "69eed52acd76741887b72f0b20048d6a130dff24210d8031f192ed7a614c0820",
+                "fileSizeInBytes": 235
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
+                "fileType": "fastq",
+                "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
+                "fileSizeInBytes": 165912,
+                "readOrder": "R1",
+                "readLength": 150
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
+                "fileType": "fastq",
+                "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
+                "fileSizeInBytes": 165806,
+                "readOrder": "R2",
+                "readLength": 150
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf",
+                "fileType": "vcf",
+                "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
+                "fileSizeInBytes": 1065
+              }
+            ]
+          },
+          "sampleDate": "1970-01-01"
+        },
+        {
+          "labDataName": "Blut DNA Tumor",
+          "tissueOntology": {
+            "name": "Human Tissue Ontology",
+            "version": "v1.2.3"
+          },
+          "tissueTypeId": "HTO:0000171",
+          "tissueTypeName": "Tumor",
+          "sampleConservation": "fresh-tissue",
+          "sequenceType": "dna",
+          "sequenceSubtype": "somatic",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wes",
+          "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
+          "libraryPrepKitManufacturer": "Agilent",
+          "sequencerModel": "Illumina HiSeq X",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Illumina NovaSeq S4 flow cell",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "Illumina",
+          "enrichmentKitDescription": "TruSeq RNA Access Library Prep Kit v2.0",
+          "barcode": "GGTACTA",
+          "sequencingLayout": "paired-end",
+          "tumorCellCount": [
+            {
+              "count": 80,
+              "method": "bioinformatics"
+            }
+          ],
+          "sequenceData": {
+            "bioinformaticsPipelineName": "In-House Pipeline",
+            "referenceGenome": "GRCh38",
+            "bioinformaticsPipelineVersion": "2e70912",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 30,
+              "percent": 95.4
+            },
+            "meanDepthOfCoverage": 252.4,
+            "minCoverage": 100,
+            "targetedRegionsAboveMinCoverage": 0.96,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "Mutect2",
+                "version": "v4.1.8.1"
+              },
+              {
+                "name": "Strelka2",
+                "version": "v2.9.10"
+              },
+              {
+                "name": "VarScan",
+                "version": "v2.4.3"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "target_regions.bed",
+                "fileType": "bed",
+                "fileChecksum": "69eed52acd76741887b72f0b20048d6a130dff24210d8031f192ed7a614c0820",
+                "fileSizeInBytes": 235
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
+                "fileType": "fastq",
+                "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
+                "fileSizeInBytes": 165912,
+                "readOrder": "R1",
+                "readLength": 150
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
+                "fileType": "fastq",
+                "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
+                "fileSizeInBytes": 165806,
+                "readOrder": "R2",
+                "readLength": 150
+              },
+              {
+                "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf",
+                "fileType": "vcf",
+                "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
+                "fileSizeInBytes": 1065
+              }
+            ]
+          },
+          "sampleDate": "1970-01-01"
+        }
+      ]
+    },
+    {
+      "donorPseudonym": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111",
+      "gender": "male",
+      "relation": "father",
+      "mvConsent": {
+        "presentationDate": "2024-07-15",
+        "version": "1.7.1b",
+        "scope": [
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "mvSequencing"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "reIdentification"
+          },
+          {
+            "type": "permit",
+            "date": "2024-07-15",
+            "domain": "caseIdentification"
+          }
+        ]
+      },
+      "researchConsents": [
+        {
+          "presentationDate": "2024-07-15",
+          "noScopeJustification": "other patient-related reason"
+        }
+      ],
+      "labData": [
+        {
+          "labDataName": "Blut DNA normal",
+          "tissueOntology": {
+            "name": "Human Tissue Ontology",
+            "version": "v1.2.3"
+          },
+          "tissueTypeId": "HTO:0000171",
+          "tissueTypeName": "Blood",
+          "sampleConservation": "fresh-tissue",
+          "sequenceType": "dna",
+          "sequenceSubtype": "germline",
+          "fragmentationMethod": "sonication",
+          "libraryType": "wes",
+          "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
+          "libraryPrepKitManufacturer": "Agilent",
+          "sequencerModel": "Illumina HiSeq X",
+          "sequencerManufacturer": "Illumina",
+          "kitName": "Illumina NovaSeq S4 flow cell",
+          "kitManufacturer": "Illumina",
+          "enrichmentKitManufacturer": "Illumina",
+          "enrichmentKitDescription": "TruSeq RNA Access Library Prep Kit v2.0",
+          "barcode": "TTGACA",
+          "sequencingLayout": "paired-end",
+          "sequenceData": {
+            "bioinformaticsPipelineName": "In-House Pipeline",
+            "referenceGenome": "GRCh38",
+            "bioinformaticsPipelineVersion": "2e70912",
+            "percentBasesAboveQualityThreshold": {
+              "minimumQuality": 30,
+              "percent": 95.4
+            },
+            "meanDepthOfCoverage": 252.4,
+            "minCoverage": 30,
+            "targetedRegionsAboveMinCoverage": 0.96,
+            "nonCodingVariants": true,
+            "callerUsed": [
+              {
+                "name": "Mutect2",
+                "version": "v4.1.8.1"
+              },
+              {
+                "name": "Strelka2",
+                "version": "v2.9.10"
+              },
+              {
+                "name": "VarScan",
+                "version": "v2.4.3"
+              }
+            ],
+            "files": [
+              {
+                "filePath": "target_regions.bed",
+                "fileType": "bed",
+                "fileChecksum": "69eed52acd76741887b72f0b20048d6a130dff24210d8031f192ed7a614c0820",
+                "fileSizeInBytes": 235
+              },
+              {
+                "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
+                "fileType": "fastq",
+                "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
+                "fileSizeInBytes": 165912,
+                "readOrder": "R1",
+                "readLength": 150
+              },
+              {
+                "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
+                "fileType": "fastq",
+                "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
+                "fileSizeInBytes": 165806,
+                "readOrder": "R2",
+                "readLength": 150
+              },
+              {
+                "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf",
+                "fileType": "vcf",
+                "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
+                "fileSizeInBytes": 1065
+              }
+            ]
+          },
+          "sampleDate": "1970-01-01"
+        }
+      ]
+    }
+  ]
+}
