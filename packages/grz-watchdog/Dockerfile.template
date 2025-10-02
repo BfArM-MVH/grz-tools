@@ -21,15 +21,15 @@ WORKDIR /grz-watchdog
 COPY pixi.toml pixi.lock ./
 RUN pixi install
 
-# copy actual workflow definition
-COPY workflow/ workflow/
+# ensure workdir and config dirs exists
+RUN mkdir /config /workdir
 
 # copy container scripts / entrypoint
 COPY container_utils/scripts/ /usr/local/bin/
 RUN chmod +x /usr/local/bin/*
 
-# ensure workdir and config dirs exists
-RUN mkdir /config /workdir
+# copy actual workflow definition
+COPY workflow/ workflow/
 
 WORKDIR /workdir
 
