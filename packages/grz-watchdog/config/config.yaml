@@ -1,0 +1,18 @@
+monitor:
+  interval: 10 # in seconds
+batch:
+  limit: 2
+
+temp-outputs: true  # true / false: Toggle between `temp(file)` and `file` in rule outputs
+on-failed-validation: "do-nothing"  # "cleanup" or "do-nothing"
+auto-cleanup: "inbox+storage"  # "inbox", "storage", "inbox+storage", "none"
+
+config_paths:
+  inbox:
+    "123456789":
+      test1: "config/configs/inbox.test1.yaml"
+  archive:
+    consented: "config/configs/consented.yaml"
+    nonconsented: "config/configs/nonconsented.yaml"
+  db: "config/configs/db.yaml"
+  pruefbericht: "config/configs/pruefbericht.yaml"

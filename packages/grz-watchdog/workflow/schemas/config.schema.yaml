@@ -1,0 +1,78 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+description: "A schema for the monitor and cleanup configuration."
+type: object
+properties:
+  monitor:
+    type: object
+    properties:
+      interval:
+        type: integer
+        description: "The interval in seconds for monitoring."
+    required:
+      - interval
+  batch:
+    type: object
+    properties:
+      limit:
+        type: integer
+        description: "The batch processing limit."
+    required:
+      - limit
+  temp-outputs:
+    type: boolean
+    description: "If true, rule outputs are temporary (marked as `temp(…)`). If false, rule outputs will be kept."
+  on-failed-validation:
+    type: string
+    description: "Action to take on failed validation."
+    enum:
+      - "do-nothing"
+      - "cleanup"
+  auto-cleanup:
+    type: string
+    description: "The auto-cleanup strategy."
+    enum:
+      - "inbox"
+      - "storage"
+      - "inbox+storage"
+      - "none"
+  config_paths:
+    type: object
+    properties:
+      inbox:
+        type: object
+        description: "Configuration paths for inbox."
+        patternProperties:
+          "^[0-9]+$":
+            type: object
+            patternProperties:
+              "^.*$":
+                type: string
+      archive:
+        type: object
+        description: "Configuration paths for archive."
+        properties:
+          consented:
+            type: string
+          nonconsented:
+            type: string
+        required:
+          - consented
+          - nonconsented
+      db:
+        type: string
+        description: "Configuration path for the database."
+      pruefbericht:
+        type: string
+        description: "Configuration path for the pruefbericht."
+    required:
+      - inbox
+      - archive
+      - db
+      - pruefbericht
+required:
+  - monitor
+  - batch
+  - on-failed-validation
+  - auto-cleanup
+  - config_paths
+additionalProperties: false
