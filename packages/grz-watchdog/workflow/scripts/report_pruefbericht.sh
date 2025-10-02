@@ -10,7 +10,7 @@ _error_handler() {
 	echo "$error_message" >&2
 	echo "$error_message" >>"${log_stderr}"
 
-	grzctl db --config-file "${db_config}" submission update "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
+	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
 }
 
 trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
@@ -29,4 +29,4 @@ grzctl pruefbericht \
 	--config-file "${snakemake_input[pruefbericht_config_path]}" \
 	--submission-dir "${snakemake_input[data]}" >"${snakemake_output[answer]}" 2>>"$log_stderr"
 
-grzctl db --config-file "$db_config" submission update "$submission_id" reported >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" reported >>"$log_stdout" 2>>"$log_stderr"
