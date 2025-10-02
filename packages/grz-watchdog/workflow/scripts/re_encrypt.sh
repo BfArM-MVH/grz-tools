@@ -10,7 +10,7 @@ _error_handler() {
 	echo "$error_message" >&2
 	echo "$error_message" >>"${log_stderr}"
 
-	grzctl db --config-file "${db_config}" submission update "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
+	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
 }
 
 trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
@@ -29,7 +29,7 @@ fi
 
 echo "Consent: $CONSENT. Using config file: $CONFIG_FILE" >"$log_stdout" 2>"$log_stderr"
 
-grzctl db --config-file "$db_config" submission update "$submission_id" encrypting >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" encrypting >>"$log_stdout" 2>>"$log_stderr"
 
 grzctl encrypt \
 	--config-file "$CONFIG_FILE" \
@@ -37,4 +37,4 @@ grzctl encrypt \
 	--force \
 	>>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "$db_config" submission update "$submission_id" encrypted >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" encrypted >>"$log_stdout" 2>>"$log_stderr"
