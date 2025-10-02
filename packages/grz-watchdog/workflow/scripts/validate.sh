@@ -10,7 +10,7 @@ validation_errors="${snakemake_output[validation_errors]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-grzctl db --config-file "$db_config" submission update "$submission_id" validating >"$log_stdout" 2>"$log_stderr"
+grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" validating >"$log_stdout" 2>"$log_stderr"
 
 # We expect `grzctl validate` to return a non-zero code on validation failure,
 # which is not a script error. So we handle its exit code manually instead of relying on `set -e`.
@@ -25,4 +25,4 @@ else
 	echo "false" >"$validation_flag"
 fi
 
-grzctl db --config-file "$db_config" submission update "$submission_id" validated >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" validated >>"$log_stdout" 2>>"$log_stderr"

@@ -31,7 +31,7 @@ if [[ "$mode" == "none" ]]; then
 	exit 0
 fi
 
-grzctl db --config-file "$db_config" submission update "$submission_id" cleaning >"$log_stdout" 2>"$log_stderr"
+grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" cleaning >"$log_stdout" 2>"$log_stderr"
 
 echo "Auto-cleanup mode: '${mode}'" >>"$log_stdout"
 
@@ -80,6 +80,6 @@ if [[ "$mode" == "storage" || "$mode" == "inbox+storage" ]]; then
 fi
 json_data="{\"targets\": [${details}]}"
 
-grzctl db --config-file "$db_config" submission update "$submission_id" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
 
 echo 'true' >"${snakemake_output[clean_results]}"
