@@ -26,7 +26,7 @@ ALL_INBOX_PAIRS = [
 wildcard_constraints:
     submitter_id=r"|".join(set(map(itemgetter(0), ALL_INBOX_PAIRS))),
     inbox=r"|".join(set(map(itemgetter(1), ALL_INBOX_PAIRS))),
-    qc_status="with_qc|without_qc",
+    qc_status=r"with_qc|without_qc",
 
 
 envvars:
