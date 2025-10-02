@@ -47,7 +47,7 @@ def test_wgs_trio_special_consent():
     metadata["donors"][0]["researchConsents"][0]["scope"] = metadata["donors"][1]["researchConsents"][0]["scope"]
 
     with pytest.raises(
-        ValidationError, match="All donors must consent to model project participation for initial submissions."
+        ValidationError, match=r"All donors must consent to model project participation for initial submissions."
     ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
