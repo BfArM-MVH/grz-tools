@@ -142,66 +142,6 @@ def get_s3_metadata_key(wildcards: Wildcards) -> str:
     return f"{wildcards.submission_id}/metadata/metadata.json"
 
 
-def register_s3_access_key(
-    wildcards: Wildcards, input: InputFiles
-) -> Literal["success"]:
-    """
-    Export the S3 access key in the environment as AWS_ACCESS_KEY_ID.
-
-    Try looking up environment variable `GRZ_S3__ACCESS_KEY` first,
-    then look up the access key in the inbox config file.
-
-    Args:
-        wildcards: Unused
-        input: InputFiles with attribute `inbox_config_path` pointing to the inbox config file.
-
-    Returns:
-        "success" if the access key was registered, else raises ValueError.
-
-    Raises:
-        ValueError: If no S3 access key is found.
-    """
-    if access_key := os.environ.get("GRZ_S3__ACCESS_KEY", ""):
-        os.environ["AWS_ACCESS_KEY_ID"] = access_key
-        return "success"
-
-    with open(input.inbox_config_path) as f:
-        access_key = yaml.safe_load(f).get("s3", {}).get("access_key", "")
-        if not access_key:
-            raise ValueError("No S3 access_key found.")
-        os.environ["AWS_ACCESS_KEY_ID"] = access_key
-        return "success"
-
-
-def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["success"]:
-    """
-    Export the S3 secret in the environment as AWS_SECRET_ACCESS_KEY.
-
-    Try looking up environment variable `GRZ_S3__SECRET` first,
-    then look up the secret in the inbox config file.
-
-    Args:
-        wildcards: Unused
-        input: InputFiles with attribute `inbox_config_path` pointing to the inbox config file.
-
-    Returns:
-        "success" if the access key was registered, else raises ValueError.
-
-    Raises:
-        ValueError: If no S3 secret is found.
-    """
-    if secret := os.environ.get("GRZ_S3__SECRET", ""):
-        os.environ["AWS_SECRET_ACCESS_KEY"] = secret
-        return "success"
-
-    with open(input.inbox_config_path) as f:
-        secret = yaml.safe_load(f).get("s3", {}).get("secret", "")
-        if not secret:
-            raise ValueError("No S3 secret found.")
-        os.environ["AWS_SECRET_ACCESS_KEY"] = secret
-        return "success"
-
-
 ## RESOURCE ESTIMATION FUNCTIONS
 
 
