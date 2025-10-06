@@ -2,8 +2,9 @@
 set -euo pipefail
 
 GRZ_WATCHDOG_WORKFLOW_IMAGE="grz-watchdog:latest"
-
-snakemake --containerize > Dockerfile.snake.tmp
+# To be able to run snakemake --containerize, we have to ensure the env vars snakemake needs are at least present/empty
+GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE="" GRZ_S3__ACCESS_KEY="" GRZ_S3__SECRET="" \
+  snakemake --containerize > Dockerfile.snake.tmp
 
 if [ -f Dockerfile.snake ] && cmp -s Dockerfile.snake Dockerfile.snake.tmp; then
   rm Dockerfile.snake.tmp
