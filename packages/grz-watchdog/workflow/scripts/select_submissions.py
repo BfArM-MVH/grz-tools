@@ -1,27 +1,15 @@
 import json
-import subprocess
+import os
+import sys
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
-from contextlib import redirect_stdout, redirect_stderr
+
+sys.path.append(os.path.dirname(__file__))
+import shared
 
 
 def select_submissions(submissions_path, db_config_path, limit):
-    result = subprocess.run(
-        ["grzctl", "db", "--config-file", db_config_path, "list", "--json"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    db_output = result.stdout
-    if not db_output:
-        print("No submissions found in database. Nothing to do.")
-        return []
-    db_states = {}
-    for db_submission_entry in json.loads(db_output):
-        if latest_state := db_submission_entry.get("latest_state"):
-            db_states[db_submission_entry["id"]] = {
-                "state": latest_state["state"].casefold(),
-                "timestamp": latest_state["timestamp"],
-            }
+    db_states = shared.get_db_states(db_config_path)
 
     with open(submissions_path, "r") as f:
         synced_submissions = json.load(f)
@@ -49,17 +37,10 @@ limit = snakemake.params.batch_limit
 stdout_log_path = snakemake.log.stdout
 stderr_log_path = snakemake.log.stderr
 
-with (
-    redirect_stdout(open(stdout_log_path, "w")),
-    redirect_stderr(open(stderr_log_path, "w")),
-):
+with redirect_stdout(open(stdout_log_path, "w")), redirect_stderr(open(stderr_log_path, "w")):
     selected_submissions = select_submissions(submissions_path, db_config_path, limit)
     print(f"Selected {len(selected_submissions)} submissions for processing.")
     with open(output_batch_file, "w") as f:
         for submission in selected_submissions:
-            origin = submission["origin"]
-            # TODO implement selection strategy for with_qc/without_qc
-            target_path = (
-                f"results/{origin['submitter_id']}/{origin['inbox']}/{submission['submission_id']}/processed/without_qc"
-            )
+            target_path = shared.determine_target_path(submission["origin"], submission["submission_id"])
             f.write(f"{target_path}\n")

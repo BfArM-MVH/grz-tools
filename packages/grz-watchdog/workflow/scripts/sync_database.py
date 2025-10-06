@@ -1,59 +1,24 @@
 import json
-import subprocess
+import os
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from os import PathLike
-from typing import Any
 
-SUBPROCESS_TIMEOUT = 120
-
-
-def log_print(*args, **kwargs):
-    print(*args, **kwargs, file=sys.stdout)
-    sys.stdout.flush()
+sys.path.append(os.path.dirname(__file__))
+import shared
+from shared import error_print, log_print
 
 
-def error_print(*args, **kwargs):
-    print(*args, **kwargs, file=sys.stderr)
-    sys.stderr.flush()
-
-
-def get_current_db_states(db_config_path: PathLike | str) -> dict[str, str]:
-    """
-    Fetches the latest state for all submissions currently in the database.
-
-    Returns:
-        A dictionary mapping submission_id to its latest state (string).
-    """
-    log_print("Fetching current submission states from the database…")
+def register_submissions_with_db(submissions_json_list, db_config_path):
     try:
-        result = subprocess.run(
-            ["grzctl", "db", "--config-file", db_config_path, "list", "--json"],
-            check=True,
-            text=True,
-            capture_output=True,
-            timeout=SUBPROCESS_TIMEOUT,
-        )
-        if not result.stdout:
-            return {}
-        db_submissions = json.loads(result.stdout)
-
-        db_states = {}
-        for sub in db_submissions:
-            if latest_state := sub.get("latest_state"):
-                db_states[sub["id"]] = latest_state.get("state", "").casefold()
-
-        return db_states
-
-    except (subprocess.CalledProcessError, json.JSONDecodeError, subprocess.TimeoutExpired) as e:
+        db_states_info = shared.get_db_states(db_config_path)
+    except Exception as e:
         error_print("Could not fetch current states from the database.")
         if hasattr(e, "stderr"):
             error_print(e.stderr)
         raise e
 
+    current_db_states = {sub_id: info["state"] for sub_id, info in db_states_info.items()}
 
-def register_submissions_with_db(submissions_json_list, db_config_path):
-    current_db_states = get_current_db_states(db_config_path)
     all_s3_submissions = []
 
     for file_path in submissions_json_list:
@@ -87,21 +52,21 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
             # A new, incomplete submission is found.
             case None, "uploading":
                 log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploading'.")
-                add_submission(db_config_path, submission_id)
-                update_submission(db_config_path, submission_id, "uploading")
+                shared.add_submission_to_db(db_config_path, submission_id)
+                shared.update_submission_state_in_db(db_config_path, submission_id, "uploading")
                 available_submissions.append(submission)
 
             # A new, already complete submission is found.
             case None, "uploaded":
                 log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploaded'.")
-                add_submission(db_config_path, submission_id)
-                update_submission(db_config_path, submission_id, "uploaded")
+                shared.add_submission_to_db(db_config_path, submission_id)
+                shared.update_submission_state_in_db(db_config_path, submission_id, "uploaded")
                 available_submissions.append(submission)
 
             # An existing incomplete submission is now complete.
             case "uploading", "uploaded":
                 log_print(f"Updating state for {submission_id} from 'uploading' to 'uploaded'.")
-                update_submission(db_config_path, submission_id, "uploaded")
+                shared.update_submission_state_in_db(db_config_path, submission_id, "uploaded")
                 available_submissions.append(submission)
 
             # "no-op" cases for clarity, nothing to be done here
@@ -116,45 +81,6 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
                 continue
 
     return available_submissions
-
-
-def add_submission(db_config_path: PathLike | str, submission_id: str):
-    cmd = ["grzctl", "db", "--config-file", db_config_path, "submission", "add", submission_id]
-    try:
-        result = subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
-        log_print(result.stdout)
-        log_print(f"Successfully added {submission_id}.")
-
-    except subprocess.CalledProcessError as e:
-        error_print(f"An unexpected error occurred for {submission_id}:")
-        error_print(e.stderr)
-        raise e
-    except subprocess.TimeoutExpired as e:
-        error_print(f"Timeout occurred while processing {submission_id}.")
-        if e.stderr:
-            error_print(e.stderr)
-        raise e
-
-
-def update_submission(db_config_path: PathLike | str, submission_id: str, target_state: str):
-    cmd = ["grzctl", "db", "--config-file", db_config_path, "submission", "update", submission_id, target_state]
-    try:
-        result = subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
-        log_print(result.stdout)
-        log_print(f"Updated state for {submission_id} to {target_state}.")
-    except subprocess.CalledProcessError as e:
-        if "Submission is currently in an 'Error' state" in e.stderr:
-            error_print(f"The state for {submission_id} cannot be updated from 'Error' in non-interactive mode.")
-            error_print(f"Captured error:\n{e.stderr}")
-        else:
-            error_print(f"An unexpected error occurred for {submission_id}:")
-            error_print(e.stderr)
-        raise e
-    except subprocess.TimeoutExpired as e:
-        error_print(f"Timeout occurred while updating {submission_id}.")
-        if e.stderr:
-            error_print(e.stderr)
-        raise e
 
 
 submissions_json_list = snakemake.input.submissions
