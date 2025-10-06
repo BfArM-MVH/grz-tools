@@ -197,11 +197,25 @@ if "daemon" in sys.argv:
     monitor_thread.start()
 
 
-rule daemon:
-    """
-    Consumes submissions from monitoring queue and processes them.
+rule daemon_service:
+    output:
+        service(touch("results/daemon.service")),
+    run:
+        monitor_thread.join()
 
-    Entrypoint for continuous "daemon"/"monitoring" mode.
+
+rule daemon_consumer:
+    """
+    Consumes submissions from monitoring queue and sends them off for processing.
     """
     input:
         from_queue(submission_queue, finish_sentinel=finish_sentinel),
+
+
+rule daemon:
+    """
+    Entrypoint for continuous "daemon"/"monitoring" mode.
+    """
+    input:
+        "results/daemon.service",
+        rules.daemon_consumer.input,
