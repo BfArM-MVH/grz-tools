@@ -161,7 +161,7 @@ def from_metadata(metadata_file, output_json, failed):
     help="Allow submission of a Prüfbericht with a redacted TAN.",
     is_flag=True,
 )
-def submit(pruefbericht_file, config_file, output_json, token, allow_redacted_tan_g):  # noqa: PLR0913
+def submit(pruefbericht_file, config_file, output_json, token, allow_redacted_tan_g):
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
 
