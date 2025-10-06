@@ -123,17 +123,9 @@ def bfarm_submit_api(requests_mock):
     yield requests_mock
 
 
-def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path):
+def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        args = [
-            "pruefbericht",
-            "--config-file",
-            temp_pruefbericht_config_file_path,
-            "--submission-dir",
-            str(submission_dir),
-        ]
-
         runner = click.testing.CliRunner(
             env={
                 "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
@@ -143,54 +135,110 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
             }
         )
         cli = grzctl.cli.build_cli()
-        result = runner.invoke(cli, args, catch_exceptions=False)
 
-    assert result.exit_code == 0, result.output
+        # generate Prüfbericht JSON
+        pruefbericht_json_path = tmp_path / "pruefbericht.json"
+        generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
+        generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
+        assert generate_result.exit_code == 0, generate_result.output
+        pruefbericht_json_path.write_text(generate_result.output)
 
-
-def test_valid_submission_with_json_output(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path):
-    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
-    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        args = [
+        # submit generated Prüfbericht
+        submit_args = [
             "pruefbericht",
+            "submit",
             "--config-file",
             temp_pruefbericht_config_file_path,
-            "--submission-dir",
-            str(submission_dir),
+            "--pruefbericht-file",
+            str(pruefbericht_json_path),
+        ]
+        submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
+
+    assert submit_result.exit_code == 0, submit_result.output
+
+
+def test_valid_submission_with_json_output(
+    bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path
+):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grzctl.cli.build_cli()
+
+        # generate Prüfbericht JSON
+        pruefbericht_json_path = tmp_path / "pruefbericht.json"
+        generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
+        generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
+        assert generate_result.exit_code == 0, generate_result.output
+        pruefbericht_json_path.write_text(generate_result.output)
+
+        # submit generated Prüfbericht and ask for JSON output (aka token)
+        submit_args = [
+            "pruefbericht",
+            "submit",
+            "--config-file",
+            temp_pruefbericht_config_file_path,
+            "--pruefbericht-file",
+            str(pruefbericht_json_path),
             "--json",
         ]
+        submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
 
-        runner = click.testing.CliRunner(
-            env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
-            }
-        )
-        cli = grzctl.cli.build_cli()
-        result = runner.invoke(cli, args, catch_exceptions=False)
+    assert submit_result.exit_code == 0, submit_result.output
 
-    assert result.exit_code == 0, result.output
-
-    output = json.loads(result.output)
+    output = json.loads(submit_result.output)
     datetime.datetime.fromisoformat(output["expires"])
     assert output["token"] == "my_token"
 
 
-def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_file_path):
+def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        args = [
+        runner = click.testing.CliRunner(
+            env={
+                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
+                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
+                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
+                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+            }
+        )
+        cli = grzctl.cli.build_cli()
+
+        # generate Prüfbericht JSON
+        pruefbericht_json_path = tmp_path / "pruefbericht.json"
+        generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
+        generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
+        assert generate_result.exit_code == 0, generate_result.output
+        pruefbericht_json_path.write_text(generate_result.output)
+
+        # submit generated Prüfbericht with a pre-provided token
+        submit_args = [
             "pruefbericht",
+            "submit",
             "--config-file",
             temp_pruefbericht_config_file_path,
-            "--submission-dir",
-            str(submission_dir),
+            "--pruefbericht-file",
+            str(pruefbericht_json_path),
             "--token",
             "my_token",
         ]
+        submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
 
+    assert submit_result.exit_code == 0, submit_result.output
+
+
+def test_valid_submission_with_expired_token(
+    bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path
+):
+    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
+    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         runner = click.testing.CliRunner(
             env={
                 "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
@@ -200,41 +248,31 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_
             }
         )
         cli = grzctl.cli.build_cli()
-        result = runner.invoke(cli, args, catch_exceptions=False)
 
-    assert result.exit_code == 0, result.output
+        # generate Prüfbericht JSON
+        pruefbericht_json_path = tmp_path / "pruefbericht.json"
+        generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
+        generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
+        assert generate_result.exit_code == 0, generate_result.output
+        pruefbericht_json_path.write_text(generate_result.output)
 
-
-def test_valid_submission_with_expired_token(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path):
-    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
-    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        args = [
+        # (try to) submit generated Prüfbericht with an expired token
+        submit_args = [
             "pruefbericht",
+            "submit",
             "--config-file",
             temp_pruefbericht_config_file_path,
-            "--submission-dir",
-            str(submission_dir),
+            "--pruefbericht-file",
+            str(pruefbericht_json_path),
             "--token",
             "expired_token",
         ]
+        submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
 
-        runner = click.testing.CliRunner(
-            env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
-            }
-        )
-        cli = grzctl.cli.build_cli()
-        result = runner.invoke(cli, args, catch_exceptions=False)
-
-    assert result.exit_code == 0, result.output
+    assert submit_result.exit_code == 0, submit_result.output
 
 
-def test_valid_submission_multiple_library_types(
-    bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path
-):
+def test_generate_pruefbericht_multiple_library_types(temp_pruefbericht_config_file_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
@@ -255,29 +293,22 @@ def test_valid_submission_multiple_library_types(
 
         args = [
             "pruefbericht",
-            "--config-file",
-            temp_pruefbericht_config_file_path,
-            "--submission-dir",
+            "generate",
+            "from-submission-dir",
             str(tmp_path),
         ]
 
-        runner = click.testing.CliRunner(
-            env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
-            }
-        )
+        runner = click.testing.CliRunner()
         cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
+    # Check that the generated Pruefbericht correctly selected the most expensive library type
+    pruefbericht_data = json.loads(result.output)
+    assert pruefbericht_data["SubmittedCase"]["libraryType"] == "wgs"
 
 
-def test_invalid_submission_invalid_library_type(
-    bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path
-):
+def test_generate_fails_with_invalid_library_type(temp_pruefbericht_config_file_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
@@ -298,26 +329,18 @@ def test_invalid_submission_invalid_library_type(
 
         args = [
             "pruefbericht",
-            "--config-file",
-            temp_pruefbericht_config_file_path,
-            "--submission-dir",
+            "generate",
+            "from-submission-dir",
             str(tmp_path),
         ]
 
-        runner = click.testing.CliRunner(
-            env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
-            }
-        )
+        runner = click.testing.CliRunner()
         cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
         assert result.exit_code != 0, result.output
 
 
-def test_refuse_redacted_tang(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path):
+def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
@@ -332,14 +355,6 @@ def test_refuse_redacted_tang(bfarm_auth_api, bfarm_submit_api, temp_pruefberich
             json.dump(metadata, metadata_file)
             metadata_file.truncate()
 
-        args = [
-            "pruefbericht",
-            "--config-file",
-            temp_pruefbericht_config_file_path,
-            "--submission-dir",
-            str(tmp_path),
-        ]
-
         runner = click.testing.CliRunner(
             env={
                 "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
@@ -349,5 +364,22 @@ def test_refuse_redacted_tang(bfarm_auth_api, bfarm_submit_api, temp_pruefberich
             }
         )
         cli = grzctl.cli.build_cli()
+
+        # generate Prüfbericht JSON
+        pruefbericht_json_path = tmp_path / "pruefbericht.json"
+        generate_args = ["pruefbericht", "generate", "from-submission-dir", str(tmp_path)]
+        generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
+        assert generate_result.exit_code == 0, generate_result.output
+        pruefbericht_json_path.write_text(generate_result.output)
+
+        # attempt to submit
+        submit_args = [
+            "pruefbericht",
+            "submit",
+            "--config-file",
+            temp_pruefbericht_config_file_path,
+            "--pruefbericht-file",
+            str(pruefbericht_json_path),
+        ]
         with pytest.raises(ValueError, match="Refusing to submit a Prüfbericht with a redacted TAN"):
-            runner.invoke(cli, args, catch_exceptions=False)
+            runner.invoke(cli, submit_args, catch_exceptions=False)
