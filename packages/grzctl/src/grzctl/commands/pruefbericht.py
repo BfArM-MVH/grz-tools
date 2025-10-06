@@ -7,7 +7,7 @@ import sys
 
 import click
 import requests
-from grz_common.cli import config_file, output_json, submission_dir
+from grz_common.cli import DIR_R_E, config_file, output_json
 from grz_common.constants import REDACTED_TAN
 from grz_common.workers.submission import Submission
 from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
@@ -115,7 +115,12 @@ def generate():
 
 
 @generate.command("from-submission-dir")
-@submission_dir
+@click.argument(
+    "submission_dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=True,
+)
 @output_json
 @fail_or_pass
 def from_submission_dir(submission_dir, output_json, failed):
@@ -130,7 +135,7 @@ def from_submission_dir(submission_dir, output_json, failed):
 
 
 @generate.command("from-metadata")
-@click.option("--metadata-file", type=click.Path(exists=True), required=True, help="Path to metadata file")
+@click.argument("metadata_file", type=click.Path(exists=True))
 @output_json
 @fail_or_pass
 def from_metadata(metadata_file, output_json, failed):
