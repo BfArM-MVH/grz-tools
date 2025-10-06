@@ -207,6 +207,15 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
 
 
+def test_research_consent_no_subprovisions():
+    """Consent objects are allowed to have no provisions under the root."""
+    consent_json_raw = json.loads(
+        importlib.resources.files(resources).joinpath("example_research_consent", "minimal_consented.json").read_text()
+    )
+    del consent_json_raw["provision"]["provision"]
+    Consent.model_validate_json(json.dumps(consent_json_raw))
+
+
 def test_index_rna_without_dna():
     """Donors can only have RNA data if DNA data also present."""
     metadata = json.loads(

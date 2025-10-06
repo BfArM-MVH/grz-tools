@@ -55,7 +55,7 @@ class ConsentProvision(StrictIgnoringBaseModel):
 
 class RootConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
-    provision: list[ConsentProvision]
+    provision: list[ConsentProvision] = Field(default_factory=list)
 
 
 class Patient(StrictIgnoringBaseModel):
