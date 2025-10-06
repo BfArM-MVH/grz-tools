@@ -191,31 +191,28 @@ def monitor_and_queue_submissions():
         submission_queue.put(finish_sentinel)
 
 
+keep_alive_marker = "results/daemon/keep_alive.marker"
+
 # start monitoring thread only when 'daemon' rule is a target
 if "daemon" in sys.argv:
+    submission_queue.put(keep_alive_marker)
     monitor_thread = threading.Thread(target=monitor_and_queue_submissions, daemon=True)
     monitor_thread.start()
+else:
+    monitor_thread = None
 
 
-rule daemon_service:
+rule daemon_keep_alive:
     output:
-        service(touch("results/daemon.service")),
+        touch(keep_alive_marker),
     run:
-        monitor_thread.join()
+        if monitor_thread:
+            monitor_thread.join()
 
 
-rule daemon_consumer:
+rule daemon:
     """
     Consumes submissions from monitoring queue and sends them off for processing.
     """
     input:
         from_queue(submission_queue, finish_sentinel=finish_sentinel),
-
-
-rule daemon:
-    """
-    Entrypoint for continuous "daemon"/"monitoring" mode.
-    """
-    input:
-        "results/daemon.service",
-        rules.daemon_consumer.input,
