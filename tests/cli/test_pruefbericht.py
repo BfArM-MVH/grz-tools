@@ -2,7 +2,6 @@
 Tests for the Prüfbericht submission functionality.
 """
 
-import datetime
 import importlib.resources
 import json
 import shutil
@@ -155,47 +154,6 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
         submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
 
     assert submit_result.exit_code == 0, submit_result.output
-
-
-def test_valid_submission_with_json_output(
-    bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path
-):
-    submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
-    with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        runner = click.testing.CliRunner(
-            env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
-            }
-        )
-        cli = grzctl.cli.build_cli()
-
-        # generate Prüfbericht JSON
-        pruefbericht_json_path = tmp_path / "pruefbericht.json"
-        generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
-        generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
-        assert generate_result.exit_code == 0, generate_result.output
-        pruefbericht_json_path.write_text(generate_result.output)
-
-        # submit generated Prüfbericht and ask for JSON output (aka token)
-        submit_args = [
-            "pruefbericht",
-            "submit",
-            "--config-file",
-            temp_pruefbericht_config_file_path,
-            "--pruefbericht-file",
-            str(pruefbericht_json_path),
-            "--json",
-        ]
-        submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
-
-    assert submit_result.exit_code == 0, submit_result.output
-
-    output = json.loads(submit_result.output)
-    datetime.datetime.fromisoformat(output["expires"])
-    assert output["token"] == "my_token"
 
 
 def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path):
