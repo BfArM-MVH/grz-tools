@@ -543,7 +543,7 @@ rule pruefbericht:
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
     output:
         pruefbericht=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht"
+            "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"
         ),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/pruefbericht.stdout.log",
