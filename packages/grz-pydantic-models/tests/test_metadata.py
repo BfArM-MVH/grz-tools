@@ -93,6 +93,13 @@ def test_wgs_trio_1_3_fail_malformed_consent():
         importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", "v1.3.json").read_text()
     )
     metadata = json.loads(metadata_str)
+
+    # scope, if provided, must be a valid consent object
+    del metadata["donors"][0]["researchConsents"][0]["scope"]["scope"]
+    with pytest.raises(ValidationError, match=r"scope must be a valid MII Broad Consent as of metadata v1.3"):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # scope can't be an empty dict
     metadata["donors"][0]["researchConsents"][0]["scope"] = {}
     with pytest.raises(ValidationError):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))

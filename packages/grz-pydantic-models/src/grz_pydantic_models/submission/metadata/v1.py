@@ -1118,7 +1118,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return schema_version
 
     @model_validator(mode="after")
-    def validate_research_consent_after_minor_version_3(self):
+    def validate_research_consent_after_minor_version_3(self):  # noqa: C901
         if Version(self.get_schema_version()) >= Version("1.3"):
             for donor in self.donors:
                 if len(donor.research_consents) < 1:
@@ -1128,6 +1128,8 @@ class GrzSubmissionMetadata(StrictBaseModel):
                         raise ValueError("Research consents must have presentationDate as of metadata schema v1.3")
                     if consent.no_scope_justification is None and not consent.scope:
                         raise ValueError("Either a non-empty scope must be provided or a noScopeJustification")
+                    if (consent.scope is not None) and (not isinstance(consent.scope, Consent)):
+                        raise ValueError("scope must be a valid MII Broad Consent as of metadata v1.3")
         else:
             for donor in self.donors:
                 for consent in donor.research_consents:
