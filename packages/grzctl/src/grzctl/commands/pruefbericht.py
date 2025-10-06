@@ -7,7 +7,6 @@ import sys
 
 import click
 import requests
-import rich
 from grz_common.cli import config_file, output_json, submission_dir
 from grz_common.constants import REDACTED_TAN
 from grz_common.workers.submission import Submission
@@ -19,6 +18,9 @@ from pydantic_core import to_jsonable_python
 from ..models.config import PruefberichtConfig
 
 log = logging.getLogger(__name__)
+fail_or_pass = click.option(
+    "--fail/--pass", "failed", help="Fail an otherwise valid submission (e.g. failed internal QC)"
+)
 
 
 def _get_new_token(auth_url: str, client_id: str, client_secret: str) -> tuple[str, datetime.datetime]:
@@ -85,32 +87,8 @@ def get_pruefbericht_library_type(metadata: GrzSubmissionMetadata) -> Pruefberic
     return PruefberichtLibraryType(most_expensive_library_type)
 
 
-@click.command()
-@config_file
-@submission_dir
-@output_json
-@click.option("--fail/--pass", "failed", help="Fail an otherwise valid submission (e.g. failed internal QC)")
-@click.option(
-    "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
-)
-@click.option(
-    "--dry-run",
-    help="Do not perform the request, only output the pruefbericht. Can be combined with --json.",
-    is_flag=True,
-)
-@click.option(
-    "--allow-redacted-tan-g",
-    help="Allow submission of a Prüfbericht with a redacted TAN.",
-    is_flag=True,
-)
-def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_run, allow_redacted_tan_g):  # noqa: C901, PLR0913, PLR0912
-    """
-    Submit a Prüfbericht to BfArM.
-    """
-    submission = Submission(metadata_dir=f"{submission_dir}/metadata", files_dir=f"{submission_dir}/files")
-
-    metadata = submission.metadata.content
-    pruefbericht = Pruefbericht(
+def _generate_pruefbericht_from_metadata(metadata: GrzSubmissionMetadata, failed: bool) -> Pruefbericht:
+    return Pruefbericht(
         SubmittedCase=SubmittedCase(
             submissionDate=metadata.submission.submission_date,
             submissionType=metadata.submission.submission_type,
@@ -125,12 +103,62 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
         )
     )
 
-    if dry_run:
-        if output_json:
-            click.echo(pruefbericht.model_dump_json(indent=None, by_alias=True))
-        else:
-            rich.print(pruefbericht.submitted_case)
-        sys.exit(0)
+
+@click.group()
+def pruefbericht():
+    """Submit a Prüfbericht to BfArM."""
+
+
+@pruefbericht.group()
+def generate():
+    """Generate a Prüfbericht JSON."""
+
+
+@generate.command("from-submission-dir")
+@submission_dir
+@output_json
+@fail_or_pass
+def from_submission_dir(submission_dir, output_json, failed):
+    submission = Submission(metadata_dir=f"{submission_dir}/metadata", files_dir=f"{submission_dir}/files")
+    metadata = submission.metadata.content
+    pruefbericht = _generate_pruefbericht_from_metadata(metadata, failed)
+    if output_json:
+        with open(output_json, "w") as f:
+            f.write(pruefbericht.model_dump_json(indent=None, by_alias=True))
+    else:
+        click.echo(pruefbericht.model_dump_json(indent=None, by_alias=True))
+
+
+@generate.command("from-metadata")
+@click.option("--metadata-file", type=click.Path(exists=True), required=True, help="Path to metadata file")
+@output_json
+@fail_or_pass
+def from_metadata(metadata_file, output_json, failed):
+    with open(metadata_file) as f:
+        metadata = GrzSubmissionMetadata.model_validate_json(f.read())
+    pruefbericht = _generate_pruefbericht_from_metadata(metadata, failed)
+    if output_json:
+        with open(output_json, "w") as f:
+            f.write(pruefbericht.model_dump_json(indent=None, by_alias=True))
+    else:
+        click.echo(pruefbericht.model_dump_json(indent=None, by_alias=True))
+
+
+@pruefbericht.command()
+@click.option("--pruefbericht-file", type=click.Path(exists=True), required=True, help="Path to pruefbericht file")
+@config_file
+@output_json
+@click.option(
+    "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
+)
+@click.option(
+    "--allow-redacted-tan-g",
+    help="Allow submission of a Prüfbericht with a redacted TAN.",
+    is_flag=True,
+)
+def submit(pruefbericht_file, config_file, output_json, token, allow_redacted_tan_g):  # noqa: PLR0913
+    with open(pruefbericht_file) as f:
+        pruefbericht = Pruefbericht.model_validate_json(f.read())
 
     config = PruefberichtConfig.from_path(config_file)
 
@@ -141,7 +169,7 @@ def pruefbericht(config_file, submission_dir, output_json, failed, token, dry_ru
     if config.pruefbericht.client_secret is None:
         raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
 
-    if metadata.submission.tan_g == REDACTED_TAN and not allow_redacted_tan_g:
+    if pruefbericht.submitted_case.tan == REDACTED_TAN and not allow_redacted_tan_g:
         raise ValueError("Refusing to submit a Prüfbericht with a redacted TAN")
 
     if token:
