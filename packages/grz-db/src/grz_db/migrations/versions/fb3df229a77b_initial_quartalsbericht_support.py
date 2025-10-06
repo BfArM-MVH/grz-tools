@@ -76,13 +76,12 @@ def upgrade() -> None:
         sa.Column(
             "submission_id",
             AutoString(),
-            ForeignKey("submissions.id"),
             primary_key=True,
             nullable=False,
         ),
         sa.Column("lab_datum_id", AutoString(), primary_key=True, nullable=False),
-        sa.Column("pseudonym", AutoString(), ForeignKey("donors.pseudonym"), nullable=False),
-        sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("pseudonym", AutoString(), nullable=False),
+        sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False, primary_key=True),
         sa.Column("sequence_type", sa.Enum("dna", "rna", name="sequencetype"), nullable=False),
         sa.Column(
             "sequence_subtype",
@@ -117,6 +116,7 @@ def upgrade() -> None:
         sa.Column("targeted_regions_above_min_coverage", sa.Float(), nullable=False),
         sa.Column("targeted_regions_above_min_coverage_passed_qc", sa.Boolean(), nullable=False),
         sa.Column("targeted_regions_above_min_coverage_percent_deviation", sa.Float(), nullable=False),
+        sa.ForeignKeyConstraint(["submission_id", "pseudonym"], ["donors.submission_id", "donors.pseudonym"]),
     )
 
 

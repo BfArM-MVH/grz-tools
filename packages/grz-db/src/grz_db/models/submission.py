@@ -280,13 +280,16 @@ class DetailedQCResult(SQLModel, table=True):
     """Detailed QC pipeline result model."""
 
     __tablename__ = "detailed_qc_results"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(["submission_id", "pseudonym"], ["donors.submission_id", "donors.pseudonym"]),
+    )
 
-    submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
+    submission_id: str = Field(primary_key=True)
     lab_datum_id: str = Field(primary_key=True)
     pseudonym: str
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
+        sa_column=Column(DateTime(timezone=True), nullable=False, primary_key=True),
     )
     sequence_type: SequenceType
     sequence_subtype: SequenceSubtype

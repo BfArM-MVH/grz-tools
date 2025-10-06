@@ -487,8 +487,10 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
         )
         submissions_that_failed_detailed_qc = session.exec(query_submissions_that_failed_detailed_qc).all()
 
+        subquery_submissions_that_failed_detailed_qc = query_submissions_that_failed_detailed_qc.subquery()
         query_reports_of_failed_submissions = select(DetailedQCResult).join(
-            query_submissions_that_failed_detailed_qc.subquery()
+            subquery_submissions_that_failed_detailed_qc,
+            subquery_submissions_that_failed_detailed_qc.c.id == DetailedQCResult.submission_id,
         )
         reports_of_failed_submissions = session.exec(query_reports_of_failed_submissions).all()
 
