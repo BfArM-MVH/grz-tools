@@ -205,3 +205,7 @@ rule daemon:
     """
     input:
         from_queue(submission_queue, finish_sentinel=finish_sentinel),
+    output:
+        update("results/daemon/targets.log")
+    shell:
+        """echo {input} >> {output}"""
