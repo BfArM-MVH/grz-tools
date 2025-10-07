@@ -143,12 +143,13 @@ def from_metadata(metadata_file, failed):
 @click.option(
     "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
 )
+@click.option("--print-token", is_flag=True, help="Print obtained access token to stdout.")
 @click.option(
     "--allow-redacted-tan-g",
     help="Allow submission of a Prüfbericht with a redacted TAN.",
     is_flag=True,
 )
-def submit(pruefbericht_file, config_file, token, allow_redacted_tan_g):
+def submit(pruefbericht_file, config_file, token, print_token, allow_redacted_tan_g):
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
 
@@ -193,6 +194,6 @@ def submit(pruefbericht_file, config_file, token, allow_redacted_tan_g):
 
     log.info("Prüfbericht submitted successfully.")
 
-    if expiry:
+    if expiry and print_token:
         log.info(f"New token expires at {expiry.isoformat()}")
         click.echo(token)
