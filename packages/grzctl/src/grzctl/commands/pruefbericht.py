@@ -121,6 +121,10 @@ def generate():
 )
 @fail_or_pass
 def from_submission_dir(submission_dir, failed):
+    """Generate Prüfbericht from submission directory.
+
+    This is equivalent to `from-metadata ${submission_dir}/metadata/metadata.json`.
+    """
     submission = Submission(metadata_dir=f"{submission_dir}/metadata", files_dir=f"{submission_dir}/files")
     metadata = submission.metadata.content
     pruefbericht = _generate_pruefbericht_from_metadata(metadata, failed)
@@ -131,6 +135,7 @@ def from_submission_dir(submission_dir, failed):
 @click.argument("metadata_file", type=click.Path(exists=True))
 @fail_or_pass
 def from_metadata(metadata_file, failed):
+    """Generate Prüfbericht from metadata.json"""
     with open(metadata_file) as f:
         metadata = GrzSubmissionMetadata.model_validate_json(f.read())
     pruefbericht = _generate_pruefbericht_from_metadata(metadata, failed)
