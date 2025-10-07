@@ -572,8 +572,9 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
             )
 
 
-def _date_to_quarter_year(date: datetime.date) -> tuple[int, int]:
-    return (date.month % 3) + 1, date.year
+def date_to_quarter_year(date: datetime.date) -> tuple[int, int]:
+    """Return (1-based quarter, year) given a date."""
+    return ((date.month - 1) % 3) + 1, date.year
 
 
 @report.command()
@@ -611,7 +612,7 @@ def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_
     if (year and quarter) is None:
         # default to last quarter if ended less than 15 days ago otherwise current quarter
         check_date = datetime.date.today() - datetime.timedelta(days=15)
-        quarter, year = _date_to_quarter_year(check_date)
+        quarter, year = date_to_quarter_year(check_date)
 
     # help out the type checker
     year = typing.cast(int, year)

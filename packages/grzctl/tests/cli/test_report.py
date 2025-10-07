@@ -2,6 +2,7 @@ import csv
 import importlib.resources
 import json
 import sqlite3
+from datetime import date
 from operator import itemgetter
 from pathlib import Path
 from textwrap import dedent
@@ -9,6 +10,7 @@ from textwrap import dedent
 import grzctl.cli
 from click.testing import CliRunner
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grzctl.commands.report import date_to_quarter_year
 from grzctl.models.config import DbConfig
 
 from .. import resources as test_resources
@@ -418,3 +420,7 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
         qc_reader = csv.reader(qc_file, delimiter="\t")
         # header + no detailed QC failures
         assert len(list(qc_reader)) == 1
+
+
+def test_date_to_quarter_year():
+    assert date_to_quarter_year(date(year=2025, month=9, day=22)) == (3, 2025)
