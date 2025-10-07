@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
+from ..progress import EncryptionState, FileProgressLogger
 from ..validation import UserInterruptException
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
@@ -212,8 +213,33 @@ class Worker:
 
     def upload(self, s3_options: S3Options) -> str:
         """
-        Upload an encrypted submission and return the generated submission ID
+        Upload an encrypted submission and return the generated submission ID.
+
+        Verifies that all files were successfully encrypted.
         """
+        submission = self.parse_submission()
+        encryption_progress_logger = FileProgressLogger[EncryptionState](self.progress_file_encrypt)
+
+        incompletely_encrypted_files = []
+
+        self.__log.info("Verifying encryption status of all submission files…")
+        for file_path, file_metadata in submission.files.items():
+            state = encryption_progress_logger.get_state(file_path, file_metadata)
+            if not state or not state.get("encryption_successful"):
+                incompletely_encrypted_files.append(str(file_path))
+
+        if incompletely_encrypted_files:
+            failed_files = '\n - '.join(incompletely_encrypted_files)
+            error_msg = (
+                "Will not upload, as the following files were not successfully encrypted:\n"
+                f"{failed_files}\n"
+                "Please re-run the 'encrypt' command and try again."
+            )
+            self.__log.error(error_msg)
+            raise SubmissionValidationError(error_msg)
+
+        self.__log.info("All files verified as successfully encrypted.")
+
         from .upload import S3BotoUploadWorker
 
         upload_worker = S3BotoUploadWorker(
