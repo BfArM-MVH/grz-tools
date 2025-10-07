@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.1...grz-pydantic-models-v2.3.0) (2025-10-07)
+
+
+### Features
+
+* **grz-pydantic-models:** accept submission metadata v1.3 in validation ([#395](https://github.com/BfArM-MVH/grz-tools/issues/395)) ([a3fc7ab](https://github.com/BfArM-MVH/grz-tools/commit/a3fc7ab27c8834a687fa1d7078aa8557e63e0d30))
+* **grz-pydantic-models:** allow MV consent revocation on non-initial ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grz-pydantic-models:** require valid scope in metadata v1.3+ ([#396](https://github.com/BfArM-MVH/grz-tools/issues/396)) ([521b3a5](https://github.com/BfArM-MVH/grz-tools/commit/521b3a579464ff938c3abf2a0fb1e11e8f83d79a))
+* **grz-pydantic-models:** support metadata schema v1.3 ([#378](https://github.com/BfArM-MVH/grz-tools/issues/378)) ([21a1ad5](https://github.com/BfArM-MVH/grz-tools/commit/21a1ad53eec40c554f6e1b3205620f6e0cb5033d))
+* **grzctl:** add quarterly report export ([#376](https://github.com/BfArM-MVH/grz-tools/issues/376)) ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** accept consent objects with no subprovisions ([#397](https://github.com/BfArM-MVH/grz-tools/issues/397)) ([916ff64](https://github.com/BfArM-MVH/grz-tools/commit/916ff644d54c51a24a0916afc23203b44bbe5150))
+
 ## [2.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.0...grz-pydantic-models-v2.2.1) (2025-08-19)
 
 

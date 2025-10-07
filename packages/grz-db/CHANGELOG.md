@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.6.0...grz-db-v1.0.0) (2025-10-07)
+
+
+### Features
+
+* **grz-db:** bump required dependencies ([#401](https://github.com/BfArM-MVH/grz-tools/issues/401)) ([f62a6e1](https://github.com/BfArM-MVH/grz-tools/commit/f62a6e1982f7cd43210d9abf1856f7a46607092c))
+* **grz-pydantic-models:** allow MV consent revocation on non-initial ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grzctl:** add quarterly report export ([#376](https://github.com/BfArM-MVH/grz-tools/issues/376)) ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+
 ## [0.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.5.0...grz-db-v0.6.0) (2025-08-27)
 
 

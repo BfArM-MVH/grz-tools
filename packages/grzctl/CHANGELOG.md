@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.6.0...grzctl-v1.0.0) (2025-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** make pruefbericht submission a two step process ([#399](https://github.com/BfArM-MVH/grz-tools/issues/399))
+
+### Features
+
+* **grz-pydantic-models:** allow MV consent revocation on non-initial ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grzctl,grz-cli:** bump required dependencies ([#402](https://github.com/BfArM-MVH/grz-tools/issues/402)) ([9b7e6f6](https://github.com/BfArM-MVH/grz-tools/commit/9b7e6f6e97c603efb335c0e339a3bc08ea2b2da8))
+* **grzctl:** add quarterly report export ([#376](https://github.com/BfArM-MVH/grz-tools/issues/376)) ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grzctl:** add TUI for browsing submission database ([#371](https://github.com/BfArM-MVH/grz-tools/issues/371)) ([c296a30](https://github.com/BfArM-MVH/grz-tools/commit/c296a30676adcc01281affb024da26d260476442))
+* **grzctl:** make pruefbericht submission a two step process ([#399](https://github.com/BfArM-MVH/grz-tools/issues/399)) ([10cdc13](https://github.com/BfArM-MVH/grz-tools/commit/10cdc13bac9b6c07616dbeffcc70537ae3dad691))
+
+
+### Bug Fixes
+
+* **grzctl:** correctly calculate default reporting quarter ([#398](https://github.com/BfArM-MVH/grz-tools/issues/398)) ([e502bff](https://github.com/BfArM-MVH/grz-tools/commit/e502bff2ee863e2cf8a0e9071e3ad8b8d836c9ef))
+* **grzctl:** fix TUI crash on first date of new quarter ([#393](https://github.com/BfArM-MVH/grz-tools/issues/393)) ([ca333ae](https://github.com/BfArM-MVH/grz-tools/commit/ca333aea40766f2c334154a6e0c6bc27f9af5d4a))
+* **grzctl:** refuse submission of pruefbericht with redacted tanG ([#380](https://github.com/BfArM-MVH/grz-tools/issues/380)) ([6b6272e](https://github.com/BfArM-MVH/grz-tools/commit/6b6272e18a51d8aaf3559a3f22173852b4ce06d6))
+
 ## [0.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.5.0...grzctl-v0.6.0) (2025-08-27)
 
 
