@@ -229,7 +229,7 @@ class Worker:
                 incompletely_encrypted_files.append(str(file_path))
 
         if incompletely_encrypted_files:
-            failed_files = '\n - '.join(incompletely_encrypted_files)
+            failed_files = "\n - ".join(incompletely_encrypted_files)
             error_msg = (
                 "Will not upload, as the following files were not successfully encrypted:\n"
                 f"{failed_files}\n"

@@ -9,6 +9,8 @@ from unittest import mock
 
 import click.testing
 import grzctl
+from grz_common.progress import EncryptionState, FileProgressLogger
+from grz_common.workers.submission import Submission
 
 from .. import mock_files
 
@@ -16,8 +18,24 @@ from .. import mock_files
 def test_list(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
         shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
         shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+
+        logs_dir = working_dir_path / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        progress_file = logs_dir / "progress_encrypt.cjson"
+        submission = Submission(
+            metadata_dir=working_dir_path / "metadata",
+            files_dir=working_dir_path / "files",
+        )
+        progress_logger = FileProgressLogger[EncryptionState](progress_file)
+        for file_path, file_metadata in submission.files.items():
+            progress_logger.set_state(
+                file_path,
+                file_metadata,
+                state=EncryptionState(encryption_successful=True),
+            )
 
     with mock.patch(
         "grz_common.models.s3.S3Options.__getattr__",
@@ -57,8 +75,24 @@ def test_list_with_partial_env(temp_s3_config_file_path, remote_bucket, working_
     """If database configuration is partially-populated via environment variables, it should still be ignored."""
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
+        shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
         shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
         shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+
+        logs_dir = working_dir_path / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        progress_file = logs_dir / "progress_encrypt.cjson"
+        submission = Submission(
+            metadata_dir=working_dir_path / "metadata",
+            files_dir=working_dir_path / "files",
+        )
+        progress_logger = FileProgressLogger[EncryptionState](progress_file)
+        for file_path, file_metadata in submission.files.items():
+            progress_logger.set_state(
+                file_path,
+                file_metadata,
+                state=EncryptionState(encryption_successful=True),
+            )
 
     with mock.patch(
         "grz_common.models.s3.S3Options.__getattr__",
