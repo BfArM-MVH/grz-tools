@@ -71,30 +71,6 @@ def bfarm_submit_api(requests_mock):
         ],
     )
 
-    # valid submission with multiple library types + valid token
-    requests_mock.post(
-        "https://bfarm.localhost/api/upload",
-        match=[
-            responses.matchers.header_matcher({"Authorization": "bearer my_token"}),
-            responses.matchers.json_params_matcher(
-                {
-                    "SubmittedCase": {
-                        "submissionDate": "2024-07-15",
-                        "submissionType": "test",
-                        "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000001",
-                        "submitterId": "260914050",
-                        "dataNodeId": "GRZK00007",
-                        "diseaseType": "oncological",
-                        "dataCategory": "genomic",
-                        "libraryType": "wgs",
-                        "coverageType": "GKV",
-                        "dataQualityCheckPassed": True,
-                    }
-                }
-            ),
-        ],
-    )
-
     # valid submission + expired token
     requests_mock.post(
         "https://bfarm.localhost/api/upload",
