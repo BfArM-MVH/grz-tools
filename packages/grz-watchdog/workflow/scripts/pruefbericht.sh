@@ -13,8 +13,8 @@ log_stderr="${snakemake_log[stderr]}"
 	fi
 
 	grzctl pruefbericht \
-		--config-file "${snakemake_input[pruefbericht_config_path]}" \
-		--submission-dir "${snakemake_input[data]}" \
+		generate \
+		from-submission-dir "${snakemake_input[data]}" \
 		${pruefbericht_params} \
-		--dry-run --json >"${snakemake_output[pruefbericht]}"
+		>"${snakemake_output[pruefbericht]}"
 ) >"$log_stdout" 2>"$log_stderr"

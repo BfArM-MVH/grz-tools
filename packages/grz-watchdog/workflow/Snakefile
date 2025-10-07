@@ -333,7 +333,6 @@ rule pruefbericht:
         data=rules.download.output.data,
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
-        pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
     output:
         pruefbericht=perhaps_temp(
             "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"

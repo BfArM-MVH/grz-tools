@@ -26,7 +26,10 @@ if [ -n "${snakemake_params[custom_ca_cert]:-}" ]; then
 fi
 
 grzctl pruefbericht \
+  submit \
 	--config-file "${snakemake_input[pruefbericht_config_path]}" \
-	--submission-dir "${snakemake_input[data]}" >"${snakemake_output[answer]}" 2>>"$log_stderr"
+	--pruefbericht-file "${snakemake_input[pruefbericht]}" \
+	--print-token \
+	>"${snakemake_output[answer]}" 2>>"$log_stderr"
 
 grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" reported >>"$log_stdout" 2>>"$log_stderr"
