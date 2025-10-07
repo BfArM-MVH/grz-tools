@@ -104,12 +104,12 @@ def _generate_pruefbericht_from_metadata(metadata: GrzSubmissionMetadata, failed
 
 @click.group()
 def pruefbericht():
-    """Submit a Prüfbericht to BfArM."""
+    """Generate and submit Prüfberichte."""
 
 
 @pruefbericht.group()
 def generate():
-    """Generate a Prüfbericht JSON."""
+    """Generate a Prüfbericht JSON from submission metadata."""
 
 
 @generate.command("from-submission-dir")
@@ -150,6 +150,7 @@ def from_metadata(metadata_file, failed):
     is_flag=True,
 )
 def submit(pruefbericht_file, config_file, token, print_token, allow_redacted_tan_g):
+    """Submit a Prüfbericht JSON to BfArM."""
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
 
