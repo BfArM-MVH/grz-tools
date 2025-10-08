@@ -22,6 +22,7 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket, working_dir_pat
         shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
         shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
+       # manually set successful encrypted state in progress logs since upload checks for this
         logs_dir = working_dir_path / "logs"
         logs_dir.mkdir(exist_ok=True)
         progress_file = logs_dir / "progress_encrypt.cjson"
