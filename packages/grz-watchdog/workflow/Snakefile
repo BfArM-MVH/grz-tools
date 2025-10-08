@@ -403,7 +403,6 @@ rule prepare_qc_workflow_references:
         references_dir=get_qc_workflow_references_directory(),
     params:
         pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
-        revision=get_qc_workflow_revision,
         profile=["test_grch37", "test_grch38", "docker"],
         reference_path=lambda wildcards, output: output.references_dir,
     threads: 1
@@ -457,7 +456,6 @@ rule qc:
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
     params:
         pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
-        revision=get_qc_workflow_revision,
         profile=["conda", "docker"],
         reference_path=lambda wildcards, input: input.references_dir,
         submission_basepath=lambda wildcards, input: input.data,
