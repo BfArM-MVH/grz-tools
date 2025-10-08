@@ -381,11 +381,16 @@ rule setup_qc_workflow:
         revision=get_qc_workflow_revision,
     conda:
         "envs/base.yaml"
+    log:
+        stdout="logs/qc/setup_qc_workflow.stdout.log",
+        stderr="logs/qc/setup_qc_workflow.stderr.log",
     shell:
         """
-        git clone https://github.com/BfArM-MVH/GRZ_QC_Workflow.git {output.workflow_dir}
-        cd {output.workflow_dir}
-        git checkout {params.revision}
+        (
+          git clone https://github.com/BfArM-MVH/GRZ_QC_Workflow.git {output.workflow_dir}
+          cd {output.workflow_dir}
+          git checkout {params.revision}
+        ) >{log.stdout} 2> {log.stderr}
         """
 
 
@@ -401,6 +406,9 @@ rule prepare_qc_workflow_references:
         revision=get_qc_workflow_revision,
         profile=["test_grch37", "test_grch38", "docker"],
         reference_path=lambda wildcards, output: output.references_dir,
+    log:
+        stdout="logs/qc/prepare_qc_workflow_references.stdout.log",
+        stderr="logs/qc/prepare_qc_workflow_references.stderr.log",
     handover: True
     wrapper:
         "v7.6.1/utils/nextflow"
@@ -434,6 +442,19 @@ rule qc:
     handover: True
     wrapper:
         "v7.6.1/utils/nextflow"
+
+
+rule process_qc_results:
+    input:
+        qc_results=rules.qc.output.qc_results,
+        db_config_path=cfg_path("config_paths/db"),
+    params:
+        report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
+    log:
+        stdout="logs/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
+        stderr="logs/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
+    script:
+        "scripts/process_qc_results.sh"
 
 
 rule clean:
