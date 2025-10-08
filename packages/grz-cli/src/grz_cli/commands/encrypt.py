@@ -18,7 +18,13 @@ log = logging.getLogger(__name__)
 @submission_dir
 @config_file
 @force
-def encrypt(submission_dir, config_file, force):
+@click.option(
+    "--check-validation-logs/--no-check-validation-logs",
+    "check_validation_logs",
+    default=True,
+    help="Check validation logs before encrypting.",
+)
+def encrypt(submission_dir, config_file, force, check_validation_logs):
     """
     Encrypt a submission.
 
@@ -45,7 +51,12 @@ def encrypt(submission_dir, config_file, force):
         with NamedTemporaryFile("w") as f:
             f.write(pubkey)
             f.flush()
-            worker_inst.encrypt(f.name, submitter_private_key_path=submitter_privkey_path, force=force)
+            worker_inst.encrypt(
+                f.name,
+                submitter_private_key_path=submitter_privkey_path,
+                force=force,
+                check_validation_logs=check_validation_logs,
+            )
     else:
         # This case cannot occur here, but an explicit check is needed for type-checking.
         if config.keys.grz_public_key_path is None:
@@ -54,6 +65,7 @@ def encrypt(submission_dir, config_file, force):
             config.keys.grz_public_key_path,
             submitter_private_key_path=submitter_privkey_path,
             force=force,
+            check_validation_logs=check_validation_logs,
         )
 
     log.info("Encryption successful!")
