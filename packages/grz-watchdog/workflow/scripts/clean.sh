@@ -31,14 +31,14 @@ if [[ "$mode" == "none" ]]; then
 	exit 0
 fi
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" cleaning >"$log_stdout" 2>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaning >"$log_stdout" 2>"$log_stderr"
 
 echo "Auto-cleanup mode: '${mode}'" >>"$log_stdout"
 
 case "$mode" in
 "inbox")
 	echo "Cleaning S3 inbox..." >>"$log_stdout"
-	grzctl clean --config-file "$inbox_config" --submission-id "$submission_id" --yes-i-really-mean-it >>"$log_stdout" 2>>"$log_stderr"
+	grzctl clean --config-file "${inbox_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"$log_stderr"
 	;;
 
 "storage")
@@ -53,7 +53,7 @@ case "$mode" in
 
 "inbox+storage")
 	echo "Cleaning S3 inbox..." >>"$log_stdout"
-	grzctl clean --config-file "$inbox_config" --submission-id "$submission_id" --yes-i-really-mean-it >>"$log_stdout" 2>>"$log_stderr"
+	grzctl clean --config-file "${inbox_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"$log_stderr"
 
 	echo "Cleaning local storage at: ${local_data_dir}" >>"$log_stdout"
 	if [[ -d "$local_data_dir" ]]; then
@@ -80,6 +80,6 @@ if [[ "$mode" == "storage" || "$mode" == "inbox+storage" ]]; then
 fi
 json_data="{\"targets\": [${details}]}"
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
 
 echo 'true' >"${snakemake_output[clean_results]}"
