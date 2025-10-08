@@ -59,7 +59,7 @@ def get_cleanup_prerequisite(wildcards):
 
     if is_valid:
         if wildcards.qc_status == "with_qc":
-            return rules.qc.output.qc_results
+            return rules.process_qc_results.output.marker
         else:
             return rules.submit_pruefbericht.output.answer
     else:
