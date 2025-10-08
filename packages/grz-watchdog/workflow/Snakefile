@@ -415,6 +415,7 @@ rule qc:
         decryption_marker=rules.decrypt.output.marker,
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
+        workflow_dir=rules.setup_qc_workflow.output.workflow_dir,
     output:
         qc_results=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/out"),
         qc_work=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/work"),
@@ -422,10 +423,10 @@ rule qc:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
     params:
-        pipeline="/path/to/GRZ_QC_Workflow",
-        revision="v1.1.5",
+        pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
+        revision=get_qc_workflow_revision,
         profile=["conda", "docker"],
-        reference_path="/path/to/GRZ_QC_Workflow/references",
+        reference_path=rules.prepare_qc_workflow_references.output.references_dir,
         submission_basepath=lambda wildcards, input: input.data,
         outdir=lambda wildcards, output: output.qc_results,
         # TODO: check whether "-workdir" is passed correctly or if we have to adapt handover or wrapper source upstream
