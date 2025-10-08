@@ -325,7 +325,7 @@ rule archive:
         "scripts/archive.sh"
 
 
-rule pruefbericht:
+rule generate_pruefbericht:
     """
     Generate a Prüfbericht for a submission.
     """
@@ -338,21 +338,21 @@ rule pruefbericht:
             "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"
         ),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/pruefbericht.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/pruefbericht.stderr.log",
+        stdout="logs/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
+        stderr="logs/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
-        "scripts/pruefbericht.sh"
+        "scripts/generate_pruefbericht.sh"
 
 
-rule report_pruefbericht:
+rule submit_pruefbericht:
     """
     Report a Prüfbericht to BfArM.
     """
     input:
         data=rules.download.output.data,
-        pruefbericht=rules.pruefbericht.output.pruefbericht,
+        pruefbericht=rules.generate_pruefbericht.output.pruefbericht,
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
         db_config_path=cfg_path("config_paths/db"),
     output:
@@ -366,12 +366,12 @@ rule report_pruefbericht:
             else ""
         ),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/report_pruefbericht.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/report_pruefbericht.stderr.log",
+        stdout="logs/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
+        stderr="logs/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
-        "scripts/report_pruefbericht.sh"
+        "scripts/submit_pruefbericht.sh"
 
 
 rule qc:
@@ -479,8 +479,8 @@ rule finalize_success:
     """
     input:
         archived_marker=rules.archive.output.marker,
-        pruefbericht_answer=rules.report_pruefbericht.output.answer,
-        pruefbericht=rules.pruefbericht.output.pruefbericht,
+        pruefbericht_answer=rules.submit_pruefbericht.output.answer,
+        pruefbericht=rules.generate_pruefbericht.output.pruefbericht,
         clean_results=rules.clean.output.clean_results,
         db_config_path=cfg_path("config_paths/db"),
     output:

@@ -103,7 +103,7 @@
 <g id="node9" class="node">
 <title>8</title>
 <path fill="none" stroke="#56d8c1" stroke-width="2" d="M293.93,-180C293.93,-180 207.93,-180 207.93,-180 201.93,-180 195.93,-174 195.93,-168 195.93,-168 195.93,-156 195.93,-156 195.93,-150 201.93,-144 207.93,-144 207.93,-144 293.93,-144 293.93,-144 299.93,-144 305.93,-150 305.93,-156 305.93,-156 305.93,-168 305.93,-168 305.93,-174 299.93,-180 293.93,-180"/>
-<text text-anchor="middle" x="250.93" y="-159.5" font-family="sans" font-size="10.00">report_pruefbericht</text>
+<text text-anchor="middle" x="250.93" y="-159.5" font-family="sans" font-size="10.00">submit_pruefbericht</text>
 </g>
 <!-- 2&#45;&gt;8 -->
 <g id="edge19" class="edge">
