@@ -28,11 +28,11 @@ db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" decrypting >"$log_stdout" 2>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" decrypting >"$log_stdout" 2>"$log_stderr"
 
 grzctl decrypt \
 	--submission-dir "${snakemake_input[data]}" \
 	--config-file "${snakemake_input[inbox_config_path]}" \
 	>>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" decrypted >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" decrypted >>"$log_stdout" 2>>"$log_stderr"

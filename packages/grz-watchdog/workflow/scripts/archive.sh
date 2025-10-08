@@ -52,11 +52,11 @@ else
 	echo "[WARNING] metadata.json or logs directory not found. Skipping log redaction." >>"$log_stdout" 2>>"$log_stderr"
 fi
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" archiving >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" archiving >>"$log_stdout" 2>>"$log_stderr"
 
 grzctl archive \
 	--config-file "$CONFIG_FILE" \
 	--submission-dir "${submission_dir}" \
 	>>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" archived >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" archived >>"$log_stdout" 2>>"$log_stderr"

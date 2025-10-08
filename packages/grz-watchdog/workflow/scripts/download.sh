@@ -32,14 +32,14 @@ db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" downloading >"$log_stdout" 2>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" downloading >"$log_stdout" 2>"$log_stderr"
 
 grzctl download \
-	--submission-id "$submission_id" \
+	--submission-id "${submission_id}" \
 	--output-dir "${snakemake_output[data]}" \
 	--config-file "${snakemake_input[inbox_config_path]}" \
 	>>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "$db_config" submission update --ignore-error-state "$submission_id" downloaded >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" downloaded >>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "$db_config" submission populate --no-confirm "$submission_id" "${snakemake_output[data]}/metadata/metadata.json" >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission populate --no-confirm "${submission_id}" "${snakemake_output[data]}/metadata/metadata.json" >>"$log_stdout" 2>>"$log_stderr"
