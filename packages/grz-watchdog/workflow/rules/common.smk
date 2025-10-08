@@ -203,6 +203,10 @@ def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["succ
         return "success"
 
 
+def get_qc_workflow_revision(wildcards: Wildcards) -> str:
+    return config["qc"]["revision"]
+
+
 ## RESOURCE ESTIMATION FUNCTIONS
 
 
