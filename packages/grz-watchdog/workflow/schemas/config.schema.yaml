@@ -76,6 +76,10 @@ properties:
         type: string
         pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
         description: "Revision of the GRZ_QC_Workflow to use."
+      reference_directory:
+        type: string
+        default: "results/resources/references"
+        description: "Path to the reference directory. Defaults to 'results/resources/references' (relative to the workdir)."
     required:
       - revision
 required:
