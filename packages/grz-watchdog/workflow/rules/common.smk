@@ -92,7 +92,7 @@ def get_successful_finalize_inputs(wildcards):
         "pruefbericht_answer": rules.submit_pruefbericht.output.answer,
         "pruefbericht": rules.generate_pruefbericht.output.pruefbericht,
         "clean_results": rules.clean.output.clean_results,
-        "db_config_path": cfg_path("config_paths/db"),
+        "db_config_path": cfg_path("config_paths/db")(wildcards),
     }
 
     if wildcards.qc_status == "with_qc":
