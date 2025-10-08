@@ -82,6 +82,24 @@ def get_final_submission_target(wildcards):
         return rules.finalize_fail.output.target
 
 
+def get_successful_finalize_inputs(wildcards):
+    """
+    Gather inputs for a successfully validated submission.
+    Conditionally include the QC result marker based on the qc_status wildcard.
+    """
+    inputs = {
+        "archived_marker": rules.archive.output.marker,
+        "pruefbericht_answer": rules.submit_pruefbericht.output.answer,
+        "pruefbericht": rules.generate_pruefbericht.output.pruefbericht,
+        "clean_results": rules.clean.output.clean_results,
+        "db_config_path": cfg_path("config_paths/db"),
+    }
+
+    if wildcards.qc_status == "with_qc":
+        inputs["qc_processed_marker"] = rules.process_qc_results.output.marker
+    return inputs
+
+
 def get_failed_finalize_inputs(wildcards):
     """Input function for the failure endpoint to conditionally add cleanup."""
     inputs = {
@@ -89,7 +107,7 @@ def get_failed_finalize_inputs(wildcards):
         "validation_errors": rules.validate.output.validation_errors,
     }
     if config.get("on-failed-validation", "do-nothing") == "cleanup":
-        inputs["cleanup_done"] = rules.clean.output.clean_results
+        inputs["clean_results"] = rules.clean.output.clean_results
     return inputs
 
 

@@ -565,11 +565,7 @@ rule finalize_success:
     Will update the submission status in the database accordingly.
     """
     input:
-        archived_marker=rules.archive.output.marker,
-        pruefbericht_answer=rules.submit_pruefbericht.output.answer,
-        pruefbericht=rules.generate_pruefbericht.output.pruefbericht,
-        clean_results=rules.clean.output.clean_results,
-        db_config_path=cfg_path("config_paths/db"),
+        unpack(get_successful_finalize_inputs),
     output:
         target="results/{submitter_id}/{inbox}/{submission_id}/target/{qc_status}",
     log:
