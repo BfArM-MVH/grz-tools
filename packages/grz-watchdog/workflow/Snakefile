@@ -419,6 +419,24 @@ rule prepare_qc_workflow_references:
         "v7.6.1/utils/nextflow"
 
 
+rule set_status_to_qcing:
+    """
+    Set the submission status to 'qcing' in the database.
+    """
+    input:
+        db_config_path=cfg_path("config_paths/db"),
+        validation_flag=rules.validate.output.validation_flag,
+    output:
+        marker=touch("results/{submitter_id}/{inbox}/{submission_id}/qcing.marker"),
+    log:
+        stdout="logs/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stdout.log",
+        stderr="logs/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stderr.log",
+    conda:
+        "envs/grzctl.yaml"
+    script:
+        "scripts/set_status_to_qcing.sh"
+
+
 rule qc:
     """
     Perform QC on a submission using the QC nextflow pipeline.
@@ -429,6 +447,7 @@ rule qc:
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
         workflow_dir=rules.setup_qc_workflow.output.workflow_dir,
+        qcing_marker=rules.set_status_to_qcing.output.marker,
     output:
         qc_results=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/out"),
         qc_work=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/work"),
@@ -453,6 +472,10 @@ rule process_qc_results:
     input:
         qc_results=rules.qc.output.qc_results,
         db_config_path=cfg_path("config_paths/db"),
+    output:
+        marker=touch(
+            "results/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"
+        ),
     params:
         report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
     log:
