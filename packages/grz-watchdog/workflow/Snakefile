@@ -406,6 +406,11 @@ rule prepare_qc_workflow_references:
         revision=get_qc_workflow_revision,
         profile=["test_grch37", "test_grch38", "docker"],
         reference_path=lambda wildcards, output: output.references_dir,
+    threads: 1
+    resources:
+        mem="90G",
+        disk="60G",
+        runtime="3h",
     log:
         stdout="logs/qc/prepare_qc_workflow_references.stdout.log",
         stderr="logs/qc/prepare_qc_workflow_references.stderr.log",
