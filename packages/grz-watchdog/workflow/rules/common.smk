@@ -207,6 +207,12 @@ def get_qc_workflow_revision(wildcards: Wildcards) -> str:
     return config["qc"]["revision"]
 
 
+def get_qc_workflow_references_directory() -> str:
+    return directory(
+        config["qc"].get("reference_directory", "results/resources/references")
+    )
+
+
 ## RESOURCE ESTIMATION FUNCTIONS
 
 
