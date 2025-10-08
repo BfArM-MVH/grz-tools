@@ -16,3 +16,6 @@ config_paths:
     nonconsented: "config/configs/nonconsented.yaml"
   db: "config/configs/db.yaml"
   pruefbericht: "config/configs/pruefbericht.yaml"
+
+qc:
+  revision: "v1.1.5"
