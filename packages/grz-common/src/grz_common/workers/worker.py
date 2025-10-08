@@ -225,7 +225,7 @@ class Worker:
         self.__log.info("Verifying encryption status of all submission files…")
         for file_path, file_metadata in submission.files.items():
             state = encryption_progress_logger.get_state(file_path, file_metadata)
-            if not state or not state.get("encryption_successful"):
+            if not state or not state.get("encryption_successful", False):
                 incompletely_encrypted_files.append(str(file_path))
 
         if incompletely_encrypted_files:
