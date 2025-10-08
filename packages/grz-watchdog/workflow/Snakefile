@@ -403,7 +403,7 @@ rule prepare_qc_workflow_references:
         references_dir=get_qc_workflow_references_directory(),
     params:
         pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
-        profile=["test_grch37", "test_grch38", "docker"],
+        profile=["test_GRCh37", "test_GRCh38", "docker"],
         reference_path=lambda wildcards, output: output.references_dir,
     threads: 1
     resources:
