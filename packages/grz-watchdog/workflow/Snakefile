@@ -374,6 +374,38 @@ rule submit_pruefbericht:
         "scripts/submit_pruefbericht.sh"
 
 
+rule setup_qc_workflow:
+    output:
+        workflow_dir=directory("results/resources/GRZ_QC_Workflow/"),
+    params:
+        revision=get_qc_workflow_revision,
+    conda:
+        "envs/base.yaml"
+    shell:
+        """
+        git clone https://github.com/BfArM-MVH/GRZ_QC_Workflow.git {output.workflow_dir}
+        cd {output.workflow_dir}
+        git checkout {params.revision}
+        """
+
+
+rule prepare_qc_workflow_references:
+    input:
+        # marked as ancient so as not to re-generate references if not needed
+        # if you need to re-generate references, you can delete the references directory manually
+        workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
+    output:
+        references_dir=directory("results/resources/references"),
+    params:
+        pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
+        revision=get_qc_workflow_revision,
+        profile=["test_grch37", "test_grch38", "docker"],
+        reference_path=lambda wildcards, output: output.references_dir,
+    handover: True
+    wrapper:
+        "v7.6.1/utils/nextflow"
+
+
 rule qc:
     """
     Perform QC on a submission using the QC nextflow pipeline.
@@ -384,19 +416,23 @@ rule qc:
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        qc_results=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc"),
+        qc_results=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/out"),
+        qc_work=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/work"),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
-    # handover: "TODO: handover to QC pipeline"
-    shell:
-        """
-        (
-            grzctl db --config-file {input.db_config_path} submission update {wildcards.submission_id} qcing
-            (echo 'running fake qc...' > {output.qc_results}) || grzctl db --config-file {input.db_config_path} submission update {wildcards.submission_id} error
-            grzctl db --config-file {input.db_config_path} submission update {wildcards.submission_id} qced
-        ) > {log.stdout} 2> {log.stderr}
-        """
+    params:
+        pipeline="/path/to/GRZ_QC_Workflow",
+        revision="v1.1.5",
+        profile=["conda", "docker"],
+        reference_path="/path/to/GRZ_QC_Workflow/references",
+        submission_basepath=lambda wildcards, input: input.data,
+        outdir=lambda wildcards, output: output.qc_results,
+        # TODO: check whether "-workdir" is passed correctly or if we have to adapt handover or wrapper source upstream
+        workdir=lambda wildcards, output: output.qc_work,
+    handover: True
+    wrapper:
+        "v7.6.1/utils/nextflow"
 
 
 rule clean:
