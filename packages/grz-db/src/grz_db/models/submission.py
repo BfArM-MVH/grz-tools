@@ -24,7 +24,7 @@ from grz_pydantic_models.submission.metadata import (
     SubmitterId,
     Tan,
 )
-from pydantic import ConfigDict, StringConstraints
+from pydantic import AfterValidator, ConfigDict, StringConstraints
 from sqlalchemy import JSON, Column
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -258,6 +258,11 @@ class ChangeRequestLogCreate(ChangeRequestLogBase):
     signature: str
 
 
+def coerce_empty_set_to_none(value: set | None) -> set | None:
+    """SemicolonSeparatedStringSet stores both empty sets and None as None."""
+    return value if value else None
+
+
 class Donor(SQLModel, table=True):
     """Donor database model."""
 
@@ -271,9 +276,9 @@ class Donor(SQLModel, table=True):
     sequence_subtypes: set[SequenceSubtype] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     mv_consented: bool
     research_consented: bool | None = None
-    research_consent_missing_justifications: set[ResearchConsentNoScopeJustification] = Field(
-        sa_column=Column(SemicolonSeparatedStringSet)
-    )
+    research_consent_missing_justifications: Annotated[
+        set[ResearchConsentNoScopeJustification] | None, AfterValidator(coerce_empty_set_to_none)
+    ] = Field(sa_column=Column(SemicolonSeparatedStringSet))
 
 
 class DetailedQCResult(SQLModel, table=True):
@@ -487,7 +492,7 @@ class SubmissionDb:
         return donors
 
     def add_donor(self, donor: Donor) -> Donor:
-        """Add or update a donor to/in the database."""
+        """Add a donor to the database."""
         with self._get_session() as session:
             session.add(donor)
 
@@ -495,6 +500,39 @@ class SubmissionDb:
                 session.commit()
                 session.refresh(donor)
                 return donor
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    def update_donor(self, updated_donor: Donor) -> Donor:
+        """Update a donor in the database."""
+        with self._get_session() as session:
+            statement = (
+                select(Donor)
+                .where(Donor.submission_id == updated_donor.submission_id)
+                .where(Donor.pseudonym == updated_donor.pseudonym)
+            )
+            db_donor = session.exec(statement).first()
+
+            if db_donor is None:
+                raise RuntimeError("Cannot update a donor that doesn't yet exist in the database.")
+
+            if db_donor == updated_donor:
+                # nothing to do
+                return db_donor
+
+            for field in db_donor.model_fields:
+                old_value = getattr(db_donor, field)
+                new_value = getattr(updated_donor, field)
+                if old_value != new_value:
+                    setattr(db_donor, field, new_value)
+
+            session.add(db_donor)
+
+            try:
+                session.commit()
+                session.refresh(db_donor)
+                return db_donor
             except Exception as e:
                 session.rollback()
                 raise e
