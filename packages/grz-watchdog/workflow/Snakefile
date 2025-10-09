@@ -405,7 +405,7 @@ rule prepare_qc_workflow_references:
         pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
         profile=["test_GRCh37", "test_GRCh38", "conda"],
         reference_path=lambda wildcards, output: output.references_dir,
-        extra=lambda wildcards, input: input.workflow_dir,
+        extra=lambda wildcards, input: f"-resume -workdir {input.workflow_dir}",
     threads: 1
     resources:
         mem="90G",
