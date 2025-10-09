@@ -18,6 +18,6 @@ target_path="results/${submitter_id}/${inbox}/${submission_id}/processed/${qc_ta
 
 echo "Processing single submission. Target: ${target_path}"
 
-# run snakemake with the constructed target
+# run snakemake with the constructed target, see entrypoint.sh
 # pass any extra arguments to snakemake
-snakemake --snakefile /grz-watchdog/workflow/Snakefile --directory /workdir "${target_path}" "${@:5}"
+"${target_path}" "${@:5}"

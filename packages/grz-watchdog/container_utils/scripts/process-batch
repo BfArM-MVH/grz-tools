@@ -1,5 +1,5 @@
 #!/bin/bash
 set -euo pipefail
 
-# run the 'pending' rule, passing all args to snakemake
-snakemake --snakefile /grz-watchdog/workflow/Snakefile --directory /workdir pending "$@"
+# run the 'pending' rule, passing all args to snakemake, see entrypoint.sh
+pending "$@"
