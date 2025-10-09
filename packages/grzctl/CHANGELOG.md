@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.0.0...grzctl-v1.0.1) (2025-10-09)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** don't generate submission ID from redacted TAN ([#412](https://github.com/BfArM-MVH/grz-tools/issues/412)) ([c925e53](https://github.com/BfArM-MVH/grz-tools/commit/c925e53d4c36e003bca62343913233c52af73b14))
+
 ## [1.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.6.0...grzctl-v1.0.0) (2025-10-07)
 
 
