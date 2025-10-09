@@ -20,7 +20,6 @@ import rich.table
 import rich.text
 import textual.logging
 from grz_common.cli import FILE_R_E, config_file, output_json
-from grz_common.constants import REDACTED_TAN
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_db.errors import (
     DatabaseConfigurationError,
@@ -41,6 +40,7 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
+    REDACTED_TAN,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
     LibraryType,

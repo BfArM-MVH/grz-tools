@@ -10,7 +10,7 @@ import click.testing
 import grzctl.cli
 import pytest
 import responses
-from grz_common.constants import REDACTED_TAN
+from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from .. import mock_files
 

@@ -28,6 +28,7 @@ from ...mii.consent import Consent, ProvisionType
 from .versioning import Version
 
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
+REDACTED_TAN = "0" * 64
 
 log = logging.getLogger(__name__)
 
@@ -1072,6 +1073,9 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         Uses the first 8 characters of the SHA256 hash of the tanG to virtually prevent collisions.
         """
+        if self.submission.tan_g == REDACTED_TAN:
+            raise ValueError("Cannot compute submission ID from metadata with a redacted TAN.")
+
         return "_".join(
             (
                 self.submission.submitter_id,

@@ -12,9 +12,8 @@ import click.testing
 import grzctl.cli
 import pytest
 import yaml
-from grz_common.constants import REDACTED_TAN
 from grz_db.models.submission import SubmissionDb
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
 
 from .. import resources as test_resources

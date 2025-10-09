@@ -6,11 +6,10 @@ import logging
 import click
 import requests
 from grz_common.cli import DIR_R_E, config_file
-from grz_common.constants import REDACTED_TAN
 from grz_common.workers.submission import Submission
 from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
 from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
-from grz_pydantic_models.submission.metadata.v1 import GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissionMetadata
 from pydantic_core import to_jsonable_python
 
 from ..models.config import PruefberichtConfig
