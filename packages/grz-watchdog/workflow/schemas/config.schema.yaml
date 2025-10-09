@@ -35,6 +35,16 @@ properties:
       - "storage"
       - "inbox+storage"
       - "none"
+  handlers:
+    type: object
+    description: "Custom handler code for on-start, on-error and on-success"
+    properties:
+      on-start:
+        type: string
+      on-error:
+        type: string
+      on-success:
+        type: string
   config_paths:
     type: object
     properties:

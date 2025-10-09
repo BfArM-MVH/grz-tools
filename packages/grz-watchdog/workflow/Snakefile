@@ -28,6 +28,17 @@ wildcard_constraints:
     inbox=r"|".join(set(map(itemgetter(1), ALL_INBOX_PAIRS))),
     qc_status=r"with_qc|without_qc",
 
+if on_start := config.get("handlers", {}).get("on-start"):
+    onstart:
+        shell(on_start)
+
+if on_error := config.get("handlers", {}).get("on-error"):
+    onerror:
+        shell(on_error)
+
+if on_success := config.get("handlers", {}).get("on-success"):
+    onsuccess:
+        shell(on_success)
 
 envvars:
     "GRZ_S3__ACCESS_KEY",
