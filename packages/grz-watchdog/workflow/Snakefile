@@ -403,8 +403,9 @@ rule prepare_qc_workflow_references:
         references_dir=get_qc_workflow_references_directory(),
     params:
         pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
-        profile=["test_GRCh37", "test_GRCh38", "docker"],
+        profile=["test_GRCh37", "test_GRCh38", "conda"],
         reference_path=lambda wildcards, output: output.references_dir,
+        extra=lambda wildcards, input: input.workflow_dir,
     threads: 1
     resources:
         mem="90G",
@@ -443,35 +444,33 @@ rule qc:
     Perform QC on a submission using the QC nextflow pipeline.
     """
     input:
-        data=rules.download.output.data,
+        submission_basepath=rules.download.output.data,
         decryption_marker=rules.decrypt.output.marker,
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
         workflow_dir=rules.setup_qc_workflow.output.workflow_dir,
         qcing_marker=rules.set_status_to_qcing.output.marker,
-        references_dir=rules.prepare_qc_workflow_references.output.references_dir,
+        reference_path=rules.prepare_qc_workflow_references.output.references_dir,
     output:
-        qc_results=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/out"),
-        qc_work=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/work"),
+        outdir=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/out"),
+        workdir=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/work"),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
     params:
         pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
-        profile=["conda", "docker"],
-        reference_path=lambda wildcards, input: input.references_dir,
-        submission_basepath=lambda wildcards, input: input.data,
-        outdir=lambda wildcards, output: output.qc_results,
-        # TODO: check whether "-workdir" is passed correctly or if we have to adapt handover or wrapper source upstream
-        workdir=lambda wildcards, output: output.qc_work,
+        profile=["conda"],
+        extra=lambda wildcards, output: f"-resume -workdir {output.workdir}",
     handover: True
+    conda:
+        "envs/nextflow.yaml"
     wrapper:
         "v7.6.1/utils/nextflow"
 
 
 rule process_qc_results:
     input:
-        qc_results=rules.qc.output.qc_results,
+        qc_results=rules.qc.output.outdir,
         db_config_path=cfg_path("config_paths/db"),
     output:
         marker=touch(
