@@ -414,6 +414,8 @@ rule prepare_qc_workflow_references:
         stdout="logs/qc/prepare_qc_workflow_references.stdout.log",
         stderr="logs/qc/prepare_qc_workflow_references.stderr.log",
     handover: True
+    conda:
+        "envs/nextflow.yaml"
     wrapper:
         "v7.6.1/utils/nextflow"
 
