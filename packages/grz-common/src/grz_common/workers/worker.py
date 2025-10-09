@@ -191,7 +191,7 @@ class Worker:
                 checksum_passed = checksum_state and checksum_state.get("validation_passed", False)
 
                 seq_data_passed = True  # assume true for non-sequence files
-                if file_metadata.file_type in ("fastq", "bam"):
+                if file_metadata.file_type in {"fastq", "bam"}:
                     seq_data_state = seq_data_progress_logger.get_state(file_path, file_metadata)
                     seq_data_passed = seq_data_state is not None and seq_data_state.get("validation_passed", False)
 
