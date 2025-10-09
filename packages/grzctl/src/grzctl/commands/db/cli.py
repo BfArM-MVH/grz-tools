@@ -507,38 +507,51 @@ def _diff_metadata(
 
 
 def _diff_donors(
-    donors_in_db: tuple[Donor, ...], metadata: GrzSubmissionMetadata
-) -> tuple[tuple[Donor, ...], tuple[Donor, ...], tuple[rich.console.RenderableType, ...]]:
-    pseudonym2before = {donor.pseudonym: donor for donor in donors_in_db}
+    donors_in_db: tuple[Donor, ...], submission_id: str, metadata: GrzSubmissionMetadata
+) -> tuple[tuple[Donor, ...], tuple[Donor, ...], tuple[Donor, ...], tuple[rich.console.RenderableType, ...]]:
+    pseudonym2before = {(donor.submission_id, donor.pseudonym): donor for donor in donors_in_db}
 
+    added_donors = []
     updated_donors = []
-    pending_pseudonyms = set()
+    pending_pseudonyms: set[tuple[str, str]] = set()
     donor_diff_tables: list[rich.console.RenderableType] = []
     for donor in metadata.donors:
-        donor_after = Donor(
-            submission_id=metadata.submission_id,
-            pseudonym="index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
-            relation=donor.relation,
-            library_types={datum.library_type for datum in donor.lab_data},
-            sequence_types={datum.sequence_type for datum in donor.lab_data},
-            sequence_subtypes={datum.sequence_subtype for datum in donor.lab_data},
-            mv_consented=donor.consents_to_mv(),
-            research_consented=donor.consents_to_research(date=date.today()),
-            research_consent_missing_justifications={
-                consent.no_scope_justification
-                for consent in donor.research_consents
-                if consent.no_scope_justification is not None
+        # we use submission ID passed to this function instead of metadata
+        # because the tanG might be redacted and therefore the
+        # metadata-calculated submission ID would change.
+        # Also, we use model_validate here instead of __init__ because of:
+        # https://github.com/fastapi/sqlmodel/issues/453
+        donor_after = Donor.model_validate(
+            {
+                "submission_id": submission_id,
+                "pseudonym": "index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
+                "relation": Relation(donor.relation),
+                "library_types": {datum.library_type for datum in donor.lab_data},
+                "sequence_types": {datum.sequence_type for datum in donor.lab_data},
+                "sequence_subtypes": {datum.sequence_subtype for datum in donor.lab_data},
+                "mv_consented": donor.consents_to_mv(),
+                "research_consented": donor.consents_to_research(date=date.today()),
+                "research_consent_missing_justifications": {
+                    consent.no_scope_justification
+                    for consent in donor.research_consents
+                    if consent.no_scope_justification is not None
+                }
+                if donor.research_consents
+                else None,
             }
-            if donor.research_consents
-            else None,
         )
-        donor_before = pseudonym2before.get(donor_after.pseudonym, None)
-        pending_pseudonyms.add(donor_after.pseudonym)
+        donor_before = pseudonym2before.get((donor_after.submission_id, donor_after.pseudonym), None)
+        pending_pseudonyms.add((donor_after.submission_id, donor_after.pseudonym))
+        change = "added"
         if donor_before == donor_after:
             continue
-        updated_donors.append(donor_after)
+        elif donor_before is None:
+            added_donors.append(donor_after)
+        else:
+            updated_donors.append(donor_after)
+            change = "updated"
 
-        table_title = f"[green]Donor '{donor_after.pseudonym}' added/updated[/green]"
+        table_title = f"[green]Donor '{donor_after.pseudonym}' {change}[/green]"
         diff_table = rich.table.Table(title=table_title, min_width=len(table_title), title_justify="left")
         diff_table.add_column("Key")
         diff_table.add_column("Before")
@@ -553,11 +566,17 @@ def _diff_donors(
         if diff_table.row_count:
             donor_diff_tables.append(diff_table)
 
-    deleted_donors = tuple(filter(lambda donor: donor.pseudonym not in pending_pseudonyms, pseudonym2before.values()))
+    deleted_donors = tuple(
+        filter(
+            lambda donor: donor.submission_id == submission_id
+            and (donor.submission_id, donor.pseudonym) not in pending_pseudonyms,
+            pseudonym2before.values(),
+        )
+    )
     for deleted_donor in deleted_donors:
         donor_diff_tables.append(rich.text.Text(f"Donor {deleted_donor.pseudonym} deleted", style="red"))
 
-    return tuple(updated_donors), deleted_donors, tuple(donor_diff_tables)
+    return tuple(added_donors), tuple(updated_donors), deleted_donors, tuple(donor_diff_tables)
 
 
 @submission.command()
@@ -600,11 +619,11 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
     changes = _diff_metadata(submission, metadata, set(ignore_field))
 
     # consent records
-    updated_donors, deleted_donors, donor_diff_tables = _diff_donors(
-        donors_in_db=db_service.get_donors(submission_id=Submission.id), metadata=metadata
+    added_donors, updated_donors, deleted_donors, donor_diff_tables = _diff_donors(
+        donors_in_db=db_service.get_donors(submission_id=Submission.id), submission_id=submission_id, metadata=metadata
     )
 
-    if (not changes) and (not updated_donors) and (not deleted_donors):
+    if not any((changes, added_donors, updated_donors, deleted_donors)):
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
         ctx.exit()
 
@@ -629,8 +648,10 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
     ):
         for key, _before, after in changes:
             _ = db_service.modify_submission(submission_id, key=key, value=after)
+        for added_donor in added_donors:
+            _ = db_service.add_donor(added_donor)
         for updated_donor in updated_donors:
-            _ = db_service.add_donor(updated_donor)
+            _ = db_service.update_donor(updated_donor)
         for deleted_donor in deleted_donors:
             db_service.delete_donor(deleted_donor)
         console_err.print("[green]Database populated successfully.[/green]")
