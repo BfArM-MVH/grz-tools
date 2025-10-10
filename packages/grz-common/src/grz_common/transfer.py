@@ -11,9 +11,15 @@ from botocore.config import Config as Boto3Config
 import botocore
 from packaging import version
 from pydantic import BaseModel, Field, ValidationError
+from .exceptions import (
+    VersionFileNotFoundError,
+    VersionFileAccessError,
+    VersionFileValidationError,
+)
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -115,17 +121,19 @@ def get_version_info(s3_options, version_file_path) -> VersionFile:
         if error_code == "NoSuchKey":
             msg = (
                 f"Version file not found at s3://{s3_options.bucket}/{version_file_path}. "
-                "This indicates that the GRZ staff forgot to upload it. Please contact GRZ to resolve this."
+                "Please contact GRZ to resolve this."
             )
             logger.critical(msg)
-            raise FileNotFoundError(msg)
+            raise VersionFileNotFoundError(msg) from e
         else:
             msg = (
-                f"Unexpected S3 error ({error_code}) while accessing "
-                f"s3://{s3_options.bucket}/{version_file_path}. "
-                "This could indicate a permissions or bucket policy issue. "
-                "Please contact GRZ staff to resolve this."
+                f"Unable to access s3://{s3_options.bucket}/{version_file_path} "
+                f"(Error code: {error_code}). Possible permission or policy issue."
             )
             logger.error(msg, exc_info=e)
-            raise RuntimeError(msg) from e
+            raise VersionFileAccessError(msg) from e
+    except (ValidationError, json.JSONDecodeError, KeyError) as e:
+        msg = f"Invalid version file format or content: {e}"
+        logger.error(msg, exc_info=e)
+        raise VersionFileValidationError(msg) from e
 

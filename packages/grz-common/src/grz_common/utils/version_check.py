@@ -48,7 +48,7 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
             "  - Check release notes for any breaking changes\n"
         )
         logger.error(msg)
-        click.echo(click.style(msg, fg="red"))
+        click.echo(click.style(f"ERROR: {msg}", fg="red"))
         sys.exit(1)
 
     # version is behind latest but still supported
@@ -58,7 +58,7 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
             "It is recommended to upgrade to the latest version for the newest features and bug fixes."
         )
         logger.warning(msg)
-        click.echo(click.style(msg, fg="yellow"))
+        click.echo(click.style(f"WARNING: {msg}", fg="yellow"))
 
     # version is up-to-date
     else:
