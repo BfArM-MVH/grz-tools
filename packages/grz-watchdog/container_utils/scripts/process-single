@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+
+# check for required arguments
+if [ "$#" -lt 4 ]; then
+	echo "Usage: $0 <submitter_id> <inbox> <submission_id> <qc_target> [snakemake_options...]"
+	echo "Example: $0 123456789 test1 123456789_2025-09-22_aabbccdd with_qc --cores 4"
+	exit 1
+fi
+
+submitter_id="$1"
+inbox="$2"
+submission_id="$3"
+qc_target="$4"
+
+# construct snakemake target
+target_path="results/${submitter_id}/${inbox}/${submission_id}/processed/${qc_target}"
+
+echo "Processing single submission. Target: ${target_path}"
+
+# run snakemake with the constructed target, see entrypoint.sh
+# pass any extra arguments to snakemake
+"${target_path}" "${@:5}"
