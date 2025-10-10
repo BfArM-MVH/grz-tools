@@ -33,6 +33,5 @@ COPY workflow/ workflow/
 
 WORKDIR /workdir
 
-# use custom entrypoint script (basically just does `pixi run -- …`)
+# use custom entrypoint script (basically just does `pixi run -- snakemake …`, but sets relevant options)
 ENTRYPOINT ["entrypoint.sh"]
-CMD ["process-batch"]
