@@ -1,6 +1,7 @@
 """Command for managing a submission database"""
 
 import csv
+import dataclasses
 import json
 import logging
 import sys
@@ -506,9 +507,15 @@ def _diff_metadata(
     return changes
 
 
-def _diff_donors(
-    donors_in_db: tuple[Donor, ...], submission_id: str, metadata: GrzSubmissionMetadata
-) -> tuple[tuple[Donor, ...], tuple[Donor, ...], tuple[Donor, ...], tuple[rich.console.RenderableType, ...]]:
+@dataclasses.dataclass
+class _DonorDiff:
+    added: tuple[Donor, ...]
+    updated: tuple[Donor, ...]
+    deleted: tuple[Donor, ...]
+    diff_tables: tuple[rich.console.RenderableType, ...]
+
+
+def _diff_donors(donors_in_db: tuple[Donor, ...], submission_id: str, metadata: GrzSubmissionMetadata) -> _DonorDiff:
     pseudonym2before = {(donor.submission_id, donor.pseudonym): donor for donor in donors_in_db}
 
     added_donors = []
@@ -576,7 +583,12 @@ def _diff_donors(
     for deleted_donor in deleted_donors:
         donor_diff_tables.append(rich.text.Text(f"Donor {deleted_donor.pseudonym} deleted", style="red"))
 
-    return tuple(added_donors), tuple(updated_donors), deleted_donors, tuple(donor_diff_tables)
+    return _DonorDiff(
+        added=tuple(added_donors),
+        updated=tuple(updated_donors),
+        deleted=deleted_donors,
+        diff_tables=tuple(donor_diff_tables),
+    )
 
 
 @submission.command()
@@ -619,11 +631,11 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
     changes = _diff_metadata(submission, metadata, set(ignore_field))
 
     # consent records
-    added_donors, updated_donors, deleted_donors, donor_diff_tables = _diff_donors(
+    donor_diff = _diff_donors(
         donors_in_db=db_service.get_donors(submission_id=Submission.id), submission_id=submission_id, metadata=metadata
     )
 
-    if not any((changes, added_donors, updated_donors, deleted_donors)):
+    if not any(dataclasses.astuple(donor_diff)):
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
         ctx.exit()
 
@@ -638,7 +650,9 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
     else:
         diff_table = rich.padding.Padding(rich.text.Text("No changes to submission-level metadata."), pad=(0, 0, 1, 0))
 
-    panel = rich.panel.Panel.fit(rich.console.Group(diff_table, *donor_diff_tables, fit=True), title="Pending Changes")
+    panel = rich.panel.Panel.fit(
+        rich.console.Group(diff_table, *donor_diff.diff_tables, fit=True), title="Pending Changes"
+    )
     console.print(panel)
 
     if not confirm or click.confirm(
@@ -648,11 +662,11 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
     ):
         for key, _before, after in changes:
             _ = db_service.modify_submission(submission_id, key=key, value=after)
-        for added_donor in added_donors:
+        for added_donor in donor_diff.added:
             _ = db_service.add_donor(added_donor)
-        for updated_donor in updated_donors:
+        for updated_donor in donor_diff.updated:
             _ = db_service.update_donor(updated_donor)
-        for deleted_donor in deleted_donors:
+        for deleted_donor in donor_diff.deleted:
             db_service.delete_donor(deleted_donor)
         console_err.print("[green]Database populated successfully.[/green]")
 
