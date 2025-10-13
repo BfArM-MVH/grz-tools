@@ -1,0 +1,24 @@
+FROM ghcr.io/prefix-dev/pixi:0.55.0
+
+WORKDIR /workspace
+# ensure that the context is the monorepo root in docker-compose.
+COPY . .
+
+WORKDIR /workspace/packages/grz-watchdog/tests
+RUN pixi install
+
+RUN mkdir -p /config /workdir
+WORKDIR /workdir
+
+COPY packages/grz-watchdog/workflow /grz-watchdog/workflow
+COPY packages/grz-watchdog/container_utils/scripts/ /usr/local/bin/
+RUN chmod +x /usr/local/bin/*
+
+#ENTRYPOINT [ \
+#    "pixi", "run", "--manifest-path", "/workspace/packages/grz-watchdog/tests/pixi.toml", "--", \
+#    "snakemake", \
+#    "--workflow-profile", "/workspace/packages/grz-watchdog/workflow/profiles/default", \
+#    "--snakefile", "/workspace/packages/grz-watchdog/workflow/Snakefile", \
+#    "--directory", "/workdir", \
+#    "--conda-prefix", "/conda-envs" \
+#]
