@@ -216,7 +216,27 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
 
 
-def test_research_consent_deny_permit():
+def test_research_consent_subprovisions_deny_permit():
+    """Within one research consent's subprovisions, deny before permit should return a non-consented state."""
+    consent_raw = json.loads(
+        importlib.resources.files(resources)
+        .joinpath("example_research_consent", "minimal_nonconsented.json")
+        .read_text()
+    )
+
+    # add a permit subprovision object for same consent object, after the deny subprovision
+    new_permit_subprovision = copy.deepcopy(consent_raw["provision"]["provision"][0])
+    new_permit_subprovision["type"] = "permit"
+    consent_raw["provision"]["provision"].append(new_permit_subprovision)
+
+    consent = Consent.model_validate_json(json.dumps(consent_raw))
+
+    assert not ResearchConsent.consents_to_research(
+        [ResearchConsent(scope=consent)], date=date(year=2025, month=10, day=13)
+    )
+
+
+def test_research_consents_deny_permit():
     """Having two research consents, where deny comes before permit, should return a non-consented state."""
     consent_raw = json.loads(
         importlib.resources.files(resources)
