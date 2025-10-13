@@ -2,7 +2,7 @@ import functools
 from warnings import warn
 
 
-def deprecated(msg=None):
+def deprecated(func=None, /, msg=None):
     def decorator(f):
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
@@ -14,4 +14,11 @@ def deprecated(msg=None):
 
         return wrapper
 
-    return decorator
+    # stolen from dataclass implementation
+    # determine if called as @deprecated or @deprecated()
+    if func is None:
+        # @deprecated()
+        return decorator
+
+    # @deprecated
+    return decorator(func)
