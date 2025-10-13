@@ -520,7 +520,10 @@ def _diff_donors(donors_in_db: tuple[Donor, ...], submission_id: str, metadata: 
 
     added_donors = []
     updated_donors = []
-    pending_pseudonyms: set[tuple[str, str]] = set()
+    type SubmissionId = str
+    type Pseudonym = str
+    type DonorKey = tuple[SubmissionId, Pseudonym]
+    pending_pseudonyms: set[DonorKey] = set()
     donor_diff_tables: list[rich.console.RenderableType] = []
     for donor in metadata.donors:
         # we use submission ID passed to this function instead of metadata
