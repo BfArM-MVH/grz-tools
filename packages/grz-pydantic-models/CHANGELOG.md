@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.0...grz-pydantic-models-v2.3.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** add missing accepted versions ([#417](https://github.com/BfArM-MVH/grz-tools/issues/417)) ([ec85e8f](https://github.com/BfArM-MVH/grz-tools/commit/ec85e8f343af70cb6a74487bc8df1727459a3d48))
+* **grz-pydantic-models:** don't generate submission ID from redacted TAN ([#412](https://github.com/BfArM-MVH/grz-tools/issues/412)) ([c925e53](https://github.com/BfArM-MVH/grz-tools/commit/c925e53d4c36e003bca62343913233c52af73b14))
+* **grz-pydantic-models:** more conservative "deny" provisions for multiple codes ([#416](https://github.com/BfArM-MVH/grz-tools/issues/416)) ([dd36ab4](https://github.com/BfArM-MVH/grz-tools/commit/dd36ab42d4e6c232f510420eda00c94805af78f0))
+
 ## [2.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.1...grz-pydantic-models-v2.3.0) (2025-10-07)
 
 

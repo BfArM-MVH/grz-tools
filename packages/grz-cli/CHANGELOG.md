@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.3.0...grz-cli-v1.3.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common:** check validation progress logs before encrypt ([#411](https://github.com/BfArM-MVH/grz-tools/issues/411)) ([a33b342](https://github.com/BfArM-MVH/grz-tools/commit/a33b342da6f32a59c57acfa067584ac7798f9764))
+
 ## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.2.0...grz-cli-v1.3.0) (2025-10-07)
 
 

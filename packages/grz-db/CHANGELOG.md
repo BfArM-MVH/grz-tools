@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.0.0...grz-db-v1.0.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-db,grzctl:** properly repopulate donors ([#413](https://github.com/BfArM-MVH/grz-tools/issues/413)) ([cb7b1bd](https://github.com/BfArM-MVH/grz-tools/commit/cb7b1bdebcfaec2e5581eb8a2e93ab57397b242e))
+
 ## [1.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.6.0...grz-db-v1.0.0) (2025-10-07)
 
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.3.0...grz-common-v1.3.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common:** Check encryption progress logs before upload ([#406](https://github.com/BfArM-MVH/grz-tools/issues/406)) ([401a20a](https://github.com/BfArM-MVH/grz-tools/commit/401a20aef1476eb940abc0c9aaf74e409215e55e))
+* **grz-cli,grz-common:** check validation progress logs before encrypt ([#411](https://github.com/BfArM-MVH/grz-tools/issues/411)) ([a33b342](https://github.com/BfArM-MVH/grz-tools/commit/a33b342da6f32a59c57acfa067584ac7798f9764))
+* **grz-pydantic-models:** don't generate submission ID from redacted TAN ([#412](https://github.com/BfArM-MVH/grz-tools/issues/412)) ([c925e53](https://github.com/BfArM-MVH/grz-tools/commit/c925e53d4c36e003bca62343913233c52af73b14))
+
 ## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.2.1...grz-common-v1.3.0) (2025-08-19)
 
 
