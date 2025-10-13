@@ -347,11 +347,10 @@ class ResearchConsent(StrictBaseModel):
                     for codeable_concept in provision.code:
                         for coding in codeable_concept.coding:
                             if provision.type == ProvisionType.PERMIT:
-                                code2consent[coding.code] = True
+                                code2consent[coding.code] = code2consent.get(coding.code, True)  # propagate prior deny
                             else:
                                 # explicit deny overrides any prior/later permits for code
                                 code2consent[coding.code] = False
-                                break
         return code2consent
 
     @staticmethod
