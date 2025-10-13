@@ -339,7 +339,7 @@ class ResearchConsent(StrictBaseModel):
         return self
 
     def consent_by_code(self, date: date) -> dict[str, bool]:
-        code2consent = {}
+        code2consent: dict[str, bool] = {}
         if isinstance(self.scope, Consent) and (self.scope.provision is not None):
             provisions = self.scope.provision.provision
             for provision in provisions:
