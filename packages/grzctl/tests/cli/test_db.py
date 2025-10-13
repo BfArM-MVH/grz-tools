@@ -2,9 +2,12 @@
 Tests for grzctl db subcommand
 """
 
+import hashlib
 import importlib.resources
 import json
+import random
 import sqlite3
+from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
 
@@ -114,6 +117,105 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
             [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],
             catch_exceptions=False,
         )
+
+
+def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
+    """
+    Repopulating a database should work, including when:
+    - two donors from different submitters have the same pseudonym.
+    - other tricky situations that may be added in the future.
+    """
+    rng = random.Random()
+    rng.seed(42)
+
+    args_common = ["db", "--config-file", blank_database_config_path]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+
+    # first submission
+    metadata_raw["submission"]["submitterId"] = "123456789"
+    metadata_raw["submission"]["tanG"] = hashlib.sha256(rng.randbytes(128)).hexdigest()
+    metadata_s1 = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
+
+    result_add_s1 = runner.invoke(cli, [*args_common, "submission", "add", metadata_s1.submission_id])
+    assert result_add_s1.exit_code == 0, result_add_s1.stderr
+
+    metadata_s1_dump_path = tmp_path / "metadata.s1.json"
+    with open(metadata_s1_dump_path, "w") as metadata_s1_file:
+        json.dump(metadata_raw, metadata_s1_file)
+
+    result_populate_s1 = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata_s1.submission_id, str(metadata_s1_dump_path), "--no-confirm"],
+    )
+    assert result_populate_s1.exit_code == 0, result_populate_s1.stderr
+
+    # second submission with same pseudonym from different submitter
+    metadata_raw["submission"]["submitterId"] = "987654321"
+    metadata_raw["submission"]["tanG"] = hashlib.sha256(rng.randbytes(128)).hexdigest()
+    metadata_s2 = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
+
+    result_add_s2 = runner.invoke(cli, [*args_common, "submission", "add", metadata_s2.submission_id])
+    assert result_add_s2.exit_code == 0, result_add_s2.stderr
+
+    metadata_s2_dump_path = tmp_path / "metadata.s2.json"
+    with open(metadata_s2_dump_path, "w") as metadata_s2_file:
+        json.dump(metadata_raw, metadata_s2_file)
+
+    result_populate_s2 = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata_s2.submission_id, str(metadata_s2_dump_path), "--no-confirm"],
+    )
+    assert result_populate_s2.exit_code == 0, result_populate_s2.stderr
+
+    # repopulate s1 with redacted metadata and revoked consent
+    metadata_raw["submission"]["submitterId"] = "123456789"
+    metadata_raw["submission"]["tanG"] = REDACTED_TAN
+    metadata_raw["submission"]["localCaseId"] = ""
+    metadata_raw["donors"][0]["researchConsents"][0]["scope"] = None
+    metadata_raw["donors"][0]["researchConsents"][0]["noScopeJustification"] = "other patient-related reason"
+
+    metadata_s1_mod_dump_path = tmp_path / "metadata.s1.modified.json"
+    with open(metadata_s1_mod_dump_path, "w") as metadata_s1_mod_file:
+        json.dump(metadata_raw, metadata_s1_mod_file)
+
+    # need to use metadata_s1 submission_id since tanG is now redacted
+    result_repopulate_s1 = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata_s1.submission_id,
+            str(metadata_s1_mod_dump_path),
+            "--no-confirm",
+            "--ignore-field",
+            "tan_g",
+            "--ignore-field",
+            "pseudonym",
+        ],
+    )
+    assert result_repopulate_s1.exit_code == 0, result_repopulate_s1.stderr
+
+    # sanity check the database
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    submissions = db.list_submissions(limit=None)
+    assert len(submissions) == 2, "Expected two submissions in database"
+
+    donors_s1 = sorted(db.get_donors(metadata_s1.submission_id), key=attrgetter("pseudonym"))
+    assert len(donors_s1) == 2, "Expected two donors in submission 1"
+
+    assert donors_s1[1].pseudonym == "index"
+    assert not donors_s1[1].research_consented
+    assert donors_s1[1].research_consent_missing_justifications == {"other patient-related reason"}
+
+    donors_s2 = sorted(db.get_donors(metadata_s2.submission_id), key=attrgetter("pseudonym"))
+    assert len(donors_s2) == 2, "Expected two donors in submission 2"
 
 
 def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
