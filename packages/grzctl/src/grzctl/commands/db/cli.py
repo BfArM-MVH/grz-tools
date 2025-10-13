@@ -515,15 +515,15 @@ class _DonorDiff:
     diff_tables: tuple[rich.console.RenderableType, ...]
 
 
-def _diff_donors(donors_in_db: tuple[Donor, ...], submission_id: str, metadata: GrzSubmissionMetadata) -> _DonorDiff:
-    pseudonym2before = {(donor.submission_id, donor.pseudonym): donor for donor in donors_in_db}
+def _diff_donors(
+    donors_in_submission: tuple[Donor, ...], submission_id: str, metadata: GrzSubmissionMetadata
+) -> _DonorDiff:
+    pseudonym2before = {donor.pseudonym: donor for donor in donors_in_submission}
 
     added_donors = []
     updated_donors = []
-    type SubmissionId = str
     type Pseudonym = str
-    type DonorKey = tuple[SubmissionId, Pseudonym]
-    pending_pseudonyms: set[DonorKey] = set()
+    pending_pseudonyms: set[Pseudonym] = set()
     donor_diff_tables: list[rich.console.RenderableType] = []
     for donor in metadata.donors:
         # we use submission ID passed to this function instead of metadata
@@ -550,12 +550,12 @@ def _diff_donors(donors_in_db: tuple[Donor, ...], submission_id: str, metadata: 
                 else None,
             }
         )
-        donor_before = pseudonym2before.get((donor_after.submission_id, donor_after.pseudonym), None)
-        pending_pseudonyms.add((donor_after.submission_id, donor_after.pseudonym))
+        donor_before = pseudonym2before.get(donor_after.pseudonym, None)
+        pending_pseudonyms.add(donor_after.pseudonym)
         change = "added"
         if donor_before == donor_after:
             continue
-        elif donor_before is None:
+        if donor_before is None:
             added_donors.append(donor_after)
         else:
             updated_donors.append(donor_after)
@@ -578,8 +578,7 @@ def _diff_donors(donors_in_db: tuple[Donor, ...], submission_id: str, metadata: 
 
     deleted_donors = tuple(
         filter(
-            lambda donor: donor.submission_id == submission_id
-            and (donor.submission_id, donor.pseudonym) not in pending_pseudonyms,
+            lambda donor: donor.pseudonym not in pending_pseudonyms,
             pseudonym2before.values(),
         )
     )
@@ -635,7 +634,9 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
 
     # consent records
     donor_diff = _diff_donors(
-        donors_in_db=db_service.get_donors(submission_id=Submission.id), submission_id=submission_id, metadata=metadata
+        donors_in_submission=db_service.get_donors(submission_id=submission_id),
+        submission_id=submission_id,
+        metadata=metadata,
     )
 
     if not any(dataclasses.astuple(donor_diff)):
