@@ -627,11 +627,6 @@ def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_
     if output_directory is None:
         output_directory = Path.cwd()
 
-    # BfArM specification:
-    # - 1-Gesamtübersicht_[KnotenID]_[Quartal]_[Jahr]
-    # - 2-Datensätze_[KnotenID]_[Quartal]_[Jahr]
-    # - 3-Detailprüfung_[KnotenID]_[Quartal]_[Jahr]
-
     overview_output_path = output_directory / f"1-Gesamtübersicht_{grz_id}_{quarter}_{year}.tsv"
     _dump_overview_report(overview_output_path, submission_db, year, quarter)
 
