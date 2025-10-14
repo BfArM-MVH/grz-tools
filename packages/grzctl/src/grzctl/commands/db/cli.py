@@ -566,7 +566,7 @@ def _diff_donors(
         diff_table.add_column("Key")
         diff_table.add_column("Before")
         diff_table.add_column("After")
-        for field in sorted(donor_after.model_fields.keys() - {"submission_id", "pseudonym"}):
+        for field in sorted(Donor.model_fields.keys() - {"submission_id", "pseudonym"}):
             before = getattr(donor_before, field, None)
             after = getattr(donor_after, field)
             if before != after:
