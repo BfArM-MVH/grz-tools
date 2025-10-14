@@ -74,7 +74,11 @@ class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
 
     cache_ok = True
 
-    def process_bind_param(self, value: set[str] | None, dialect: sa.engine.Dialect):
+    @property
+    def python_type(self):
+        return set
+
+    def process_bind_param(self, value: set[str] | None, dialect: sa.engine.Dialect) -> str | None:
         if not value:
             # empty sets are stored as null to distinguish from a set of a single empty string
             return None
@@ -88,7 +92,7 @@ class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
         # sort the set for consistent serialization behavior / deterministic output
         return ";".join(sorted(value))
 
-    def process_result_value(self, value: str | None, dialect: sa.engine.Dialect):
+    def process_result_value(self, value: str | None, dialect: sa.engine.Dialect) -> set[str] | None:
         return None if value is None else set(value.split(";"))
 
 
@@ -282,9 +286,14 @@ class Donor(SQLModel, table=True):
     sequence_subtypes: set[SequenceSubtype] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     mv_consented: bool
     research_consented: bool | None = None
-    research_consent_missing_justifications: Annotated[
-        set[ResearchConsentNoScopeJustification] | None, AfterValidator(coerce_empty_set_to_none)
-    ] = Field(sa_column=Column(SemicolonSeparatedStringSet))
+    research_consent_missing_justifications: set[ResearchConsentNoScopeJustification] | None = Field(
+        default=None, sa_column=Column(SemicolonSeparatedStringSet, nullable=True)
+    )
+
+    @field_validator("research_consent_missing_justifications")
+    @classmethod
+    def validate_and_coerce_justifications(cls, v: set | None) -> set | None:
+        return coerce_empty_set_to_none(v)
 
 
 class DetailedQCResult(SQLModel, table=True):
