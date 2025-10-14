@@ -7,6 +7,6 @@ keys:
   grz_private_key_path: 'config/keys/watchdog-test.sec'
 s3:
   endpoint_url: "http://minio:9000"
-  access_key: "Gd4G0VqhHTmi28twgsmF"
-  secret: "KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f"
+  access_key: "minioadmin"
+  secret: "minioadmin"
   bucket: test1
