@@ -24,7 +24,7 @@ from grz_pydantic_models.submission.metadata import (
     SubmitterId,
     Tan,
 )
-from pydantic import AfterValidator, ConfigDict, StringConstraints
+from pydantic import ConfigDict, field_validator, field_serializer
 from sqlalchemy import JSON, Column
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -153,9 +153,12 @@ class SubmissionStateLogBase(SQLModel):
     )
 
     model_config = ConfigDict(  # type: ignore
-        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, ts: datetime.datetime) -> str:
+        return serialize_datetime_to_iso_z(ts)
 
 
 class SubmissionStateLogPayload(SubmissionStateLogBase, BaseSignablePayload):
@@ -220,9 +223,12 @@ class ChangeRequestLogBase(SQLModel):
     )
 
     model_config = ConfigDict(  # type: ignore[assignment]
-        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, ts: datetime.datetime) -> str:
+        return serialize_datetime_to_iso_z(ts)
 
 
 class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
@@ -312,9 +318,12 @@ class DetailedQCResult(SQLModel, table=True):
     targeted_regions_above_min_coverage_percent_deviation: float
 
     model_config = ConfigDict(  # type: ignore
-        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, ts: datetime.datetime) -> str:
+        return serialize_datetime_to_iso_z(ts)
 
 
 class SubmissionDb:
