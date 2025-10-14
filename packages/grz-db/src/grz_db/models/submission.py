@@ -126,10 +126,19 @@ class Submission(SubmissionBase, table=True):
     """Submission table model."""
 
     __tablename__ = "submissions"
+    __table_args__ = {"extend_existing": True}
 
-    id: Annotated[str, StringConstraints(pattern=r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$")] = Field(
-        primary_key=True, index=True
-    )
+    id: str = Field(primary_key=True, index=True)
+
+    @field_validator("id")
+    @classmethod
+    def validate_id_pattern(cls, v: str) -> str:
+        import re
+
+        pattern = r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$"
+        if not re.match(pattern, v):
+            raise ValueError(f"Submission ID '{v}' does not match the required pattern.")
+        return v
 
     states: list["SubmissionStateLog"] = Relationship(back_populates="submission")
 
