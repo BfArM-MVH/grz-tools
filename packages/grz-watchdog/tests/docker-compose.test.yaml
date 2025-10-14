@@ -23,19 +23,36 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    volumes:
+      - ./config/watchdog-policy.json:/config/watchdog-policy.json
+      - ./config/submitter-policy.json:/config/submitter-policy.json
     environment:
       - MINIO_TEST_USER_ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
       - MINIO_TEST_USER_SECRET_KEY=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
     command: >
       sh -c "
+      set -ex;
       echo 'Setting up MinIO alias...';
       mc alias set adm http://minio:9000 minioadmin minioadmin;
-      echo 'Creating test user...';
-      mc adm user add adm $$MINIO_TEST_USER_ACCESS_KEY $$MINIO_TEST_USER_SECRET_KEY;
+      
+      echo 'Creating policies...';
+      mc admin policy add adm watchdog-policy /config/watchdog-policy.json;
+      mc admin policy add adm submitter-policy /config/submitter-policy.json;
+
+      echo 'Attaching watchdog policy to admin user...';
+      mc admin policy attach adm watchdog-policy --user minioadmin;
+
+      echo 'Creating submitter user...';
+      mc admin user add adm $$MINIO_TEST_USER_ACCESS_KEY $$MINIO_TEST_USER_SECRET_KEY;
+      
+      echo 'Attaching submitter policy to submitter user...';
+      mc admin policy attach adm submitter-policy --user $$MINIO_TEST_USER_ACCESS_KEY;
+      
       echo 'Creating buckets...';
       mc mb --ignore-existing adm/test1;
       mc mb --ignore-existing adm/consented;
       mc mb --ignore-existing adm/nonconsented;
+      
       echo 'MinIO setup complete.';
       "
 
@@ -44,6 +61,7 @@ services:
       # context must be monorepo root!
       context: ../../..
       dockerfile: ./packages/grz-watchdog/tests/Dockerfile.test
+    image: grz-watchdog-test-image:latest
     container_name: grz-watchdog-test-runner
     depends_on:
       minio:
@@ -61,6 +79,25 @@ services:
     # Keep the service alive for testing after startup
     entrypoint: /usr/bin/tail
     command: -f /dev/null
+
+  grz-submitter:
+    image: grz-watchdog-test-image:latest
+    container_name: grz-submitter-test-runner
+    depends_on:
+      minio:
+        condition: service_healthy
+      setup-minio:
+        condition: service_completed_successfully
+    volumes:
+      - ./config:/config
+    working_dir: /workdir
+    environment:
+      - GRZ_S3__ENDPOINT_URL=http://minio:9000
+      - GRZ_S3__ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
+      - GRZ_S3__SECRET=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
+    entrypoint: /usr/bin/tail
+    command: -f /dev/null
+
 
 volumes:
   minio_data:
