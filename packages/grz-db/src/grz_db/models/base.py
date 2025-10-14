@@ -21,7 +21,6 @@ class BaseSignablePayload(SQLModel):
     """
 
     model_config = ConfigDict(  # type: ignore
-        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
 
