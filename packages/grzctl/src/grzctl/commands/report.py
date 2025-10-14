@@ -27,7 +27,7 @@ from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, 
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
 
-from ..models.config import DbConfig
+from ..models.config import ReportConfig
 from .db.cli import get_submission_db_instance
 
 log = logging.getLogger(__name__)
@@ -40,11 +40,14 @@ def report(ctx: click.Context, config_file: str):
     """
     Generate various reports related to GRZ activities.
     """
-    config = DbConfig.from_path(config_file).db
+    config = ReportConfig.from_path(config_file)
     if not config:
         raise ValueError("DB config not found")
 
-    ctx.obj = {"db_url": config.database_url}
+    ctx.obj = {
+        "db_url": config.db.database_url,
+        "grz_id": config.identifiers.grz,
+    }
 
 
 @report.command()
@@ -604,6 +607,7 @@ def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_
     Generate the tables for the quarterly report.
     """
     db = ctx.obj["db_url"]
+    grz_id = ctx.obj["grz_id"]
     submission_db = get_submission_db_instance(db)
 
     if bool(year) != bool(quarter):
@@ -623,11 +627,16 @@ def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_
     if output_directory is None:
         output_directory = Path.cwd()
 
-    overview_output_path = output_directory / "Gesamtübersicht.tsv"
+    # BfArM specification:
+    # - 1-Gesamtübersicht_[KnotenID]_[Quartal]_[Jahr]
+    # - 2-Datensätze_[KnotenID]_[Quartal]_[Jahr]
+    # - 3-Detailprüfung_[KnotenID]_[Quartal]_[Jahr]
+
+    overview_output_path = output_directory / f"1-Gesamtübersicht_{grz_id}_{quarter}_{year}.tsv"
     _dump_overview_report(overview_output_path, submission_db, year, quarter)
 
-    dataset_output_path = output_directory / "Infos_zu_Datensätzen.tsv"
+    dataset_output_path = output_directory / f"2-Infos_zu_Datensätzen_{grz_id}_{quarter}_{year}.tsv"
     _dump_dataset_report(dataset_output_path, submission_db, year, quarter)
 
-    qc_output_path = output_directory / "Detailprüfung.tsv"
+    qc_output_path = output_directory / f"3-Detailprüfung_{grz_id}_{quarter}_{year}.tsv"
     _dump_qc_report(qc_output_path, submission_db, year, quarter)

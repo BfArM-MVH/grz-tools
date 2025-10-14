@@ -18,7 +18,11 @@ from .. import resources as test_resources
 
 def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on an empty database."""
-    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
+    env = {
+        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
+        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "GRZ_IDENTIFIERS__LE": "999999999",
+    }
 
     runner = CliRunner(env=env)
     cli = grzctl.cli.build_cli()
@@ -36,7 +40,11 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
 
 def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     """Small test case with a few submissions for quarterly reports."""
-    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
+    env = {
+        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
+        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "GRZ_IDENTIFIERS__LE": "999999999",
+    }
 
     runner = CliRunner(env=env)
     cli = grzctl.cli.build_cli()
@@ -227,7 +235,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         )
         assert result_report.exit_code == 0, result_report.output
 
-    overview_output_path = Path(report_tmp_dir) / "Gesamtübersicht.tsv"
+    overview_output_path = Path(report_tmp_dir) / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"
     assert overview_output_path.exists()
     with open(overview_output_path, newline="", encoding="utf-8") as overview_file:
         overview_reader = csv.reader(overview_file, delimiter="\t")
@@ -270,7 +278,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         "0",
     ]
 
-    dataset_output_path = Path(report_tmp_dir) / "Infos_zu_Datensätzen.tsv"
+    dataset_output_path = Path(report_tmp_dir) / "2-Infos_zu_Datensätzen_GRZX00000_3_2025.tsv"
     assert dataset_output_path.exists()
     with open(dataset_output_path, newline="", encoding="utf-8") as dataset_file:
         dataset_reader = csv.reader(dataset_file, delimiter="\t")
@@ -336,7 +344,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         "germline;somatic",
     ]
 
-    qc_output_path = Path(report_tmp_dir) / "Detailprüfung.tsv"
+    qc_output_path = Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv"
     assert qc_output_path.exists()
     with open(qc_output_path, newline="", encoding="utf-8") as qc_file:
         qc_reader = csv.reader(qc_file, delimiter="\t")
@@ -388,7 +396,12 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
             },
         )
 
-    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
+
+    env = {
+        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
+        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "GRZ_IDENTIFIERS__LE": "999999999",
+    }
 
     runner = CliRunner(env=env)
     cli = grzctl.cli.build_cli()

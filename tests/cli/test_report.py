@@ -7,7 +7,11 @@ from click.testing import CliRunner
 
 
 def test_report_processed(temp_db_config_file_path):
-    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
+    env = {
+        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
+        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "GRZ_IDENTIFIERS__LE": "999999999",
+    }
 
     runner = CliRunner(env=env)
     cli = grzctl.cli.build_cli()
