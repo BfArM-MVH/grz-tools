@@ -1,6 +1,7 @@
 # Version control
 **/.git
 .gitignore
+**/.github
 
 # Python virtual environments and caches at any level
 **/.venv
@@ -10,6 +11,19 @@
 **/*.pyo
 **/*.pyd
 **/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# grz-check specific rust targets
+packages/grz-check/target
+
+# bioinformatics related files
+**/*.fastq.gz
+**/*.fq.gz
+**/*.bam
+**/*.vcf
+**/*.c4gh
+**/*.bed
 
 # Build artifacts at any level
 **/dist
