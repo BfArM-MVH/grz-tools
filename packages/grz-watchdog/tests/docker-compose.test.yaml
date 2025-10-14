@@ -6,19 +6,38 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
-      - ./minio-setup:/config
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
       - MINIO_TEST_USER_ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
       - MINIO_TEST_USER_SECRET_KEY=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
-    entrypoint: /config/entrypoint-minio.sh
-    command: /usr/bin/minio server /data --console-address :9001
+    command: server /data --console-address :9001
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/setup_complete && mc ready local --exit-code"]
+      test: ["CMD-SHELL", "mc ready local"]
       interval: 5s
       timeout: 5s
       retries: 30
+
+  setup-minio:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      - MINIO_TEST_USER_ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
+      - MINIO_TEST_USER_SECRET_KEY=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
+    command: >
+      sh -c "
+      echo 'Setting up MinIO alias...';
+      mc alias set adm http://minio:9000 minioadmin minioadmin;
+      echo 'Creating test user...';
+      mc adm user add adm $$MINIO_TEST_USER_ACCESS_KEY $$MINIO_TEST_USER_SECRET_KEY;
+      echo 'Creating buckets...';
+      mc mb --ignore-existing adm/test1;
+      mc mb --ignore-existing adm/consented;
+      mc mb --ignore-existing adm/nonconsented;
+      echo 'MinIO setup complete.';
+      "
 
   grz-watchdog:
     build:
@@ -29,6 +48,8 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+      setup-minio:
+        condition: service_completed_successfully
     volumes:
       - ./config:/config
     working_dir: /workdir
@@ -37,9 +58,9 @@ services:
       - GRZ_S3__ACCESS_KEY=minioadmin
       - GRZ_S3__SECRET=minioadmin
       - GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE=test
-    # overriding entrypoint here to keep this service running, ugly workaround
-    entrypoint: /bin/sleep
-    command: infinity
+    # Keep the service alive for testing after startup
+    entrypoint: /usr/bin/tail
+    command: -f /dev/null
 
 volumes:
   minio_data:

@@ -7,10 +7,11 @@ from .conftest import (
     BUCKET_CONSENTED,
     BUCKET_INBOX,
     CONTAINER_COMPOSE_CMD,
-    CONTAINER_NAME,
+    GRZ_WATCHDOG_CONTAINER_NAME,
+    MINIO_SERVICE_NAME,
     CONTAINER_RUNTIME,
     INBOX,
-    SERVICE_NAME,
+    GRZ_WATCHDOG_SERVICE_NAME,
     SUBMITTER_ID,
 )
 
@@ -39,9 +40,11 @@ SNAKEMAKE_BASE_CMD = [
 ]
 
 
-def run_in_container(docker_compose_file: str, *args: str) -> subprocess.CompletedProcess:
+def run_in_container(
+    docker_compose_file: str, *args: str, service=GRZ_WATCHDOG_SERVICE_NAME
+) -> subprocess.CompletedProcess:
     """Helper to execute a command inside the container via the compose service name."""
-    command = [*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "exec", "-T", SERVICE_NAME, *args]
+    command = [*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "exec", "-T", service, *args]
     return subprocess.run(command, capture_output=True, text=True, check=True)
 
 
@@ -49,19 +52,20 @@ def run_in_container(docker_compose_file: str, *args: str) -> subprocess.Complet
 def setup_and_submit(docker_compose_file: str, test_data_dir: Path, request):
     """A fixture to set up S3 and submit a specific test dataset."""
     submission_type = request.param
-    local_data_path = test_data_dir / submission_type / submission_type
+    local_data_path = test_data_dir / submission_type
     container_data_path = f"/tmp/{submission_type}"
 
     # cleanup workdir and tmp files
     run_in_container(docker_compose_file, "sh", "-c", "rm -rf /workdir/results/* /tmp/*")
 
     # create fresh buckets for this test
-    run_in_container(docker_compose_file, "mc", "mb", "--ignore-existing", BUCKET_INBOX)
-    run_in_container(docker_compose_file, "mc", "mb", "--ignore-existing", BUCKET_CONSENTED)
+    run_in_container(docker_compose_file, "mc", "mb", "--ignore-existing", BUCKET_INBOX, service=MINIO_SERVICE_NAME)
+    run_in_container(docker_compose_file, "mc", "mb", "--ignore-existing", BUCKET_CONSENTED, service=MINIO_SERVICE_NAME)
 
     # copy unencrypted data into the container
     subprocess.run(
-        [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{CONTAINER_NAME}:{container_data_path}"], check=True
+        [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{GRZ_WATCHDOG_CONTAINER_NAME}:{container_data_path}"],
+        check=True,
     )
 
     # submit the data to the inbox using grz-cli inside the container
@@ -78,8 +82,8 @@ def setup_and_submit(docker_compose_file: str, test_data_dir: Path, request):
     yield
 
     # clean up buckets after the test
-    run_in_container(docker_compose_file, "mc", "rb", "--force", BUCKET_INBOX)
-    run_in_container(docker_compose_file, "mc", "rb", "--force", BUCKET_CONSENTED)
+    run_in_container(docker_compose_file, "mc", "rb", "--force", BUCKET_INBOX, service=MINIO_SERVICE_NAME)
+    run_in_container(docker_compose_file, "mc", "rb", "--force", BUCKET_CONSENTED, service=MINIO_SERVICE_NAME)
 
 
 @pytest.mark.parametrize("setup_and_submit, submission_id", TEST_CASES, indirect=["setup_and_submit"])
@@ -99,13 +103,15 @@ def test_single_valid_submission(docker_compose_file: str, setup_and_submit, sub
     assert "State: Finished" in db_result.stdout, "Submission state was not 'Finished' in the database."
 
     inbox_path = f"{BUCKET_INBOX}/{submission_id}"
-    inbox_ls_result = run_in_container(docker_compose_file, "mc", "ls", "--recursive", inbox_path)
+    inbox_ls_result = run_in_container(
+        docker_compose_file, "mc", "ls", "--recursive", inbox_path, service=MINIO_SERVICE_NAME
+    )
     inbox_files = {line.split()[-1] for line in inbox_ls_result.stdout.strip().split("\n")}
     assert inbox_files == {f"{inbox_path}/cleaned", f"{inbox_path}/metadata/metadata.json"}, (
         "Inbox was not cleaned correctly."
     )
 
     archive_path = f"{BUCKET_CONSENTED}/{submission_id}"
-    archive_ls_result = run_in_container(docker_compose_file, "mc", "ls", archive_path)
+    archive_ls_result = run_in_container(docker_compose_file, "mc", "ls", archive_path, service=MINIO_SERVICE_NAME)
     assert "metadata/" in archive_ls_result.stdout, "Archived submission missing metadata directory."
     assert "files/" in archive_ls_result.stdout, "Archived submission missing files directory."
