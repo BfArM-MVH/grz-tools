@@ -8,8 +8,9 @@ import requests
 
 CONTAINER_RUNTIME = "podman"  # or "docker"
 CONTAINER_COMPOSE_CMD = ["podman-compose"]  # or ["docker", "compose"]
-CONTAINER_NAME = "grz-watchdog-test-runner"
-SERVICE_NAME = "grz-watchdog"
+GRZ_WATCHDOG_CONTAINER_NAME = "grz-watchdog-test-runner"
+GRZ_WATCHDOG_SERVICE_NAME = "grz-watchdog"
+MINIO_SERVICE_NAME = "minio"
 
 SUBMITTER_ID = "123456789"
 INBOX = "test1"
@@ -55,58 +56,23 @@ def test_data_dir(tmpdir_factory, version: str = "0.2.2"):
         else:
             print(f"\nUsing cached test data from {cached_tarball_path}...")
 
-        extract_path = session_data_dir / what
-        extract_path.mkdir()
         with tarfile.open(cached_tarball_path, "r:gz") as tar:
-            tar.extractall(path=extract_path)
+            tar.extractall(path=session_data_dir, filter="data")
 
     return session_data_dir
 
 
 @pytest.fixture(scope="session", autouse=True)
 def test_environment(docker_compose_file: str):
-    """Starts/stops container environment and waits for it to be ready."""
+    """Starts/stops container environment."""
     try:
         print("Starting TEST container environment in detached mode...")
-
-        subprocess.Popen(
+        subprocess.run(
             [*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "up", "--detach", "--build"],
+            check=True,
+            capture_output=True,
         )
-
-        print("Waiting for services to become healthy and configured...")
-        timeout = 300
-        start_time = time.time()
-        mc_alias_set = False
-        while time.time() - start_time < timeout:
-            try:
-                subprocess.run(
-                    [
-                        *CONTAINER_COMPOSE_CMD,
-                        "-f",
-                        docker_compose_file,
-                        "exec",
-                        "-T",
-                        SERVICE_NAME,
-                        "mc",
-                        "alias",
-                        "set",
-                        "adm",
-                        "http://minio:9000",
-                        "minioadmin",
-                        "minioadmin",
-                    ],
-                    check=True,
-                    capture_output=True,
-                )
-                print("Services are ready and mc alias is configured.")
-                mc_alias_set = True
-                break
-            except subprocess.CalledProcessError as e:
-                print("Services not ready yet, retrying in 10 seconds...", e)
-                time.sleep(10)
-
-        if not mc_alias_set:
-            pytest.fail(f"Services did not become ready within the {timeout} second timeout.")
+        print("All services are up and ready for testing.")
 
         yield
     finally:
