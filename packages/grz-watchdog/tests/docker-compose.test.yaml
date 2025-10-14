@@ -1,6 +1,9 @@
+x-image-def: &grz-image
+  image: grz-watchdog-test-image:latest
+
 services:
   minio:
-    image: minio/minio:latest
+    image: docker.io/minio/minio:latest
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -12,41 +15,42 @@ services:
       - MINIO_TEST_USER_ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
       - MINIO_TEST_USER_SECRET_KEY=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
     command: server /data --console-address :9001
-    healthcheck:
-      test: ["CMD-SHELL", "mc ready local"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
+#    healthcheck:
+#      test: ["CMD-SHELL", "mc ready local"]
+##      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/minio/health/live"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 30
 
   setup-minio:
     image: minio/mc
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started  # service_healthy
     volumes:
-      - ./config/watchdog-policy.json:/config/watchdog-policy.json
       - ./config/submitter-policy.json:/config/submitter-policy.json
     environment:
       - MINIO_TEST_USER_ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
       - MINIO_TEST_USER_SECRET_KEY=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
+    entrypoint: /bin/sh
     command: >
-      sh -c "
+      -c "
       set -ex;
-      echo 'Setting up MinIO alias...';
-      mc alias set adm http://minio:9000 minioadmin minioadmin;
       
-      echo 'Creating policies...';
-      mc admin policy add adm watchdog-policy /config/watchdog-policy.json;
-      mc admin policy add adm submitter-policy /config/submitter-policy.json;
-
-      echo 'Attaching watchdog policy to admin user...';
-      mc admin policy attach adm watchdog-policy --user minioadmin;
+      echo 'Waiting for MinIO to be ready...';
+      until mc alias set adm http://minio:9000 minioadmin minioadmin; do
+        echo '... MinIO not ready, waiting 5s';
+        sleep 5;
+      done;
+      
+      echo 'Creating submitter policy...';
+      mc admin policy create adm submitter-policy /config/submitter-policy.json;
 
       echo 'Creating submitter user...';
-      mc admin user add adm $$MINIO_TEST_USER_ACCESS_KEY $$MINIO_TEST_USER_SECRET_KEY;
+      mc admin user add adm 'Gd4G0VqhHTmi28twgsmF' 'KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f';
       
       echo 'Attaching submitter policy to submitter user...';
-      mc admin policy attach adm submitter-policy --user $$MINIO_TEST_USER_ACCESS_KEY;
+      mc admin policy attach adm submitter-policy --user 'Gd4G0VqhHTmi28twgsmF';
       
       echo 'Creating buckets...';
       mc mb --ignore-existing adm/test1;
@@ -56,19 +60,21 @@ services:
       echo 'MinIO setup complete.';
       "
 
-  grz-watchdog:
+  builder:
+    <<: *grz-image
     build:
-      # context must be monorepo root!
       context: ../../..
       dockerfile: ./packages/grz-watchdog/tests/Dockerfile.test
-    image: grz-watchdog-test-image:latest
+    command: ["echo", "Build complete."]
+
+  grz-watchdog:
+    <<: *grz-image
     container_name: grz-watchdog-test-runner
     depends_on:
-      minio:
-        condition: service_healthy
       setup-minio:
         condition: service_completed_successfully
     volumes:
+      - ./config:/workdir/config
       - ./config:/config
     working_dir: /workdir
     environment:
@@ -77,26 +83,25 @@ services:
       - GRZ_S3__SECRET=minioadmin
       - GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE=test
     # Keep the service alive for testing after startup
-    entrypoint: /usr/bin/tail
-    command: -f /dev/null
+    entrypoint: /bin/sh
+    command: -c 'trap "exit 0" SIGTERM; while true; do sleep 1; done'
 
   grz-submitter:
-    image: grz-watchdog-test-image:latest
+    <<: *grz-image
     container_name: grz-submitter-test-runner
     depends_on:
-      minio:
-        condition: service_healthy
       setup-minio:
         condition: service_completed_successfully
     volumes:
+      - ./config:/workdir/config
       - ./config:/config
     working_dir: /workdir
     environment:
       - GRZ_S3__ENDPOINT_URL=http://minio:9000
       - GRZ_S3__ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
       - GRZ_S3__SECRET=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
-    entrypoint: /usr/bin/tail
-    command: -f /dev/null
+    entrypoint: /bin/sh
+    command: -c 'trap "exit 0" SIGTERM; while true; do sleep 1; done'
 
 
 volumes:

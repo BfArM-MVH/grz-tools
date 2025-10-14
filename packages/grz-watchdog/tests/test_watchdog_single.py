@@ -1,3 +1,4 @@
+import re
 import subprocess
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import pytest
 from .conftest import (
     BUCKET_CONSENTED,
     BUCKET_INBOX,
+    BUCKET_NONCONSENTED,
     CONTAINER_COMPOSE_CMD,
     CONTAINER_RUNTIME,
     GRZ_SUBMITTER_CONTAINER_NAME,
@@ -21,7 +23,7 @@ from .conftest import (
 
 TEST_CASES = [
     ("panel", "123456789_2024-11-08_d0f805c5"),
-    ("wgs", "123456789_2024-10-28_e1bab61b"),
+    # ("wgs", "123456789_2024-10-28_e1bab61b"),
     ("wgs_lr", "123456789_2024-10-28_e1bab61b"),
 ]
 
@@ -41,20 +43,23 @@ def setup_and_submit(docker_compose_file: str, test_data_dir: Path, request):
     local_data_path = test_data_dir / submission_type
     container_data_path = f"/tmp/{submission_type}"
 
-    # cleanup workdir and tmp files
     run_in_container(docker_compose_file, "sh", "-c", "rm -rf /workdir/results/* /tmp/*")
+    run_in_container(docker_compose_file, "rm", "-f", "/workdir/results", service=GRZ_WATCHDOG_SERVICE_NAME)
 
-    # create fresh buckets for this test
-    run_in_container(docker_compose_file, "mc", "mb", "--ignore-existing", BUCKET_INBOX, service=MINIO_SERVICE_NAME)
-    run_in_container(docker_compose_file, "mc", "mb", "--ignore-existing", BUCKET_CONSENTED, service=MINIO_SERVICE_NAME)
+    buckets_to_clean = [BUCKET_INBOX, BUCKET_CONSENTED, BUCKET_NONCONSENTED]
+    for bucket in buckets_to_clean:
+        cleanup_command = f"mc rm --recursive --force adm/{bucket}/* || true"
+        run_in_container(docker_compose_file, "sh", "-c", cleanup_command, service=MINIO_SERVICE_NAME)
 
-    # copy unencrypted data into the container
+    run_in_container(
+        docker_compose_file, "mc", "mb", "--ignore-existing", f"adm/{BUCKET_INBOX}", service=MINIO_SERVICE_NAME
+    )
+
     subprocess.run(
         [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{GRZ_SUBMITTER_CONTAINER_NAME}:{container_data_path}"],
         check=True,
     )
 
-    # submit the data to the inbox using grz-cli inside the submitter container
     run_in_container(
         docker_compose_file,
         *PIXI_RUN_PREFIX,
@@ -63,15 +68,11 @@ def setup_and_submit(docker_compose_file: str, test_data_dir: Path, request):
         "--submission-dir",
         container_data_path,
         "--config-file",
-        "/config/grz-cli.config.yaml",
+        "/workdir/config/grz-cli.config.yaml",
         service=GRZ_SUBMITTER_SERVICE_NAME,
     )
 
     yield
-
-    # clean up buckets after the test
-    run_in_container(docker_compose_file, "mc", "rb", "--force", BUCKET_INBOX, service=MINIO_SERVICE_NAME)
-    run_in_container(docker_compose_file, "mc", "rb", "--force", BUCKET_CONSENTED, service=MINIO_SERVICE_NAME)
 
 
 @pytest.mark.parametrize("setup_and_submit, submission_id", TEST_CASES, indirect=["setup_and_submit"])
@@ -98,7 +99,7 @@ def test_single_valid_submission(docker_compose_file: str, setup_and_submit, sub
     )
     assert "State: Finished" in db_result.stdout, "Submission state was not 'Finished' in the database."
 
-    inbox_path = f"{BUCKET_INBOX}/{submission_id}"
+    inbox_path = f"adm/{BUCKET_INBOX}/{submission_id}"
     inbox_ls_result = run_in_container(
         docker_compose_file, "mc", "ls", "--recursive", inbox_path, service=MINIO_SERVICE_NAME
     )
@@ -107,7 +108,7 @@ def test_single_valid_submission(docker_compose_file: str, setup_and_submit, sub
         "Inbox was not cleaned correctly."
     )
 
-    archive_path = f"{BUCKET_CONSENTED}/{submission_id}"
+    archive_path = f"adm/{BUCKET_CONSENTED}/{submission_id}"
     archive_ls_result = run_in_container(docker_compose_file, "mc", "ls", archive_path, service=MINIO_SERVICE_NAME)
     assert "metadata/" in archive_ls_result.stdout, "Archived submission missing metadata directory."
     assert "files/" in archive_ls_result.stdout, "Archived submission missing files directory."

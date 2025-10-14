@@ -1,3 +1,4 @@
+import json
 import subprocess
 import tarfile
 import time
@@ -16,9 +17,9 @@ MINIO_SERVICE_NAME = "minio"
 
 SUBMITTER_ID = "123456789"
 INBOX = "test1"
-BUCKET_INBOX = "adm/test1"
-BUCKET_CONSENTED = "adm/consented"
-BUCKET_NONCONSENTED = "adm/nonconsented"
+BUCKET_INBOX = "test1"
+BUCKET_CONSENTED = "consented"
+BUCKET_NONCONSENTED = "nonconsented"
 
 PIXI_RUN_PREFIX = [
     "pixi",
@@ -31,7 +32,7 @@ PIXI_RUN_PREFIX = [
 SNAKEMAKE_BASE_CMD = PIXI_RUN_PREFIX + [
     "snakemake",
     "--workflow-profile",
-    "/workspace/packages/grz-watchdog/workflow/profiles/default",
+    "/workspace/packages/grz-watchdog/workflow/profiles/test",
     "--snakefile",
     "/workspace/packages/grz-watchdog/workflow/Snakefile",
     "--directory",
@@ -85,6 +86,44 @@ def test_data_dir(tmpdir_factory, version: str = "0.2.2"):
     return session_data_dir
 
 
+# workaround for missing "--wait" in podman: https://github.com/containers/podman-compose/issues/710
+def wait_for_services_ready(docker_compose_file: str, services_to_check: list[str], timeout: int = 120):
+    """
+    Polls `podman-compose ps` until all specified services are in a 'running' state.
+    """
+    print(f"Waiting for services to become fully running: {services_to_check}")
+    start_time = time.time()
+    not_ready_yet = set(services_to_check)
+
+    while time.time() - start_time < timeout:
+        try:
+            ps_result = subprocess.run(
+                [*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "ps", "--format", "json"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            services_status = json.loads(ps_result.stdout)
+
+            for service_state in services_status:
+                service_name = service_state.get("Labels", {}).get("com.docker.compose.service")
+
+                if service_name in not_ready_yet and service_state.get("State") == "running":
+                    print(f"Service '{service_name}' is running.")
+                    not_ready_yet.remove(service_name)
+
+            if not not_ready_yet:
+                print("All specified services are up and running.")
+                return
+
+            time.sleep(2)
+        except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
+            print(f"Waiting for services... (Encountered temporary error: {e})")
+            time.sleep(2)
+
+    pytest.fail(f"The following services did not become ready within the {timeout}s timeout: {list(not_ready_yet)}")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def test_environment(docker_compose_file: str):
     """Starts/stops container environment."""
@@ -95,6 +134,11 @@ def test_environment(docker_compose_file: str):
             check=True,
             capture_output=True,
         )
+
+        wait_for_services_ready(
+            docker_compose_file, services_to_check=[GRZ_WATCHDOG_SERVICE_NAME, GRZ_SUBMITTER_SERVICE_NAME]
+        )
+
         print("All services are up and ready for testing.")
 
         yield
