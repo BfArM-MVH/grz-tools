@@ -396,7 +396,6 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
             },
         )
 
-
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",

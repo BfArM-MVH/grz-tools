@@ -33,10 +33,11 @@ class PruefberichtConfig(IgnoringBaseSettings):
 class DbConfig(IgnoringBaseSettings):
     db: DbModel
 
+
 class ReportConfig(DbConfig, IdentifiersConfigModel):
     pass
+
 
 class ListConfig(S3ConfigModel):
     # invalid DbModel will be silently ignored as dict
     db: Annotated[DbModel | dict | None, Field(union_mode="left_to_right")] = None
-
