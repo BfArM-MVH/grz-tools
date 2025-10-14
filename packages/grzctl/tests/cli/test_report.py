@@ -33,9 +33,9 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
         )
         assert result_report.exit_code == 0, result_report.output
 
-    assert (Path(report_tmp_dir) / "Gesamtübersicht.tsv").exists()
-    assert (Path(report_tmp_dir) / "Infos_zu_Datensätzen.tsv").exists()
-    assert (Path(report_tmp_dir) / "Detailprüfung.tsv").exists()
+    assert (Path(report_tmp_dir) / "1-Gesamtübersicht_GRZX00000_3_2025.tsv").exists()
+    assert (Path(report_tmp_dir) / "2-Infos_zu_Datensätzen_GRZX00000_3_2025.tsv").exists()
+    assert (Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv").exists()
 
 
 def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
@@ -412,21 +412,21 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
         )
         assert result_report.exit_code == 0, result_report.output
 
-    overview_output_path = Path(report_tmp_dir) / "Gesamtübersicht.tsv"
+    overview_output_path = Path(report_tmp_dir) / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"
     assert overview_output_path.exists()
     with open(overview_output_path, newline="", encoding="utf-8") as overview_file:
         overview_reader = csv.reader(overview_file, delimiter="\t")
         # header + single submitter
         assert len(list(overview_reader)) == 2
 
-    dataset_output_path = Path(report_tmp_dir) / "Infos_zu_Datensätzen.tsv"
+    dataset_output_path = Path(report_tmp_dir) / "2-Infos_zu_Datensätzen_GRZX00000_3_2025.tsv"
     assert dataset_output_path.exists()
     with open(dataset_output_path, newline="", encoding="utf-8") as dataset_file:
         dataset_reader = csv.reader(dataset_file, delimiter="\t")
         # header + single submission
         assert len(list(dataset_reader)) == 2
 
-    qc_output_path = Path(report_tmp_dir) / "Detailprüfung.tsv"
+    qc_output_path = Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv"
     assert qc_output_path.exists()
     with open(qc_output_path, newline="", encoding="utf-8") as qc_file:
         qc_reader = csv.reader(qc_file, delimiter="\t")
