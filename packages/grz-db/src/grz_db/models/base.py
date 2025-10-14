@@ -58,12 +58,17 @@ class VerifiableLog(Generic[P]):
         super().__init_subclass__(**kwargs)
         if not hasattr(cls, "_payload_model_class"):
             raise TypeError(f"Class {cls.__name__} lacks '_payload_model_class' attribute required by VerifiableLog.")
-        if not (
-            isinstance(cls._payload_model_class, type) and issubclass(cls._payload_model_class, BaseSignablePayload)
-        ):
+        payload_class_or_field = getattr(cls, "_payload_model_class")
+
+        if hasattr(payload_class_or_field, "default"):
+            payload_class = payload_class_or_field.default
+        else:
+            payload_class = payload_class_or_field
+
+        if not (isinstance(payload_class, type) and issubclass(payload_class, BaseSignablePayload)):
             raise TypeError(
                 f"'_payload_model_class' in {cls.__name__} must be a class and a subclass of BaseSignedPayload. "
-                f"Got: {cls._payload_model_class}"
+                f"Got: {payload_class_or_field}"
             )
 
     def verify(self, public_key: Ed25519PublicKey) -> bool:
@@ -73,7 +78,13 @@ class VerifiableLog(Generic[P]):
             return False
 
         signature_bytes = bytes.fromhex(self.signature)
-        data_for_payload = self.model_dump(by_alias=True, exclude={"signature", "_payload_model_class"})  # type: ignore[attr-defined]
+
+        payload_fields = self._payload_model_class.model_fields
+
+        data_for_payload = {
+            field_name: getattr(self, field_name) for field_name in payload_fields if hasattr(self, field_name)
+        }
+
         payload_to_verify = self._payload_model_class(**data_for_payload)
         bytes_to_verify = payload_to_verify.to_bytes()
 
@@ -82,5 +93,6 @@ class VerifiableLog(Generic[P]):
         except cryptography.exceptions.InvalidSignature:
             return False
         except:
+            log.error("An unexpected error occurred during signature verification:", exc_info=True)
             raise
         return True
