@@ -10,6 +10,8 @@ CONTAINER_RUNTIME = "podman"  # or "docker"
 CONTAINER_COMPOSE_CMD = ["podman-compose"]  # or ["docker", "compose"]
 GRZ_WATCHDOG_CONTAINER_NAME = "grz-watchdog-test-runner"
 GRZ_WATCHDOG_SERVICE_NAME = "grz-watchdog"
+GRZ_SUBMITTER_SERVICE_NAME = "grz-submitter"
+GRZ_SUBMITTER_CONTAINER_NAME = "grz-submitter-test-runner"
 MINIO_SERVICE_NAME = "minio"
 
 SUBMITTER_ID = "123456789"
@@ -17,6 +19,26 @@ INBOX = "test1"
 BUCKET_INBOX = "adm/test1"
 BUCKET_CONSENTED = "adm/consented"
 BUCKET_NONCONSENTED = "adm/nonconsented"
+
+PIXI_RUN_PREFIX = [
+    "pixi",
+    "run",
+    "--manifest-path",
+    "/workspace/packages/grz-watchdog/tests/pixi.toml",
+    "--",
+]
+
+SNAKEMAKE_BASE_CMD = PIXI_RUN_PREFIX + [
+    "snakemake",
+    "--workflow-profile",
+    "/workspace/packages/grz-watchdog/workflow/profiles/default",
+    "--snakefile",
+    "/workspace/packages/grz-watchdog/workflow/Snakefile",
+    "--directory",
+    "/workdir",
+    "--conda-prefix",
+    "/conda-envs",
+]
 
 
 @pytest.fixture(scope="session")
@@ -56,8 +78,9 @@ def test_data_dir(tmpdir_factory, version: str = "0.2.2"):
         else:
             print(f"\nUsing cached test data from {cached_tarball_path}...")
 
+        extract_dir = session_data_dir / what
         with tarfile.open(cached_tarball_path, "r:gz") as tar:
-            tar.extractall(path=session_data_dir, filter="data")
+            tar.extractall(path=extract_dir, filter="data")
 
     return session_data_dir
 

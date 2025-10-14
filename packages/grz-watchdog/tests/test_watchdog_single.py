@@ -7,11 +7,15 @@ from .conftest import (
     BUCKET_CONSENTED,
     BUCKET_INBOX,
     CONTAINER_COMPOSE_CMD,
-    GRZ_WATCHDOG_CONTAINER_NAME,
-    MINIO_SERVICE_NAME,
     CONTAINER_RUNTIME,
-    INBOX,
+    GRZ_SUBMITTER_CONTAINER_NAME,
+    GRZ_SUBMITTER_SERVICE_NAME,
+    GRZ_WATCHDOG_CONTAINER_NAME,
     GRZ_WATCHDOG_SERVICE_NAME,
+    INBOX,
+    MINIO_SERVICE_NAME,
+    PIXI_RUN_PREFIX,
+    SNAKEMAKE_BASE_CMD,
     SUBMITTER_ID,
 )
 
@@ -19,24 +23,6 @@ TEST_CASES = [
     ("panel", "123456789_2024-11-08_d0f805c5"),
     ("wgs", "123456789_2024-10-28_e1bab61b"),
     ("wgs_lr", "123456789_2024-10-28_e1bab61b"),
-]
-
-
-SNAKEMAKE_BASE_CMD = [
-    "pixi",
-    "run",
-    "--manifest-path",
-    "/workspace/packages/grz-watchdog/tests/pixi.testing.toml",
-    "--",
-    "snakemake",
-    "--workflow-profile",
-    "/workspace/packages/grz-watchdog/workflow/profiles/default",
-    "--snakefile",
-    "/workspace/packages/grz-watchdog/workflow/Snakefile",
-    "--directory",
-    "/workdir",
-    "--conda-prefix",
-    "/conda-envs",
 ]
 
 
@@ -64,19 +50,21 @@ def setup_and_submit(docker_compose_file: str, test_data_dir: Path, request):
 
     # copy unencrypted data into the container
     subprocess.run(
-        [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{GRZ_WATCHDOG_CONTAINER_NAME}:{container_data_path}"],
+        [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{GRZ_SUBMITTER_CONTAINER_NAME}:{container_data_path}"],
         check=True,
     )
 
-    # submit the data to the inbox using grz-cli inside the container
+    # submit the data to the inbox using grz-cli inside the submitter container
     run_in_container(
         docker_compose_file,
+        *PIXI_RUN_PREFIX,
         "grz-cli",
         "submit",
         "--submission-dir",
         container_data_path,
         "--config-file",
         "/config/grz-cli.config.yaml",
+        service=GRZ_SUBMITTER_SERVICE_NAME,
     )
 
     yield
@@ -98,7 +86,15 @@ def test_single_valid_submission(docker_compose_file: str, setup_and_submit, sub
 
     print("Verifying outcomes...")
     db_result = run_in_container(
-        docker_compose_file, "grzctl", "db", "--config-file", "/config/db.yaml", "submission", "show", submission_id
+        docker_compose_file,
+        *PIXI_RUN_PREFIX,
+        "grzctl",
+        "db",
+        "--config-file",
+        "/config/db.yaml",
+        "submission",
+        "show",
+        submission_id,
     )
     assert "State: Finished" in db_result.stdout, "Submission state was not 'Finished' in the database."
 
