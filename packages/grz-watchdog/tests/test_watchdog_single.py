@@ -81,9 +81,37 @@ def test_single_valid_submission(docker_compose_file: str, setup_and_submit, sub
     print(f"\nRunning Snakemake for ({submission_id})...")
     target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed/without_qc"
 
-    result = run_in_container(docker_compose_file, *SNAKEMAKE_BASE_CMD, "--cores", "1", target_file)
+    try:
+        run_in_container(docker_compose_file, *SNAKEMAKE_BASE_CMD, "--cores", "1", target_file)
+    except subprocess.CalledProcessError as e:
+        print("\n--- SNAKEMAKE FAILED ---")
+        print("Parsing stderr to find and dump specific log files...")
 
-    assert result.returncode == 0, f"Snakemake workflow failed!\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        log_path_pattern = re.compile(r"logs/[\w/.-]+\.log")
+        found_logs = sorted(list(set(log_path_pattern.findall(e.stderr))))
+
+        if not found_logs:
+            print("\nCould not automatically find any log file paths in Snakemake's stderr.")
+            print("--- Raw Snakemake stderr: ---")
+            print(e.stderr)
+        else:
+            print(f"Found {len(found_logs)} log file(s) to dump: {', '.join(found_logs)}")
+            for log_path in found_logs:
+                try:
+                    full_path_in_container = f"/workdir/{log_path}"
+                    log_content = run_in_container(
+                        docker_compose_file, "cat", full_path_in_container, service=GRZ_WATCHDOG_SERVICE_NAME
+                    )
+                    print(f"\n--- CONTENTS OF {log_path} ---")
+                    print(log_content.stdout)
+                    if log_content.stderr:
+                        print(f"--- (stderr while cat'ing {log_path}) ---\n{log_content.stderr}")
+
+                except subprocess.CalledProcessError as log_e:
+                    print(f"\n--- Could not retrieve {log_path} ---")
+                    print(log_e.stderr)
+
+        pytest.fail(f"Snakemake workflow failed. See dumped log file contents above for details.", pytrace=False)
 
     print("Verifying outcomes...")
     db_result = run_in_container(
