@@ -3,19 +3,19 @@ monitor:
 batch:
   limit: 2
 
-temp-outputs: false 
-on-failed-validation: "cleanup" 
+temp-outputs: false
+on-failed-validation: "cleanup"
 auto-cleanup: "inbox+storage"
 
 config_paths:
   inbox:
     "123456789":
-      test1: "inbox.test1.yaml"
+      test1: "config/configs/inbox.test1.yaml"
   archive:
-    consented: "archive.consented.yaml"
-    nonconsented: "archive.nonconsented.yaml"
-  db: "db.yaml"
-  pruefbericht: "pruefbericht.yaml"
+    consented: "config/configs/consented.yaml"
+    nonconsented: "config/configs/nonconsented.yaml"
+  db: "config/configs/db.yaml"
+  pruefbericht: "config/configs/pruefbericht.yaml"
 
 qc:
   revision: "v1.1.5"

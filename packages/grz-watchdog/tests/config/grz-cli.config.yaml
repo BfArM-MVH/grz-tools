@@ -4,7 +4,6 @@ identifiers:
 
 keys:
   grz_public_key_path: '/config/keys/watchdog-test.pub'
-  # submitter_private_key_path: '/config/keys/submitter_key.sex'
 
 s3:
   endpoint_url: "http://minio:9000"
