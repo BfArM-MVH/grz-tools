@@ -187,6 +187,7 @@ class SubmissionStateLog(SubmissionStateLogBase, VerifiableLog[SubmissionStateLo
     """Submission state log table model."""
 
     __tablename__ = "submission_states"
+    __table_args__ = {"extend_existing": True}
 
     _payload_model_class = SubmissionStateLogPayload
 
@@ -257,6 +258,7 @@ class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPaylo
     """Change-request log table model."""
 
     __tablename__ = "submission_change_requests"
+    __table_args__ = {"extend_existing": True}
 
     _payload_model_class = ChangeRequestLogPayload
 
@@ -286,6 +288,7 @@ class Donor(SQLModel, table=True):
     """Donor database model."""
 
     __tablename__ = "donors"
+    __table_args__ = {"extend_existing": True}
 
     submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
     pseudonym: str = Field(primary_key=True)
@@ -311,6 +314,7 @@ class DetailedQCResult(SQLModel, table=True):
     __tablename__ = "detailed_qc_results"
     __table_args__ = (
         sa.ForeignKeyConstraint(["submission_id", "pseudonym"], ["donors.submission_id", "donors.pseudonym"]),
+        {"extend_existing": True},
     )
 
     submission_id: str = Field(primary_key=True)
