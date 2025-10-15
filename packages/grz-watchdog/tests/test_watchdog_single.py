@@ -44,7 +44,7 @@ def setup_and_submit(docker_compose_file: str, test_data_dir: Path, request):
     container_data_path = f"/tmp/{submission_type}"
 
     run_in_container(docker_compose_file, "sh", "-c", "rm -rf /workdir/results/* /tmp/*")
-    run_in_container(docker_compose_file, "rm", "-f", "/workdir/results", service=GRZ_WATCHDOG_SERVICE_NAME)
+    run_in_container(docker_compose_file, "rm", "-r", "-f", "/workdir/results", service=GRZ_WATCHDOG_SERVICE_NAME)
 
     buckets_to_clean = [BUCKET_INBOX, BUCKET_CONSENTED, BUCKET_NONCONSENTED]
     for bucket in buckets_to_clean:
