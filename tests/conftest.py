@@ -1,5 +1,6 @@
 """Fixtures for the tests."""
 
+import hashlib
 import json
 import os
 from os import PathLike
@@ -180,8 +181,6 @@ def temp_fastq_file_path(temp_data_dir_path) -> Path:
 
 @pytest.fixture
 def temp_fastq_file_md5sum(temp_fastq_file_path):
-    import hashlib
-
     with open(temp_fastq_file_path, "rb") as f:
         file_hash = hashlib.md5()
         while chunk := f.read(8192):
@@ -192,8 +191,6 @@ def temp_fastq_file_md5sum(temp_fastq_file_path):
 
 @pytest.fixture
 def temp_fastq_file_sha256sum(temp_fastq_file_path):
-    import hashlib
-
     with open(temp_fastq_file_path, "rb") as f:
         file_hash = hashlib.sha256()
         while chunk := f.read(8192):

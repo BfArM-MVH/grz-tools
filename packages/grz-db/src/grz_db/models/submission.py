@@ -1,8 +1,9 @@
 import datetime
+import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
-from typing import Annotated, Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 import sqlalchemy as sa
 from alembic import command as alembic_command
@@ -24,7 +25,7 @@ from grz_pydantic_models.submission.metadata import (
     SubmitterId,
     Tan,
 )
-from pydantic import ConfigDict, field_validator, field_serializer
+from pydantic import ConfigDict, field_serializer, field_validator
 from sqlalchemy import JSON, Column
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -133,8 +134,6 @@ class Submission(SubmissionBase, table=True):
     @field_validator("id")
     @classmethod
     def validate_id_pattern(cls, v: str) -> str:
-        import re
-
         pattern = r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$"
         if not re.match(pattern, v):
             raise ValueError(f"Submission ID '{v}' does not match the required pattern.")

@@ -24,24 +24,24 @@ def test_submission_metadata(temp_metadata_file_path, identifiers_config_model):
 
 def test_submission_metadata_fails():
     error_types = (ValueError, ValidationError, SystemExit)
-    with pytest.raises(error_types, match="No read order specified for FASTQ file"):
+    with pytest.raises(error_types, match=r"No read order specified for FASTQ file"):
         SubmissionMetadata(metadata_missing_read_order)
 
-    with pytest.raises(error_types, match="BED file missing for lab datum"):
+    with pytest.raises(error_types, match=r"BED file missing for lab datum"):
         SubmissionMetadata(metadata_no_target_regions)
 
     # missing VCF is allowed
     SubmissionMetadata(metadata_missing_vcf_file)
 
     with pytest.raises(
-        error_types, match="Paired end sequencing layout but not there is not exactly one R1 and one R2"
+        error_types, match=r"Paired end sequencing layout but not there is not exactly one R1 and one R2"
     ):
         SubmissionMetadata(metadata_missing_fastq_r2)
 
-    with pytest.raises(error_types, match="Incompatible reference genomes found"):
+    with pytest.raises(error_types, match=r"Incompatible reference genomes found"):
         SubmissionMetadata(metadata_incompatible_reference_genomes)
 
-    with pytest.raises(error_types, match="must have a unique combination of flowcell_id, lane_id, and read_order"):
+    with pytest.raises(error_types, match=r"must have a unique combination of flowcell_id, lane_id, and read_order"):
         SubmissionMetadata("tests/mock_files/metadata_validation/duplicate-run-id.json")
 
 

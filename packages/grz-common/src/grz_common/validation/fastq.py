@@ -138,7 +138,7 @@ def validate_single_end_reads(fastq_file: str | PathLike, expected_read_length: 
     :param expected_read_length: Expected read length (None if not known)
     :return: Generator of errors, if any.
     """
-    num_lines, read_lengths, errors = validate_fastq_file(fastq_file, expected_read_length=expected_read_length)
+    _num_lines, _read_lengths, errors = validate_fastq_file(fastq_file, expected_read_length=expected_read_length)
     yield from errors
 
 
@@ -155,11 +155,11 @@ def validate_paired_end_reads(
     :param expected_read_length: Expected read length (None if not known)
     :return: Generator of errors, if any.
     """
-    num_lines_file1, read_lengths_file1, errors_file1 = validate_fastq_file(
+    num_lines_file1, _read_lengths_file1, errors_file1 = validate_fastq_file(
         fastq_file1, expected_read_length=expected_read_length
     )
     yield from errors_file1
-    num_lines_file2, read_lengths_file2, errors_file2 = validate_fastq_file(
+    num_lines_file2, _read_lengths_file2, errors_file2 = validate_fastq_file(
         fastq_file2, expected_read_length=expected_read_length
     )
     yield from errors_file2
