@@ -120,7 +120,7 @@ def test_single_valid_submission(docker_compose_file: str, setup_and_submit, sub
         "grzctl",
         "db",
         "--config-file",
-        "/config/db.yaml",
+        "/config/configs/db.yaml",
         "submission",
         "show",
         submission_id,
