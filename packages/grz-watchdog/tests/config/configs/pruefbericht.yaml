@@ -1,5 +1,5 @@
 pruefbericht:
-  authorization_url: "http://bfarm-mock-api:5000/token"
-  api_base_url: "http://bfarm-mock-api:5000/api/v1"  # /upload
+  authorization_url: "https://bfarm-mock-api:5000/token"
+  api_base_url: "https://bfarm-mock-api:5000/api/v1"  # /upload
   client_id: "mock-client-id"
   client_secret: "mock-client-password"
