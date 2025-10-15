@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -121,16 +122,28 @@ def test_single_valid_submission(docker_compose_file: str, setup_and_submit, sub
         "db",
         "--config-file",
         "/config/configs/db.yaml",
-        "submission",
-        "show",
-        submission_id,
+        "list",
+        "--json",
     )
-    assert "State: Finished" in db_result.stdout, "Submission state was not 'Finished' in the database."
+
+    submissions = json.loads(db_result.stdout)
+    target_submission = None
+    for submission in submissions:
+        if submission.get("id") == submission_id:
+            target_submission = submission
+            break
+
+    assert target_submission is not None, f"Submission '{submission_id}' not found in the database."
+    final_state = target_submission.get("latest_state", {}).get("state")
+    assert final_state == "Finished", (
+        f"Submission state was not 'Finished' in the database. Actual state: '{final_state}'"
+    )
 
     inbox_path = f"adm/{BUCKET_INBOX}/{submission_id}"
     inbox_ls_result = run_in_container(
         docker_compose_file, "mc", "ls", "--recursive", inbox_path, service=MINIO_SERVICE_NAME
     )
+    assert inbox_ls_result.stdout != "", inbox_ls_result.stdout
     inbox_files = {line.split()[-1] for line in inbox_ls_result.stdout.strip().split("\n")}
     assert inbox_files == {f"{inbox_path}/cleaned", f"{inbox_path}/metadata/metadata.json"}, (
         "Inbox was not cleaned correctly."
