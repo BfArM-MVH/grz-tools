@@ -1,5 +1,5 @@
 import logging
-from typing import Any, ClassVar, TypeVar
+from typing import Any, ClassVar
 
 import cryptography
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
@@ -37,10 +37,7 @@ class BaseSignablePayload(SQLModel):
         return signature
 
 
-P = TypeVar("P", bound=BaseSignablePayload)
-
-
-class VerifiableLog[P]:
+class VerifiableLog[P: BaseSignablePayload]:
     """
     Mixin class for SQLModels that store a signature and can be verified.
     Subclasses MUST:
