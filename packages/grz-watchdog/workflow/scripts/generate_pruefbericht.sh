@@ -14,7 +14,7 @@ log_stderr="${snakemake_log[stderr]}"
 
 	grzctl pruefbericht \
 		generate \
-		from-submission-dir "${snakemake_input[data]}" \
+		from-metadata "${snakemake_input[metadata]}" \
 		${pruefbericht_params} \
 		>"${snakemake_output[pruefbericht]}"
 ) >"$log_stdout" 2>"$log_stderr"

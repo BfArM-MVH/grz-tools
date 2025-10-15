@@ -40,7 +40,7 @@ if [ -f "$metadata_file" ] && [ -d "$logs_dir" ]; then
 
 	if [ -n "$tanG" ] && [ "$tanG" != "null" ]; then
 		echo "Redacting tanG..." >>"$log_stdout" 2>>"$log_stderr"
-		rg --files-with-matches --fixed-strings "$tanG" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$tanG/REDACTED_TAN_G/g" || true
+		rg --files-with-matches --fixed-strings "$tanG" "$logs_dir" | xargs --no-run-if-empty sed -i "s/$tanG/0000000000000000000000000000000000000000000000000000000000000000/g" || true
 	fi
 
 	if [ -n "$localCaseId" ] && [ "$localCaseId" != "null" ]; then
