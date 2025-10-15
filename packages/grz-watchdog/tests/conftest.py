@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tarfile
 import time
@@ -143,5 +144,51 @@ def test_environment(docker_compose_file: str):
 
         yield
     finally:
-        print("\nStopping TEST container environment...")
+        print("\nStopping TEST container environment…")
         subprocess.run([*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "down", "--volumes"], check=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_api_certificates(project_root: Path):
+    """
+    Generates self-signed certificates for the mock API service if they don't exist.
+    """
+    cert_dir = project_root / "packages/grz-watchdog/tests/generated"
+    key_file = cert_dir / "key.pem"
+    cert_file = cert_dir / "cert.pem"
+
+    if key_file.exists() and cert_file.exists():
+        print("Mock API certificates already exist. Skipping generation.")
+        return
+
+    print(f"Generating Mock API certificates in {cert_dir}…")
+    os.makedirs(cert_dir, exist_ok=True)
+
+    try:
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:4096",
+                "-keyout",
+                str(key_file),
+                "-out",
+                str(cert_file),
+                "-sha256",
+                "-days",
+                "365",
+                "-nodes",
+                "-subj",
+                "/CN=bfarm-mock-api",
+                "-addext",
+                "subjectAltName = DNS:bfarm-mock-api",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print("Certificates generated successfully.")
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        pytest.fail(f"Failed to generate self-signed certificates with openssl.\nError: {e.stderr}", pytrace=False)

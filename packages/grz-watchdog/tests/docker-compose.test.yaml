@@ -65,6 +65,9 @@ services:
     build:
       context: ./mock_api
     hostname: bfarm-mock-api
+    volumes:
+      - ./generated/cert.pem:/app/cert.pem:ro
+      - ./generated/key.pem:/app/key.pem:ro
     healthcheck:
       test: ["CMD-SHELL", "curl --fail http://localhost:5000/token || exit 1"]
       interval: 5s
@@ -91,12 +94,14 @@ services:
     volumes:
       - ./config:/workdir/config
       - ./config:/config
+      - ./generated/cert.pem:/workdir/config/cert.pem:ro
     working_dir: /workdir
     environment:
       - GRZ_S3__ENDPOINT_URL=http://minio:9000
       - GRZ_S3__ACCESS_KEY=minioadmin
       - GRZ_S3__SECRET=minioadmin
       - GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE=test
+      - GRZ_PRUEFBERICHT_MOCK=true
     # Keep the service alive for testing after startup
     entrypoint: /bin/sh
     command: -c 'trap "exit 0" SIGTERM; while true; do sleep 1; done'

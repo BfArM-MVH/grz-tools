@@ -370,6 +370,12 @@ rule submit_pruefbericht:
         answer=perhaps_temp(
             "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"
         ),
+    params:
+        custom_ca_cert=lambda _: (
+            "/workdir/config/cert.pem"
+            if os.environ.get("GRZ_PRUEFBERICHT_MOCK", False)
+            else ""
+        ),
     log:
         stdout="logs/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
         stderr="logs/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",

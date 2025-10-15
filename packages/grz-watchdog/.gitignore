@@ -3,6 +3,7 @@ Dockerfile.snake
 data/
 tests/data
 tests/workflow-workdir
+tests/generated
 results/
 .snakemake
 .conda/
