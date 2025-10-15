@@ -70,7 +70,7 @@ def test_data_dir(tmpdir_factory, version: str = "0.2.2"):
         cached_tarball_path = cache_dir / f"{what}.tgz"
 
         if not cached_tarball_path.exists():
-            print(f"\nDownloading test data to {cached_tarball_path}...")
+            print(f"\nDownloading test data to {cached_tarball_path}…")
             url = f"https://github.com/twrightsman/grz-mini-test-data/releases/download/version/{version}/{what}.tgz"
             with requests.get(url, stream=True) as r:
                 r.raise_for_status()
@@ -78,7 +78,7 @@ def test_data_dir(tmpdir_factory, version: str = "0.2.2"):
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
         else:
-            print(f"\nUsing cached test data from {cached_tarball_path}...")
+            print(f"\nUsing cached test data from {cached_tarball_path}…")
 
         extract_dir = session_data_dir / what
         with tarfile.open(cached_tarball_path, "r:gz") as tar:
@@ -119,7 +119,7 @@ def wait_for_services_ready(docker_compose_file: str, services_to_check: list[st
 
             time.sleep(2)
         except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
-            print(f"Waiting for services... (Encountered temporary error: {e})")
+            print(f"Waiting for services… (Encountered temporary error: {e})")
             time.sleep(2)
 
     pytest.fail(f"The following services did not become ready within the {timeout}s timeout: {list(not_ready_yet)}")
@@ -129,7 +129,7 @@ def wait_for_services_ready(docker_compose_file: str, services_to_check: list[st
 def test_environment(docker_compose_file: str):
     """Starts/stops container environment."""
     try:
-        print("Starting TEST container environment in detached mode...")
+        print("Starting TEST container environment in detached mode…")
         subprocess.run(
             [*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "up", "--detach", "--build"],
             check=True,
