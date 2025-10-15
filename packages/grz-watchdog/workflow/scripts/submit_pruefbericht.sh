@@ -20,11 +20,6 @@ db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-# if snakemake_params[custom_ca_cert] exists, prepend REQUESTS_CA_BUNDLE=…
-if [ -n "${snakemake_params[custom_ca_cert]:-}" ]; then
-	export REQUESTS_CA_BUNDLE="${snakemake_params[custom_ca_cert]}"
-fi
-
 grzctl pruefbericht \
 	submit \
 	--config-file "${snakemake_input[pruefbericht_config_path]}" \

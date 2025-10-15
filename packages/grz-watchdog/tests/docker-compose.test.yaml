@@ -60,6 +60,19 @@ services:
       echo 'MinIO setup complete.';
       "
 
+
+  bfarm-mock-api:
+    build:
+      context: ./mock_api
+    hostname: bfarm-mock-api
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:5000/token || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+
   builder:
     <<: *grz-image
     build:
@@ -73,6 +86,8 @@ services:
     depends_on:
       setup-minio:
         condition: service_completed_successfully
+      bfarm-mock-api:
+        condition: service_started
     volumes:
       - ./config:/workdir/config
       - ./config:/config
