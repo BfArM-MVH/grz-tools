@@ -67,7 +67,7 @@ def test_encrypt_submission_protect_overwrite(
 
     # removing the cache and running again should error without force
     (working_dir_path / "logs" / "progress_encrypt.cjson").unlink()
-    with pytest.raises(RuntimeError, match="already exists. Delete it or use --force to overwrite it."):
+    with pytest.raises(RuntimeError, match=r"already exists. Delete it or use --force to overwrite it."):
         runner.invoke(cli, testargs, catch_exceptions=False)
 
 

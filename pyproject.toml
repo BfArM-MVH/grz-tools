@@ -61,7 +61,8 @@ exclude = [
     "__pycache__",
     "build",
     "dist",
-    "out"
+    "out",
+    ".snakemake"
 ]
 extend-exclude = ["alembic"]
 
@@ -102,7 +103,8 @@ ignore = [
     "D102",
     "D103",
     "B028",
-    "COM812"
+    "COM812",
+    "PLC0415"
 ]
 select = [
     "C90",
@@ -178,6 +180,7 @@ commands = [["mypy"]]
 python_version = "3.12"
 plugins = "pydantic.mypy"
 packages = "grz_cli,grzctl,grz_pydantic_models,grz_db,grz_common"
+exclude = "(src/packages/grz-watchdog)"
 
 [[tool.mypy.overrides]]
 module = "crypt4gh.*"
