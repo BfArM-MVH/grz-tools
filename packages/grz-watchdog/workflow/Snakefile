@@ -341,7 +341,7 @@ rule generate_pruefbericht:
     Generate a Prüfbericht for a submission.
     """
     input:
-        data=rules.download.output.data,
+        metadata=rules.metadata.output.metadata,
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
     output:
