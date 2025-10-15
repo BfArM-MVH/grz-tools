@@ -189,7 +189,7 @@ class SubmissionStateLog(SubmissionStateLogBase, VerifiableLog[SubmissionStateLo
     __tablename__ = "submission_states"
     __table_args__ = {"extend_existing": True}
 
-    _payload_model_class = SubmissionStateLogPayload
+    _payload_model_class: ClassVar = SubmissionStateLogPayload
 
     id: int | None = Field(default=None, primary_key=True, index=True)
     submission_id: str = Field(foreign_key="submissions.id", index=True)
@@ -260,7 +260,7 @@ class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPaylo
     __tablename__ = "submission_change_requests"
     __table_args__ = {"extend_existing": True}
 
-    _payload_model_class = ChangeRequestLogPayload
+    _payload_model_class: ClassVar = ChangeRequestLogPayload
 
     id: int | None = Field(default=None, primary_key=True, index=True)
     submission_id: str = Field(foreign_key="submissions.id", index=True)
