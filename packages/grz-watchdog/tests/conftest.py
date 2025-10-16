@@ -252,9 +252,16 @@ class BaseTest:
         """Verifies that the S3 inbox was cleaned correctly."""
         print(f"Verifying inbox state for {submission_id}…")
 
-        cmd_str = f"mc alias set verify http://minio:9000 minioadmin minioadmin && mc ls --recursive verify/{BUCKET_INBOX}/{submission_id}"
-
-        result = run_in_container(*PIXI_RUN_PREFIX, cmd_str, service=GRZ_WATCHDOG_SERVICE_NAME)
+        _ = run_in_container(
+            *PIXI_RUN_PREFIX,
+            "mc alias set verify http://minio:9000 minioadmin minioadmin",
+            service=GRZ_WATCHDOG_SERVICE_NAME,
+        )
+        result = run_in_container(
+            *PIXI_RUN_PREFIX,
+            f"mc ls --recursive verify/{BUCKET_INBOX}/{submission_id}",
+            service=GRZ_WATCHDOG_SERVICE_NAME,
+        )
 
         files = {line.split()[-1] for line in result.stdout.strip().split("\n")}
         expected_files = {"cleaned", "metadata/metadata.json"}
@@ -267,9 +274,12 @@ class BaseTest:
         print(f"Verifying archive state for {submission_id} in bucket {bucket}...")
         archive_path = f"verify/{bucket}/{submission_id}"
 
-        cmd_str = f"mc alias set verify http://minio:9000 minioadmin minioadmin && mc ls {archive_path}"
-
-        result = run_in_container(*PIXI_RUN_PREFIX, cmd_str, service=GRZ_WATCHDOG_SERVICE_NAME)
+        _ = run_in_container(
+            *PIXI_RUN_PREFIX,
+            "mc alias set verify http://minio:9000 minioadmin minioadmin",
+            service=GRZ_WATCHDOG_SERVICE_NAME,
+        )
+        result = run_in_container(*PIXI_RUN_PREFIX, f"mc ls {archive_path}", service=GRZ_WATCHDOG_SERVICE_NAME)
 
         assert "metadata/" in result.stdout, "Archived submission missing metadata directory."
         assert "files/" in result.stdout, "Archived submission missing files directory."
