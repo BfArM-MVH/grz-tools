@@ -67,4 +67,4 @@ class TestProcessSingle(BaseTest):
 
         self._verify_db_state(submission_id, expected_state="Finished")
         self._verify_inbox_cleaned(submission_id)
-        self._verify_archived(submission_id, bucket=BUCKET_CONSENTED)
+        self._verify_archived(submission_id, bucket=BUCKET_NONCONSENTED)
