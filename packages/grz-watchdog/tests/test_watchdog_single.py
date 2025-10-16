@@ -1,5 +1,3 @@
-import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -11,6 +9,7 @@ from .conftest import (
     BUCKET_NONCONSENTED,
     CONTAINER_COMPOSE_CMD,
     CONTAINER_RUNTIME,
+    DOCKER_COMPOSE_FILE,
     GRZ_SUBMITTER_CONTAINER_NAME,
     GRZ_SUBMITTER_SERVICE_NAME,
     GRZ_WATCHDOG_CONTAINER_NAME,
@@ -20,6 +19,8 @@ from .conftest import (
     PIXI_RUN_PREFIX,
     SNAKEMAKE_BASE_CMD,
     SUBMITTER_ID,
+    run_in_container,
+    BaseTest,
 )
 
 TEST_CASES = [
@@ -29,127 +30,41 @@ TEST_CASES = [
 ]
 
 
-def run_in_container(
-    docker_compose_file: str, *args: str, service=GRZ_WATCHDOG_SERVICE_NAME
-) -> subprocess.CompletedProcess:
-    """Helper to execute a command inside the container via the compose service name."""
-    command = [*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "exec", "-T", service, *args]
-    return subprocess.run(command, capture_output=True, text=True, check=True)
+@pytest.mark.usefixtures("setup_class_environment")
+class TestProcessSingle(BaseTest):
+    """Testing setup for the process-single branch of grz-watchdog"""
 
+    def _submit_data(self, test_data_dir: Path, submission_type: str):
+        """Helper to prepare and submit a specific test dataset."""
+        print(f"\n--- Submitting Data for test case: {submission_type} ---")
+        local_data_path = test_data_dir / submission_type
+        container_data_path = f"/tmp/{submission_type}"
 
-@pytest.fixture(scope="function")
-def setup_and_submit(docker_compose_file: str, test_data_dir: Path, request):
-    """A fixture to set up S3 and submit a specific test dataset."""
-    submission_type = request.param
-    local_data_path = test_data_dir / submission_type
-    container_data_path = f"/tmp/{submission_type}"
+        subprocess.run(
+            [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{GRZ_SUBMITTER_CONTAINER_NAME}:{container_data_path}"],
+            check=True,
+        )
+        run_in_container(
+            *PIXI_RUN_PREFIX,
+            "grz-cli",
+            "submit",
+            "--submission-dir",
+            container_data_path,
+            "--config-file",
+            "/workdir/config/grz-cli.config.yaml",
+            service=GRZ_SUBMITTER_SERVICE_NAME,
+        )
 
-    run_in_container(docker_compose_file, "sh", "-c", "rm -rf /workdir/results/* /tmp/*")
-    run_in_container(docker_compose_file, "rm", "-r", "-f", "/workdir/results", service=GRZ_WATCHDOG_SERVICE_NAME)
+    @pytest.mark.parametrize("submission_type, submission_id", TEST_CASES)
+    def test_single_valid_submission(self, test_data_dir: Path, submission_type: str, submission_id: str):
+        """
+        Tests the successful end-to-end processing of a single valid submission.
+        """
+        self._submit_data(test_data_dir, submission_type)
 
-    buckets_to_clean = [BUCKET_INBOX, BUCKET_CONSENTED, BUCKET_NONCONSENTED]
-    for bucket in buckets_to_clean:
-        cleanup_command = f"mc rm --recursive --force adm/{bucket}/* || true"
-        run_in_container(docker_compose_file, "sh", "-c", cleanup_command, service=MINIO_SERVICE_NAME)
+        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed/without_qc"
+        self._run_snakemake(target_file)
 
-    run_in_container(
-        docker_compose_file, "mc", "mb", "--ignore-existing", f"adm/{BUCKET_INBOX}", service=MINIO_SERVICE_NAME
-    )
-
-    subprocess.run(
-        [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{GRZ_SUBMITTER_CONTAINER_NAME}:{container_data_path}"],
-        check=True,
-    )
-
-    run_in_container(
-        docker_compose_file,
-        *PIXI_RUN_PREFIX,
-        "grz-cli",
-        "submit",
-        "--submission-dir",
-        container_data_path,
-        "--config-file",
-        "/workdir/config/grz-cli.config.yaml",
-        service=GRZ_SUBMITTER_SERVICE_NAME,
-    )
-
-    yield
-
-
-@pytest.mark.parametrize("setup_and_submit, submission_id", TEST_CASES, indirect=["setup_and_submit"])
-def test_single_valid_submission(docker_compose_file: str, setup_and_submit, submission_id: str):
-    """Tests the successful end-to-end processing of a single valid submission."""
-    print(f"\nRunning Snakemake for ({submission_id})...")
-    target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed/without_qc"
-
-    try:
-        run_in_container(docker_compose_file, *SNAKEMAKE_BASE_CMD, "--cores", "1", target_file)
-    except subprocess.CalledProcessError as e:
-        print("\n--- SNAKEMAKE FAILED ---")
-        print("Parsing stderr to find and dump specific log files...")
-
-        log_path_pattern = re.compile(r"logs/[\w/.-]+\.log")
-        found_logs = sorted(list(set(log_path_pattern.findall(e.stderr))))
-
-        if not found_logs:
-            print("\nCould not automatically find any log file paths in Snakemake's stderr.")
-            print("--- Raw Snakemake stderr: ---")
-            print(e.stderr)
-        else:
-            print(f"Found {len(found_logs)} log file(s) to dump: {', '.join(found_logs)}")
-            for log_path in found_logs:
-                try:
-                    full_path_in_container = f"/workdir/{log_path}"
-                    log_content = run_in_container(
-                        docker_compose_file, "cat", full_path_in_container, service=GRZ_WATCHDOG_SERVICE_NAME
-                    )
-                    print(f"\n--- CONTENTS OF {log_path} ---")
-                    print(log_content.stdout)
-                    if log_content.stderr:
-                        print(f"--- (stderr while cat'ing {log_path}) ---\n{log_content.stderr}")
-
-                except subprocess.CalledProcessError as log_e:
-                    print(f"\n--- Could not retrieve {log_path} ---")
-                    print(log_e.stderr)
-
-        pytest.fail(f"Snakemake workflow failed. See dumped log file contents above for details.", pytrace=False)
-
-    print("Verifying outcomes...")
-    db_result = run_in_container(
-        docker_compose_file,
-        *PIXI_RUN_PREFIX,
-        "grzctl",
-        "db",
-        "--config-file",
-        "/config/configs/db.yaml",
-        "list",
-        "--json",
-    )
-
-    submissions = json.loads(db_result.stdout)
-    target_submission = None
-    for submission in submissions:
-        if submission.get("id") == submission_id:
-            target_submission = submission
-            break
-
-    assert target_submission is not None, f"Submission '{submission_id}' not found in the database."
-    final_state = target_submission.get("latest_state", {}).get("state")
-    assert final_state == "Finished", (
-        f"Submission state was not 'Finished' in the database. Actual state: '{final_state}'"
-    )
-
-    inbox_path = f"adm/{BUCKET_INBOX}/{submission_id}"
-    inbox_ls_result = run_in_container(
-        docker_compose_file, "mc", "ls", "--recursive", inbox_path, service=MINIO_SERVICE_NAME
-    )
-    assert inbox_ls_result.stdout != "", inbox_ls_result.stdout
-    inbox_files = {line.split()[-1] for line in inbox_ls_result.stdout.strip().split("\n")}
-    assert inbox_files == {f"{inbox_path}/cleaned", f"{inbox_path}/metadata/metadata.json"}, (
-        "Inbox was not cleaned correctly."
-    )
-
-    archive_path = f"adm/{BUCKET_CONSENTED}/{submission_id}"
-    archive_ls_result = run_in_container(docker_compose_file, "mc", "ls", archive_path, service=MINIO_SERVICE_NAME)
-    assert "metadata/" in archive_ls_result.stdout, "Archived submission missing metadata directory."
-    assert "files/" in archive_ls_result.stdout, "Archived submission missing files directory."
+        self._verify_db_state(submission_id, expected_state="Finished")
+        self._verify_inbox_cleaned(submission_id)
+        self._verify_archived(submission_id, bucket=BUCKET_CONSENTED)
