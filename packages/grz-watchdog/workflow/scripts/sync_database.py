@@ -2,13 +2,14 @@ import json
 import os
 import sys
 from contextlib import redirect_stderr, redirect_stdout
+from typing import Any
 
 sys.path.append(os.path.dirname(__file__))
 import shared
 from shared import error_print, log_print
 
 
-def register_submissions_with_db(submissions_json_list, db_config_path):
+def register_submissions_with_db(submissions_json_list, db_config_path):  # noqa: C901
     try:
         db_states_info = shared.get_db_states(db_config_path)
     except Exception as e:
@@ -19,15 +20,7 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
 
     current_db_states = {sub_id: info["state"] for sub_id, info in db_states_info.items()}
 
-    all_s3_submissions = []
-
-    for file_path in submissions_json_list:
-        try:
-            with open(file_path) as f:
-                all_s3_submissions.extend(json.load(f))
-        except (OSError, json.JSONDecodeError) as e:
-            error_print(f"Error reading or parsing {file_path}.")
-            raise e
+    all_s3_submissions = gather_submissions(submissions_json_list)
 
     if not all_s3_submissions:
         log_print("No submissions found in S3 input files. Nothing to do.")
@@ -46,7 +39,7 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
             log_print(f"Skipping submission {submission_id} with state {s3_state}.")
             continue
 
-        current_db_state = current_db_states.get(submission_id, None)
+        current_db_state = current_db_states.get(submission_id)
 
         match (current_db_state, target_db_state):
             # A new, incomplete submission is found.
@@ -81,6 +74,19 @@ def register_submissions_with_db(submissions_json_list, db_config_path):
                 continue
 
     return available_submissions
+
+
+def gather_submissions(submissions_json_list) -> list[Any]:
+    all_s3_submissions = []
+
+    for file_path in submissions_json_list:
+        try:
+            with open(file_path) as f:
+                all_s3_submissions.extend(json.load(f))
+        except (OSError, json.JSONDecodeError) as e:
+            error_print(f"Error reading or parsing {file_path}.")
+            raise e
+    return all_s3_submissions
 
 
 submissions_json_list = snakemake.input.submissions

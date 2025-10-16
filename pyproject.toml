@@ -143,6 +143,9 @@ max-complexity = 10
 "packages/grz-cli/src/grz_cli/models/**.py" = [
     "N805"
 ]
+"packages/grz-watchdog/workflow/scripts/**.py" = [
+    "F821"
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"

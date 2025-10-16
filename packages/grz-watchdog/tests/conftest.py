@@ -34,7 +34,8 @@ PIXI_RUN_PREFIX = [
     "--",
 ]
 
-SNAKEMAKE_BASE_CMD = PIXI_RUN_PREFIX + [
+SNAKEMAKE_BASE_CMD = [
+    *PIXI_RUN_PREFIX,
     "snakemake",
     "--workflow-profile",
     "/workspace/packages/grz-watchdog/workflow/profiles/test",
