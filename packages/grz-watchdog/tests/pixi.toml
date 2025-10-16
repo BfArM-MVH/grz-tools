@@ -17,6 +17,7 @@ jq = ">=1.8.1,<2"
 ripgrep = ">=14.1.1,<15"
 nextflow = ">=25.4.8,<26"
 s5cmd = ">=2.3.0,<3"
+minio-client = ">=2025.8.13.8.35.41,<2026"
 
 [pypi-dependencies]
 grz-pydantic-models = { path = "../../grz-pydantic-models", editable = true }
