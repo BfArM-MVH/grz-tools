@@ -252,14 +252,12 @@ class BaseTest:
         """Verifies that the S3 inbox was cleaned correctly."""
         print(f"Verifying inbox state for {submission_id}…")
 
-        cmd_str = (
-            f"mc alias set verify http://minio:9000 minioadmin minioadmin && mc ls --recursive verify/{BUCKET_INBOX}"
-        )
+        cmd_str = f"mc alias set verify http://minio:9000 minioadmin minioadmin && mc ls --recursive verify/{BUCKET_INBOX}/{submission_id}"
 
         result = run_in_container(*PIXI_RUN_PREFIX, cmd_str, service=GRZ_WATCHDOG_SERVICE_NAME)
 
         files = {line.split()[-1] for line in result.stdout.strip().split("\n")}
-        expected_files = {f"{submission_id}/cleaned", f"{submission_id}/metadata/metadata.json"}
+        expected_files = {"cleaned", "metadata/metadata.json"}
 
         assert files == expected_files, f"Inbox was not cleaned correctly. Found: {files}"
         print("OK: Inbox is cleaned correctly.")
