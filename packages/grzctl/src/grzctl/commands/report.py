@@ -577,7 +577,7 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
 
 def date_to_quarter_year(date: datetime.date) -> tuple[int, int]:
     """Return (1-based quarter, year) given a date."""
-    return ((date.month - 1) % 3) + 1, date.year
+    return (date.month - 1) // 3 + 1, date.year
 
 
 @report.command()
