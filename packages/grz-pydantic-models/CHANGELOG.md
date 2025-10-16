@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.1...grz-pydantic-models-v2.4.0) (2025-10-16)
+
+
+### Features
+
+* **grz-pydantic-models:** allow deprecated to be used with or without parentheses ([#418](https://github.com/BfArM-MVH/grz-tools/issues/418)) ([62b2ef3](https://github.com/BfArM-MVH/grz-tools/commit/62b2ef359ccc87cfea86a4f8ddb34e01e227e177))
+
 ## [2.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.0...grz-pydantic-models-v2.3.1) (2025-10-13)
 
 
