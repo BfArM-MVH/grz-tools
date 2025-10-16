@@ -1,6 +1,8 @@
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 import time
@@ -8,6 +10,8 @@ from pathlib import Path
 
 import pytest
 import requests
+
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 DOCKER_COMPOSE_FILE = str(PROJECT_ROOT / "packages/grz-watchdog/tests/docker-compose.test.yaml")
@@ -202,9 +206,29 @@ def run_in_container(*args: str, service: str = GRZ_WATCHDOG_SERVICE_NAME) -> su
 class BaseTest:
     """A base class for tests, containing reusable helper methods."""
 
-    def _handle_snakemake_failure(self, e: subprocess.CalledProcessError):
-        """Dumps logs from a failed Snakemake run."""
-        print("\n--- SNAKEMAKE FAILED ---")
+    def _submit_data(self, local_data_path: Path):
+        """Helper to submit a specific test dataset."""
+        local_data_path = Path(local_data_path)
+        container_data_path = f"/tmp/{local_data_path.name}"
+        print(f"\n--- Submitting Data from {local_data_path.name} ---")
+
+        subprocess.run(
+            [CONTAINER_RUNTIME, "cp", str(local_data_path), f"{GRZ_SUBMITTER_CONTAINER_NAME}:{container_data_path}"],
+            check=True,
+        )
+        run_in_container(
+            *PIXI_RUN_PREFIX,
+            "grz-cli",
+            "submit",
+            "--submission-dir",
+            container_data_path,
+            "--config-file",
+            "/workdir/config/grz-cli.config.yaml",
+            service=GRZ_SUBMITTER_SERVICE_NAME,
+        )
+
+    def _handle_watchdog_failure(self, e: subprocess.CalledProcessError):
+        """Dump logs from a failed grz-watchdog run."""
         log_path_pattern = re.compile(r"logs/[\w/.-]+\.log")
         found_logs = sorted(list(set(log_path_pattern.findall(e.stderr))))
         print(e.stderr)
@@ -223,15 +247,54 @@ class BaseTest:
             except subprocess.CalledProcessError as log_e:
                 print(f"\n--- Could not retrieve {log_path} ---\n{log_e.stderr}")
 
-    def _run_snakemake(self, target: str, cores: int = 1):
-        """Runs the Snakemake workflow and handles failures."""
-        print(f"\nRunning Snakemake for target: {target}…")
+    def _run_watchdog(self, target: str, cores: int = 1):
+        """Run grz-watchdog and handle failures."""
+        print(f"\nRunning grz-watchdog for target: {target}…")
         try:
             run_in_container(*SNAKEMAKE_BASE_CMD, "--cores", str(cores), target)
-            print("--- SNAKEMAKE SUCCEEDED ---")
         except subprocess.CalledProcessError as e:
-            self._handle_snakemake_failure(e)
-            pytest.fail("Snakemake workflow failed. See dumped log contents above for details.", pytrace=False)
+            self._handle_watchdog_failure(e)
+            pytest.fail("grz-watchdog failed. See dumped log contents above for details.", pytrace=False)
+
+    def _run_watchdog_expect_fail(self, target: str, cores: int = 1):
+        """Run grz-watchdog and assert that it fails."""
+        print(f"\nRunning grz-watchdog for target: {target} (expecting failure)…")
+        with pytest.raises(subprocess.CalledProcessError) as excinfo:
+            run_in_container(*SNAKEMAKE_BASE_CMD, "--cores", str(cores), target)
+
+        self._handle_watchdog_failure(excinfo.value)
+        return excinfo.value
+
+    def start_background_process(self, command: list[str]) -> subprocess.Popen:
+        """Starts a background process inside the container."""
+        full_command = [*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "exec", GRZ_WATCHDOG_SERVICE_NAME, *command]
+        process = subprocess.Popen(
+            full_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        )
+        return process
+
+    def stop_background_process(self, process: subprocess.Popen):
+        """Stops a running background process."""
+        print("Stopping background process...")
+        try:
+            # Send TERM signal for graceful shutdown
+            run_in_container("pkill", "-SIGTERM", "-f", "snakemake")
+            stdout, _ = process.communicate(timeout=120)
+            print(stdout)
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            print("Process did not terminate gracefully, killing.")
+            try:
+                run_in_container("pkill", "-SIGKILL", "-f", "snakemake")
+            except subprocess.CalledProcessError:
+                pass
+            process.kill()
+            stdout, _ = process.communicate()
+            print(stdout)
 
     def _verify_db_state(self, submission_id: str, expected_state: str):
         """Verifies the final state of a submission in the database."""
@@ -301,3 +364,28 @@ def setup_class_environment():
     run_in_container("mc", "mb", "--ignore-existing", f"adm/{BUCKET_INBOX}", service=MINIO_SERVICE_NAME)
     print("\n--- Finished cleaning ---")
     yield
+
+
+def _create_variant_submission(base_dir: Path, variant_name_suffix: str, tmp_path: Path):
+    """Create a modified submission with a different tanG."""
+    base_dir, tmp_dir = Path(base_dir), Path(tmp_path)
+    variant_dir = tmp_path / f"{base_dir.name}_{variant_name_suffix}"
+    if variant_dir.exists():
+        shutil.rmtree(variant_dir)
+    shutil.copytree(base_dir, variant_dir)
+
+    metadata_path = variant_dir / "metadata" / "metadata.json"
+    with open(metadata_path) as f:
+        metadata = GrzSubmissionMetadata(**json.load(f))
+
+    original_tang = metadata.submission.tan_g
+    new_tang = hashlib.sha256(f"{original_tang}{variant_name_suffix}".encode()).hexdigest()
+    metadata.submission.tan_g = new_tang
+
+    with open(metadata_path, "w") as f:
+        f.write(metadata.model_dump_json(by_alias=True))
+
+    submission_id = metadata.submission_id
+    print(metadata)
+
+    return variant_dir, submission_id
