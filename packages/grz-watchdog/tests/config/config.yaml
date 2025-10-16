@@ -7,6 +7,16 @@ temp-outputs: false
 on-failed-validation: "cleanup"
 auto-cleanup: "inbox+storage"
 
+handlers:
+  # What to do when the workflow encounters an error.
+  # Placeholder '{log}' points to main snakemake log.
+  # For example, to send a mail with the contents of the log:
+  #   "mail -s 'grz-watchdog error' send-mail-to@recipient.domain < {log}"
+  on-error: "echo 'Failed running grz-watchdog, check logs at {log}'; cat {log}"
+  on-start: "echo 'Starting grz-watchdog.'"
+  on-success: "echo 'Successfully finished grz-watchdog run.'"
+
+
 config_paths:
   inbox:
     "123456789":
