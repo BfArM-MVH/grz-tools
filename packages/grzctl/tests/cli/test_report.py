@@ -29,7 +29,9 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
 
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
-            cli, ["report", "--config-file", blank_database_config_path, "quarterly"], catch_exceptions=False
+            cli,
+            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
 
