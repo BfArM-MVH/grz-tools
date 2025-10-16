@@ -281,8 +281,8 @@ class BaseTest:
         )
         result = run_in_container(*PIXI_RUN_PREFIX, f"mc ls {archive_path}", service=GRZ_WATCHDOG_SERVICE_NAME)
 
-        assert "metadata/" in result.stdout, "Archived submission missing metadata directory."
-        assert "files/" in result.stdout, "Archived submission missing files directory."
+        assert "metadata/" in result.stdout, "Archived submission missing metadata directory: " + result.stdout
+        assert "files/" in result.stdout, "Archived submission missing files directory: " + result.stdout
         print(f"OK: Submission correctly archived in {bucket}.")
 
 
