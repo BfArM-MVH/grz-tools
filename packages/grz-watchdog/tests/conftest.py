@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tarfile
 import time
@@ -7,6 +8,9 @@ from pathlib import Path
 
 import pytest
 import requests
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+DOCKER_COMPOSE_FILE = str(PROJECT_ROOT / "packages/grz-watchdog/tests/docker-compose.test.yaml")
 
 CONTAINER_RUNTIME = "podman"  # or "docker"
 CONTAINER_COMPOSE_CMD = ["podman-compose"]  # or ["docker", "compose"]
@@ -47,12 +51,6 @@ SNAKEMAKE_BASE_CMD = PIXI_RUN_PREFIX + [
 def project_root() -> Path:
     """Returns the grz-tools root directory."""
     return Path(__file__).parent.parent.parent.parent
-
-
-@pytest.fixture(scope="session")
-def docker_compose_file(project_root: Path) -> str:
-    """Returns the path to the test-specific docker-compose.yml file."""
-    return str(project_root / "packages/grz-watchdog/tests/docker-compose.test.yaml")
 
 
 @pytest.fixture(scope="session")
@@ -126,26 +124,26 @@ def wait_for_services_ready(docker_compose_file: str, services_to_check: list[st
 
 
 @pytest.fixture(scope="session", autouse=True)
-def test_environment(docker_compose_file: str):
+def test_environment():
     """Starts/stops container environment."""
     try:
         print("Starting TEST container environment in detached mode…")
         subprocess.run(
-            [*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "up", "--detach", "--build"],
+            [*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "up", "--detach", "--build"],
             check=True,
             capture_output=True,
         )
 
         wait_for_services_ready(
-            docker_compose_file, services_to_check=[GRZ_WATCHDOG_SERVICE_NAME, GRZ_SUBMITTER_SERVICE_NAME]
+            DOCKER_COMPOSE_FILE, services_to_check=[GRZ_WATCHDOG_SERVICE_NAME, GRZ_SUBMITTER_SERVICE_NAME]
         )
 
         print("All services are up and ready for testing.")
 
         yield
     finally:
-        print("\nStopping TEST container environment…")
-        subprocess.run([*CONTAINER_COMPOSE_CMD, "-f", docker_compose_file, "down", "--volumes"], check=True)
+        print("Stopping TEST container environment…")
+        subprocess.run([*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "down", "--volumes"], check=True)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -192,3 +190,113 @@ def mock_api_certificates(project_root: Path):
         print("Certificates generated successfully.")
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         pytest.fail(f"Failed to generate self-signed certificates with openssl.\nError: {e.stderr}", pytrace=False)
+
+
+def run_in_container(*args: str, service: str = GRZ_WATCHDOG_SERVICE_NAME) -> subprocess.CompletedProcess:
+    """Helper to execute a command inside the container via the compose service name."""
+    command = [*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "exec", "-T", service, *args]
+    return subprocess.run(command, capture_output=True, text=True, check=True)
+
+
+class BaseTest:
+    """A base class for tests, containing reusable helper methods."""
+
+    def _handle_snakemake_failure(self, e: subprocess.CalledProcessError):
+        """Dumps logs from a failed Snakemake run."""
+        print("\n--- SNAKEMAKE FAILED ---")
+        log_path_pattern = re.compile(r"logs/[\w/.-]+\.log")
+        found_logs = sorted(list(set(log_path_pattern.findall(e.stderr))))
+        print(e.stderr)
+
+        if not found_logs:
+            print("\nCould not automatically find any log file paths in Snakemake's stderr.")
+            return
+
+        print(f"Found {len(found_logs)} log file(s) to dump: {', '.join(found_logs)}")
+        for log_path in found_logs:
+            try:
+                full_path = f"/workdir/{log_path}"
+                log_content = run_in_container("cat", full_path)
+                print(f"\n--- CONTENTS OF {log_path} ---")
+                print(log_content.stdout)
+            except subprocess.CalledProcessError as log_e:
+                print(f"\n--- Could not retrieve {log_path} ---\n{log_e.stderr}")
+
+    def _run_snakemake(self, target: str, cores: int = 1):
+        """Runs the Snakemake workflow and handles failures."""
+        print(f"\nRunning Snakemake for target: {target}…")
+        try:
+            run_in_container(*SNAKEMAKE_BASE_CMD, "--cores", str(cores), target)
+            print("--- SNAKEMAKE SUCCEEDED ---")
+        except subprocess.CalledProcessError as e:
+            self._handle_snakemake_failure(e)
+            pytest.fail("Snakemake workflow failed. See dumped log contents above for details.", pytrace=False)
+
+    def _verify_db_state(self, submission_id: str, expected_state: str):
+        """Verifies the final state of a submission in the database."""
+        print(f"Verifying database state for {submission_id}…")
+        result = run_in_container(
+            *PIXI_RUN_PREFIX, "grzctl", "db", "--config-file", "/config/configs/db.yaml", "list", "--json"
+        )
+        submissions = json.loads(result.stdout)
+        target = next((s for s in submissions if s.get("id") == submission_id), None)
+
+        assert target is not None, f"Submission '{submission_id}' not found in the database."
+        final_state = target.get("latest_state", {}).get("state")
+        assert final_state == expected_state, (
+            f"Submission state was not '{expected_state}'. Actual state: '{final_state}'"
+        )
+        print(f"OK: Database state is '{final_state}'.")
+
+    def _verify_inbox_cleaned(self, submission_id: str):
+        """Verifies that the S3 inbox was cleaned correctly."""
+        print(f"Verifying inbox state for {submission_id}…")
+
+        inbox_path = f"adm/{BUCKET_INBOX}/{submission_id}"
+        cmd_str = (
+            "mc alias set verify http://minio:9000 minioadmin minioadmin && "
+            f"mc ls --recursive verify/{BUCKET_INBOX}/{submission_id}"
+        )
+
+        result = run_in_container("sh", "-c", cmd_str, service=GRZ_WATCHDOG_SERVICE_NAME)
+        # result = run_in_container("mc", "ls", "--recursive", inbox_path, service=MINIO_SERVICE_NAME)
+
+        files = {line.split()[-1] for line in result.stdout.strip().split("\n")}
+        expected_files = {f"{inbox_path}/cleaned", f"{inbox_path}/metadata/metadata.json"}
+
+        assert files == expected_files, f"Inbox was not cleaned correctly. Found: {files}"
+        print("OK: Inbox is cleaned correctly.")
+
+    def _verify_archived(self, submission_id: str, bucket: str):
+        """Verifies that a submission was correctly archived to the target bucket."""
+        print(f"Verifying archive state for {submission_id} in bucket {bucket}...")
+        archive_path = f"adm/{bucket}/{submission_id}"
+
+
+        cmd_str = (
+            "mc alias set verify http://minio:9000 minioadmin minioadmin && "
+            f"mc ls verify/{bucket}/{submission_id}"
+        )
+
+        result = run_in_container("sh", "-c", cmd_str, service=GRZ_WATCHDOG_SERVICE_NAME)
+        # result = run_in_container("mc", "ls", archive_path, service=MINIO_SERVICE_NAME)
+
+        assert "metadata/" in result.stdout, "Archived submission missing metadata directory."
+        assert "files/" in result.stdout, "Archived submission missing files directory."
+        print(f"OK: Submission correctly archived in {bucket}.")
+
+
+@pytest.fixture(scope="class")
+def setup_class_environment():
+    """A fixture to clean the environment once before any tests in the class run."""
+    print("\n--- Cleaning S3 buckets and workspace before tests ---")
+    run_in_container("sh", "-c", "rm -rf /workdir/results/* /tmp/*")
+
+    buckets_to_clean = [BUCKET_INBOX, BUCKET_CONSENTED, BUCKET_NONCONSENTED]
+    for bucket in buckets_to_clean:
+        cleanup_command = f"mc rm --recursive --force adm/{bucket}/* || true"
+        run_in_container("sh", "-c", cleanup_command, service=MINIO_SERVICE_NAME)
+
+    run_in_container("mc", "mb", "--ignore-existing", f"adm/{BUCKET_INBOX}", service=MINIO_SERVICE_NAME)
+    print("\n--- Finished cleaning ---")
+    yield
