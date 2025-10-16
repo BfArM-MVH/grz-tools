@@ -11,7 +11,7 @@ import shared
 def select_submissions(submissions_path, db_config_path, limit):
     db_states = shared.get_db_states(db_config_path)
 
-    with open(submissions_path, "r") as f:
+    with open(submissions_path) as f:
         synced_submissions = json.load(f)
 
     pending_submissions = []

@@ -19,8 +19,8 @@ def error_print(*args, **kwargs):
 def run_grzctl_command(cmd, check=True):
     """Helper to run a grzctl command."""
     try:
-        result = subprocess.run(
-            ["grzctl", *cmd],
+        result = subprocess.run(  # noqa: S603
+            ["grzctl", *cmd],  # noqa: S607
             check=check,
             text=True,
             capture_output=True,

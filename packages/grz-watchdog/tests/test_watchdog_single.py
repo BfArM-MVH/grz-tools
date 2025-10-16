@@ -4,23 +4,15 @@ from pathlib import Path
 import pytest
 
 from .conftest import (
-    BUCKET_CONSENTED,
-    BUCKET_INBOX,
     BUCKET_NONCONSENTED,
-    CONTAINER_COMPOSE_CMD,
     CONTAINER_RUNTIME,
-    DOCKER_COMPOSE_FILE,
     GRZ_SUBMITTER_CONTAINER_NAME,
     GRZ_SUBMITTER_SERVICE_NAME,
-    GRZ_WATCHDOG_CONTAINER_NAME,
-    GRZ_WATCHDOG_SERVICE_NAME,
     INBOX,
-    MINIO_SERVICE_NAME,
     PIXI_RUN_PREFIX,
-    SNAKEMAKE_BASE_CMD,
     SUBMITTER_ID,
-    run_in_container,
     BaseTest,
+    run_in_container,
 )
 
 TEST_CASES = [
