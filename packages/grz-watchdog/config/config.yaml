@@ -1,0 +1,30 @@
+monitor:
+  interval: 10 # in seconds
+batch:
+  limit: 2
+
+handlers:
+  # What to do when the workflow encounters an error.
+  # Placeholder '{log}' points to main snakemake log.
+  # For example, to send a mail with the contents of the log:
+  #   "mail -s 'grz-watchdog error' send-mail-to@recipient.domain < {log}"
+  on-error: "echo 'Failed running grz-watchdog, check logs at {log}'"
+  on-start: "echo 'Starting grz-watchdog.'"
+  on-success: "echo 'Successfully finished grz-watchdog run.'"
+
+temp-outputs: true  # true / false: Toggle between `temp(file)` and `file` in rule outputs
+on-failed-validation: "do-nothing"  # "cleanup" or "do-nothing"
+auto-cleanup: "inbox+storage"  # "inbox", "storage", "inbox+storage", "none"
+
+config_paths:
+  inbox:
+    "123456789":
+      test1: "config/configs/inbox.test1.yaml"
+  archive:
+    consented: "config/configs/consented.yaml"
+    nonconsented: "config/configs/nonconsented.yaml"
+  db: "config/configs/db.yaml"
+  pruefbericht: "config/configs/pruefbericht.yaml"
+
+qc:
+  revision: "v1.1.5"

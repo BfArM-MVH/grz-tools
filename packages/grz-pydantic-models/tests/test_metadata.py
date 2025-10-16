@@ -277,7 +277,7 @@ def test_index_rna_without_dna():
     metadata["donors"][0]["labData"][0]["sequenceType"] = "rna"
 
     with pytest.raises(
-        ValidationError, match="Index donor must have at least one lab datum with one of the following library types"
+        ValidationError, match=r"Index donor must have at least one lab datum with one of the following library types"
     ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 

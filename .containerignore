@@ -1,0 +1,56 @@
+# Version control
+**/.git
+.gitignore
+**/.github
+
+# Python virtual environments and caches at any level
+**/.venv
+**/.tox
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# grz-check specific rust targets
+packages/grz-check/target
+
+# bioinformatics related files
+**/*.fastq.gz
+**/*.fq.gz
+**/*.bam
+**/*.vcf
+**/*.c4gh
+**/*.bed
+
+# Build artifacts at any level
+**/dist
+**/build
+**/*.egg-info
+**/.eggs
+
+# IDE and editor configuration
+**/.vscode
+**/.idea
+**/*.swp
+
+**/results/
+**/logs/
+**/.snakemake/
+
+**/.pixi/
+**/.conda/
+**/.vscode/
+**/.idea/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Test data cache for grz-watchdog
+packages/grz-watchdog/tests/.test_cache/
+
+# Local configuration files
+config.local.yaml
