@@ -5,7 +5,7 @@
     "genomicStudySubtype": "tumor+germline",
     "thresholds": {
       "meanDepthOfCoverage": 200,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -22,7 +22,7 @@
     "genomicStudySubtype": "tumor-only",
     "thresholds": {
       "meanDepthOfCoverage": 200,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -39,7 +39,7 @@
     "genomicStudySubtype": "tumor+germline",
     "thresholds": {
       "meanDepthOfCoverage": 200,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -56,7 +56,7 @@
     "genomicStudySubtype": "tumor-only",
     "thresholds": {
       "meanDepthOfCoverage": 200,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -73,7 +73,7 @@
     "genomicStudySubtype": "tumor+germline",
     "thresholds": {
       "meanDepthOfCoverage": 100,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -90,7 +90,7 @@
     "genomicStudySubtype": "tumor+germline",
     "thresholds": {
       "meanDepthOfCoverage": 100,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -107,7 +107,7 @@
     "genomicStudySubtype": "tumor-only",
     "thresholds": {
       "meanDepthOfCoverage": 100,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -124,7 +124,7 @@
     "genomicStudySubtype": "tumor+germline",
     "thresholds": {
       "meanDepthOfCoverage": 30,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85
@@ -141,7 +141,7 @@
     "genomicStudySubtype": "germline-only",
     "thresholds": {
       "meanDepthOfCoverage": 30,
-      "readLength": 100,
+      "meanReadLength": 70,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 30,
         "percentBasesAbove": 85

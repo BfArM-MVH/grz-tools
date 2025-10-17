@@ -60,48 +60,36 @@ def open_fastq(file_path: str | PathLike, progress=True) -> Generator[TextIO, No
             yield typing.cast(TextIO, handle)
 
 
-def calculate_fastq_stats(file_path, expected_read_length: int | None = None) -> tuple[int, int | None]:
+def calculate_fastq_stats(file_path) -> tuple[int, float]:
     """
     Calculate line number and read lengths in FASTQ file.
+
     :param file_path: Path to the FASTQ file
-    :param expected_read_length: Expected read length (None if not known)
     :return: tuple with the following values:
       - Number of lines in the file
-      - Observed read length
+      - Observed mean read length
     """
+    total_read_length = 0
+    total_reads = 0
     with open_fastq(file_path) as f:
-        read_length_warned = False
         for line_number, line in enumerate(f):
             if (line_number % 4) == 1:
                 # Sequence lines are every 4th line starting from the 2nd
-                # Check if the read length is consistent
-                read_length = len(line.strip())
-                if expected_read_length is None:
-                    expected_read_length = read_length
-                elif (not read_length_warned) and (read_length != expected_read_length):
-                    # For the time being, read length mismatch is downgraded to warning
-                    log.warning(
-                        f"Read length mismatch at line {line_number + 1}: "
-                        f"expected {expected_read_length}, found {read_length}. "
-                        "This will be an error in the future."
-                        "Further mismatches in the same file won't be reported."
-                    )
-                    read_length_warned = True
+                total_read_length += len(line.strip())
+                total_reads += 1
 
     return (
         line_number + 1,  # enumerate starts indexing at 0
-        expected_read_length,
+        total_read_length / total_reads,
     )
 
 
-def validate_fastq_file(
-    fastq_file: str | PathLike, expected_read_length: int | None = None
-) -> tuple[int, int, list[str]] | tuple[int, int | None, list[str]]:
+def validate_fastq_file(fastq_file: str | PathLike, mean_read_length_threshold: int) -> tuple[int, list[str]]:
     """
     Validates a FASTQ file.
 
     :param fastq_file: Path to the fastq file
-    :param expected_read_length: Expected read length (None if not known)
+    :param mean_read_length_threshold: Exclusive minimum mean read length
     :return: Tuple with the following fields:
       - number of lines
       - set of observed read lengths
@@ -109,17 +97,11 @@ def validate_fastq_file(
     """
     errors = []
     try:
-        if expected_read_length is not None:
-            log.debug("%s: expecting read length of %s", fastq_file, expected_read_length)
-
         # Calculate the number of lines and read lengths
-        num_lines, read_length = calculate_fastq_stats(fastq_file, expected_read_length=expected_read_length)
+        num_lines, mean_read_length = calculate_fastq_stats(fastq_file)
     except ValueError as e:
-        if "Read length mismatch" in str(e):
-            log.warning(f"{fastq_file}: {e}")
-        else:
-            errors.append(f"{fastq_file}: {e}")
-        return -1, -1, errors
+        errors.append(f"{fastq_file}: {e}")
+        return -1, errors
 
     # Check if the number of lines in a FASTQ file is a multiple of 4.
     if num_lines % 4 != 0:
@@ -127,40 +109,43 @@ def validate_fastq_file(
     else:
         log.debug("%s: %s lines", fastq_file, num_lines)
 
-    return num_lines, read_length, errors
+    if mean_read_length <= mean_read_length_threshold:
+        raise ValueError(
+            f"Mean read length must be > {mean_read_length_threshold}bp, calculated {mean_read_length:.2f}."
+        )
+
+    return num_lines, errors
 
 
-def validate_single_end_reads(fastq_file: str | PathLike, expected_read_length: int | None = None) -> Generator[str]:
+def validate_single_end_reads(fastq_file: str | PathLike, mean_read_length_threshold: int) -> Generator[str]:
     """
     Validate a single-end FASTQ file.
 
     :param fastq_file: Path to the FASTQ file
-    :param expected_read_length: Expected read length (None if not known)
     :return: Generator of errors, if any.
+    :param mean_read_length_threshold: Exclusive minimum mean read length
     """
-    num_lines, read_lengths, errors = validate_fastq_file(fastq_file, expected_read_length=expected_read_length)
+    num_lines, errors = validate_fastq_file(fastq_file, mean_read_length_threshold=mean_read_length_threshold)
     yield from errors
 
 
 def validate_paired_end_reads(
-    fastq_file1: str | PathLike,
-    fastq_file2: str | PathLike,
-    expected_read_length: int | None = None,
+    fastq_file1: str | PathLike, fastq_file2: str | PathLike, mean_read_length_threshold: int
 ) -> Generator[str]:
     """
     Validate two paired-end FASTQ files.
 
     :param fastq_file1: Path to the first FASTQ file (Read 1)
     :param fastq_file2: Path to the second FASTQ file (Read 2)
-    :param expected_read_length: Expected read length (None if not known)
+    :param mean_read_length_threshold: Exclusive minimum mean read length
     :return: Generator of errors, if any.
     """
-    num_lines_file1, read_lengths_file1, errors_file1 = validate_fastq_file(
-        fastq_file1, expected_read_length=expected_read_length
+    num_lines_file1, errors_file1 = validate_fastq_file(
+        fastq_file1, mean_read_length_threshold=mean_read_length_threshold
     )
     yield from errors_file1
-    num_lines_file2, read_lengths_file2, errors_file2 = validate_fastq_file(
-        fastq_file2, expected_read_length=expected_read_length
+    num_lines_file2, errors_file2 = validate_fastq_file(
+        fastq_file2, mean_read_length_threshold=mean_read_length_threshold
     )
     yield from errors_file2
 
