@@ -57,10 +57,10 @@ rule init_db:
     input:
         db_config_path=cfg_path("config_paths/db"),
     output:
-        marker=touch("results/db/init.marker"),
+        marker=touch("<results>/db/init.marker"),
     log:
-        stdout="logs/db/init.stdout.log",
-        stderr="logs/db/init.stderr.log",
+        stdout="<logs>/db/init.stdout.log",
+        stderr="<logs>/db/init.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -75,7 +75,7 @@ rule scan_inbox:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
     output:
         submissions=perhaps_temp(
-            "results/scan_inbox/{submitter_id}/{inbox}/submissions.json"
+            "<results>/scan_inbox/{submitter_id}/{inbox}/submissions.json"
         ),
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
@@ -83,8 +83,8 @@ rule scan_inbox:
     conda:
         "envs/grzctl.yaml"
     log:
-        stdout="logs/scan_inbox/{submitter_id}/{inbox}.stdout.log",
-        stderr="logs/scan_inbox/{submitter_id}/{inbox}.stderr.log",
+        stdout="<logs>/scan_inbox/{submitter_id}/{inbox}.stdout.log",
+        stderr="<logs>/scan_inbox/{submitter_id}/{inbox}.stderr.log",
     script:
         "scripts/scan_inbox.py"
 
@@ -97,14 +97,14 @@ rule filter_single_submission:
         submissions=rules.scan_inbox.output.submissions,
     output:
         filtered_submission=temp(
-            "results/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.json"
+            "<results>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.json"
         ),
     params:
         submission_id=lambda wildcards: wildcards.submission_id,
     conda:
         "envs/grzctl.yaml"
     log:
-        stderr="logs/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.stderr.log",
+        stderr="<logs>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.stderr.log",
     shell:
         """(
         jq --arg sid "{params.submission_id}" '[.[] | select(.submission_id == $sid)]' {input.submissions} > {output.filtered_submission}
@@ -122,10 +122,10 @@ rule sync_database:
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:
-        submissions=temp("results/sync_database/submissions.json"),  # should always be transient
+        submissions=temp("<results>/sync_database/submissions.json"),  # should always be transient
     log:
-        stdout="logs/sync_database.stdout.log",
-        stderr="logs/sync_database.stderr.log",
+        stdout="<logs>/sync_database.stdout.log",
+        stderr="<logs>/sync_database.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -140,12 +140,12 @@ checkpoint select_submissions:
         submissions=rules.sync_database.output.submissions,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        submissions_batch="results/select_submissions/pending_batch.txt",
+        submissions_batch="<results>/select_submissions/pending_batch.txt",
     params:
         batch_limit=config["batch"].get("limit", None),
     log:
-        stdout="logs/select_submissions.stdout.log",
-        stderr="logs/select_submissions.stderr.log",
+        stdout="<logs>/select_submissions.stdout.log",
+        stderr="<logs>/select_submissions.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -169,7 +169,7 @@ rule metadata:
         db_sync_marker=rules.sync_database.output.submissions,
     output:
         metadata=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}.metadata.json"
+            "<results>/{submitter_id}/{inbox}/{submission_id}.metadata.json"
         ),
     params:
         s3_access_key=register_s3_access_key,
@@ -178,8 +178,8 @@ rule metadata:
         s3_metadata_key=get_s3_metadata_key,
         s3_endpoint_url=get_endpoint_url,
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/download.metadata.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/download.metadata.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stderr.log",
     conda:
         "envs/s3.yaml"
     shell:
@@ -198,7 +198,7 @@ rule download:
         db_config_path=cfg_path("config_paths/db"),
     output:
         data=perhaps_temp(
-            directory("results/{submitter_id}/{inbox}/{submission_id}/data")
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/data")
         ),
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
@@ -206,8 +206,8 @@ rule download:
     resources:
         disk=estimate_download_size,
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -224,7 +224,7 @@ rule decrypt:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        marker=touch("results/{submitter_id}/{inbox}/{submission_id}/decrypted"),
+        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
     params:
         grz_private_key_passphrase=os.environ.get(
             "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"
@@ -232,8 +232,8 @@ rule decrypt:
     resources:
         disk=estimate_decrypt_size,
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -253,15 +253,15 @@ checkpoint validate:
         db_config_path=cfg_path("config_paths/db"),
     output:
         validation_flag=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}/validation_flag"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag"
         ),
         validation_errors=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"
         ),
     threads: 4
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/validate.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/validate.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -277,11 +277,11 @@ rule consent:
         decrypted_marker=rules.decrypt.output.marker,
     output:
         consent_flag=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}/consent_flag"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag"
         ),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -302,12 +302,12 @@ rule re_encrypt:
         nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        marker=touch("results/{submitter_id}/{inbox}/{submission_id}/re-encrypted"),
+        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted"),
     resources:
         disk=estimate_re_encrypt_size,
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -326,10 +326,10 @@ rule archive:
         nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        marker=touch("results/{submitter_id}/{inbox}/{submission_id}/archived"),
+        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/archived"),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -346,11 +346,11 @@ rule generate_pruefbericht:
         archived_marker=rules.archive.output.marker,
     output:
         pruefbericht=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"
         ),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -368,7 +368,7 @@ rule submit_pruefbericht:
         db_config_path=cfg_path("config_paths/db"),
     output:
         answer=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"
         ),
     params:
         custom_ca_cert=lambda _: (
@@ -377,8 +377,8 @@ rule submit_pruefbericht:
             else ""
         ),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -387,14 +387,14 @@ rule submit_pruefbericht:
 
 rule setup_qc_workflow:
     output:
-        workflow_dir=directory("results/resources/GRZ_QC_Workflow/"),
+        workflow_dir=directory("<resources>/GRZ_QC_Workflow/"),
     params:
         revision=get_qc_workflow_revision,
     conda:
         "envs/base.yaml"
     log:
-        stdout="logs/qc/setup_qc_workflow.stdout.log",
-        stderr="logs/qc/setup_qc_workflow.stderr.log",
+        stdout="<logs>/qc/setup_qc_workflow.stdout.log",
+        stderr="<logs>/qc/setup_qc_workflow.stderr.log",
     shell:
         """
         (
@@ -423,8 +423,8 @@ rule prepare_qc_workflow_references:
         disk="60G",
         runtime="3h",
     log:
-        stdout="logs/qc/prepare_qc_workflow_references.stdout.log",
-        stderr="logs/qc/prepare_qc_workflow_references.stderr.log",
+        stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
+        stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
     handover: True
     conda:
         "envs/nextflow.yaml"
@@ -440,10 +440,10 @@ rule set_status_to_qcing:
         db_config_path=cfg_path("config_paths/db"),
         validation_flag=rules.validate.output.validation_flag,
     output:
-        marker=touch("results/{submitter_id}/{inbox}/{submission_id}/qcing.marker"),
+        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/qcing.marker"),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -463,11 +463,11 @@ rule qc:
         qcing_marker=rules.set_status_to_qcing.output.marker,
         reference_path=rules.prepare_qc_workflow_references.output.references_dir,
     output:
-        outdir=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/out"),
-        workdir=perhaps_temp("results/{submitter_id}/{inbox}/{submission_id}/qc/work"),
+        outdir=perhaps_temp("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out"),
+        workdir=perhaps_temp("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work"),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
     params:
         pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
         profile=["conda"],
@@ -485,13 +485,13 @@ rule process_qc_results:
         db_config_path=cfg_path("config_paths/db"),
     output:
         marker=touch(
-            "results/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"
         ),
     params:
         report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
     script:
         "scripts/process_qc_results.sh"
 
@@ -510,13 +510,13 @@ rule clean:
         db_config_path=cfg_path("config_paths/db"),
     output:
         clean_results=perhaps_temp(
-            "results/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}"
         ),
     params:
         mode=config.get("auto-cleanup", "none"),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stderr.log",
     conda:
         "envs/grzctl.yaml"
     script:
@@ -529,12 +529,12 @@ rule clean:
 #     """
 #     output:
 #         taetigkeitsbericht=perhaps_temp(
-#             "results/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.pdf"
+#             "<results>/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.pdf"
 #         ),
 #     params:
 #         db_config_path=cfg_path("config_paths/db"),
 #     log:
-#         "logs/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.log",
+#         "<logs>/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.log",
 #     shell:
 #         """
 #         # (generate taetigkeitsbericht using submission DB via {input.db_config_path}) 2> {log}
@@ -550,11 +550,11 @@ rule finalize_fail:
         unpack(get_failed_finalize_inputs),
     output:
         target=touch(
-            "results/{submitter_id}/{inbox}/{submission_id}/target/failed_validation.{qc_status}"
+            "<results>/{submitter_id}/{inbox}/{submission_id}/target/failed_validation.{qc_status}"
         ),
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stderr.log",
     conda:
         "envs/grzctl.yaml"
     shell:
@@ -577,10 +577,10 @@ rule finalize_success:
     input:
         unpack(get_successful_finalize_inputs),
     output:
-        target="results/{submitter_id}/{inbox}/{submission_id}/target/{qc_status}",
+        target="<results>/{submitter_id}/{inbox}/{submission_id}/target/{qc_status}",
     log:
-        stdout="logs/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stdout.log",
-        stderr="logs/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stderr.log",
     conda:
         "envs/grzctl.yaml"
     shell:
@@ -602,4 +602,4 @@ rule process_submission:
     input:
         get_final_submission_target,
     output:
-        touch("results/{submitter_id}/{inbox}/{submission_id}/processed/{qc_status}"),
+        touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed/{qc_status}"),
