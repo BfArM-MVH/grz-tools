@@ -8,7 +8,7 @@ version = "0.1.0"
 [tasks]
 
 [dependencies]
-snakemake = ">=9.12.0,<10"
+snakemake = ">=9.13.2,<10"
 snakefmt = ">=0.11.2,<0.12"
 conda = ">=25.9.0,<26"
 grz-check = ">=0.1.0,<0.2"
@@ -18,6 +18,7 @@ ripgrep = ">=14.1.1,<15"
 nextflow = ">=25.4.8,<26"
 s5cmd = ">=2.3.0,<3"
 minio-client = ">=2025.8.13.8.35.41,<2026"
+sqlite = ">=3.50.4,<4"
 
 [pypi-dependencies]
 grz-pydantic-models = { path = "../../grz-pydantic-models", editable = true }
