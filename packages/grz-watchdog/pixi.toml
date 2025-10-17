@@ -8,7 +8,7 @@ version = "0.1.0"
 [tasks]
 
 [dependencies]
-snakemake = ">=9.12.0,<10"
+snakemake = ">=9.13.2,<10"
 snakefmt = ">=0.11.2,<0.12"
 #snakemake-storage-plugin-s3 = ">=0.3.6,<0.4"
 #snakemake-executor-plugin-slurm = ">=1.8.0,<2"
