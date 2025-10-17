@@ -62,12 +62,11 @@ class Patient(StrictIgnoringBaseModel):
     reference: str | None = None
 
 
-EXPECTED_SCOPE = CodeableConcept(
-    coding=[Coding(system="http://terminology.hl7.org/CodeSystem/consentscope", code="research")]
-)
-EXPECTED_CATEGORIES = (
-    CodeableConcept(coding=[Coding(system="http://loinc.org", code="57016-8")]),
-    CodeableConcept(
+EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
+EXPECTED_SCOPE_CODING_CODE = "research"
+EXPECTED_CATEGORIES = {
+    "loinc": CodeableConcept(coding=[Coding(system="http://loinc.org", code="57016-8")]),
+    "mii": CodeableConcept(
         coding=[
             Coding(
                 system="https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
@@ -75,7 +74,7 @@ EXPECTED_CATEGORIES = (
             )
         ]
     ),
-)
+}
 
 
 class Consent(StrictIgnoringBaseModel):
@@ -89,19 +88,39 @@ class Consent(StrictIgnoringBaseModel):
 
     @model_validator(mode="after")
     def ensure_valid_scope(self):
-        if self.scope != EXPECTED_SCOPE:
+        if len(self.scope.coding) != 1:
+            raise ValueError(f"consent.scope.coding must contain only a single element, not {len(self.scope.coding)}")
+
+        if self.scope.coding[0].system != EXPECTED_SCOPE_CODING_SYSTEM:
             raise ValueError(
-                "scope was not the expected value.\n"
-                f"Expected: {EXPECTED_SCOPE.model_dump(exclude_defaults=True)}\n"
-                f"Observed: {self.scope.model_dump(exclude_defaults=True)}\n"
+                f"Expected '{EXPECTED_SCOPE_CODING_SYSTEM}' in consent.scope.coding[0].system, got '{self.scope.coding[0].system}'"
             )
+
+        if self.scope.coding[0].code != EXPECTED_SCOPE_CODING_CODE:
+            raise ValueError(
+                f"Expected '{EXPECTED_SCOPE_CODING_CODE}' in consent.scope.coding[0].code, got '{self.scope.coding[0].code}'"
+            )
+
         return self
 
     @model_validator(mode="after")
     def ensure_valid_category(self):
-        for category in EXPECTED_CATEGORIES:
-            if category not in self.category:
+        categories_to_find = set(EXPECTED_CATEGORIES.keys())
+        for i, category in enumerate(self.category):
+            if len(category.coding) != 1:
                 raise ValueError(
-                    f"Expected {category.model_dump(exclude_defaults=True)} in categories but couldn't find it"
+                    f"consent.category[{i}].coding must contain only a single element, not {len(category.coding)}"
                 )
+            category_minimal = CodeableConcept(
+                coding=[Coding(system=category.coding[0].system, code=category.coding[0].code)]
+            )
+            for expected_category_name, expected_category in EXPECTED_CATEGORIES.items():
+                if expected_category == category_minimal:
+                    if expected_category_name not in categories_to_find:
+                        raise ValueError(f"Duplicate required category in consent.category: {category}")
+                    categories_to_find.remove(expected_category_name)
+
+        if categories_to_find:
+            raise ValueError(f"Missing expected categories: {[EXPECTED_CATEGORIES[c] for c in categories_to_find]}")
+
         return self
