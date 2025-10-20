@@ -73,16 +73,6 @@ class TestProcessSingle(BaseTest):
         s3_path_to_corrupt = f"adm/{BUCKET_INBOX}/{submission_id}/{encrypted_file_key}"
         container_temp_path = f"/tmp/{Path(encrypted_file_key).name}"
 
-        run_in_container(
-            *PIXI_RUN_PREFIX,
-            "mc",
-            "alias",
-            "set",
-            "adm",
-            "http://minio:9000",
-            "minioadmin",
-            "minioadmin",
-        )
         run_in_container(*PIXI_RUN_PREFIX, "mc", "cp", s3_path_to_corrupt, container_temp_path)
         corruption_command = f"printf '\\1' | dd of={container_temp_path} bs=1 count=1 conv=notrunc"
         run_in_container("sh", "-c", corruption_command)
