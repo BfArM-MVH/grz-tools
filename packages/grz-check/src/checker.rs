@@ -776,7 +776,7 @@ mod tests {
         let jobs = vec![Job::PairedFastq(PairedFastqJob {
             fq1_path,
             fq2_path,
-            length_check: ReadLengthCheck::Fixed(4),
+            length_check: ReadLengthCheck::Fixed(3),
             fq1_size,
             fq2_size,
         })];
