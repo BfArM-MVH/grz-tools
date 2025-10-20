@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 import requests
-
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -346,14 +345,9 @@ class BaseTest:
         """Verifies that the S3 inbox was cleaned correctly."""
         print(f"Verifying inbox state for {submission_id}…")
 
-        _ = run_in_container(
-            *PIXI_RUN_PREFIX,
-            "mc alias set verify http://minio:9000 minioadmin minioadmin",
-            service=GRZ_WATCHDOG_SERVICE_NAME,
-        )
         result = run_in_container(
             *PIXI_RUN_PREFIX,
-            f"mc ls --recursive verify/{BUCKET_INBOX}/{submission_id}",
+            f"mc ls --recursive adm/{BUCKET_INBOX}/{submission_id}",
             service=GRZ_WATCHDOG_SERVICE_NAME,
         )
 
@@ -366,13 +360,7 @@ class BaseTest:
     def _verify_archived(self, submission_id: str, bucket: str):
         """Verifies that a submission was correctly archived to the target bucket."""
         print(f"Verifying archive state for {submission_id} in bucket {bucket}...")
-        archive_path = f"verify/{bucket}/{submission_id}"
-
-        _ = run_in_container(
-            *PIXI_RUN_PREFIX,
-            "mc alias set verify http://minio:9000 minioadmin minioadmin",
-            service=GRZ_WATCHDOG_SERVICE_NAME,
-        )
+        archive_path = f"adm/{bucket}/{submission_id}"
         result = run_in_container(*PIXI_RUN_PREFIX, f"mc ls {archive_path}", service=GRZ_WATCHDOG_SERVICE_NAME)
 
         assert "metadata/" in result.stdout, "Archived submission missing metadata directory: " + result.stdout
@@ -407,6 +395,23 @@ def setup_class_environment():
 
     run_in_container("mc", "mb", "--ignore-existing", f"adm/{BUCKET_INBOX}", service=MINIO_SERVICE_NAME)
     yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_mc_alias(test_environment):
+    try:
+        run_in_container(
+            *PIXI_RUN_PREFIX,
+            "mc",
+            "alias",
+            "set",
+            "adm",
+            "http://minio:9000",
+            "minioadmin",
+            "minioadmin",
+        )
+    except subprocess.CalledProcessError as e:
+        pytest.fail(f"Failed to set up MinIO client alias. Error: {e.stderr}", pytrace=False)
 
 
 @pytest.fixture(autouse=True)
