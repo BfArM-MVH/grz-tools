@@ -24,10 +24,8 @@ pub struct Stats {
 
 impl Stats {
     pub fn mean_read_length(self) -> Option<f64> {
-        match self.total_read_length {
-            None => None,
-            Some(total_read_length) => Some((total_read_length as f64) / (self.num_records as f64)),
-        }
+        self.total_read_length
+            .map(|total_read_length| (total_read_length as f64) / (self.num_records as f64))
     }
 }
 
