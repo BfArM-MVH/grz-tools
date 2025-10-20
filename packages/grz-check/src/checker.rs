@@ -497,8 +497,9 @@ pub fn run_check(
                     output.display()
                 ));
                 anyhow::bail!(
-                    "A validation error occurred in {}. Aborting.",
-                    failed_report.primary_path().display()
+                    "A validation error occurred in {}. Aborting.\n{:?}",
+                    failed_report.primary_path().display(),
+                    &failed_report
                 );
             }
             StopReason::Interrupted => {
