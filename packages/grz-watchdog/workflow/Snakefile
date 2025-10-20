@@ -127,7 +127,7 @@ rule sync_database:
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:
-        submissions=temp("<results>/sync_database/submissions.json"),  # should always be transient
+        submissions=temp("<results>/sync_database/submissions.json"),
     log:
         stdout="<logs>/sync_database.stdout.log",
         stderr="<logs>/sync_database.stderr.log",
@@ -145,7 +145,7 @@ checkpoint select_submissions:
         submissions=rules.sync_database.output.submissions,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        submissions_batch="<results>/select_submissions/pending_batch.txt",
+        submissions_batch=temp("<results>/select_submissions/pending_batch.txt"),
     params:
         batch_limit=config["batch"].get("limit", None),
     log:
