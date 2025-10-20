@@ -27,4 +27,4 @@ config_paths:
   pruefbericht: "config/configs/pruefbericht.yaml"
 
 qc:
-  revision: "v1.1.5"
+  revision: "v1.2.0"

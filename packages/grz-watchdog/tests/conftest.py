@@ -129,7 +129,7 @@ def wait_for_services_ready(docker_compose_file: str, services_to_check: list[st
 
 
 @pytest.fixture(scope="session", autouse=True)
-def test_environment():
+def test_environment(test_data_dir: Path):
     """Starts/stops container environment."""
     try:
         print("Starting TEST container environment in detached mode…")
@@ -141,6 +141,30 @@ def test_environment():
 
         wait_for_services_ready(
             DOCKER_COMPOSE_FILE, services_to_check=[GRZ_WATCHDOG_SERVICE_NAME, GRZ_SUBMITTER_SERVICE_NAME]
+        )
+
+        host_reference_path = test_data_dir / "references" / "references"
+        host_wgs_data_path = test_data_dir / "wgs"
+
+        container_data_root = "/workdir/test_data/grz-mini-test-data"
+        container_reference_dest = f"{container_data_root}/references"
+        container_wgs_dest = f"{container_data_root}/submissions/wgs"
+
+        run_in_container("mkdir", "-p", str(Path(container_reference_dest).parent))
+        run_in_container("mkdir", "-p", str(Path(container_wgs_dest).parent))
+
+        subprocess.run(
+            [
+                CONTAINER_RUNTIME,
+                "cp",
+                str(host_reference_path),
+                f"{GRZ_WATCHDOG_CONTAINER_NAME}:{container_reference_dest}",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [CONTAINER_RUNTIME, "cp", str(host_wgs_data_path), f"{GRZ_WATCHDOG_CONTAINER_NAME}:{container_wgs_dest}"],
+            check=True,
         )
 
         print("All services are up and ready for testing.")
@@ -229,20 +253,26 @@ class BaseTest:
 
     def _handle_watchdog_failure(self, e: subprocess.CalledProcessError):
         """Dump logs from a failed grz-watchdog run."""
-        log_path_pattern = re.compile(r"logs/[\w/.-]+\.log")
-        found_logs = sorted(list(set(log_path_pattern.findall(e.stderr))))
         print(e.stderr)
 
-        if not found_logs:
-            print("\nCould not automatically find any log file paths in Snakemake's stderr.")
+        log_line_pattern = re.compile(r"^\s*log:\s*(.*?)\s*\(check log", re.MULTILINE)
+        log_path_groups = log_line_pattern.findall(e.stderr)
+
+        failed_logs = []
+        for group in log_path_groups:
+            paths = [path.strip() for path in group.split(",")]
+            failed_logs.extend(paths)
+
+        if not failed_logs:
+            print("\nCould not automatically identify any specific log files for failed rules in Snakemake's stderr.")
             return
 
-        print(f"Found {len(found_logs)} log file(s) to dump: {', '.join(found_logs)}")
-        for log_path in found_logs:
+        print(f"Found {len(failed_logs)} log file(s) for failed rules: {', '.join(failed_logs)}")
+        for log_path in failed_logs:
             try:
                 full_path = f"/workdir/{log_path}"
                 log_content = run_in_container("cat", full_path)
-                print(f"\n--- CONTENTS OF {log_path} ---")
+                print(f"\n--- CONTENTS OF FAILED RULE LOG: {log_path} ---")
                 print(log_content.stdout)
             except subprocess.CalledProcessError as log_e:
                 print(f"\n--- Could not retrieve {log_path} ---\n{log_e.stderr}")
@@ -331,7 +361,7 @@ class BaseTest:
         expected_files = {"cleaned", "metadata/metadata.json"}
 
         assert files == expected_files, f"Inbox was not cleaned correctly. Found: {files}"
-        print("OK: Inbox is cleaned correctly.")
+        print("OK: Inbox has been cleaned correctly.")
 
     def _verify_archived(self, submission_id: str, bucket: str):
         """Verifies that a submission was correctly archived to the target bucket."""
@@ -349,6 +379,20 @@ class BaseTest:
         assert "files/" in result.stdout, "Archived submission missing files directory: " + result.stdout
         print(f"OK: Submission correctly archived in {bucket}.")
 
+    def _verify_qc_results_populated(self, submission_id: str):
+        """Verifies that detailed QC results were populated for a submission."""
+        print(f"Verifying QC results for {submission_id} in database…")
+        db_path = "/workdir/results/submissions.sqlite"
+        query = f"SELECT COUNT(*) FROM detailed_qc_results WHERE submission_id='{submission_id}';"
+
+        try:
+            result = run_in_container(*PIXI_RUN_PREFIX, "sqlite3", db_path, query)
+            count = int(result.stdout.strip())
+            assert count > 0, f"No detailed QC results found in the database for submission '{submission_id}'."
+            print(f"OK: Found {count} detailed QC result entries.")
+        except (subprocess.CalledProcessError, ValueError, AssertionError) as e:
+            pytest.fail(f"Failed to verify QC results for {submission_id}. Error: {e}")
+
 
 @pytest.fixture(scope="class")
 def setup_class_environment():
@@ -362,13 +406,25 @@ def setup_class_environment():
         run_in_container("sh", "-c", cleanup_command, service=MINIO_SERVICE_NAME)
 
     run_in_container("mc", "mb", "--ignore-existing", f"adm/{BUCKET_INBOX}", service=MINIO_SERVICE_NAME)
-    print("\n--- Finished cleaning ---")
+    yield
+
+
+@pytest.fixture(autouse=True)
+def clean_test_workspace():
+    """
+    Runs before each test function to ensure a clean working directory in the container.
+    """
+    print("\n--- Cleaning workspace before test ---")
+    try:
+        run_in_container("sh", "-c", "rm -rf /workdir/results/*")
+    except subprocess.CalledProcessError as e:
+        print(f"Workspace cleaning may have failed: {e.stderr}")
     yield
 
 
 def _create_variant_submission(base_dir: Path, variant_name_suffix: str, tmp_path: Path):
     """Create a modified submission with a different tanG."""
-    base_dir, tmp_dir = Path(base_dir), Path(tmp_path)
+    base_dir, _tmp_dir = Path(base_dir), Path(tmp_path)
     variant_dir = tmp_path / f"{base_dir.name}_{variant_name_suffix}"
     if variant_dir.exists():
         shutil.rmtree(variant_dir)
@@ -386,6 +442,5 @@ def _create_variant_submission(base_dir: Path, variant_name_suffix: str, tmp_pat
         f.write(metadata.model_dump_json(by_alias=True))
 
     submission_id = metadata.submission_id
-    print(metadata)
 
     return variant_dir, submission_id
