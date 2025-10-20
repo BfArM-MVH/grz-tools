@@ -1,4 +1,4 @@
-import shutil
+import os
 from operator import itemgetter
 from os import PathLike
 from typing import Literal
@@ -35,7 +35,7 @@ def get_submission_to_sync(wildcards):
         return [rules.filter_single_submission.output.filtered_submission]
     else:
         return expand(
-            "results/scan_inbox/{submitter}/{inbox}/submissions.json",
+            "<results>/scan_inbox/{submitter}/{inbox}/submissions.json",
             zip,
             submitter=map(itemgetter(0), ALL_INBOX_PAIRS),
             inbox=map(itemgetter(1), ALL_INBOX_PAIRS),
@@ -226,9 +226,43 @@ def get_qc_workflow_revision(wildcards: Wildcards) -> str:
 
 
 def get_qc_workflow_references_directory() -> str:
-    return directory(
-        config["qc"].get("reference_directory", "results/resources/references")
-    )
+    return directory(config["qc"].get("reference_directory", "<resources>/references"))
+
+
+def get_prepare_qc_nextflow_extra_params(wildcards, input, output):
+    work_dir = os.path.abspath(output.work_dir)
+    extra = config.get("qc", {}).get("prepare-qc", {}).get("extra", "")
+    return f"-resume -work-dir {work_dir} {extra}"
+
+
+def get_run_qc_nextflow_extra_params(wildcards, input, output):
+    work_dir = os.path.abspath(output.work_dir)
+    extra = config.get("qc", {}).get("run-qc", {}).get("extra", "")
+    return f"-resume -work-dir {work_dir} {extra}"
+
+
+def get_prepare_qc_nextflow_configs(wildcards):
+    config_paths = config.get("qc", {}).get("prepare-qc", {}).get("configs", [])
+    if not config_paths:
+        return ""
+    return " ".join([f"-c {os.path.abspath(p)}" for p in config_paths])
+
+
+def get_prepare_qc_nextflow_profiles(wildcards):
+    profiles = config.get("qc", {}).get("prepare-qc", {}).get("profiles", ["conda"])
+    return ",".join(profiles)
+
+
+def get_run_qc_nextflow_configs(wildcards):
+    config_paths = config.get("qc", {}).get("run-qc", {}).get("configs", [])
+    if not config_paths:
+        return ""
+    return " ".join([f"-c {os.path.abspath(p)}" for p in config_paths])
+
+
+def get_run_qc_nextflow_profiles(wildcards):
+    profiles = config.get("qc", {}).get("run-qc", {}).get("profiles", ["conda"])
+    return ",".join(profiles)
 
 
 ## RESOURCE ESTIMATION FUNCTIONS

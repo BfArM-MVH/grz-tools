@@ -88,8 +88,20 @@ properties:
         description: "Revision of the GRZ_QC_Workflow to use."
       reference_directory:
         type: string
-        default: "results/resources/references"
-        description: "Path to the reference directory. Defaults to 'results/resources/references' (relative to the workdir)."
+        default: "resources/references"
+        description: "Path to the reference directory. Defaults to 'resources/references' (relative to the workdir)."
+      prepare-qc:
+        type: object
+        properties:
+          extra:
+            type: string
+            description: "A string of any additional command-line arguments for the Nextflow 'reference preparation' run."
+      run-qc:
+        type: object
+        properties:
+          extra:
+            type: string
+            description: "A string of any additional command-line arguments for the main Nextflow 'QC' run."
     required:
       - revision
 required:

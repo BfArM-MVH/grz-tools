@@ -104,7 +104,7 @@ services:
       - GRZ_PRUEFBERICHT_MOCK=true
     # Keep the service alive for testing after startup
     entrypoint: /bin/sh
-    command: -c 'trap "exit 0" SIGTERM; while true; do sleep 1; done'
+    command: -c 'trap "exit 0" TERM; while true; do sleep 1; done'
 
   grz-submitter:
     <<: *grz-image
@@ -121,7 +121,7 @@ services:
       - GRZ_S3__ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
       - GRZ_S3__SECRET=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
     entrypoint: /bin/sh
-    command: -c 'trap "exit 0" SIGTERM; while true; do sleep 1; done'
+    command: -c 'trap "exit 0" TERM; while true; do sleep 1; done'
 
 
 volumes:

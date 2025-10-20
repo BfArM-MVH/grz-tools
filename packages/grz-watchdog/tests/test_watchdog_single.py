@@ -46,12 +46,10 @@ class TestProcessSingle(BaseTest):
         Test failure path for submission with corrupted (encrypted) fastq file.
         """
         test_data_dir = Path(test_data_dir) / "panel"
-        variant3_dir, sub_id3 = _create_variant_submission(test_data_dir, "corrupted", tmp_path)
-        submission_id = sub_id3
+        variant_corrupted_dir, submission_id = _create_variant_submission(test_data_dir, "corrupted", tmp_path)
+        self._submit_data(variant_corrupted_dir)
 
-        self._submit_data(variant3_dir)
-
-        metadata_path = variant3_dir / "metadata" / "metadata.json"
+        metadata_path = variant_corrupted_dir / "metadata" / "metadata.json"
         with open(metadata_path) as f:
             metadata = GrzSubmissionMetadata(**json.load(f))
 
@@ -100,3 +98,62 @@ class TestProcessSingle(BaseTest):
             assert any("files/" in l for l in result.stdout.strip().splitlines())
         except subprocess.CalledProcessError as e:
             pytest.fail(f"Failed to check inbox state for {submission_id}. Error: {e.stderr}")
+
+    def test_single_valid_submission_with_qc(self, test_data_dir: Path, tmp_path: Path):
+        """
+        Test the successful end-to-end processing of a single valid submission including the QC pipeline.
+        """
+        submission_type = "panel"
+        test_data_dir = Path(test_data_dir) / submission_type
+        variant_qc_dir, submission_id = _create_variant_submission(test_data_dir, "qc", tmp_path)
+        self._submit_data(variant_qc_dir)
+
+        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed/with_qc"
+        self._run_watchdog(target_file)
+
+        self._verify_db_state(submission_id, expected_state="Finished")
+        self._verify_qc_results_populated(submission_id)
+        self._verify_inbox_cleaned(submission_id)
+        self._verify_archived(submission_id, bucket=BUCKET_NONCONSENTED)
+
+    def test_recovery_after_failure(self, test_data_dir: Path, tmp_path: Path):
+        """
+        Tests that the workflow can process a new, valid submission even after a
+        previous run failed, leaving potentially stale intermediate files.
+        """
+        base_submission_dir = test_data_dir / "panel"
+        fail_dir, fail_id = _create_variant_submission(base_submission_dir, "fail_run", tmp_path)
+        self._submit_data(fail_dir)
+
+        metadata_path = fail_dir / "metadata" / "metadata.json"
+        with open(metadata_path) as f:
+            metadata = GrzSubmissionMetadata(**json.load(f))
+
+        file_to_corrupt_meta = next(
+            file_meta
+            for donor in metadata.donors
+            for lab_datum in donor.lab_data
+            if lab_datum.sequence_data
+            for file_meta in lab_datum.sequence_data.files
+            if file_meta.file_type == FileType.fastq
+        )
+
+        s3_path_to_corrupt = f"adm/{BUCKET_INBOX}/{fail_id}/files/{file_to_corrupt_meta.encrypted_file_path()}"
+        container_temp_path = f"/tmp/{Path(file_to_corrupt_meta.file_path).name}.corrupt"
+        run_in_container(*PIXI_RUN_PREFIX, "mc", "cp", s3_path_to_corrupt, container_temp_path)
+        run_in_container("sh", "-c", f"printf '\\0' | dd of={container_temp_path} bs=1 count=1 conv=notrunc")
+        run_in_container(*PIXI_RUN_PREFIX, "mc", "cp", container_temp_path, s3_path_to_corrupt)
+
+        fail_target = f"results/{SUBMITTER_ID}/{INBOX}/{fail_id}/processed/without_qc"
+        self._run_watchdog_expect_fail(fail_target)
+        self._verify_db_state(fail_id, expected_state="Error")
+
+        pass_dir, pass_id = _create_variant_submission(base_submission_dir, "pass_run", tmp_path)
+        self._submit_data(pass_dir)
+
+        pass_target = f"results/{SUBMITTER_ID}/{INBOX}/{pass_id}/processed/without_qc"
+        self._run_watchdog(pass_target)
+
+        self._verify_db_state(pass_id, expected_state="Finished")
+        self._verify_inbox_cleaned(pass_id)
+        self._verify_archived(pass_id, bucket=BUCKET_NONCONSENTED)

@@ -28,17 +28,24 @@ wildcard_constraints:
     inbox=r"|".join(set(map(itemgetter(1), ALL_INBOX_PAIRS))),
     qc_status=r"with_qc|without_qc",
 
+
 if on_start := config.get("handlers", {}).get("on-start"):
+
     onstart:
         shell(on_start)
 
+
 if on_error := config.get("handlers", {}).get("on-error"):
+
     onerror:
         shell(on_error)
 
+
 if on_success := config.get("handlers", {}).get("on-success"):
+
     onsuccess:
         shell(on_success)
+
 
 envvars:
     "GRZ_S3__ACCESS_KEY",
@@ -74,9 +81,7 @@ rule scan_inbox:
     input:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
     output:
-        submissions=perhaps_temp(
-            "<results>/scan_inbox/{submitter_id}/{inbox}/submissions.json"
-        ),
+        submissions=temp("<results>/scan_inbox/{submitter_id}/{inbox}/submissions.json"),
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
         s3_secret=os.environ.get("GRZ_S3__SECRET"),
@@ -388,6 +393,7 @@ rule submit_pruefbericht:
 rule setup_qc_workflow:
     output:
         workflow_dir=directory("<resources>/GRZ_QC_Workflow/"),
+        pipeline="<resources>/GRZ_QC_Workflow/main.nf",
     params:
         revision=get_qc_workflow_revision,
     conda:
@@ -398,9 +404,7 @@ rule setup_qc_workflow:
     shell:
         """
         (
-          git clone https://github.com/BfArM-MVH/GRZ_QC_Workflow.git {output.workflow_dir}
-          cd {output.workflow_dir}
-          git checkout {params.revision}
+          git clone --branch {params.revision} --depth 1 https://github.com/BfArM-MVH/GRZ_QC_Workflow.git {output.workflow_dir}
         ) >{log.stdout} 2> {log.stderr}
         """
 
@@ -410,13 +414,21 @@ rule prepare_qc_workflow_references:
         # marked as ancient so as not to re-generate references if not needed
         # if you need to re-generate references, you can delete the references directory manually
         workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
+        pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
+        custom_configs=lambda wc: config.get("qc", {})
+        .get("prepare-qc", {})
+        .get("configs", []),
     output:
         references_dir=get_qc_workflow_references_directory(),
+        launch_dir=directory("<resources>/shared_qc_launchdir"),
+        work_dir=temp(directory("<resources>/prepare_qc_workflow/work")),
     params:
-        pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
-        profile=["test_GRCh37", "test_GRCh38", "conda"],
-        reference_path=lambda wildcards, output: output.references_dir,
-        extra=lambda wildcards, input: f"-resume -work-dir {input.workflow_dir}",
+        profiles=get_prepare_qc_nextflow_profiles,
+        configs=get_prepare_qc_nextflow_configs,
+        extra=get_prepare_qc_nextflow_extra_params,
+        reference_path=lambda wildcards, output: os.path.abspath(output.references_dir),
+        outdir=lambda wildcards, output: os.path.abspath(output.references_dir),
+        absolute_pipeline_path=lambda wildcards, input: os.path.abspath(input.pipeline),
     threads: 1
     resources:
         mem="90G",
@@ -428,8 +440,20 @@ rule prepare_qc_workflow_references:
     handover: True
     conda:
         "envs/nextflow.yaml"
-    wrapper:
-        "v7.6.1/utils/nextflow"
+    shell:
+        """
+        (
+        mkdir -p {output.work_dir}
+        mkdir -p {output.launch_dir}
+        cd {output.launch_dir}
+        nextflow run {params.absolute_pipeline_path} \
+        {params.configs} \
+        -profile {params.profiles} \
+        --outdir {params.outdir} \
+        --reference_path {params.reference_path} \
+        {params.extra}
+        ) > {log.stdout} 2> {log.stderr}
+        """
 
 
 rule set_status_to_qcing:
@@ -459,29 +483,57 @@ rule qc:
         decryption_marker=rules.decrypt.output.marker,
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
-        workflow_dir=rules.setup_qc_workflow.output.workflow_dir,
+        workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
+        pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
+        launch_dir=rules.prepare_qc_workflow_references.output.launch_dir,
         qcing_marker=rules.set_status_to_qcing.output.marker,
         reference_path=rules.prepare_qc_workflow_references.output.references_dir,
+        custom_configs=lambda wc: config.get("qc", {})
+        .get("run-qc", {})
+        .get("configs", []),
     output:
-        outdir=perhaps_temp("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out"),
-        workdir=perhaps_temp("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work"),
+        out_dir=perhaps_temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out")
+        ),
+        work_dir=perhaps_temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work")
+        ),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
     params:
-        pipeline=lambda wildcards, input: Path(input.workflow_dir) / "main.nf",
-        profile=["conda"],
-        extra=lambda wildcards, output: f"-resume -work-dir {output.workdir}",
+        profiles=get_run_qc_nextflow_profiles,
+        configs=get_run_qc_nextflow_configs,
+        extra=get_run_qc_nextflow_extra_params,
+        outdir=lambda wildcards, output: os.path.abspath(output.out_dir),
+        reference_path=lambda wildcards, input: os.path.abspath(input.reference_path),
+        absolute_pipeline_path=lambda wildcards, input: os.path.abspath(input.pipeline),
+        absolute_submission_basepath=lambda wildcards, input: os.path.abspath(
+            input.submission_basepath
+        ),
     handover: True
     conda:
         "envs/nextflow.yaml"
-    wrapper:
-        "v7.6.1/utils/nextflow"
+    shell:
+        """
+        (
+        mkdir -p {output.work_dir}
+        mkdir -p {output.out_dir}
+        cd {input.launch_dir}
+        nextflow run {params.absolute_pipeline_path} \
+        {params.configs} \
+        -profile {params.profiles} \
+        --outdir {params.outdir} \
+        --reference_path {params.reference_path} \
+        --submission_basepath {params.absolute_submission_basepath} \
+        {params.extra}
+        ) > {log.stdout} 2> {log.stderr}
+        """
 
 
 rule process_qc_results:
     input:
-        qc_results=rules.qc.output.outdir,
+        qc_results=rules.qc.output.out_dir,
         db_config_path=cfg_path("config_paths/db"),
     output:
         marker=touch(
@@ -492,6 +544,8 @@ rule process_qc_results:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
+    conda:
+        "envs/grzctl.yaml"
     script:
         "scripts/process_qc_results.sh"
 
