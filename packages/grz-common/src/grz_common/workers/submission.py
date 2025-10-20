@@ -236,6 +236,16 @@ class Submission:
                 if not lab_data.sequence_data:
                     continue
 
+                threshold_definitions = load_thresholds()
+                thresholds = threshold_definitions[
+                    (
+                        self.metadata.content.submission.genomic_study_subtype,
+                        lab_data.library_type,
+                        lab_data.sequence_subtype,
+                    )
+                ]
+                mean_read_length_threshold = thresholds["meanReadLength"]
+
                 sequence_data = lab_data.sequence_data
                 fastq_files = [f for f in sequence_data.files if f.file_type == FileType.fastq]
                 bam_files = [f for f in sequence_data.files if f.file_type == FileType.bam]
@@ -252,10 +262,8 @@ class Submission:
                             r1_path = self.files_dir / r1_meta.file_path
                             r2_path = self.files_dir / r2_meta.file_path
                             if should_check_file(r1_path, r1_meta) or should_check_file(r2_path, r2_meta):
-                                r1_read_len = -1  # disable read length check for now; r1_meta.read_length
-                                r2_read_len = -1  # disable read length check for now; r2_meta.read_length
                                 grz_check_args.extend(
-                                    ["--fastq-paired", str(r1_path), str(r1_read_len), str(r2_path), str(r2_read_len)]
+                                    ["--fastq-paired", str(r1_path), str(r2_path), str(mean_read_length_threshold)]
                                 )
                             checked_files.add(r1_path)
                             checked_files.add(r2_path)
@@ -265,8 +273,7 @@ class Submission:
                         if f_path in checked_files:
                             continue
                         if should_check_file(f_path, f_meta):
-                            read_len = -1  # disable read length check for now; f_meta.read_length
-                            grz_check_args.extend(["--fastq-single", str(f_path), str(read_len)])
+                            grz_check_args.extend(["--fastq-single", str(f_path), str(mean_read_length_threshold)])
                         checked_files.add(f_path)
 
                 for bam_meta in bam_files:
