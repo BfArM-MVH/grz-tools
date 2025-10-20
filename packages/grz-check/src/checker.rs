@@ -19,7 +19,16 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub num_records: u64,
-    pub mean_read_length: Option<f64>,
+    pub total_read_length: Option<u64>,
+}
+
+impl Stats {
+    pub fn mean_read_length(self) -> Option<f64> {
+        match self.total_read_length {
+            None => None,
+            Some(total_read_length) => Some((total_read_length as f64) / (self.num_records as f64)),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -577,7 +586,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
                     path: &file_report.path,
                     status,
                     num_records: file_report.stats.map(|s| s.num_records),
-                    mean_read_length: file_report.stats.and_then(|s| s.mean_read_length),
+                    mean_read_length: file_report.stats.and_then(|s| s.mean_read_length()),
                     checksum: file_report.sha256.as_ref(),
                     errors,
                     warnings: &file_report.warnings,
@@ -591,7 +600,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
                 path: &report.path,
                 status: if report.is_ok() { "OK" } else { "ERROR" },
                 num_records: report.stats.map(|s| s.num_records),
-                mean_read_length: report.stats.and_then(|s| s.mean_read_length),
+                mean_read_length: report.stats.and_then(|s| s.mean_read_length()),
                 checksum: report.sha256.as_ref(),
                 errors: report.errors.clone(),
                 warnings: &report.warnings,

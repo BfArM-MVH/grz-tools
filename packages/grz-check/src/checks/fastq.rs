@@ -85,6 +85,9 @@ impl FastqCheckProcessor {
 
         match self.length_check {
             ReadLengthCheck::Fixed(min_mean_read_length) => {
+                // if mean_read_length is NaN (num_records is zero) then following conditional will
+                // be false and the error correctly not reported, since the empty file error was
+                // already recorded above.
                 if mean_read_length <= (min_mean_read_length as f64) {
                     self.errors.push(format!(
                         "Mean read length ({}) is not greater than minimum required ({})",
@@ -99,7 +102,7 @@ impl FastqCheckProcessor {
             stats: if self.num_records > 0 {
                 Some(Stats {
                     num_records: self.num_records,
-                    mean_read_length: Some(mean_read_length),
+                    total_read_length: Some(self.total_read_length),
                 })
             } else {
                 None
