@@ -68,7 +68,7 @@ impl FastqCheckProcessor {
             .total_read_length
             .checked_add(
                 u64::try_from(record.sequence().len())
-                    .expect("Single FASTQ record length should fix in u64"),
+                    .expect("Single FASTQ record length should fit in u64"),
             )
             .expect("Total length of all reads should fit in u64");
 
