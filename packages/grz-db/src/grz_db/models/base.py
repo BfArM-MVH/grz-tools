@@ -46,7 +46,7 @@ class VerifiableLog[P: BaseSignablePayload]:
     """
 
     signature: str
-    _payload_model_class: ClassVar[type[P]]
+    _payload_model_class: ClassVar  # ClassVar[P] or ClassVar[type[P]] are invalid, see https://typing.python.org/en/latest/spec/class-compat.html#classvar
 
     def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: D105
         super().__init_subclass__(**kwargs)
