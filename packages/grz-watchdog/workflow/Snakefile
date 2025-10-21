@@ -29,21 +29,22 @@ wildcard_constraints:
     qc_status=r"with_qc|without_qc",
 
 
-if on_start := config.get("handlers", {}).get("on-start"):
-
-    onstart:
+onstart:
+    print("grz-watchdog starting up")
+    if on_start := config.get("handlers", {}).get("on-start"):
         shell(on_start)
 
 
-if on_error := config.get("handlers", {}).get("on-error"):
-
-    onerror:
+onerror:
+    print("grz-watchdog encountered an error")
+    cleanup_stale_temp_outputs()
+    if on_error := config.get("handlers", {}).get("on-error"):
         shell(on_error)
 
 
-if on_success := config.get("handlers", {}).get("on-success"):
-
-    onsuccess:
+onsuccess:
+    print("grz-watchdog finished successfully")
+    if on_success := config.get("handlers", {}).get("on-success"):
         shell(on_success)
 
 

@@ -20,6 +20,33 @@ ALL_INBOX_PAIRS = [
     for inbox in inboxes.keys()
 ]
 
+
+def cleanup_stale_temp_outputs():
+    from snakemake.logging import logger
+
+    logger.info("Checking for stale temporary state files...")
+    relevant_temp_outputs = [
+        str(rules.scan_inbox.output.submissions),
+        str(rules.sync_database.output.submissions),
+    ]
+
+    paths_to_check = set()
+
+    for template in relevant_temp_outputs:
+        for submitter_id, inbox in ALL_INBOX_PAIRS:
+            path = template.format(submitter_id=submitter_id, inbox=inbox)
+            paths_to_check.add(path)
+
+    for path in paths_to_check:
+        if os.path.exists(path):
+            logger.info(f"Removing stale file: {path}")
+            try:
+                os.remove(path)
+            except OSError as e:
+                logger.error(f"Failed to remove {path}: {e}")
+    logger.debug("Cleanup stale temp outputs done")
+
+
 ## RULE INPUT FUNCTIONS
 
 

@@ -41,13 +41,14 @@ SNAKEMAKE_BASE_CMD = [
     *PIXI_RUN_PREFIX,
     "snakemake",
     "--workflow-profile",
-    "/workspace/packages/grz-watchdog/workflow/profiles/test",
+    "/grz-watchdog/workflow/profiles/test",
     "--snakefile",
-    "/workspace/packages/grz-watchdog/workflow/Snakefile",
+    "/grz-watchdog/workflow/Snakefile",
     "--directory",
     "/workdir",
     "--conda-prefix",
     "/conda-envs",
+    "--verbose",
 ]
 
 
