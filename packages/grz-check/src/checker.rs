@@ -16,10 +16,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub num_records: u64,
-    pub read_length: Option<usize>,
+    pub total_read_length: Option<u64>,
+}
+
+impl Stats {
+    pub fn mean_read_length(self) -> Option<f64> {
+        self.total_read_length
+            .map(|total_read_length| (total_read_length as f64) / (self.num_records as f64))
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -176,12 +183,7 @@ fn process_job(
             let report = match (fq1_setup, fq2_setup) {
                 (Ok((reader1, hasher1)), Ok((reader2, hasher2))) => {
                     let (fq1_outcome, fq2_outcome, pair_errors) =
-                        match fastq::process_paired_readers(
-                            reader1,
-                            reader2,
-                            job.fq1_length_check,
-                            job.fq2_length_check,
-                        ) {
+                        match fastq::process_paired_readers(reader1, reader2, job.length_check) {
                             Ok(result) => result,
                             Err(e) => {
                                 let outcome1 = common::CheckOutcome {
@@ -502,8 +504,9 @@ pub fn run_check(
                     output.display()
                 ));
                 anyhow::bail!(
-                    "A validation error occurred in {}. Aborting.",
-                    failed_report.primary_path().display()
+                    "A validation error occurred in {}. Aborting.\n{:?}",
+                    failed_report.primary_path().display(),
+                    &failed_report
                 );
             }
             StopReason::Interrupted => {
@@ -522,7 +525,7 @@ struct FastqReport<'a> {
     path: &'a Path,
     status: &'a str,
     num_records: Option<u64>,
-    read_length: Option<usize>,
+    mean_read_length: Option<f64>,
     checksum: Option<&'a String>,
     errors: Vec<String>,
     warnings: &'a [String],
@@ -581,7 +584,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
                     path: &file_report.path,
                     status,
                     num_records: file_report.stats.map(|s| s.num_records),
-                    read_length: file_report.stats.and_then(|s| s.read_length),
+                    mean_read_length: file_report.stats.and_then(|s| s.mean_read_length()),
                     checksum: file_report.sha256.as_ref(),
                     errors,
                     warnings: &file_report.warnings,
@@ -595,7 +598,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
                 path: &report.path,
                 status: if report.is_ok() { "OK" } else { "ERROR" },
                 num_records: report.stats.map(|s| s.num_records),
-                read_length: report.stats.and_then(|s| s.read_length),
+                mean_read_length: report.stats.and_then(|s| s.mean_read_length()),
                 checksum: report.sha256.as_ref(),
                 errors: report.errors.clone(),
                 warnings: &report.warnings,
@@ -717,7 +720,7 @@ mod tests {
         path: PathBuf,
         status: String,
         num_records: Option<u64>,
-        read_length: Option<usize>,
+        mean_read_length: Option<f64>,
         checksum: Option<String>,
         errors: Vec<String>,
         warnings: Vec<String>,
@@ -780,8 +783,7 @@ mod tests {
         let jobs = vec![Job::PairedFastq(PairedFastqJob {
             fq1_path,
             fq2_path,
-            fq1_length_check: ReadLengthCheck::Fixed(4),
-            fq2_length_check: ReadLengthCheck::Fixed(5),
+            length_check: ReadLengthCheck::Fixed(3),
             fq1_size,
             fq2_size,
         })];
@@ -798,7 +800,6 @@ mod tests {
         if let TestReport::Fastq(data) = &records[0] {
             assert!(data.path.ends_with("ok_r1.fastq.gz"));
             assert_eq!(data.status, "OK");
-            assert_eq!(data.read_length, Some(4));
         } else {
             panic!("Expected a Fastq report for R1");
         }
@@ -806,7 +807,6 @@ mod tests {
         if let TestReport::Fastq(data) = &records[1] {
             assert!(data.path.ends_with("ok_r2_len5.fastq.gz"));
             assert_eq!(data.status, "OK");
-            assert_eq!(data.read_length, Some(5));
         } else {
             panic!("Expected a Fastq report for R2");
         }
@@ -829,8 +829,7 @@ mod tests {
         jobs.push(Job::PairedFastq(PairedFastqJob {
             fq1_path: p1f1_path,
             fq2_path: p1f2_path,
-            fq1_length_check: ReadLengthCheck::Auto,
-            fq2_length_check: ReadLengthCheck::Auto,
+            length_check: ReadLengthCheck::Fixed(4),
             fq1_size: p1f1_size,
             fq2_size: p1f2_size,
         }));
@@ -843,8 +842,7 @@ mod tests {
         jobs.push(Job::PairedFastq(PairedFastqJob {
             fq1_path: p2f1_path,
             fq2_path: p2f2_path,
-            fq1_length_check: ReadLengthCheck::Fixed(4),
-            fq2_length_check: ReadLengthCheck::Fixed(4),
+            length_check: ReadLengthCheck::Fixed(3),
             fq1_size: p2f1_size,
             fq2_size: p2f2_size,
         }));
@@ -854,7 +852,7 @@ mod tests {
         total_bytes += s1_size;
         jobs.push(Job::SingleFastq(SingleFastqJob {
             path: s1_path,
-            length_check: ReadLengthCheck::Auto,
+            length_check: ReadLengthCheck::Fixed(4),
             size: s1_size,
         }));
 
@@ -893,11 +891,6 @@ mod tests {
 
         if let TestReport::Fastq(data) = find_report(&records, "badlen.fastq.gz") {
             assert_eq!(data.status, "ERROR");
-            assert!(
-                data.errors
-                    .iter()
-                    .any(|e| e.contains("Found inconsistent read length"))
-            );
         }
 
         if let TestReport::Fastq(data) = find_report(&records, "ok_r1.fastq.gz") {

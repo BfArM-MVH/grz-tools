@@ -87,7 +87,7 @@ pub fn check_bam(path: &Path, file_pb: &ProgressBar, global_pb: &ProgressBar) ->
         Ok(CheckOutcome {
             stats: Some(Stats {
                 num_records,
-                read_length: None,
+                total_read_length: None,
             }),
             errors: vec![],
             warnings,

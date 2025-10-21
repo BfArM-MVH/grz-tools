@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Copy, Clone)]
 pub enum ReadLengthCheck {
     Fixed(usize),
-    Auto,
     Skip,
 }
 
@@ -25,8 +24,7 @@ pub struct SingleFastqJob {
 pub struct PairedFastqJob {
     pub fq1_path: PathBuf,
     pub fq2_path: PathBuf,
-    pub fq1_length_check: ReadLengthCheck,
-    pub fq2_length_check: ReadLengthCheck,
+    pub length_check: ReadLengthCheck,
     pub fq1_size: u64,
     pub fq2_size: u64,
 }
@@ -34,7 +32,7 @@ pub struct PairedFastqJob {
 struct FastqCheckProcessor {
     length_check: ReadLengthCheck,
     num_records: u64,
-    detected_read_length: Option<usize>,
+    total_read_length: u64,
     errors: Vec<String>,
 }
 
@@ -43,7 +41,7 @@ impl FastqCheckProcessor {
         Self {
             length_check,
             num_records: 0,
-            detected_read_length: None,
+            total_read_length: 0,
             errors: Vec::new(),
         }
     }
@@ -66,25 +64,14 @@ impl FastqCheckProcessor {
             )
         })?;
 
-        let current_len = record.sequence().len();
+        self.total_read_length = self
+            .total_read_length
+            .checked_add(
+                u64::try_from(record.sequence().len())
+                    .expect("Single FASTQ record length should fit in u64"),
+            )
+            .expect("Total length of all reads should fit in u64");
 
-        if let Some(expected_len) = self.detected_read_length {
-            if !matches!(self.length_check, ReadLengthCheck::Skip) && current_len != expected_len {
-                self.errors.push(format!(
-                    "Found inconsistent read length at record #{}. Expected {}, but got {}.",
-                    self.num_records, expected_len, current_len
-                ));
-            }
-        } else {
-            self.detected_read_length = Some(current_len);
-            if let ReadLengthCheck::Fixed(expected) = self.length_check
-                && current_len != expected
-            {
-                self.errors.push(format!(
-                        "Provided read length ({expected}) does not match first read's length ({current_len})."
-                    ));
-            }
-        }
         Ok(())
     }
 
@@ -94,11 +81,28 @@ impl FastqCheckProcessor {
                 .push("File is empty. Expected at least one record.".to_string());
         }
 
+        let mean_read_length = (self.total_read_length as f64) / (self.num_records as f64);
+
+        match self.length_check {
+            ReadLengthCheck::Fixed(min_mean_read_length) => {
+                // if mean_read_length is NaN (num_records is zero) then following conditional will
+                // be false and the error correctly not reported, since the empty file error was
+                // already recorded above.
+                if mean_read_length <= (min_mean_read_length as f64) {
+                    self.errors.push(format!(
+                        "Mean read length ({}) is not greater than minimum required ({})",
+                        mean_read_length, min_mean_read_length
+                    ))
+                }
+            }
+            ReadLengthCheck::Skip => (),
+        };
+
         CheckOutcome {
             stats: if self.num_records > 0 {
                 Some(Stats {
                     num_records: self.num_records,
-                    read_length: self.detected_read_length,
+                    total_read_length: Some(self.total_read_length),
                 })
             } else {
                 None
@@ -133,8 +137,7 @@ pub fn check_single_fastq(
 pub fn process_paired_readers<R1, R2>(
     reader1: R1,
     reader2: R2,
-    length_check1: ReadLengthCheck,
-    length_check2: ReadLengthCheck,
+    length_check: ReadLengthCheck,
 ) -> Result<(CheckOutcome, CheckOutcome, Vec<String>), String>
 where
     R1: Read,
@@ -143,8 +146,8 @@ where
     let mut fq1_reader = fastq::io::Reader::new(BufReader::new(reader1));
     let mut fq2_reader = fastq::io::Reader::new(BufReader::new(reader2));
 
-    let mut fq1_processor = FastqCheckProcessor::new(length_check1);
-    let mut fq2_processor = FastqCheckProcessor::new(length_check2);
+    let mut fq1_processor = FastqCheckProcessor::new(length_check);
+    let mut fq2_processor = FastqCheckProcessor::new(length_check);
     let mut pair_errors = Vec::new();
 
     for result in fq1_reader.records().zip_longest(fq2_reader.records()) {

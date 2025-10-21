@@ -1254,7 +1254,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         """
         Check if the submission meets the minimum mean coverage requirements.
         """
-        threshold_definitions = _load_thresholds()
+        threshold_definitions = load_thresholds()
 
         for donor in self.donors:
             for lab_datum in donor.lab_data:
@@ -1326,15 +1326,6 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
             f"below threshold: {mean_depth_of_coverage_v} < {mean_depth_of_coverage_t}"
         )
 
-    read_length_t = thresholds.get("readLength")
-    for f in sequence_data.list_files(FileType.fastq) + sequence_data.list_files(FileType.bam):
-        read_length_v = f.read_length
-        if read_length_t and read_length_v < read_length_t:
-            raise_if_index(
-                f"Read length for donor '{pseudonym}', lab datum '{lab_data_name}' "
-                f"below threshold: {read_length_v} < {read_length_t}"
-            )
-
     if percent_bases_above_quality_threshold_t := thresholds.get("percentBasesAboveQualityThreshold"):
         minimum_quality_t = percent_bases_above_quality_threshold_t.get("qualityThreshold")
         minimum_quality_v = sequence_data.percent_bases_above_quality_threshold.minimum_quality
@@ -1376,7 +1367,7 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
 type Thresholds = dict[tuple[str, str, str], dict[str, Any]]
 
 
-def _load_thresholds() -> Thresholds:
+def load_thresholds() -> Thresholds:
     threshold_definitions = json.load(
         files("grz_pydantic_models").joinpath("resources", "thresholds.json").open("r", encoding="utf-8")
     )

@@ -177,6 +177,7 @@ def test_file_extensions():
     "case,valid",
     (
         ("minimal_consented", True),
+        ("extra_consented", True),
         ("minimal_nonconsented", True),
         ("minimal_consented_expired", True),
         ("mii_ig_consent_v2025_example1", True),

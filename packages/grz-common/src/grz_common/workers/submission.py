@@ -17,9 +17,12 @@ from grz_pydantic_models.submission.metadata.v1 import (
     File,
     FileType,
     GrzSubmissionMetadata,
+    LibraryType,
     ReadOrder,
     SequenceData,
+    SequenceSubtype,
     SequencingLayout,
+    load_thresholds,
 )
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
@@ -233,6 +236,16 @@ class Submission:
                 if not lab_data.sequence_data:
                     continue
 
+                threshold_definitions = load_thresholds()
+                thresholds = threshold_definitions[
+                    (
+                        self.metadata.content.submission.genomic_study_subtype,
+                        lab_data.library_type,
+                        lab_data.sequence_subtype,
+                    )
+                ]
+                mean_read_length_threshold = thresholds["meanReadLength"]
+
                 sequence_data = lab_data.sequence_data
                 fastq_files = [f for f in sequence_data.files if f.file_type == FileType.fastq]
                 bam_files = [f for f in sequence_data.files if f.file_type == FileType.bam]
@@ -249,10 +262,8 @@ class Submission:
                             r1_path = self.files_dir / r1_meta.file_path
                             r2_path = self.files_dir / r2_meta.file_path
                             if should_check_file(r1_path, r1_meta) or should_check_file(r2_path, r2_meta):
-                                r1_read_len = -1  # disable read length check for now; r1_meta.read_length
-                                r2_read_len = -1  # disable read length check for now; r2_meta.read_length
                                 grz_check_args.extend(
-                                    ["--fastq-paired", str(r1_path), str(r1_read_len), str(r2_path), str(r2_read_len)]
+                                    ["--fastq-paired", str(r1_path), str(r2_path), str(mean_read_length_threshold)]
                                 )
                             checked_files.add(r1_path)
                             checked_files.add(r2_path)
@@ -262,8 +273,7 @@ class Submission:
                         if f_path in checked_files:
                             continue
                         if should_check_file(f_path, f_meta):
-                            read_len = -1  # disable read length check for now; f_meta.read_length
-                            grz_check_args.extend(["--fastq-single", str(f_path), str(read_len)])
+                            grz_check_args.extend(["--fastq-single", str(f_path), str(mean_read_length_threshold)])
                         checked_files.add(f_path)
 
                 for bam_meta in bam_files:
@@ -501,9 +511,13 @@ class Submission:
                 if not lab_data.library_type.endswith("_lr"):
                     match sequencing_layout:
                         case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
-                            yield from self._validate_single_end_fallback(fastq_files, progress_logger)
+                            yield from self._validate_single_end_fallback(
+                                fastq_files, progress_logger, lab_data.library_type, lab_data.sequence_subtype
+                            )
                         case SequencingLayout.paired_end:
-                            yield from self._validate_paired_end_fallback(fastq_files, progress_logger)
+                            yield from self._validate_paired_end_fallback(
+                                fastq_files, progress_logger, lab_data.library_type, lab_data.sequence_subtype
+                            )
                 yield from self._validate_bams_fallback(bam_files, progress_logger)
 
     def _validate_bams_fallback(
@@ -545,12 +559,25 @@ class Submission:
         self,
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
+        library_type: LibraryType,
+        sequence_subtype: SequenceSubtype,
     ) -> Generator[str, None, None]:
         def validate_file(local_file_path, file_metadata: SubmissionFileMetadata) -> ValidationState:
             self.__log.debug("Validating '%s'...", str(local_file_path))
 
             # validate the file
-            errors = list(validate_single_end_reads(local_file_path, expected_read_length=file_metadata.read_length))
+            threshold_definitions = load_thresholds()
+            thresholds = threshold_definitions[
+                (
+                    self.metadata.content.submission.genomic_study_subtype,
+                    library_type,
+                    sequence_subtype,
+                )
+            ]
+            mean_read_length_threshold = thresholds["meanReadLength"]
+            errors = list(
+                validate_single_end_reads(local_file_path, mean_read_length_threshold=mean_read_length_threshold)
+            )
             validation_passed = len(errors) == 0
 
             # return log state
@@ -569,7 +596,18 @@ class Submission:
         self,
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
+        library_type: LibraryType,
+        sequence_subtype: SequenceSubtype,
     ) -> Generator[str, None, None]:
+        threshold_definitions = load_thresholds()
+        thresholds = threshold_definitions[
+            (
+                self.metadata.content.submission.genomic_study_subtype,
+                library_type,
+                sequence_subtype,
+            )
+        ]
+        mean_read_length_threshold = thresholds["meanReadLength"]
         key = lambda f: (f.flowcell_id, f.lane_id)
         fastq_files.sort(key=key)
         for _key, group in groupby(fastq_files, key):
@@ -593,7 +631,7 @@ class Submission:
                         validate_paired_end_reads(
                             local_fastq_r1_path,  # fastq R1
                             local_fastq_r2_path,  # fastq R2
-                            expected_read_length=fastq_r1.read_length,  # fastq R1 and R2 should have the same read length
+                            mean_read_length_threshold=mean_read_length_threshold,
                         )
                     )
                     validation_passed = len(errors) == 0

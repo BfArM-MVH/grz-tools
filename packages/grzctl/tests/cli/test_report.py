@@ -16,6 +16,28 @@ from grzctl.models.config import DbConfig
 from .. import resources as test_resources
 
 
+def test_quarter_determination():
+    """Test that quarter determination works as expected."""
+    dates = [
+        ((1, 2025), date.fromisoformat("2025-01-01")),
+        ((1, 2025), date.fromisoformat("2025-02-01")),
+        ((1, 2025), date.fromisoformat("2025-03-01")),
+        ((2, 2025), date.fromisoformat("2025-04-01")),
+        ((2, 2025), date.fromisoformat("2025-05-01")),
+        ((2, 2025), date.fromisoformat("2025-06-01")),
+        ((3, 2025), date.fromisoformat("2025-07-01")),
+        ((3, 2025), date.fromisoformat("2025-08-01")),
+        ((3, 2025), date.fromisoformat("2025-09-01")),
+        ((4, 2025), date.fromisoformat("2025-10-01")),
+        ((4, 2025), date.fromisoformat("2025-11-01")),
+        ((4, 2025), date.fromisoformat("2025-12-01")),
+    ]
+    for (expected_quarter, expected_year), check_date in dates:
+        quarter, year = date_to_quarter_year(check_date)
+        assert quarter == expected_quarter
+        assert year == expected_year
+
+
 def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on an empty database."""
     env = {
@@ -29,7 +51,9 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
 
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
-            cli, ["report", "--config-file", blank_database_config_path, "quarterly"], catch_exceptions=False
+            cli,
+            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
 
