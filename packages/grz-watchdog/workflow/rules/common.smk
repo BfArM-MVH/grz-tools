@@ -22,6 +22,14 @@ ALL_INBOX_PAIRS = [
 
 
 def cleanup_stale_temp_outputs():
+    """
+    For use with the `onerror` hook: Make sure to remove relevant temp files (scan_inbox and sync_database outputs),
+    so subsequent runs are forced to re-run scan_inbox and sync_database (if they need their outputs).
+
+    For example, this covers the following case, where:
+     - invalid submission A is processed, the workflow fails, is terminated (but the temp files aren't removed automatically)
+     - a subsequent valid submission B is processed, which needs to re-run scan_inbox and sync_database, otherwise submission B can't be found because the old scan_inbox / sync_database outputs may only include submission A.
+    """
     from snakemake.logging import logger
 
     logger.info("Checking for stale temporary state files...")
