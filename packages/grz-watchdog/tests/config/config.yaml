@@ -33,7 +33,7 @@ qc:
     profiles:
       - conda
     configs:
-      - "/grz-watchdog/tests/config/nextflow.test.config"
+      - "/workdir/config/nextflow.test.config"
     extra: >-
       --fasta "/workdir/test_data/grz-mini-test-data/references/GRCh37/mini.fa.gz"
       --target "/workdir/test_data/grz-mini-test-data/references/GRCh37/mini.genes.bed"
