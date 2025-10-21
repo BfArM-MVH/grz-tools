@@ -1,4 +1,5 @@
 import os
+import shutil
 from operator import itemgetter
 from os import PathLike
 from typing import Literal
@@ -46,10 +47,14 @@ def cleanup_stale_temp_outputs():
             paths_to_check.add(path)
 
     for path in paths_to_check:
-        if os.path.exists(path):
+        path = Path(path)
+        if path.exists():
             logger.info(f"Removing stale file: {path}")
             try:
-                os.remove(path)
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
             except OSError as e:
                 logger.error(f"Failed to remove {path}: {e}")
     logger.debug("Cleanup stale temp outputs done")
