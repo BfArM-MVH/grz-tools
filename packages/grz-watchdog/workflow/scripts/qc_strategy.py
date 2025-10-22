@@ -6,66 +6,36 @@ import yaml
 from grz_db.models.submission import SubmissionDb
 
 
-def get_monthly_submission_stats(db_config_path: str, submitter_id: str) -> tuple[int, int, int]:
+def should_run_qc(db_config_path: str, submitter_id: str, target_percentage: float, salt: str) -> bool:
     """
-    Fetches submission statistics for a given submitter for the current calendar month.
-    - Total number of submissions.
-    - Number of submissions that have had QC.
-    - Number of submissions since the last QC'd submission.
+    Determines if a validated submission should undergo QC.
     """
     with open(db_config_path) as f:
         db_url = yaml.safe_load(f)["db"]["database_url"]
-
     db = SubmissionDb(db_url=db_url, author=None)
-    all_submissions = db.list_submissions(limit=None)
 
     today = datetime.date.today()
-
-    def is_relevant(s):
-        return (
-            s.submitter_id == submitter_id
-            and (d := s.submission_date)
-            and d.year == today.year
-            and d.month == today.month
-        )
-
-    submissions_this_month = sorted(
-        list(filter(is_relevant, all_submissions)), key=lambda s: s.submission_date or datetime.date.min
+    num_validated, num_qcing, num_since_last_qcing = db.get_monthly_qc_stats(
+        submitter_id=submitter_id, year=today.year, month=today.month
     )
 
-    if not submissions_this_month:
-        return 0, 0, 0
+    # always qc the first (validated) submission each month
+    if num_validated == 0:
+        return True
 
-    total_this_month = len(submissions_this_month)
-    qcd_this_month = sum(1 for sub in submissions_this_month if sub.detailed_qc_passed is not None)
+    # for example, for a target_percentage of 2%, pick 1 submission at random from 50 submissions
+    target_fraction = target_percentage / 100.0
+    block = math.floor(1 / target_fraction)
+    block_index = num_qcing
+    current_index_in_block = num_since_last_qcing
 
-    last_qcd = next(
-        filter(lambda item: item[1].detailed_qc_passed is not None, reversed(list(enumerate(submissions_this_month)))),
-        None,
-    )
+    # ensure the seed is consistent across submitter, date, block_index and (secret) salt
+    seed = f"{submitter_id}-{today.year}-{today.month}-{block_index}-{salt}"
+    rng = random.Random(seed)  # noqa: S311
+    target_index_in_block = rng.randint(0, block - 1)
 
-    if last_qcd:
-        last_qc_index = last_qcd[0]
-        submissions_since_last_qc = max(0, total_this_month - 1 - last_qc_index)
-    else:
-        submissions_since_last_qc = total_this_month
+    if current_index_in_block == target_index_in_block:
+        return True
 
-    return total_this_month, qcd_this_month, submissions_since_last_qc
-
-
-def should_run_qc(db_config_path: str, submitter_id: str, target_percentage: float) -> bool:
-    _total_this_month, qcd_this_month, qcd_since_last = get_monthly_submission_stats(db_config_path, submitter_id)
-
-    def _should_run_qc(qcd: int, qcd_since_last: int, target_fraction: float) -> bool:
-        if not (0 < target_fraction <= 1):
-            raise ValueError("target_fraction must be larger than 0 and at most 1")
-
-        if qcd == 0:
-            return True
-        block = math.floor(1 / target_fraction)
-        n = qcd_since_last + 1
-        probability = n / block
-
-        return random.random() < probability
-
-    return _should_run_qc(qcd_this_month, qcd_since_last, target_percentage / 100.0)
+    # if we somehow have exceeded the block size, return True, otherwise False
+    return current_index_in_block >= block - 1

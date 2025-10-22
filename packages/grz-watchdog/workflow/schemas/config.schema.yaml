@@ -97,8 +97,17 @@ properties:
           target_percentage:
             type: number
             minimum: 2.0
+            maximum: 100.0
             default: 2.0
             description: "Target percentage of submissions to run QC on per LE per month."
+          salt:
+            type:
+              - integer
+              - number
+              - string
+            description: "Salt for random seed"
+        required:
+          - salt
       reference_directory:
         type: string
         default: "<resources>/references"
