@@ -96,7 +96,7 @@ properties:
             description: "Target percentage of submissions to run QC on per LE per month"
       reference_directory:
         type: string
-        default: "resources/references"
+        default: "<resources>/references"
         description: "Path to the reference directory. Defaults to 'resources/references' (relative to the workdir)."
       prepare-qc:
         type: object
