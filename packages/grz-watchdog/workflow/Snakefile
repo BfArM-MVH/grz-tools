@@ -149,7 +149,6 @@ checkpoint select_submissions:
         submissions_batch=temp("<results>/select_submissions/pending_batch.txt"),
     params:
         batch_limit=config["batch"].get("limit", None),
-        target_qc_percentage=get_target_qc_percentage,
     log:
         stdout="<logs>/select_submissions.stdout.log",
         stderr="<logs>/select_submissions.stderr.log",
@@ -658,4 +657,4 @@ rule process_submission:
     input:
         get_final_submission_target,
     output:
-        touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed/{qc_status}"),
+        touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed"),

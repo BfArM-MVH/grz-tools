@@ -1,4 +1,7 @@
+import datetime
+import math
 import os
+import random
 import shutil
 from operator import itemgetter
 from os import PathLike
@@ -6,6 +9,7 @@ from typing import Literal
 
 import humanfriendly
 import yaml
+from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from snakemake.io import InputFiles, Wildcards
 
@@ -106,6 +110,43 @@ def get_cleanup_prerequisite(wildcards):
         return validation_flag_file
 
 
+def should_run_qc(
+    db_config_path: str, submitter_id: str, target_percentage: float, salt: str
+) -> bool:
+    """
+    Determines if a validated submission should undergo QC.
+    """
+    with open(db_config_path) as f:
+        db_url = yaml.safe_load(f)["db"]["database_url"]
+    db = SubmissionDb(db_url=db_url, author=None)
+
+    today = datetime.date.today()
+    num_validated, num_qcing, num_since_last_qcing = db.get_monthly_qc_stats(
+        submitter_id=submitter_id, year=today.year, month=today.month
+    )
+
+    # always qc the first (validated) submission each month
+    if num_validated == 0:
+        return True
+
+    # for example, for a target_percentage of 2%, pick 1 submission at random from 50 submissions
+    target_fraction = target_percentage / 100.0
+    block = math.floor(1 / target_fraction)
+    block_index = num_qcing
+    current_index_in_block = num_since_last_qcing
+
+    # ensure the seed is consistent across submitter, date, block_index and (secret) salt
+    seed = f"{submitter_id}-{today.year}-{today.month}-{block_index}-{salt}"
+    rng = random.Random(seed)  # noqa: S311
+    target_index_in_block = rng.randint(0, block - 1)
+
+    if current_index_in_block == target_index_in_block:
+        return True
+
+    # if we somehow have exceeded the block size, return True, otherwise False
+    return current_index_in_block >= block - 1
+
+
 def get_final_submission_target(wildcards):
     validation_flag_file = checkpoints.validate.get(
         submitter_id=wildcards.submitter_id,
@@ -116,10 +157,30 @@ def get_final_submission_target(wildcards):
     with open(validation_flag_file) as f:
         is_valid = f.read().strip() == "true"
 
-    if is_valid:
-        return rules.finalize_success.output.target
-    else:
-        return rules.finalize_fail.output.target
+    if not is_valid:
+        return rules.finalize_fail.output.target.format(
+            submitter_id=wildcards.submitter_id,
+            inbox=wildcards.inbox,
+            submission_id=wildcards.submission_id,
+            qc_status="without_qc",
+        )
+
+    strategy = config["qc"]["selection_strategy"]
+    run_qc = should_run_qc(
+        db_config_path=config["config_paths"]["db"],
+        submitter_id=wildcards.submitter_id,
+        target_percentage=strategy["target_percentage"],
+        salt=strategy["salt"],
+    )
+
+    qc_status = "with_qc" if run_qc else "without_qc"
+
+    return rules.finalize_success.output.target.format(
+        submitter_id=wildcards.submitter_id,
+        inbox=wildcards.inbox,
+        submission_id=wildcards.submission_id,
+        qc_status=qc_status,
+    )
 
 
 def get_successful_finalize_inputs(wildcards):
