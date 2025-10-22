@@ -42,10 +42,6 @@ def should_run_qc(db_config_path: str, submitter_id: str, target_percentage: flo
     total_this_month, qc_this_month = get_monthly_submission_stats(db_config_path, submitter_id)
 
     def _should_run_qc(total: int, qcd: int, target_fraction: float) -> bool:
-        # first submission of the month for an LE always gets qc'd.
-        if total == 0:
-            return True
-
         # if no submissions have been qc'd this month, pick the next one.
         if qcd == 0:
             return True
