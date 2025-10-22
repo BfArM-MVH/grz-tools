@@ -305,6 +305,18 @@ def get_run_qc_nextflow_profiles(wildcards):
     return ",".join(profiles)
 
 
+def get_target_qc_percentage(wildcards) -> float | None:
+    """
+    If automatic qc selection strategy is enabled, returns the target qc percentage.
+    Otherwise, returns None.
+    """
+    selection_strategy = config["qc"].get("selection_strategy", {})
+    if bool(selection_strategy.get("enabled", False)):
+        return selection_strategy.get("target_qc_percentage", 2.0)
+    else:
+        return None
+
+
 ## RESOURCE ESTIMATION FUNCTIONS
 
 

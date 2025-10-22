@@ -30,6 +30,7 @@ config_paths:
 qc:
   revision: "v1.2.0"
   selection_strategy:
+    enabled: false
     target_percentage: 2.0
   prepare-qc:
     profiles:

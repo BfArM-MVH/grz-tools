@@ -90,10 +90,15 @@ properties:
         type: object
         description: ""
         properties:
+          enabled:
+            type: boolean
+            default: true
+            description: "Whether automatic qc selection is enabled or not."
           target_percentage:
             type: number
             minimum: 2.0
-            description: "Target percentage of submissions to run QC on per LE per month"
+            default: 2.0
+            description: "Target percentage of submissions to run QC on per LE per month."
       reference_directory:
         type: string
         default: "<resources>/references"

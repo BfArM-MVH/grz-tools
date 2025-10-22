@@ -1,7 +1,10 @@
 import json
+import os
 import subprocess
 import sys
-from typing import Literal
+from typing import Any, Literal
+
+sys.path.append(os.path.dirname(__file__))
 
 SUBPROCESS_TIMEOUT = 120
 
@@ -94,8 +97,18 @@ def update_submission_state_in_db(db_config_path, submission_id, state):
 
 
 def determine_target_path(
-    origin: dict[Literal["submitter_id", "inbox"], str], submission_id: str, qc_status: str = "without_qc"
+    origin: dict[Literal["submitter_id", "inbox"], str],
+    submission_id: str,
+    target_qc_percentage: float | None,
+    db_config_path: os.PathLike | str,
 ) -> str:
-    """Generates the conventional target file path for a submission."""
-    # TODO: implement qc_status selection strategy if needed
+    """Automatically determines whether a submission should undergo qc."""
+    from qc_strategy import should_run_qc
+
+    if target_qc_percentage is None:
+        qc_status = "without_qc"
+    else:
+        qc_status = (
+            "with_qc" if should_run_qc(db_config_path, origin["submitter_id"], target_qc_percentage) else "without_qc"
+        )
     return f"results/{origin['submitter_id']}/{origin['inbox']}/{submission_id}/processed/{qc_status}"
