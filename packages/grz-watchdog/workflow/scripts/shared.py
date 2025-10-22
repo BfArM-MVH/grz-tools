@@ -2,7 +2,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import Any, Literal
+from typing import Literal
 
 sys.path.append(os.path.dirname(__file__))
 
