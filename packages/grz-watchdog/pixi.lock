@@ -55,11 +55,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/gitdb-4.0.12-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/gitpython-3.1.45-pyhff2d567_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/greenlet-3.2.4-py313h7033f15_1.conda
-      - conda: https://conda.anaconda.org/bioconda/noarch/grz-cli-1.3.0-pyhdfd78af_0.conda
-      - conda: https://conda.anaconda.org/bioconda/noarch/grz-common-1.3.0-pyhdfd78af_0.conda
+      - conda: https://conda.anaconda.org/bioconda/noarch/grz-cli-1.3.1-pyhdfd78af_0.conda
+      - conda: https://conda.anaconda.org/bioconda/noarch/grz-common-1.3.1-pyhdfd78af_0.conda
       - conda: https://conda.anaconda.org/bioconda/noarch/grz-db-1.0.1-pyhdfd78af_0.conda
-      - conda: https://conda.anaconda.org/bioconda/noarch/grz-pydantic-models-2.3.0-pyh0648b3f_0.conda
-      - conda: https://conda.anaconda.org/bioconda/noarch/grzctl-1.0.0-pyhdfd78af_0.conda
+      - conda: https://conda.anaconda.org/bioconda/noarch/grz-pydantic-models-2.3.1-pyh0648b3f_0.conda
+      - conda: https://conda.anaconda.org/bioconda/noarch/grzctl-1.0.1-pyhdfd78af_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/h2-4.3.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/hpack-4.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/humanfriendly-10.0-pyh707e725_8.conda
@@ -817,18 +817,18 @@ packages:
   license_family: MIT
   size: 239662
   timestamp: 1756752171827
-- conda: https://conda.anaconda.org/bioconda/noarch/grz-cli-1.3.0-pyhdfd78af_0.conda
-  sha256: 03f7512f875eda60cb7e608c81d99ac275c7b2ed80371234941502ad72d20175
-  md5: c565a5cffb5b360770d8b1d3340b32c0
+- conda: https://conda.anaconda.org/bioconda/noarch/grz-cli-1.3.1-pyhdfd78af_0.conda
+  sha256: bf27e5f1635df6a5451fd2995e50b577f2d21e81457c02e49fc0589de3165c9d
+  md5: cc47726d01abf2d89617dce6d6cb707e
   depends:
   - boto3 >=1.36,<2
   - click >=8.2,<9
-  - grz-common >=1.3.0,<2
-  - grz-pydantic-models >=2.3,<3
+  - grz-common >=1.3.1,<2
+  - grz-pydantic-models >=2.3.1,<3
   - jsonschema >=4.23.0,<5
   - platformdirs >=4.3.6,<5
   - pydantic >=2.9.2,<2.10
-  - pydantic-settings >=2.9.0,<3
+  - pydantic-settings >=2.9.0,<2.10
   - pysam 0.23.*
   - python >=3.12
   - python-crypt4gh >=1.7,<2
@@ -838,11 +838,11 @@ packages:
   - tqdm >=4.66.5,<5
   license: MIT
   license_family: MIT
-  size: 18124
-  timestamp: 1759832652533
-- conda: https://conda.anaconda.org/bioconda/noarch/grz-common-1.3.0-pyhdfd78af_0.conda
-  sha256: 162541fd20fd9a25156816bf2e2f68d0d28981238ce4876a39d0d2a9fffd0489
-  md5: fa2fc39608354c298f2dc591f211b93f
+  size: 18251
+  timestamp: 1760375580363
+- conda: https://conda.anaconda.org/bioconda/noarch/grz-common-1.3.1-pyhdfd78af_0.conda
+  sha256: 71dc2eee7efef3c6c8e413f1a3d5c7b6e4f856511ea21afb4f3ca13a28e1a963
+  md5: 9434e54328c6d1e8327a56773e7b3c77
   depends:
   - boto3 >=1.36,<2
   - click >=8.2,<9
@@ -850,7 +850,7 @@ packages:
   - jsonschema >=4.23.0,<5
   - platformdirs >=4.3.6,<5
   - pydantic >=2.9.2,<2.10
-  - pydantic-settings >=2.9.0,<3
+  - pydantic-settings >=2.9.0,<2.10
   - pysam 0.23.*
   - python >=3.12
   - python-crypt4gh >=1.7,<2
@@ -860,8 +860,8 @@ packages:
   - tqdm >=4.66.5,<5
   license: MIT
   license_family: MIT
-  size: 36493
-  timestamp: 1755605618611
+  size: 36896
+  timestamp: 1760372503134
 - conda: https://conda.anaconda.org/bioconda/noarch/grz-db-1.0.1-pyhdfd78af_0.conda
   sha256: be022049487dd01b47f3eda31d73fce17d0326328c7ecf5c518a83040cdc314e
   md5: 2b4d725e863e03e2427578780a8619f5
@@ -874,29 +874,29 @@ packages:
   license: MIT
   size: 22948
   timestamp: 1760372914215
-- conda: https://conda.anaconda.org/bioconda/noarch/grz-pydantic-models-2.3.0-pyh0648b3f_0.conda
-  sha256: 8fa6093fdff3821002a9839443317c7bc957707f5ddd4a19b45e231c0c3f2ef9
-  md5: dc0f48a4188f1485e6e467c59f05554e
+- conda: https://conda.anaconda.org/bioconda/noarch/grz-pydantic-models-2.3.1-pyh0648b3f_0.conda
+  sha256: 0a9a4631710fa2be8f3817416ad024b914564c824be175ef9b8fc8cda219d0eb
+  md5: 4722bf42d0857851f7bf365223921259
   depends:
   - pydantic >=2.9.2,<3
   - python >=3.12
   license: MIT
-  size: 25452
-  timestamp: 1759829703250
-- conda: https://conda.anaconda.org/bioconda/noarch/grzctl-1.0.0-pyhdfd78af_0.conda
-  sha256: 86ddebf6864e709ee9f4d83ede791ad6cb61cbbfc054a1d4fec2383090f9b2a6
-  md5: fabaa203da7c08863288b9c65ad2a1be
+  size: 25565
+  timestamp: 1760373176322
+- conda: https://conda.anaconda.org/bioconda/noarch/grzctl-1.0.1-pyhdfd78af_0.conda
+  sha256: 1458f502c002a51ed1ce4b91720c6769d9d7b3f09ef02aac9936b2353588b9ee
+  md5: 1bacaa0cf91d61cc652ae898a9f0e937
   depends:
   - boto3 >=1.36,<2
   - click >=8.2,<9
-  - grz-cli >=1.3,<2
-  - grz-common >=1.3.0,<2
-  - grz-db >=1,<2
-  - grz-pydantic-models >=2.3,<3
+  - grz-cli >=1.3.1,<2
+  - grz-common >=1.3.1,<2
+  - grz-db >=1.0.1,<2
+  - grz-pydantic-models >=2.3.1,<3
   - jsonschema >=4.23.0,<5
   - platformdirs >=4.3.6,<5
   - pydantic >=2.9.2,<2.10
-  - pydantic-settings >=2.9.0,<3
+  - pydantic-settings >=2.9.0,<2.10
   - pysam 0.23.*
   - python >=3.12
   - python-crypt4gh >=1.7,<2
@@ -907,8 +907,8 @@ packages:
   - tqdm >=4.66.5,<5
   license: MIT
   license_family: MIT
-  size: 36078
-  timestamp: 1759833995829
+  size: 36484
+  timestamp: 1760378008046
 - conda: https://conda.anaconda.org/conda-forge/noarch/h2-4.3.0-pyhcf101f3_0.conda
   sha256: 84c64443368f84b600bfecc529a1194a3b14c3656ee2e832d15a20e0329b6da3
   md5: 164fc43f0b53b6e3a7bc7dce5e4f1dc9
