@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.0.1...grz-db-v1.1.0) (2025-10-23)
+
+
+### Features
+
+* **grzctl,grz-cli:** support meanReadLength ([#437](https://github.com/BfArM-MVH/grz-tools/issues/437)) ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
+
+### Bug Fixes
+
+* **grz-db:** bump grz-pydantic-models version ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
 ## [1.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.0.0...grz-db-v1.0.1) (2025-10-13)
 
 

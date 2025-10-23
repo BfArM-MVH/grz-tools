@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.3.1...grz-common-v1.4.0) (2025-10-23)
+
+
+### Features
+
+* **grz-common,grz-pydantic-models,grz-check:** use mean read length threshold ([#428](https://github.com/BfArM-MVH/grz-tools/issues/428)) ([18db996](https://github.com/BfArM-MVH/grz-tools/commit/18db99663f67b8883a038c61a765bcb1d2fb9edf))
+
+
+### Bug Fixes
+
+* **grz-common:** meanReadLength param None vs 0 ([#435](https://github.com/BfArM-MVH/grz-tools/issues/435)) ([90538aa](https://github.com/BfArM-MVH/grz-tools/commit/90538aa6879b5f4e7c112cb7cb36ddb2ade3918c))
+* **grz-common:** resolve KeyError with long-read submissions ([#432](https://github.com/BfArM-MVH/grz-tools/issues/432)) ([81bd0cb](https://github.com/BfArM-MVH/grz-tools/commit/81bd0cbf411282c69352eb86b3fc53258bfe9cc1))
+
 ## [1.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.3.0...grz-common-v1.3.1) (2025-10-13)
 
 

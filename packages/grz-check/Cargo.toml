@@ -1,6 +1,6 @@
 [package]
 name = "grz-check"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 description = "grz-check is a tool for validating incoming files of Modellvorhaben §64e submissions to Genomrechenzentren (GRZ) in Germany."

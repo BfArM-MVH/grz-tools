@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.1...grz-pydantic-models-v2.4.0) (2025-10-23)
+
+
+### Features
+
+* **grz-common,grz-pydantic-models,grz-check:** use mean read length threshold ([#428](https://github.com/BfArM-MVH/grz-tools/issues/428)) ([18db996](https://github.com/BfArM-MVH/grz-tools/commit/18db99663f67b8883a038c61a765bcb1d2fb9edf))
+* **grz-pydantic-models:** allow deprecated to be used with or without parentheses ([#418](https://github.com/BfArM-MVH/grz-tools/issues/418)) ([62b2ef3](https://github.com/BfArM-MVH/grz-tools/commit/62b2ef359ccc87cfea86a4f8ddb34e01e227e177))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** ignore optional fields in required consent scope/category ([#429](https://github.com/BfArM-MVH/grz-tools/issues/429)) ([f9fad57](https://github.com/BfArM-MVH/grz-tools/commit/f9fad573c16056cd24c9c26db0fa6d10c2e4e755))
+
 ## [2.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.0...grz-pydantic-models-v2.3.1) (2025-10-13)
 
 
