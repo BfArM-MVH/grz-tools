@@ -244,7 +244,7 @@ class Submission:
                         lab_data.sequence_subtype,
                     )
                 ]
-                mean_read_length_threshold = thresholds.get("meanReadLength", None)
+                mean_read_length_threshold = thresholds.get("meanReadLength", 0)
 
                 sequence_data = lab_data.sequence_data
                 fastq_files = [f for f in sequence_data.files if f.file_type == FileType.fastq]
