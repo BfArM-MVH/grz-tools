@@ -747,19 +747,19 @@ class SubmissionDb:
 
             stmt = (
                 select(Submission, qcing_state.state)
-                .join(uploaded_state, Submission.id == uploaded_state.submission_id)
-                .join(validated_state, Submission.id == validated_state.submission_id)
+                .join(uploaded_state, Submission.id == uploaded_state.submission_id)  # type: ignore[arg-type]
+                .join(validated_state, Submission.id == validated_state.submission_id)  # type: ignore[arg-type]
                 .outerjoin(
                     qcing_state,
-                    sa.and_(Submission.id == qcing_state.submission_id, qcing_state.state == SubmissionStateEnum.QCING),
+                    sa.and_(Submission.id == qcing_state.submission_id, qcing_state.state == SubmissionStateEnum.QCING),  # type: ignore[arg-type]
                 )
                 .where(
                     Submission.submitter_id == submitter_id,
                     uploaded_state.state == SubmissionStateEnum.UPLOADED,
                     validated_state.state == SubmissionStateEnum.VALIDATED,
-                    sa.and_(uploaded_state.timestamp >= start_of_month, uploaded_state.timestamp < start_of_next_month),
+                    sa.and_(uploaded_state.timestamp >= start_of_month, uploaded_state.timestamp < start_of_next_month),  # type: ignore[arg-type]
                 )
-                .order_by(uploaded_state.timestamp)
+                .order_by(uploaded_state.timestamp)  # type: ignore[arg-type]
                 .distinct()
             )
 
