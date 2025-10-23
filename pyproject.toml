@@ -62,7 +62,8 @@ exclude = [
     "build",
     "dist",
     "out",
-    ".snakemake"
+    ".snakemake",
+    "packages/grz-watchdog/tests",
 ]
 extend-exclude = ["alembic"]
 
