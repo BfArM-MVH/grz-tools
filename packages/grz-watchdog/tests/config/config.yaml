@@ -32,6 +32,7 @@ qc:
   selection_strategy:
     enabled: false
     target_percentage: 2.0
+    salt: 鹽
   prepare-qc:
     profiles:
       - conda
