@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.0.1...grzctl-v1.1.0) (2025-10-23)
+
+
+### Features
+
+* **grzctl:** Adapt report paths to BfArM specs ([#424](https://github.com/BfArM-MVH/grz-tools/issues/424)) ([a7788e8](https://github.com/BfArM-MVH/grz-tools/commit/a7788e8804e557c0556b3afaf909468ea0ba6c21)), closes [#422](https://github.com/BfArM-MVH/grz-tools/issues/422)
+
+
+### Bug Fixes
+
+* **grzctl:** automatic quarter determination ([#426](https://github.com/BfArM-MVH/grz-tools/issues/426)) ([f7a9108](https://github.com/BfArM-MVH/grz-tools/commit/f7a9108ad8352936c890b10af89c362f22cb6fe6))
+
 ## [1.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.0.0...grzctl-v1.0.1) (2025-10-13)
 
 
