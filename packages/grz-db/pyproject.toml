@@ -18,7 +18,7 @@ dependencies = [
     "alembic[tz] >=1.16.1",
     "cryptography >=45.0.3",
     "sqlmodel >=0.0.24",
-    "grz-pydantic-models >=2.3,<3"
+    "grz-pydantic-models >=2.4,<3"
 ]
 
 [tool.uv.sources]
