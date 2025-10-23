@@ -751,13 +751,13 @@ class SubmissionDb:
                 .join(validated_state, Submission.id == validated_state.submission_id)
                 .outerjoin(
                     qcing_state,
-                    (Submission.id == qcing_state.submission_id) and (qcing_state.state == SubmissionStateEnum.QCING),
+                    sa.and_(Submission.id == qcing_state.submission_id, qcing_state.state == SubmissionStateEnum.QCING),
                 )
                 .where(
                     Submission.submitter_id == submitter_id,
                     uploaded_state.state == SubmissionStateEnum.UPLOADED,
                     validated_state.state == SubmissionStateEnum.VALIDATED,
-                    (uploaded_state.timestamp >= start_of_month) and (uploaded_state.timestamp < start_of_next_month),
+                    sa.and_(uploaded_state.timestamp >= start_of_month, uploaded_state.timestamp < start_of_next_month),
                 )
                 .order_by(uploaded_state.timestamp)
                 .distinct()
