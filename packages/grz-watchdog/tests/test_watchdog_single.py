@@ -34,8 +34,9 @@ class TestProcessSingle(BaseTest):
         """
         self._submit_data(test_data_dir / submission_type)
 
-        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed/without_qc"
-        self._run_watchdog(target_file)
+        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
+        config_overrides = {"qc": {"selection_strategy": {"enabled": False}}}
+        self._run_watchdog(target_file, config_overrides=config_overrides)
 
         self._verify_db_state(submission_id, expected_state="Finished")
         self._verify_inbox_cleaned(submission_id)
@@ -78,8 +79,9 @@ class TestProcessSingle(BaseTest):
         run_in_container("sh", "-c", corruption_command)
         run_in_container(*PIXI_RUN_PREFIX, "mc", "cp", container_temp_path, s3_path_to_corrupt)
 
-        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed/without_qc"
-        self._run_watchdog_expect_fail(target_file)
+        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
+        config_overrides = {"qc": {"selection_strategy": {"enabled": False}}}
+        self._run_watchdog_expect_fail(target_file, config_overrides=config_overrides)
 
         self._verify_db_state(submission_id, expected_state="Error")
 
@@ -98,8 +100,9 @@ class TestProcessSingle(BaseTest):
         variant_qc_dir, submission_id = _create_variant_submission(test_data_dir, "qc", tmp_path)
         self._submit_data(variant_qc_dir)
 
-        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed/with_qc"
-        self._run_watchdog(target_file)
+        target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
+        config_overrides = {"qc": {"selection_strategy": {"enabled": True, "target_percentage": 100.0}}}
+        self._run_watchdog(target_file, config_overrides=config_overrides)
 
         self._verify_db_state(submission_id, expected_state="Finished")
         self._verify_qc_results_populated(submission_id)
@@ -111,6 +114,7 @@ class TestProcessSingle(BaseTest):
         Tests that the workflow can process a new, valid submission even after a
         previous run failed, leaving potentially stale intermediate files.
         """
+        config_overrides = {"qc": {"selection_strategy": {"enabled": False}}}
         base_submission_dir = test_data_dir / "panel"
         fail_dir, fail_id = _create_variant_submission(base_submission_dir, "fail_run", tmp_path)
         self._submit_data(fail_dir)
@@ -134,15 +138,15 @@ class TestProcessSingle(BaseTest):
         run_in_container("sh", "-c", f"printf '\\0' | dd of={container_temp_path} bs=1 count=1 conv=notrunc")
         run_in_container(*PIXI_RUN_PREFIX, "mc", "cp", container_temp_path, s3_path_to_corrupt)
 
-        fail_target = f"results/{SUBMITTER_ID}/{INBOX}/{fail_id}/processed/without_qc"
-        self._run_watchdog_expect_fail(fail_target)
+        fail_target = f"results/{SUBMITTER_ID}/{INBOX}/{fail_id}/processed"
+        self._run_watchdog_expect_fail(fail_target, config_overrides=config_overrides)
         self._verify_db_state(fail_id, expected_state="Error")
 
         pass_dir, pass_id = _create_variant_submission(base_submission_dir, "pass_run", tmp_path)
         self._submit_data(pass_dir)
 
-        pass_target = f"results/{SUBMITTER_ID}/{INBOX}/{pass_id}/processed/without_qc"
-        self._run_watchdog(pass_target)
+        pass_target = f"results/{SUBMITTER_ID}/{INBOX}/{pass_id}/processed"
+        self._run_watchdog(pass_target, config_overrides=config_overrides)
 
         self._verify_db_state(pass_id, expected_state="Finished")
         self._verify_inbox_cleaned(pass_id)

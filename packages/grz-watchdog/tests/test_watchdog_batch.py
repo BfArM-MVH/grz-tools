@@ -27,7 +27,8 @@ class TestProcessMulti(BaseTest):
         self._submit_data(variant2_dir)
 
         # run watchdog with target "pending", which should process all available submissions
-        self._run_watchdog("pending")
+        config_overrides = {"qc": {"selection_strategy": {"enabled": False}}}
+        self._run_watchdog("pending", config_overrides=config_overrides)
 
         # verify both submissions have been processed
         for sub_id in [sub_id1, sub_id2]:

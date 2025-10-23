@@ -5,11 +5,14 @@ import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import time
 from pathlib import Path
 
 import pytest
 import requests
+import yaml
+
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -277,20 +280,43 @@ class BaseTest:
             except subprocess.CalledProcessError as log_e:
                 print(f"\n--- Could not retrieve {log_path} ---\n{log_e.stderr}")
 
-    def _run_watchdog(self, target: str, cores: int = 1):
+    def _build_snakemake_cmd(self, target: str, cores: int = 1, config_overrides: dict | None = None) -> list[str]:
+        cmd = [*SNAKEMAKE_BASE_CMD, target, "--cores", str(cores)]
+        if config_overrides:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as tmp:
+                yaml.dump(config_overrides, tmp)
+                local_temp_path = tmp.name
+            hex = hashlib.sha256(str(config_overrides).encode()).hexdigest()
+            container_temp_path = f"/tmp/{hex}.yaml"
+
+            try:
+                subprocess.run(
+                    [CONTAINER_RUNTIME, "cp", local_temp_path, f"{GRZ_WATCHDOG_CONTAINER_NAME}:{container_temp_path}"],
+                    check=True,
+                    capture_output=True,
+                )
+            finally:
+                os.remove(local_temp_path)
+
+            cmd.extend(["--configfile", container_temp_path])
+        return cmd
+
+    def _run_watchdog(self, target: str, cores: int = 1, config_overrides: dict | None = None):
         """Run grz-watchdog and handle failures."""
         print(f"\nRunning grz-watchdog for target: {target}…")
+        cmd = self._build_snakemake_cmd(target, cores, config_overrides)
         try:
-            run_in_container(*SNAKEMAKE_BASE_CMD, "--cores", str(cores), target)
+            run_in_container(*cmd)
         except subprocess.CalledProcessError as e:
             self._handle_watchdog_failure(e)
             pytest.fail("grz-watchdog failed. See dumped log contents above for details.", pytrace=False)
 
-    def _run_watchdog_expect_fail(self, target: str, cores: int = 1):
+    def _run_watchdog_expect_fail(self, target: str, cores: int = 1, config_overrides: dict | None = None):
         """Run grz-watchdog and assert that it fails."""
         print(f"\nRunning grz-watchdog for target: {target} (expecting failure)…")
+        cmd = self._build_snakemake_cmd(target, cores, config_overrides)
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
-            run_in_container(*SNAKEMAKE_BASE_CMD, "--cores", str(cores), target)
+            run_in_container(*cmd)
 
         self._handle_watchdog_failure(excinfo.value)
         return excinfo.value

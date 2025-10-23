@@ -67,14 +67,14 @@ def cleanup_stale_temp_outputs():
 ## RULE INPUT FUNCTIONS
 
 
-def all_pending_submissions(wildcards):
+def all_pending_submissions(wildcards: Wildcards):
     batch_file = checkpoints.select_submissions.get().output["submissions_batch"]
     with open(batch_file) as f:
         targets = [line.strip() for line in f if line.strip()]
     return targets
 
 
-def get_submission_to_sync(wildcards):
+def get_submission_to_sync(wildcards: Wildcards):
     if hasattr(wildcards, "submission_id"):
         return [rules.filter_single_submission.output.filtered_submission]
     else:
@@ -86,7 +86,7 @@ def get_submission_to_sync(wildcards):
         )
 
 
-def get_cleanup_prerequisite(wildcards):
+def get_cleanup_prerequisite(wildcards: Wildcards):
     """
     Determines the prerequisite for the 'clean' rule.
     - If validation was successful, it depends on the downstream QC/reporting rules.
@@ -147,7 +147,7 @@ def should_run_qc(
     return current_index_in_block >= block - 1
 
 
-def get_final_submission_target(wildcards):
+def get_final_submission_target(wildcards: Wildcards):
     validation_flag_file = checkpoints.validate.get(
         submitter_id=wildcards.submitter_id,
         inbox=wildcards.inbox,
@@ -167,7 +167,7 @@ def get_final_submission_target(wildcards):
 
     strategy = config["qc"]["selection_strategy"]
     run_qc = should_run_qc(
-        db_config_path=config["config_paths"]["db"],
+        db_config_path=cfg_path("config_paths/db")(wildcards),
         submitter_id=wildcards.submitter_id,
         target_percentage=strategy["target_percentage"],
         salt=strategy["salt"],
@@ -183,7 +183,7 @@ def get_final_submission_target(wildcards):
     )
 
 
-def get_successful_finalize_inputs(wildcards):
+def get_successful_finalize_inputs(wildcards: Wildcards):
     """
     Gather inputs for a successfully validated submission.
     Conditionally include the QC result marker based on the qc_status wildcard.
@@ -201,7 +201,7 @@ def get_successful_finalize_inputs(wildcards):
     return inputs
 
 
-def get_failed_finalize_inputs(wildcards):
+def get_failed_finalize_inputs(wildcards: Wildcards):
     """Input function for the failure endpoint to conditionally add cleanup."""
     inputs = {
         "db_config_path": cfg_path("config_paths/db")(wildcards),
@@ -330,43 +330,43 @@ def get_qc_workflow_references_directory() -> str:
     return directory(config["qc"].get("reference_directory", "<resources>/references"))
 
 
-def get_prepare_qc_nextflow_extra_params(wildcards, input, output):
+def get_prepare_qc_nextflow_extra_params(wildcards: Wildcards, input, output):
     work_dir = os.path.abspath(output.work_dir)
     extra = config.get("qc", {}).get("prepare-qc", {}).get("extra", "")
     return f"-resume -work-dir {work_dir} {extra}"
 
 
-def get_run_qc_nextflow_extra_params(wildcards, input, output):
+def get_run_qc_nextflow_extra_params(wildcards: Wildcards, input, output):
     work_dir = os.path.abspath(output.work_dir)
     extra = config.get("qc", {}).get("run-qc", {}).get("extra", "")
     return f"-resume -work-dir {work_dir} {extra}"
 
 
-def get_prepare_qc_nextflow_configs(wildcards):
+def get_prepare_qc_nextflow_configs(wildcards: Wildcards):
     config_paths = config.get("qc", {}).get("prepare-qc", {}).get("configs", [])
     if not config_paths:
         return ""
     return " ".join([f"-c {os.path.abspath(p)}" for p in config_paths])
 
 
-def get_prepare_qc_nextflow_profiles(wildcards):
+def get_prepare_qc_nextflow_profiles(wildcards: Wildcards):
     profiles = config.get("qc", {}).get("prepare-qc", {}).get("profiles", ["conda"])
     return ",".join(profiles)
 
 
-def get_run_qc_nextflow_configs(wildcards):
+def get_run_qc_nextflow_configs(wildcards: Wildcards):
     config_paths = config.get("qc", {}).get("run-qc", {}).get("configs", [])
     if not config_paths:
         return ""
     return " ".join([f"-c {os.path.abspath(p)}" for p in config_paths])
 
 
-def get_run_qc_nextflow_profiles(wildcards):
+def get_run_qc_nextflow_profiles(wildcards: Wildcards):
     profiles = config.get("qc", {}).get("run-qc", {}).get("profiles", ["conda"])
     return ",".join(profiles)
 
 
-def get_target_qc_percentage(wildcards) -> float | None:
+def get_target_qc_percentage(wildcards: Wildcards) -> float | None:
     """
     If automatic qc selection strategy is enabled, returns the target qc percentage.
     Otherwise, returns None.

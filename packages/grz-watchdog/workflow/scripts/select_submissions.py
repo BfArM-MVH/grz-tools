@@ -43,6 +43,7 @@ with redirect_stdout(open(stdout_log_path, "w")), redirect_stderr(open(stderr_lo
     with open(output_batch_file, "w") as f:
         for submission in selected_submissions:
             origin = submission["origin"]
-            submitter_id, inbox, submission_id = origin["submitter_id"], origin["inbox"], origin["submission_id"]
+            submitter_id, inbox = origin["submitter_id"], origin["inbox"]
+            submission_id = submission["submission_id"]
             target_path = f"results/{submitter_id}/{inbox}/{submission_id}/processed"
             f.write(f"{target_path}\n")
