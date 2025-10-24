@@ -386,5 +386,5 @@ jobs:
       - name: Install grz-watchdog dependencies
         run: uv sync --all-extras --all-groups --all-packages
 
-      - name: Run grz-watchdog zrdzd
+      - name: Run grz-watchdog
         run: uv run pytest packages/grz-watchdog/tests -v
