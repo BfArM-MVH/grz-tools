@@ -71,6 +71,77 @@ def test_wgs_trio_no_vcf(version):
 
 @pytest.mark.parametrize(
     "version",
+    TESTED_VERSIONS,
+)
+def test_wgs_tumor_germline_missing_dna(version):
+    """
+    Ensure that both tumor and germline DNA lab data are required for WGS tumor-germline submissions.
+    """
+    metadata_str = (
+        importlib.resources.files(resources)
+        .joinpath("example_metadata", "wgs_tumor_germline", f"v{version}.json")
+        .read_text()
+    )
+
+    ### tumor+germline
+
+    # delete germline DNA
+    metadata = json.loads(metadata_str)
+    del metadata["donors"][0]["labData"][0]
+
+    # missing germline DNA should fail
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # delete tumor DNA
+    metadata = json.loads(metadata_str)
+    del metadata["donors"][0]["labData"][1]
+
+    # missing tumor DNA should fail
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    ### tumor-only
+
+    # delete germline DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "tumor-only"
+    del metadata["donors"][0]["labData"][0]
+
+    # missing germline DNA should pass
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # delete tumor DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "tumor-only"
+    del metadata["donors"][0]["labData"][1]
+
+    # missing tumor DNA should fail
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    ### germline-only
+
+    # delete germline DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "germline-only"
+    del metadata["donors"][0]["labData"][0]
+
+    # missing germline DNA should fail
+    with pytest.raises(ValidationError):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # delete tumor DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "germline-only"
+    del metadata["donors"][0]["labData"][1]
+
+    # missing tumor DNA should pass
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize(
+    "version",
     [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
 )
 def test_wgs_trio_1_3_fail_empty_consent_list(version: str):
