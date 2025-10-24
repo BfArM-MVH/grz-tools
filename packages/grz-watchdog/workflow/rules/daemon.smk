@@ -10,7 +10,7 @@ daemon_logger = logging.getLogger("daemon_monitor")
 finish_sentinel = object()
 submission_queue = queue.Queue()
 
-daemon_keepalive_marker = "results/daemon/daemon_keepalive_marker.marker"
+daemon_keepalive_marker = "<results>/daemon/daemon_keepalive_marker.marker"
 if "daemon" in sys.argv:
     submission_queue.put(daemon_keepalive_marker)
 
@@ -174,7 +174,7 @@ def monitor_and_queue_submissions(shutdown_event):
             for submission_id, state in final_db_states.items():
                 if state == "uploaded":
                     if origin := sub_id_to_origin.get(submission_id):
-                        target_path = f"results/{origin['submitter_id']}/{origin['inbox']}/{submission_id}/processed"
+                        target_path = f"<results>/{origin['submitter_id']}/{origin['inbox']}/{submission_id}/processed"
                         if target_path not in already_queued:
                             new_targets_found.append(target_path)
 
@@ -212,7 +212,7 @@ if "daemon" in sys.argv:
 
 rule daemon_keepalive:
     output:
-        touch(temp(daemon_keepalive_marker)),
+        marker=touch(temp(daemon_keepalive_marker)),
     input:
         rules.init_db.output.marker,
     params:
@@ -226,6 +226,6 @@ rule daemon:
     Consumes submissions from monitoring queue and sends them off for processing.
     """
     input:
-        rules.daemon_keepalive.output,
+        rules.daemon_keepalive.output.marker,
         from_queue(submission_queue, finish_sentinel=finish_sentinel),
     default_target: True
