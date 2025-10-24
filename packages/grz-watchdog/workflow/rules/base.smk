@@ -28,6 +28,8 @@ rule scan_inbox:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
     output:
         submissions=temp("<results>/scan_inbox/{submitter_id}/{inbox}/submissions.json"),
+    benchmark:
+        "<benchmarks>/scan_inbox/{submitter_id}/{inbox}/benchmark.tsv"
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
         s3_secret=os.environ.get("GRZ_S3__SECRET"),
@@ -151,6 +153,8 @@ rule download:
         data=perhaps_temp(
             directory("<results>/{submitter_id}/{inbox}/{submission_id}/data")
         ),
+    benchmark:
+        "<benchmarks>/download/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
         s3_secret=os.environ.get("GRZ_S3__SECRET"),
@@ -176,6 +180,8 @@ rule decrypt:
         db_config_path=cfg_path("config_paths/db"),
     output:
         marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
+    benchmark:
+        "<benchmarks>/decrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
         grz_private_key_passphrase=os.environ.get(
             "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"
@@ -209,6 +215,8 @@ checkpoint validate:
         validation_errors=perhaps_temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"
         ),
+    benchmark:
+        "<benchmarks>/validate/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     threads: 4
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stdout.log",
@@ -254,6 +262,8 @@ rule re_encrypt:
         db_config_path=cfg_path("config_paths/db"),
     output:
         marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted"),
+    benchmark:
+        "<benchmarks>/re_encrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
         disk=estimate_re_encrypt_size,
     log:
@@ -278,6 +288,8 @@ rule archive:
         db_config_path=cfg_path("config_paths/db"),
     output:
         marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/archived"),
+    benchmark:
+        "<benchmarks>/archive/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
@@ -368,6 +380,8 @@ rule prepare_qc_workflow_references:
         references_dir=get_qc_workflow_references_directory(),
         launch_dir=directory("<resources>/shared_qc_launchdir"),
         work_dir=temp(directory("<resources>/prepare_qc_workflow/work")),
+    benchmark:
+        "<benchmarks>/prepare_qc_workflow_references/benchmark.tsv"
     params:
         profiles=get_prepare_qc_nextflow_profiles,
         configs=get_prepare_qc_nextflow_configs,
@@ -444,6 +458,8 @@ rule qc:
         work_dir=perhaps_temp(
             directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work")
         ),
+    benchmark:
+        "<benchmarks>/qc/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
@@ -512,6 +528,8 @@ rule clean:
         clean_results=perhaps_temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}"
         ),
+    benchmark:
+        "<benchmarks>/clean/{submitter_id}/{inbox}/{submission_id}/{qc_status}/benchmark.tsv"
     params:
         mode=config.get("auto-cleanup", "none"),
     log:
