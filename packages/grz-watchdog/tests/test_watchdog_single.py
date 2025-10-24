@@ -151,3 +151,38 @@ class TestProcessSingle(BaseTest):
         self._verify_db_state(pass_id, expected_state="Finished")
         self._verify_inbox_cleaned(pass_id)
         self._verify_archived(pass_id, bucket=BUCKET_NONCONSENTED)
+
+
+    def test_single_submission_with_existing_db(self, test_data_dir: Path, tmp_path: Path):
+        """
+        Tests that processing a new submission does not affect submissions already
+        present and finished in the database.
+        """
+        base_submission_dir = test_data_dir / "panel"
+        config_overrides = {"qc": {"selection_strategy": {"enabled": False}}}
+
+        pre_existing_dir, pre_existing_id = _create_variant_submission(
+            base_submission_dir, "pre_existing", tmp_path
+        )
+        self._submit_data(pre_existing_dir)
+
+        pre_existing_target = f"results/{SUBMITTER_ID}/{INBOX}/{pre_existing_id}/processed"
+        self._run_watchdog(pre_existing_target, config_overrides=config_overrides)
+
+        self._verify_db_state(pre_existing_id, expected_state="Finished")
+        self._verify_archived(pre_existing_id, bucket=BUCKET_NONCONSENTED)
+        self._verify_inbox_cleaned(pre_existing_id)
+
+        new_submission_dir, new_submission_id = _create_variant_submission(
+            base_submission_dir, "new_submission", tmp_path
+        )
+        self._submit_data(new_submission_dir)
+
+        new_target = f"results/{SUBMITTER_ID}/{INBOX}/{new_submission_id}/processed"
+        self._run_watchdog(new_target, config_overrides=config_overrides)
+
+        self._verify_db_state(new_submission_id, expected_state="Finished")
+        self._verify_archived(new_submission_id, bucket=BUCKET_NONCONSENTED)
+        self._verify_inbox_cleaned(new_submission_id)
+
+        self._verify_db_state(pre_existing_id, expected_state="Finished")
