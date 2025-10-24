@@ -10,6 +10,10 @@ daemon_logger = logging.getLogger("daemon_monitor")
 finish_sentinel = object()
 submission_queue = queue.Queue()
 
+daemon_keepalive_marker = "results/daemon/daemon_keepalive_marker.marker"
+if "daemon" in sys.argv:
+    submission_queue.put(daemon_keepalive_marker)
+
 
 def _run_grzctl_db_command(*args):
     """Helper to run grzctl db commands from monitoring thread"""
@@ -32,7 +36,7 @@ def _run_grzctl_db_command(*args):
         return None
 
 
-def monitor_and_queue_submissions():
+def monitor_and_queue_submissions(shutdown_event):
     """
     Runs in background thread, replicates discovery logic (scan → sync → select)
     to find new submissions and puts the respective target paths onto snakemake queue.
@@ -45,9 +49,18 @@ def monitor_and_queue_submissions():
         "Starting monitoring thread with a scan interval of %s seconds.",
         interval,
     )
+    print("Starting monitoring thread with a scan interval of %s seconds.", interval)
 
     try:
-        while True:
+        while not shutdown_event.is_set():
+            if (
+                not submission_queue.empty()
+                and submission_queue.queue[0] is finish_sentinel
+            ):
+                daemon_logger.info(
+                    "Finish sentinel detected in queue. Shutting down monitoring thread."
+                )
+                break
             daemon_logger.info(
                 "Checking for new submissions in all configured inboxes."
             )
@@ -178,7 +191,7 @@ def monitor_and_queue_submissions():
                     "No new submissions were found that are ready for processing in this cycle."
                 )
 
-            time.sleep(interval)
+            shutdown_event.wait(timeout=interval)
 
     except (KeyboardInterrupt, SystemExit):
         daemon_logger.info(
@@ -188,28 +201,24 @@ def monitor_and_queue_submissions():
         daemon_logger.info(
             "Placing the finish sentinel on the queue to allow a graceful shutdown."
         )
-        submission_queue.put(finish_sentinel)
 
 
-keep_alive_marker = "results/daemon/keep_alive.marker"
-
-# start monitoring thread only when 'daemon' rule is a target
+monitor_thread = None
 if "daemon" in sys.argv:
-    submission_queue.put(keep_alive_marker)
-    monitor_thread = threading.Thread(target=monitor_and_queue_submissions, daemon=True)
-    monitor_thread.start()
-else:
-    monitor_thread = None
+    monitor_thread = threading.Thread(
+        target=monitor_and_queue_submissions, args=(shutdown_event,), daemon=True
+    )
 
 
-rule daemon_keep_alive:
-    input:
-        db_init_marker=rules.init_db.output.marker,
+rule daemon_keepalive:
     output:
-        marker=temp(touch(keep_alive_marker)),
-    run:
-        if monitor_thread:
-            monitor_thread.join()
+        touch(temp(daemon_keepalive_marker)),
+    input:
+        rules.init_db.output.marker,
+    params:
+        delay=lambda wildcards: int(config["monitor"]["interval"]) * 2 + 3,
+    shell:
+        "sleep {params.delay};"
 
 
 rule daemon:
@@ -217,4 +226,6 @@ rule daemon:
     Consumes submissions from monitoring queue and sends them off for processing.
     """
     input:
+        rules.daemon_keepalive.output,
         from_queue(submission_queue, finish_sentinel=finish_sentinel),
+    default_target: True
