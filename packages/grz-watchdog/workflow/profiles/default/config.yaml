@@ -1,0 +1,4 @@
+cores: all
+printshellcmds: true
+sdm:
+ - conda

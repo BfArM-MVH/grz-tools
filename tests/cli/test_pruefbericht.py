@@ -315,5 +315,5 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
             "--pruefbericht-file",
             str(pruefbericht_json_path),
         ]
-        with pytest.raises(ValueError, match="Refusing to submit a Prüfbericht with a redacted TAN"):
+        with pytest.raises(ValueError, match=r"Refusing to submit a Prüfbericht with a redacted TAN"):
             runner.invoke(cli, submit_args, catch_exceptions=False)

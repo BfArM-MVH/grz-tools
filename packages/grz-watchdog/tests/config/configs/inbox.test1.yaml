@@ -1,0 +1,12 @@
+identifiers:
+  grz: "GRZM00123"
+  le: "123456789"
+
+keys:
+  grz_public_key_path: 'config/keys/watchdog-test.pub'
+  grz_private_key_path: 'config/keys/watchdog-test.sec'
+s3:
+  endpoint_url: "http://minio:9000"
+  access_key: "minioadmin"
+  secret: "minioadmin"
+  bucket: test1

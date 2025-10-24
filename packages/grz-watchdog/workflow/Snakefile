@@ -1,0 +1,82 @@
+import threading
+from operator import itemgetter
+
+from snakemake.utils import min_version, validate
+
+
+min_version("9.13.2")
+
+
+containerized: "docker://grz-watchdog:latest"
+
+
+configfile: "config/config.yaml"
+
+
+validate(config, schema="schemas/config.schema.yaml")
+
+ALL_INBOX_PAIRS = [
+    (submitter, inbox)
+    for submitter, inboxes in config["config_paths"]["inbox"].items()
+    for inbox in inboxes.keys()
+]
+
+
+wildcard_constraints:
+    submitter_id=r"|".join(set(map(itemgetter(0), ALL_INBOX_PAIRS))),
+    inbox=r"|".join(set(map(itemgetter(1), ALL_INBOX_PAIRS))),
+    qc_status=r"with_qc|without_qc",
+
+
+shutdown_event = threading.Event()
+
+
+# order is important:
+#  1. common has helper functions and other shared code
+#  2. base has most of the workflow code and relies on definitions from common and this Snakefile
+#  3. daemon relies on all of the above to be available
+include: "rules/common.smk"
+include: "rules/base.smk"
+include: "rules/daemon.smk"
+
+
+def shutdown_monitor():
+    """Helper function to gracefully stop the monitor thread."""
+    if monitor_thread and monitor_thread.is_alive():
+        print("Signalling monitoring thread to stop...")
+        shutdown_event.set()
+        submission_queue.put(finish_sentinel)
+        monitor_thread.join(timeout=15)
+        if monitor_thread.is_alive():
+            print("Monitoring thread did not stop gracefully.")
+
+
+onstart:
+    print("grz-watchdog starting up")
+    if monitor_thread and not monitor_thread.is_alive():
+        print("Starting monitoring thread...")
+        monitor_thread.start()
+    if on_start := config.get("handlers", {}).get("on-start"):
+        shell(on_start)
+
+
+onerror:
+    print("grz-watchdog encountered an error")
+    shutdown_monitor()
+    cleanup_stale_temp_outputs()
+    if on_error := config.get("handlers", {}).get("on-error"):
+        shell(on_error)
+
+
+onsuccess:
+    print("grz-watchdog finished successfully")
+    shutdown_monitor()
+    cleanup_stale_temp_outputs()
+    if on_success := config.get("handlers", {}).get("on-success"):
+        shell(on_success)
+
+
+envvars:
+    "GRZ_S3__ACCESS_KEY",
+    "GRZ_S3__SECRET",
+    "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE",
