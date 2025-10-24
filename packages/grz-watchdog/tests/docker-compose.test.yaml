@@ -97,6 +97,7 @@ services:
       - ./generated/cert.pem:/workdir/config/cert.pem:ro
     working_dir: /workdir
     environment:
+      - PYTHONUNBUFFERED=1
       - GRZ_S3__ENDPOINT_URL=http://minio:9000
       - GRZ_S3__ACCESS_KEY=minioadmin
       - GRZ_S3__SECRET=minioadmin

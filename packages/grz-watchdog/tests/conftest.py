@@ -281,7 +281,7 @@ class BaseTest:
                 print(f"\n--- Could not retrieve {log_path} ---\n{log_e.stderr}")
 
     def _build_snakemake_cmd(self, target: str, cores: int = 1, config_overrides: dict | None = None) -> list[str]:
-        cmd = [*SNAKEMAKE_BASE_CMD, target, "--cores", str(cores)]
+        cmd = [*SNAKEMAKE_BASE_CMD, target, "--cores", str(cores), "--nocolor", "--force-use-threads"]
         if config_overrides:
             with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as tmp:
                 yaml.dump(config_overrides, tmp)
@@ -323,7 +323,7 @@ class BaseTest:
 
     def start_background_process(self, command: list[str]) -> subprocess.Popen:
         """Starts a background process inside the container."""
-        full_command = [*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "exec", GRZ_WATCHDOG_SERVICE_NAME, *command]
+        full_command = [*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "exec", "-T", GRZ_WATCHDOG_SERVICE_NAME, *command]
         process = subprocess.Popen(
             full_command,
             stdout=subprocess.PIPE,
@@ -334,23 +334,23 @@ class BaseTest:
         )
         return process
 
-    def stop_background_process(self, process: subprocess.Popen):
-        """Stops a running background process."""
+    def stop_background_process(self, process: subprocess.Popen, timeout: int = 120):
+        """Stops a running background process by sending SIGTERM."""
         print("Stopping background process...")
+
+        if process.poll() is not None:
+            print("Background process was already stopped.")
+            return
+
+        process.terminate()
         try:
-            # Send TERM signal for graceful shutdown
-            run_in_container("pkill", "-SIGTERM", "-f", "snakemake")
-            stdout, _ = process.communicate(timeout=120)
-            print(stdout)
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-            print("Process did not terminate gracefully, killing.")
-            try:
-                run_in_container("pkill", "-SIGKILL", "-f", "snakemake")
-            except subprocess.CalledProcessError:
-                pass
+            stdout, stderr = process.communicate(timeout=timeout)
+            print(stdout, stderr)
+        except subprocess.TimeoutExpired:
+            print(f"Process did not terminate gracefully after {timeout}s, killing.")
             process.kill()
-            stdout, _ = process.communicate()
-            print(stdout)
+            stdout, stderr = process.communicate(timeout=timeout)
+            print(stdout, stderr)
 
     def _verify_db_state(self, submission_id: str, expected_state: str):
         """Verifies the final state of a submission in the database."""
