@@ -9,7 +9,7 @@
     "submitterId": "123456789",
     "genomicDataCenterId": "GRZM00123",
     "clinicalDataNodeId": "KDKM00456",
-    "diseaseType": "rare",
+    "diseaseType": "oncological",
     "genomicStudyType": "single",
     "genomicStudySubtype": "tumor-only",
     "labName": "Genomics Lab Humangenetik MRI"
@@ -103,7 +103,7 @@
       ],
       "labData": [
         {
-          "labDataName": "Blood DNA normal",
+          "labDataName": "Blood DNA tumor",
           "tissueOntology": {
             "name": "UBERON",
             "version": "1.5"
@@ -113,7 +113,7 @@
           "sampleDate": "2023-06-21",
           "sampleConservation": "cryo-frozen",
           "sequenceType": "dna",
-          "sequenceSubtype": "other",
+          "sequenceSubtype": "somatic",
           "fragmentationMethod": "none",
           "libraryType": "wgs_lr",
           "libraryPrepKit": "SMRTbell™ Express Template Prep Kit",
@@ -137,10 +137,10 @@
             "bioinformaticsPipelineVersion": "v3.4.1",
             "referenceGenome": "GRCh38",
             "percentBasesAboveQualityThreshold": {
-              "minimumQuality": 50,
+              "minimumQuality": 20,
               "percent": 88
             },
-            "meanDepthOfCoverage": 40,
+            "meanDepthOfCoverage": 100,
             "minCoverage": 30,
             "targetedRegionsAboveMinCoverage": 0.9,
             "nonCodingVariants": true,
