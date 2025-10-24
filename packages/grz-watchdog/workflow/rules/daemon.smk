@@ -161,7 +161,7 @@ def monitor_and_queue_submissions():
             for submission_id, state in final_db_states.items():
                 if state == "uploaded":
                     if origin := sub_id_to_origin.get(submission_id):
-                        target_path = f"results/{origin['submitter_id']}/{origin['inbox']}/{submission_id}/processed/without_qc"
+                        target_path = f"results/{origin['submitter_id']}/{origin['inbox']}/{submission_id}/processed"
                         if target_path not in already_queued:
                             new_targets_found.append(target_path)
 
