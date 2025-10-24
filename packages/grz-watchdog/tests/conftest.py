@@ -342,15 +342,23 @@ class BaseTest:
             print("Background process was already stopped.")
             return
 
-        process.terminate()
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
-            print(stdout, stderr)
+            run_in_container("pkill", "-SIGINT", "-f", "snakemake")
+            process.wait(timeout=timeout)
+            print("Snakemake process terminated gracefully.")
         except subprocess.TimeoutExpired:
             print(f"Process did not terminate gracefully after {timeout}s, killing.")
             process.kill()
-            stdout, stderr = process.communicate(timeout=timeout)
-            print(stdout, stderr)
+            process.wait()
+        except subprocess.CalledProcessError as e:
+            print(f"Could not send SIGINT to snakemake process, it might have already exited. Error: {e.stderr}")
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                print("Process still running after pkill failed, killing.")
+                process.kill()
+                process.wait()
+
 
     def _verify_db_state(self, submission_id: str, expected_state: str):
         """Verifies the final state of a submission in the database."""
