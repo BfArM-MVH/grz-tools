@@ -203,8 +203,10 @@ else:
 
 
 rule daemon_keep_alive:
+    input:
+        db_init_marker=rules.init_db.output.marker,
     output:
-        touch(keep_alive_marker),
+        marker=temp(touch(keep_alive_marker)),
     run:
         if monitor_thread:
             monitor_thread.join()

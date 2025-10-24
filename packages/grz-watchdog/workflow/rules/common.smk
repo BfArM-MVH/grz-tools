@@ -41,6 +41,7 @@ def cleanup_stale_temp_outputs():
     relevant_temp_outputs = [
         str(rules.scan_inbox.output.submissions),
         str(rules.sync_database.output.submissions),
+        str(rules.daemon_keep_alive.output.marker),
     ]
 
     paths_to_check = set()
