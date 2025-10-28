@@ -14,8 +14,6 @@ rule init_db:
     log:
         stdout="<logs>/db/init.stdout.log",
         stderr="<logs>/db/init.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/init_db.sh"
 
@@ -33,8 +31,6 @@ rule scan_inbox:
     params:
         s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
         s3_secret=os.environ.get("GRZ_S3__SECRET"),
-    conda:
-        "../envs/grzctl.yaml"
     log:
         stdout="<logs>/scan_inbox/{submitter_id}/{inbox}.stdout.log",
         stderr="<logs>/scan_inbox/{submitter_id}/{inbox}.stderr.log",
@@ -54,8 +50,6 @@ rule filter_single_submission:
         ),
     params:
         submission_id=lambda wildcards: wildcards.submission_id,
-    conda:
-        "../envs/grzctl.yaml"
     log:
         stderr="<logs>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.stderr.log",
     shell:
@@ -79,8 +73,6 @@ rule sync_database:
     log:
         stdout="<logs>/sync_database.stdout.log",
         stderr="<logs>/sync_database.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/sync_database.py"
 
@@ -99,8 +91,6 @@ checkpoint select_submissions:
     log:
         stdout="<logs>/select_submissions.stdout.log",
         stderr="<logs>/select_submissions.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/select_submissions.py"
 
@@ -133,8 +123,6 @@ rule metadata:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stderr.log",
-    conda:
-        "../envs/s3.yaml"
     shell:
         """(
         s5cmd --endpoint-url {params.s3_endpoint_url} cp s3://{params.s3_bucket}/{params.s3_metadata_key} {output.metadata}
@@ -163,8 +151,6 @@ rule download:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/download.sh"
 
@@ -191,8 +177,6 @@ rule decrypt:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/decrypt.sh"
 
@@ -221,8 +205,6 @@ checkpoint validate:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/validate.sh"
 
@@ -241,8 +223,6 @@ rule consent:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/consent.sh"
 
@@ -269,8 +249,6 @@ rule re_encrypt:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/re_encrypt.sh"
 
@@ -293,8 +271,6 @@ rule archive:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/archive.sh"
 
@@ -314,8 +290,6 @@ rule generate_pruefbericht:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/generate_pruefbericht.sh"
 
@@ -342,8 +316,6 @@ rule submit_pruefbericht:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/submit_pruefbericht.sh"
 
@@ -354,8 +326,6 @@ rule setup_qc_workflow:
         pipeline="<resources>/GRZ_QC_Workflow/main.nf",
     params:
         revision=get_qc_workflow_revision,
-    conda:
-        "../envs/base.yaml"
     log:
         stdout="<logs>/qc/setup_qc_workflow.stdout.log",
         stderr="<logs>/qc/setup_qc_workflow.stderr.log",
@@ -398,8 +368,6 @@ rule prepare_qc_workflow_references:
         stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
         stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
     handover: True
-    conda:
-        "../envs/nextflow.yaml"
     shell:
         """
         (
@@ -428,8 +396,6 @@ rule set_status_to_qcing:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/set_status_to_qcing.sh"
 
@@ -474,8 +440,6 @@ rule qc:
             input.submission_basepath
         ),
     handover: True
-    conda:
-        "../envs/nextflow.yaml"
     shell:
         """
         (
@@ -506,8 +470,6 @@ rule process_qc_results:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/process_qc_results.sh"
 
@@ -535,8 +497,6 @@ rule clean:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     script:
         "../scripts/clean.sh"
 
@@ -573,8 +533,6 @@ rule finalize_fail:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     shell:
         """
         (
@@ -599,8 +557,6 @@ rule finalize_success:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stderr.log",
-    conda:
-        "../envs/grzctl.yaml"
     shell:
         """
         (

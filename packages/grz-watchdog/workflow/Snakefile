@@ -7,9 +7,6 @@ from snakemake.utils import min_version, validate
 min_version("9.13.2")
 
 
-containerized: "docker://grz-watchdog:latest"
-
-
 configfile: "config/config.yaml"
 
 

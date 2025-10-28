@@ -13,6 +13,17 @@ snakefmt = ">=0.11.2,<0.12"
 #snakemake-storage-plugin-s3 = ">=0.3.6,<0.4"
 #snakemake-executor-plugin-slurm = ">=1.8.0,<2"
 conda = ">=25.9.0,<26"
-grz-pydantic-models = ">=2.3.1,<3"
-grz-db = ">=1.0.1,<2"
-grzctl = ">=1.0.1,<1.1"
+git = ">=2.51.0,<3"
+jq = ">=1.8.1,<2"
+ripgrep = ">=14.1.1,<15"
+nextflow = ">=25.4.8,<26"
+s5cmd = ">=2.3.0,<3"
+minio-client = ">=2025.8.13.8.35.41,<2026"
+sqlite = ">=3.50.4,<4"
+
+[pypi-dependencies]
+grz-pydantic-models = { path = "../../grz-pydantic-models", editable = true }
+grz-common = { path = "../../grz-common", editable = true }
+grz-db = { path = "../../grz-db", editable = true }
+grz-cli = { path = "../../grz-cli", editable = true }
+grzctl = { path = "../../grzctl", editable = true }
