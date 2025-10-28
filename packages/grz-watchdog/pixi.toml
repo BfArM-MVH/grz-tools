@@ -22,8 +22,8 @@ minio-client = ">=2025.8.13.8.35.41,<2026"
 sqlite = ">=3.50.4,<4"
 
 [pypi-dependencies]
-grz-pydantic-models = { path = "../../grz-pydantic-models", editable = true }
-grz-common = { path = "../../grz-common", editable = true }
-grz-db = { path = "../../grz-db", editable = true }
-grz-cli = { path = "../../grz-cli", editable = true }
-grzctl = { path = "../../grzctl", editable = true }
+grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
+grz-common = { path = "../grz-common", editable = true }
+grz-db = { path = "../grz-db", editable = true }
+grz-cli = { path = "../grz-cli", editable = true }
+grzctl = { path = "../grzctl", editable = true }
