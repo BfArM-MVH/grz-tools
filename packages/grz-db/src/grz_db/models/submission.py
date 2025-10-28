@@ -551,7 +551,7 @@ class SubmissionDb:
                 # nothing to do
                 return db_donor
 
-            for field in db_donor.model_fields:
+            for field in Donor.model_fields:
                 old_value = getattr(db_donor, field)
                 new_value = getattr(updated_donor, field)
                 if old_value != new_value:
@@ -732,3 +732,54 @@ class SubmissionDb:
             )
             change_requests = session.exec(statement).all()
             return change_requests
+
+    def get_monthly_qc_stats(self, submitter_id: str, year: int, month: int) -> tuple[int, int, int]:
+        """
+        For any given month, get the number of validated submissions, the number of qc'ing submissions and the number of submissions since the last qc'ing submission.
+        """
+        start_of_month = datetime.datetime(year, month, 1, tzinfo=datetime.UTC)
+        start_of_next_month = (start_of_month + datetime.timedelta(days=32)).replace(day=1)
+
+        with self._get_session() as session:
+            uploaded_state = sa.orm.aliased(SubmissionStateLog, name="uploaded_state")
+            validated_state = sa.orm.aliased(SubmissionStateLog, name="validated_state")
+            qcing_state = sa.orm.aliased(SubmissionStateLog, name="qcing_state")
+
+            stmt = (
+                select(Submission, qcing_state.state)
+                .join(uploaded_state, Submission.id == uploaded_state.submission_id)  # type: ignore[arg-type]
+                .join(validated_state, Submission.id == validated_state.submission_id)  # type: ignore[arg-type]
+                .outerjoin(
+                    qcing_state,
+                    sa.and_(Submission.id == qcing_state.submission_id, qcing_state.state == SubmissionStateEnum.QCING),  # type: ignore[arg-type]
+                )
+                .where(
+                    Submission.submitter_id == submitter_id,
+                    uploaded_state.state == SubmissionStateEnum.UPLOADED,
+                    validated_state.state == SubmissionStateEnum.VALIDATED,
+                    sa.and_(uploaded_state.timestamp >= start_of_month, uploaded_state.timestamp < start_of_next_month),  # type: ignore[arg-type]
+                )
+                .order_by(uploaded_state.timestamp)  # type: ignore[arg-type]
+                .distinct()
+            )
+
+            query_results = session.exec(stmt).all()
+
+            if not query_results:
+                return 0, 0, 0
+
+            validated_this_month: int = len(query_results)
+            qcing_this_month: int = 0
+            last_qcing_index: int | None = None
+
+            for i, (_submission, qcing_state_value) in enumerate(query_results):
+                if qcing_state_value is not None:
+                    qcing_this_month += 1
+                    last_qcing_index = i
+
+            if last_qcing_index is not None:
+                submissions_since_last_qcing_submission = validated_this_month - 1 - last_qcing_index
+            else:
+                submissions_since_last_qcing_submission = validated_this_month
+
+            return validated_this_month, qcing_this_month, submissions_since_last_qcing_submission
