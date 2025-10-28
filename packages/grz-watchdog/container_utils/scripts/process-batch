@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# run the 'pending' rule, passing all args to snakemake, see entrypoint.sh
-entrypoint.sh "pending" "$@"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+RUNNER_SCRIPT="$SCRIPT_DIR/run_workflow.py"
+python3 "$RUNNER_SCRIPT" "pending" "$@"

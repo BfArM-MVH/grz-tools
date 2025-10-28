@@ -1,4 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-entrypoint.sh "daemon" "$@"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+RUNNER_SCRIPT="$SCRIPT_DIR/run_workflow.py"
+python3 "$RUNNER_SCRIPT" "daemon" "$@"

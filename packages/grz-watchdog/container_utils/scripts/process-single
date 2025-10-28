@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-    cat <<EOF
+	cat <<EOF
 Usage: $0 <submitter_id> <inbox> <submission_id> [MODE] [snakemake_options...]
 
 Processes a single submission using grz-watchdog.
@@ -29,62 +29,67 @@ Example (force no QC):
 Example (automatically determine whether to do QC):
   $0 123456789 test1 123456789_2025-09-22_aabbccdd --cores 4
 EOF
-    exit 1
+	exit 1
 }
 
 if [ "$#" -lt 3 ]; then
-    usage
+	usage
 fi
 
-submitter_id="$1"; shift
-inbox="$1"; shift
-submission_id="$1"; shift
+submitter_id="$1"
+shift
+inbox="$1"
+shift
+submission_id="$1"
+shift
 
 qc_mode="auto_qc" # default to automatically determining whether to do qc or not
 snakemake_args=()
 
 # separate qc mode flag from extra snakemake arguments
-while (( "$#" )); do
-  case "$1" in
-    --force-with-qc)
-      qc_mode="force_with_qc"
-      shift
-      ;;
-    --force-without-qc)
-      qc_mode="force_without_qc"
-      shift
-      ;;
-    -h|--help)
-      usage
-      ;;
-    *)
-      # pass other args on to snakemake
-      snakemake_args+=("$1")
-      shift
-      ;;
-  esac
+while (("$#")); do
+	case "$1" in
+	--force-with-qc)
+		qc_mode="force_with_qc"
+		shift
+		;;
+	--force-without-qc)
+		qc_mode="force_without_qc"
+		shift
+		;;
+	-h | --help)
+		usage
+		;;
+	*)
+		# pass other args on to snakemake
+		snakemake_args+=("$1")
+		shift
+		;;
+	esac
 done
 
 SNAKEMAKE_OPTS=()
 
 case "$qc_mode" in
-    "force_with_qc")
-        echo "qc mode: forcing qc for this submission."
-        config_json='{"qc": {"selection_strategy": {"enabled": true, "target_percentage": 100.0}}}'
-        SNAKEMAKE_OPTS+=("--config" "$config_json")
-        ;;
-    "force_without_qc")
-        echo "qc mode: forcing no qc for this submission."
-        config_json='{"qc": {"selection_strategy": {"enabled": false}}}'
-        SNAKEMAKE_OPTS+=("--config" "$config_json")
-        ;;
-    "auto_qc")
-        echo "qc mode: using automatic selection from main configuration."
-        ;;
+"force_with_qc")
+	echo "qc mode: forcing qc for this submission."
+	config_json='{"qc": {"selection_strategy": {"enabled": true, "target_percentage": 100.0}}}'
+	SNAKEMAKE_OPTS+=("--config" "$config_json")
+	;;
+"force_without_qc")
+	echo "qc mode: forcing no qc for this submission."
+	config_json='{"qc": {"selection_strategy": {"enabled": false}}}'
+	SNAKEMAKE_OPTS+=("--config" "$config_json")
+	;;
+"auto_qc")
+	echo "qc mode: using automatic selection from main configuration."
+	;;
 esac
 
 target_path="results/${submitter_id}/${inbox}/${submission_id}/processed"
 
 echo "Processing single submission. Target: ${target_path}"
 
-entrypoint.sh "${target_path}" "${SNAKEMAKE_OPTS[@]}" "${snakemake_args[@]}"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+RUNNER_SCRIPT="$SCRIPT_DIR/run_workflow.py"
+python3 "$RUNNER_SCRIPT" "${target_path}" "${SNAKEMAKE_OPTS[@]}" "${snakemake_args[@]}"

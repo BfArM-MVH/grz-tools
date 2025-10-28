@@ -35,7 +35,7 @@ PIXI_RUN_PREFIX = [
     "pixi",
     "run",
     "--manifest-path",
-    "/workspace/packages/grz-watchdog/tests/pixi.toml",
+    "/workspace/packages/grz-watchdog/pixi.toml",
     "--",
 ]
 
@@ -48,8 +48,6 @@ SNAKEMAKE_BASE_CMD = [
     "/grz-watchdog/workflow/Snakefile",
     "--directory",
     "/workdir",
-    "--conda-prefix",
-    "/conda-envs",
     "--verbose",
 ]
 

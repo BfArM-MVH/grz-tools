@@ -80,7 +80,7 @@ services:
     <<: *grz-image
     build:
       context: ../../..
-      dockerfile: ./packages/grz-watchdog/tests/Dockerfile.test
+      dockerfile: ./packages/grz-watchdog/Dockerfile
     command: ["echo", "Build complete."]
 
   grz-watchdog:
@@ -103,6 +103,9 @@ services:
       - GRZ_S3__SECRET=minioadmin
       - GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE=test
       - GRZ_PRUEFBERICHT_MOCK=true
+      - GRZ_WATCHDOG_WORKDIR=/workdir
+      - GRZ_WATCHDOG_SNAKEFILE=/grz-watchdog/workflow/Snakefile
+      - GRZ_WATCHDOG_SNAKEMAKE_PROFILE=/grz-watchdog/workflow/profiles/test
     # Keep the service alive for testing after startup
     entrypoint: /bin/sh
     command: -c 'trap "exit 0" TERM; while true; do sleep 1; done'
