@@ -6,6 +6,9 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
+process-single = { cmd = "process-single" }
+process-batch = { cmd = "process-batch" }
+daemon = { cmd = "daemon" }
 
 [dependencies]
 snakemake = ">=9.13.2,<10"
