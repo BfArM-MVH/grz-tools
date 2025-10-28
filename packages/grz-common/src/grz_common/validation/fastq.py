@@ -125,7 +125,7 @@ def validate_single_end_reads(fastq_file: str | PathLike, mean_read_length_thres
     :return: Generator of errors, if any.
     :param mean_read_length_threshold: Exclusive minimum mean read length
     """
-    _num_lines, errors = validate_fastq_file(fastq_file, mean_read_length_threshold=mean_read_length_threshold)
+    num_lines, errors = validate_fastq_file(fastq_file, mean_read_length_threshold=mean_read_length_threshold)
     yield from errors
 
 
