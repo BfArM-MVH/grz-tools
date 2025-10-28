@@ -2,4 +2,4 @@
 set -euo pipefail
 
 # run the 'pending' rule, passing all args to snakemake, see entrypoint.sh
-pending "$@"
+entrypoint.sh "pending" "$@"
