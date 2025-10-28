@@ -12,7 +12,7 @@ def main():
         print("Error: Could not determine project root directory.", file=sys.stderr)
         sys.exit(1)
 
-    workdir = project_root / "packages/grz-watchdog/workdir"
+    workdir = project_root / "packages/grz-watchdog/"
     snakefile_path = project_root / "packages/grz-watchdog/workflow/Snakefile"
     snakemake_profile_path = project_root / "packages/grz-watchdog/workflow/profiles/default"
     pixi_manifest_path = project_root / "packages/grz-watchdog/pixi.toml"
