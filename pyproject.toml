@@ -62,7 +62,8 @@ exclude = [
     "build",
     "dist",
     "out",
-    ".snakemake"
+    ".snakemake",
+    "packages/grz-watchdog/tests",
 ]
 extend-exclude = ["alembic"]
 
@@ -90,6 +91,7 @@ ignore = [
     "N818",
     "B008",
     "PLR2004",
+    "PLC0415",
     "D200",
     "D205",
     "D400",
@@ -103,8 +105,7 @@ ignore = [
     "D102",
     "D103",
     "B028",
-    "COM812",
-    "PLC0415"
+    "COM812"
 ]
 select = [
     "C90",
@@ -141,6 +142,9 @@ max-complexity = 10
 ]
 "packages/grz-cli/src/grz_cli/models/**.py" = [
     "N805"
+]
+"packages/grz-watchdog/workflow/scripts/**.py" = [
+    "F821"
 ]
 
 [tool.ruff.lint.pydocstyle]
