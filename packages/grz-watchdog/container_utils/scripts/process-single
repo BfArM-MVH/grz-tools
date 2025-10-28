@@ -91,5 +91,5 @@ target_path="results/${submitter_id}/${inbox}/${submission_id}/processed"
 echo "Processing single submission. Target: ${target_path}"
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-RUNNER_SCRIPT="$SCRIPT_DIR/run_workflow.py"
+RUNNER_SCRIPT="$SCRIPT_DIR/runner.py"
 python3 "$RUNNER_SCRIPT" "${target_path}" "${SNAKEMAKE_OPTS[@]}" "${snakemake_args[@]}"
