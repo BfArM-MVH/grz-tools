@@ -265,6 +265,7 @@ rule archive:
     """
     input:
         data=rules.download.output.data,
+        metadata=rules.metadata.output.metadata,
         consent_flag=rules.consent.output.consent_flag,
         encrypted_marker=rules.re_encrypt.output.marker,
         consented_config_path=cfg_path("config_paths/archive/consented"),
