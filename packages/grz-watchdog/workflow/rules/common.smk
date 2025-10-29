@@ -429,7 +429,7 @@ def estimated_processing_time_in_minutes(
     if processing_speed_in_mb_per_s <= 0:
         raise ValueError("processing_speed_in_mb_per_s must be positive")
     bytes_per_second = processing_speed_in_mb_per_s * 1024**2
-    bytes_per_minute = float(bytes_per_second) / 60
+    bytes_per_minute = float(bytes_per_second) * 60
     minutes = int(math.ceil(data_size_in_bytes / bytes_per_minute))
     return minutes
 
