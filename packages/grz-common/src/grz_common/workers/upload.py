@@ -8,6 +8,7 @@ import logging
 import math
 import re
 import shutil
+from importlib.metadata import version
 from os import PathLike
 from os.path import getsize
 from pathlib import Path
@@ -15,13 +16,13 @@ from typing import TYPE_CHECKING, override
 
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
-from grz_common.constants import REDACTED_TAN
+from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
-from ..transfer import init_s3_client
+from ..transfer import init_s3_client, init_s3_resource
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
 MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
@@ -98,6 +99,7 @@ class S3BotoUploadWorker(UploadWorker):
         self._threads = threads
 
         self._s3_client = init_s3_client(s3_options)
+        self._s3_resource = init_s3_resource(s3_options)
 
     @override
     def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):
@@ -222,6 +224,12 @@ class S3BotoUploadWorker(UploadWorker):
 
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id
+
+        # first, upload a small marker file with the grz-cli version to get
+        # more accurate total submission upload durations by last modified
+        # times
+        bucket = self._s3_resource.Bucket(self._s3_options.bucket)
+        bucket.put_object(Body=version("grz-cli").encode("utf-8"), Key=f"{encrypted_submission.submission_id}/version")
 
         self._upload_logged_files(encrypted_submission, progress_logger, files_to_upload)
 

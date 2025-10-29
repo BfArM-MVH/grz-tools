@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from grz_common.models.base import IgnoringBaseSettings
+from grz_common.models.identifiers import IdentifiersConfigModel
 from grz_common.models.keys import KeyConfigModel
 from grz_common.models.s3 import S3ConfigModel
 from pydantic import Field
@@ -31,6 +32,10 @@ class PruefberichtConfig(IgnoringBaseSettings):
 
 class DbConfig(IgnoringBaseSettings):
     db: DbModel
+
+
+class ReportConfig(DbConfig, IdentifiersConfigModel):
+    pass
 
 
 class ListConfig(S3ConfigModel):

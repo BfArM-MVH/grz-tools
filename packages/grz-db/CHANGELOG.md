@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.0.1...grz-db-v1.1.0) (2025-10-23)
+
+
+### Features
+
+* **grzctl,grz-cli:** support meanReadLength ([#437](https://github.com/BfArM-MVH/grz-tools/issues/437)) ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
+
+### Bug Fixes
+
+* **grz-db:** bump grz-pydantic-models version ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
+## [1.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.0.0...grz-db-v1.0.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-db,grzctl:** properly repopulate donors ([#413](https://github.com/BfArM-MVH/grz-tools/issues/413)) ([cb7b1bd](https://github.com/BfArM-MVH/grz-tools/commit/cb7b1bdebcfaec2e5581eb8a2e93ab57397b242e))
+
+## [1.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.6.0...grz-db-v1.0.0) (2025-10-07)
+
+
+### Features
+
+* **grz-db:** bump required dependencies ([#401](https://github.com/BfArM-MVH/grz-tools/issues/401)) ([f62a6e1](https://github.com/BfArM-MVH/grz-tools/commit/f62a6e1982f7cd43210d9abf1856f7a46607092c))
+* **grz-pydantic-models:** allow MV consent revocation on non-initial ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grzctl:** add quarterly report export ([#376](https://github.com/BfArM-MVH/grz-tools/issues/376)) ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+
 ## [0.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v0.5.0...grz-db-v0.6.0) (2025-08-27)
 
 

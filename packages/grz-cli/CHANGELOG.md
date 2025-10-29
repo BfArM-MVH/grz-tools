@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.4.0...grz-cli-v1.5.0) (2025-10-29)
+
+
+### Features
+
+* **grz-cli:** bump grz-common to upload version marker ([#448](https://github.com/BfArM-MVH/grz-tools/issues/448)) ([a82a120](https://github.com/BfArM-MVH/grz-tools/commit/a82a120d39e4aadd5197f737eca0d5c8ed7f74a6))
+
+## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.3.1...grz-cli-v1.4.0) (2025-10-23)
+
+
+### Features
+
+* **grzctl,grz-cli:** support meanReadLength ([#437](https://github.com/BfArM-MVH/grz-tools/issues/437)) ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
+
+### Bug Fixes
+
+* **grz-db:** bump grz-pydantic-models version ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
+## [1.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.3.0...grz-cli-v1.3.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common:** check validation progress logs before encrypt ([#411](https://github.com/BfArM-MVH/grz-tools/issues/411)) ([a33b342](https://github.com/BfArM-MVH/grz-tools/commit/a33b342da6f32a59c57acfa067584ac7798f9764))
+
+## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.2.0...grz-cli-v1.3.0) (2025-10-07)
+
+
+### Features
+
+* **grzctl,grz-cli:** bump required dependencies ([#402](https://github.com/BfArM-MVH/grz-tools/issues/402)) ([9b7e6f6](https://github.com/BfArM-MVH/grz-tools/commit/9b7e6f6e97c603efb335c0e339a3bc08ea2b2da8))
+
 ## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.1.2...grz-cli-v1.2.0) (2025-08-19)
 
 

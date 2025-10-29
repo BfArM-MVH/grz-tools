@@ -1,7 +1,7 @@
 {
-  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.1.7/GRZ/grz-schema.json",
+  "$schema": "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/v1.3.0/GRZ/grz-schema.json",
   "submission": {
-    "submissionDate": "2024-10-28",
+    "submissionDate": "2025-09-15",
     "submissionType": "initial",
     "tanG": "9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30",
     "localCaseId": "CASE12345",
@@ -34,7 +34,71 @@
         {
           "schemaVersion": "2025.0.1",
           "presentationDate": "2023-06-10",
-          "scope": {}
+          "scope": {
+            "status": "active",
+            "scope": {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/consentscope",
+                  "code": "research"
+                }
+              ]
+            },
+            "category": [
+              {
+                "coding": [
+                  {
+                    "system": "http://loinc.org",
+                    "code": "57016-8"
+                  }
+                ]
+              },
+              {
+                "coding": [
+                  {
+                    "system": "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
+                    "code": "2.16.840.1.113883.3.1937.777.24.2.184"
+                  }
+                ]
+              }
+            ],
+            "patient": {
+              "reference": "Patient/9b4a702d-162c-428a-8c5d-8b98af21b693"
+            },
+            "dateTime": "2020-09-01",
+            "policy": [
+              {
+                "uri": "urn:oid:2.16.840.1.113883.3.1937.777.24.2.1791"
+              }
+            ],
+            "provision": {
+              "type": "deny",
+              "period": {
+                "start": "2020-09-01",
+                "end": "2050-08-31"
+              },
+              "provision": [
+                {
+                  "code": [
+                    {
+                      "coding": [
+                        {
+                          "system": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+                          "code": "2.16.840.1.113883.3.1937.777.24.5.3.1",
+                          "display": "PATDAT_erheben_speichern_nutzen"
+                        }
+                      ]
+                    }
+                  ],
+                  "type": "permit",
+                  "period": {
+                    "start": "2020-09-01",
+                    "end": "2050-08-31"
+                  }
+                }
+              ]
+            }
+          }
         }
       ],
       "labData": [
@@ -132,9 +196,8 @@
       },
       "researchConsents": [
         {
-          "schemaVersion": "2025.0.1",
           "presentationDate": "2023-06-10",
-          "scope": {}
+          "noScopeJustification": "other patient-related reason"
         }
       ],
       "labData": [
@@ -232,9 +295,8 @@
       },
       "researchConsents": [
         {
-          "schemaVersion": "2025.0.1",
           "presentationDate": "2023-06-10",
-          "scope": {}
+          "noScopeJustification": "patient did not return consent documents"
         }
       ],
       "labData": [

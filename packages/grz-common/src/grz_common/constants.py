@@ -9,5 +9,3 @@ TQDM_DEFAULTS = {
     "smoothing": 0.00001,
     "colour": "cyan",
 }
-
-REDACTED_TAN = "0" * 64

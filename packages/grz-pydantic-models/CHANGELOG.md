@@ -1,5 +1,43 @@
 # Changelog
 
+## [2.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.1...grz-pydantic-models-v2.4.0) (2025-10-23)
+
+
+### Features
+
+* **grz-common,grz-pydantic-models,grz-check:** use mean read length threshold ([#428](https://github.com/BfArM-MVH/grz-tools/issues/428)) ([18db996](https://github.com/BfArM-MVH/grz-tools/commit/18db99663f67b8883a038c61a765bcb1d2fb9edf))
+* **grz-pydantic-models:** allow deprecated to be used with or without parentheses ([#418](https://github.com/BfArM-MVH/grz-tools/issues/418)) ([62b2ef3](https://github.com/BfArM-MVH/grz-tools/commit/62b2ef359ccc87cfea86a4f8ddb34e01e227e177))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** ignore optional fields in required consent scope/category ([#429](https://github.com/BfArM-MVH/grz-tools/issues/429)) ([f9fad57](https://github.com/BfArM-MVH/grz-tools/commit/f9fad573c16056cd24c9c26db0fa6d10c2e4e755))
+
+## [2.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.0...grz-pydantic-models-v2.3.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** add missing accepted versions ([#417](https://github.com/BfArM-MVH/grz-tools/issues/417)) ([ec85e8f](https://github.com/BfArM-MVH/grz-tools/commit/ec85e8f343af70cb6a74487bc8df1727459a3d48))
+* **grz-pydantic-models:** don't generate submission ID from redacted TAN ([#412](https://github.com/BfArM-MVH/grz-tools/issues/412)) ([c925e53](https://github.com/BfArM-MVH/grz-tools/commit/c925e53d4c36e003bca62343913233c52af73b14))
+* **grz-pydantic-models:** more conservative "deny" provisions for multiple codes ([#416](https://github.com/BfArM-MVH/grz-tools/issues/416)) ([dd36ab4](https://github.com/BfArM-MVH/grz-tools/commit/dd36ab42d4e6c232f510420eda00c94805af78f0))
+
+## [2.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.1...grz-pydantic-models-v2.3.0) (2025-10-07)
+
+
+### Features
+
+* **grz-pydantic-models:** accept submission metadata v1.3 in validation ([#395](https://github.com/BfArM-MVH/grz-tools/issues/395)) ([a3fc7ab](https://github.com/BfArM-MVH/grz-tools/commit/a3fc7ab27c8834a687fa1d7078aa8557e63e0d30))
+* **grz-pydantic-models:** allow MV consent revocation on non-initial ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grz-pydantic-models:** require valid scope in metadata v1.3+ ([#396](https://github.com/BfArM-MVH/grz-tools/issues/396)) ([521b3a5](https://github.com/BfArM-MVH/grz-tools/commit/521b3a579464ff938c3abf2a0fb1e11e8f83d79a))
+* **grz-pydantic-models:** support metadata schema v1.3 ([#378](https://github.com/BfArM-MVH/grz-tools/issues/378)) ([21a1ad5](https://github.com/BfArM-MVH/grz-tools/commit/21a1ad53eec40c554f6e1b3205620f6e0cb5033d))
+* **grzctl:** add quarterly report export ([#376](https://github.com/BfArM-MVH/grz-tools/issues/376)) ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** accept consent objects with no subprovisions ([#397](https://github.com/BfArM-MVH/grz-tools/issues/397)) ([916ff64](https://github.com/BfArM-MVH/grz-tools/commit/916ff644d54c51a24a0916afc23203b44bbe5150))
+
 ## [2.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.2.0...grz-pydantic-models-v2.2.1) (2025-08-19)
 
 

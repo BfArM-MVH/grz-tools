@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.4.0...grz-common-v1.5.0) (2025-10-29)
+
+
+### Features
+
+* **grz-common:** upload version marker first ([#447](https://github.com/BfArM-MVH/grz-tools/issues/447)) ([156807f](https://github.com/BfArM-MVH/grz-tools/commit/156807f6cf00ef16d8f3223e83c4135b0591cdc7))
+* **grzctl,grz-common:** show size in inbox listing ([#446](https://github.com/BfArM-MVH/grz-tools/issues/446)) ([3bee924](https://github.com/BfArM-MVH/grz-tools/commit/3bee92413f537fc4c087b0aca472548c557e3f78))
+
+## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.3.1...grz-common-v1.4.0) (2025-10-23)
+
+
+### Features
+
+* **grz-common,grz-pydantic-models,grz-check:** use mean read length threshold ([#428](https://github.com/BfArM-MVH/grz-tools/issues/428)) ([18db996](https://github.com/BfArM-MVH/grz-tools/commit/18db99663f67b8883a038c61a765bcb1d2fb9edf))
+
+
+### Bug Fixes
+
+* **grz-common:** meanReadLength param None vs 0 ([#435](https://github.com/BfArM-MVH/grz-tools/issues/435)) ([90538aa](https://github.com/BfArM-MVH/grz-tools/commit/90538aa6879b5f4e7c112cb7cb36ddb2ade3918c))
+* **grz-common:** resolve KeyError with long-read submissions ([#432](https://github.com/BfArM-MVH/grz-tools/issues/432)) ([81bd0cb](https://github.com/BfArM-MVH/grz-tools/commit/81bd0cbf411282c69352eb86b3fc53258bfe9cc1))
+
+## [1.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.3.0...grz-common-v1.3.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common:** Check encryption progress logs before upload ([#406](https://github.com/BfArM-MVH/grz-tools/issues/406)) ([401a20a](https://github.com/BfArM-MVH/grz-tools/commit/401a20aef1476eb940abc0c9aaf74e409215e55e))
+* **grz-cli,grz-common:** check validation progress logs before encrypt ([#411](https://github.com/BfArM-MVH/grz-tools/issues/411)) ([a33b342](https://github.com/BfArM-MVH/grz-tools/commit/a33b342da6f32a59c57acfa067584ac7798f9764))
+* **grz-pydantic-models:** don't generate submission ID from redacted TAN ([#412](https://github.com/BfArM-MVH/grz-tools/issues/412)) ([c925e53](https://github.com/BfArM-MVH/grz-tools/commit/c925e53d4c36e003bca62343913233c52af73b14))
+
 ## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.2.1...grz-common-v1.3.0) (2025-08-19)
 
 

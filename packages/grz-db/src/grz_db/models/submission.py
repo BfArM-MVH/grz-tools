@@ -4,19 +4,27 @@ from contextlib import contextmanager
 from operator import attrgetter
 from typing import Annotated, Any, ClassVar, Optional
 
+import sqlalchemy as sa
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
 from grz_pydantic_models.submission.metadata import (
+    CoverageType,
     DiseaseType,
     GenomicDataCenterId,
+    GenomicStudySubtype,
+    GenomicStudyType,
     LibraryType,
+    Relation,
+    ResearchConsentNoScopeJustification,
+    SequenceSubtype,
+    SequenceType,
     SubmissionType,
     SubmitterId,
     Tan,
 )
-from pydantic import ConfigDict, StringConstraints
+from pydantic import AfterValidator, ConfigDict, StringConstraints
 from sqlalchemy import JSON, Column
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -61,6 +69,29 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     ERROR = "Error"
 
 
+class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
+    impl = sa.types.String
+
+    cache_ok = True
+
+    def process_bind_param(self, value: set[str] | None, dialect: sa.engine.Dialect):
+        if not value:
+            # empty sets are stored as null to distinguish from a set of a single empty string
+            return None
+
+        for s in value:
+            if ";" in s:
+                raise ValueError(
+                    f"Cannot safely serialize string '{s}' in a semicolon-separated set since it contains a semicolon."
+                )
+
+        # sort the set for consistent serialization behavior / deterministic output
+        return ";".join(sorted(value))
+
+    def process_result_value(self, value: str | None, dialect: sa.engine.Dialect):
+        return None if value is None else set(value.split(";"))
+
+
 class SubmissionBase(SQLModel):
     """Submission base model."""
 
@@ -76,13 +107,15 @@ class SubmissionBase(SQLModel):
     submission_type: SubmissionType | None = None
     submitter_id: SubmitterId | None = None
     data_node_id: GenomicDataCenterId | None = None
+    coverage_type: CoverageType | None = None
     disease_type: DiseaseType | None = None
-    library_type: LibraryType | None = None
     basic_qc_passed: bool | None = None
 
     # fields also for Tätigkeitsbericht
     consented: bool | None = None
     detailed_qc_passed: bool | None = None
+    genomic_study_type: GenomicStudyType | None = None
+    genomic_study_subtype: GenomicStudySubtype | None = None
 
 
 class Submission(SubmissionBase, table=True):
@@ -223,6 +256,65 @@ class ChangeRequestLogCreate(ChangeRequestLogBase):
     submission_id: str
     author_name: str
     signature: str
+
+
+def coerce_empty_set_to_none(value: set | None) -> set | None:
+    """SemicolonSeparatedStringSet stores both empty sets and None as None."""
+    return value if value else None
+
+
+class Donor(SQLModel, table=True):
+    """Donor database model."""
+
+    __tablename__ = "donors"
+
+    submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
+    pseudonym: str = Field(primary_key=True)
+    relation: Relation
+    library_types: set[LibraryType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
+    sequence_types: set[SequenceType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
+    sequence_subtypes: set[SequenceSubtype] = Field(sa_column=Column(SemicolonSeparatedStringSet))
+    mv_consented: bool
+    research_consented: bool | None = None
+    research_consent_missing_justifications: Annotated[
+        set[ResearchConsentNoScopeJustification] | None, AfterValidator(coerce_empty_set_to_none)
+    ] = Field(sa_column=Column(SemicolonSeparatedStringSet))
+
+
+class DetailedQCResult(SQLModel, table=True):
+    """Detailed QC pipeline result model."""
+
+    __tablename__ = "detailed_qc_results"
+    __table_args__ = (
+        sa.ForeignKeyConstraint(["submission_id", "pseudonym"], ["donors.submission_id", "donors.pseudonym"]),
+    )
+
+    submission_id: str = Field(primary_key=True)
+    lab_datum_id: str = Field(primary_key=True)
+    pseudonym: str
+    timestamp: datetime.datetime = Field(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False, primary_key=True),
+    )
+    sequence_type: SequenceType
+    sequence_subtype: SequenceSubtype
+    library_type: LibraryType
+    percent_bases_above_quality_threshold_minimum_quality: float
+    percent_bases_above_quality_threshold_percent: float
+    percent_bases_above_quality_threshold_passed_qc: bool
+    percent_bases_above_quality_threshold_percent_deviation: float
+    mean_depth_of_coverage: float
+    mean_depth_of_coverage_passed_qc: bool
+    mean_depth_of_coverage_percent_deviation: float
+    targeted_regions_min_coverage: float
+    targeted_regions_above_min_coverage: float
+    targeted_regions_above_min_coverage_passed_qc: bool
+    targeted_regions_above_min_coverage_percent_deviation: float
+
+    model_config = ConfigDict(  # type: ignore
+        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
+        populate_by_name=True,
+    )
 
 
 class SubmissionDb:
@@ -389,6 +481,92 @@ class SubmissionDb:
             except Exception:
                 session.rollback()
                 raise
+
+    def get_donors(self, submission_id: str, pseudonym: str | None = None) -> tuple[Donor, ...]:
+        """Retrieve all donors for a given submission, or, optionally, only for a specific pseudonym."""
+        with self._get_session() as session:
+            statement = select(Donor).where(Donor.submission_id == submission_id)
+            if pseudonym is not None:
+                statement = statement.where(Donor.pseudonym == pseudonym)
+            donors = tuple(session.exec(statement).all())
+        return donors
+
+    def add_donor(self, donor: Donor) -> Donor:
+        """Add a donor to the database."""
+        with self._get_session() as session:
+            session.add(donor)
+
+            try:
+                session.commit()
+                session.refresh(donor)
+                return donor
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    def update_donor(self, updated_donor: Donor) -> Donor:
+        """Update a donor in the database."""
+        with self._get_session() as session:
+            statement = (
+                select(Donor)
+                .where(Donor.submission_id == updated_donor.submission_id)
+                .where(Donor.pseudonym == updated_donor.pseudonym)
+            )
+            db_donor = session.exec(statement).first()
+
+            if db_donor is None:
+                raise RuntimeError("Cannot update a donor that doesn't yet exist in the database.")
+
+            if db_donor == updated_donor:
+                # nothing to do
+                return db_donor
+
+            for field in db_donor.model_fields:
+                old_value = getattr(db_donor, field)
+                new_value = getattr(updated_donor, field)
+                if old_value != new_value:
+                    setattr(db_donor, field, new_value)
+
+            session.add(db_donor)
+
+            try:
+                session.commit()
+                session.refresh(db_donor)
+                return db_donor
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    def delete_donor(self, donor: Donor) -> None:
+        """Delete a donor from the database."""
+        with self._get_session() as session:
+            session.delete(donor)
+
+            try:
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                raise e
+
+    def get_detailed_qc_results(self, submission_id: str) -> tuple[DetailedQCResult, ...]:
+        """Retrieve all detailed QC results for a given submission."""
+        with self._get_session() as session:
+            statement = select(DetailedQCResult).where(DetailedQCResult.submission_id == submission_id)
+            results = tuple(session.exec(statement).all())
+        return results
+
+    def add_detailed_qc_result(self, result: DetailedQCResult) -> DetailedQCResult:
+        """Add or update a detailed QC result to/in the database."""
+        with self._get_session() as session:
+            session.add(result)
+
+            try:
+                session.commit()
+                session.refresh(result)
+                return result
+            except Exception as e:
+                session.rollback()
+                raise e
 
     def add_change_request(
         self,

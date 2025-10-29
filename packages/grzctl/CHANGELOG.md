@@ -1,5 +1,72 @@
 # Changelog
 
+## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.2.0...grzctl-v1.3.0) (2025-10-29)
+
+
+### Features
+
+* **grzctl,grz-common:** show size in inbox listing ([#446](https://github.com/BfArM-MVH/grz-tools/issues/446)) ([3bee924](https://github.com/BfArM-MVH/grz-tools/commit/3bee92413f537fc4c087b0aca472548c557e3f78))
+
+
+### Bug Fixes
+
+* **grzctl:** bump grz-common dependency for new functionality ([#449](https://github.com/BfArM-MVH/grz-tools/issues/449)) ([27415bd](https://github.com/BfArM-MVH/grz-tools/commit/27415bddd9f6647f57f16d2029621030853da35f))
+* **grzctl:** restrict detailed QC table to basic QC passed submissions ([#444](https://github.com/BfArM-MVH/grz-tools/issues/444)) ([217cf74](https://github.com/BfArM-MVH/grz-tools/commit/217cf74aafa3ebbbeadbcb36efbbe6b08ca9b423))
+
+## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.1.0...grzctl-v1.2.0) (2025-10-23)
+
+
+### Features
+
+* **grzctl,grz-cli:** support meanReadLength ([#437](https://github.com/BfArM-MVH/grz-tools/issues/437)) ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
+
+### Bug Fixes
+
+* **grz-db:** bump grz-pydantic-models version ([b86b843](https://github.com/BfArM-MVH/grz-tools/commit/b86b84313758d6fa16b1ee74af4834ba3e2ec914))
+
+## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.0.1...grzctl-v1.1.0) (2025-10-23)
+
+
+### Features
+
+* **grzctl:** Adapt report paths to BfArM specs ([#424](https://github.com/BfArM-MVH/grz-tools/issues/424)) ([a7788e8](https://github.com/BfArM-MVH/grz-tools/commit/a7788e8804e557c0556b3afaf909468ea0ba6c21)), closes [#422](https://github.com/BfArM-MVH/grz-tools/issues/422)
+
+
+### Bug Fixes
+
+* **grzctl:** automatic quarter determination ([#426](https://github.com/BfArM-MVH/grz-tools/issues/426)) ([f7a9108](https://github.com/BfArM-MVH/grz-tools/commit/f7a9108ad8352936c890b10af89c362f22cb6fe6))
+
+## [1.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.0.0...grzctl-v1.0.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* **grz-db,grzctl:** properly repopulate donors ([#413](https://github.com/BfArM-MVH/grz-tools/issues/413)) ([cb7b1bd](https://github.com/BfArM-MVH/grz-tools/commit/cb7b1bdebcfaec2e5581eb8a2e93ab57397b242e))
+* **grz-pydantic-models:** don't generate submission ID from redacted TAN ([#412](https://github.com/BfArM-MVH/grz-tools/issues/412)) ([c925e53](https://github.com/BfArM-MVH/grz-tools/commit/c925e53d4c36e003bca62343913233c52af73b14))
+
+## [1.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.6.0...grzctl-v1.0.0) (2025-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** make pruefbericht submission a two step process ([#399](https://github.com/BfArM-MVH/grz-tools/issues/399))
+
+### Features
+
+* **grz-pydantic-models:** allow MV consent revocation on non-initial ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grzctl,grz-cli:** bump required dependencies ([#402](https://github.com/BfArM-MVH/grz-tools/issues/402)) ([9b7e6f6](https://github.com/BfArM-MVH/grz-tools/commit/9b7e6f6e97c603efb335c0e339a3bc08ea2b2da8))
+* **grzctl:** add quarterly report export ([#376](https://github.com/BfArM-MVH/grz-tools/issues/376)) ([1179499](https://github.com/BfArM-MVH/grz-tools/commit/117949907151b612251ce5680d709d335f0e9427))
+* **grzctl:** add TUI for browsing submission database ([#371](https://github.com/BfArM-MVH/grz-tools/issues/371)) ([c296a30](https://github.com/BfArM-MVH/grz-tools/commit/c296a30676adcc01281affb024da26d260476442))
+* **grzctl:** make pruefbericht submission a two step process ([#399](https://github.com/BfArM-MVH/grz-tools/issues/399)) ([10cdc13](https://github.com/BfArM-MVH/grz-tools/commit/10cdc13bac9b6c07616dbeffcc70537ae3dad691))
+
+
+### Bug Fixes
+
+* **grzctl:** correctly calculate default reporting quarter ([#398](https://github.com/BfArM-MVH/grz-tools/issues/398)) ([e502bff](https://github.com/BfArM-MVH/grz-tools/commit/e502bff2ee863e2cf8a0e9071e3ad8b8d836c9ef))
+* **grzctl:** fix TUI crash on first date of new quarter ([#393](https://github.com/BfArM-MVH/grz-tools/issues/393)) ([ca333ae](https://github.com/BfArM-MVH/grz-tools/commit/ca333aea40766f2c334154a6e0c6bc27f9af5d4a))
+* **grzctl:** refuse submission of pruefbericht with redacted tanG ([#380](https://github.com/BfArM-MVH/grz-tools/issues/380)) ([6b6272e](https://github.com/BfArM-MVH/grz-tools/commit/6b6272e18a51d8aaf3559a3f22173852b4ce06d6))
+
 ## [0.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v0.5.0...grzctl-v0.6.0) (2025-08-27)
 
 

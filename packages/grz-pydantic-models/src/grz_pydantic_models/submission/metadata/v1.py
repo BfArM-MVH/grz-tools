@@ -28,6 +28,7 @@ from ...mii.consent import Consent, ProvisionType
 from .versioning import Version
 
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
+REDACTED_TAN = "0" * 64
 
 log = logging.getLogger(__name__)
 
@@ -338,7 +339,7 @@ class ResearchConsent(StrictBaseModel):
         return self
 
     def consent_by_code(self, date: date) -> dict[str, bool]:
-        code2consent = {}
+        code2consent: dict[str, bool] = {}
         if isinstance(self.scope, Consent) and (self.scope.provision is not None):
             provisions = self.scope.provision.provision
             for provision in provisions:
@@ -346,11 +347,10 @@ class ResearchConsent(StrictBaseModel):
                     for codeable_concept in provision.code:
                         for coding in codeable_concept.coding:
                             if provision.type == ProvisionType.PERMIT:
-                                code2consent[coding.code] = True
+                                code2consent[coding.code] = code2consent.get(coding.code, True)  # propagate prior deny
                             else:
                                 # explicit deny overrides any prior/later permits for code
                                 code2consent[coding.code] = False
-                                break
         return code2consent
 
     @staticmethod
@@ -1002,24 +1002,21 @@ class Donor(StrictBaseModel):
     def consents_to_research(self, date: date) -> bool:
         return ResearchConsent.consents_to_research(self.research_consents, date)
 
-    @model_validator(mode="after")
-    def ensure_mv_consented(self):
+    def consents_to_mv(self) -> bool:
         if self.mv_consent.scope:
-            if not any(
+            return any(
                 scope.domain == MvConsentScopeDomain.mv_sequencing and scope.type_ == MvConsentScopeType.permit
                 for scope in self.mv_consent.scope
-            ):
-                raise ValueError("Must have at least a permit of mvSequencing")
+            )
         else:
             if self.relation not in {Relation.mother, Relation.father}:
-                raise ValueError(
-                    "Donors must have at least a permit of mvSequencing. Exemptions only apply to parents."
-                )
-
+                log.warning("Donors must have at least a permit of mvSequencing. Exemptions only apply to parents.")
+                return False
             if not self.research_consents:
-                raise ValueError(
+                log.warning(
                     "Neither mvConsent nor researchConsent provided. Cannot confirm donor consented to participation."
                 )
+                return False
 
             mv_consent_exempt = False
             for research_consent in self.research_consents:
@@ -1031,11 +1028,13 @@ class Donor(StrictBaseModel):
                     mv_consent_exempt = True
 
             if not mv_consent_exempt:
-                raise ValueError(
+                log.warning(
                     "mvConsent not provided and researchConsent does not specify broad consent presented before 2025-06-15. Cannot confirm donor consented to participation."
                 )
 
-        return self
+            return mv_consent_exempt
+
+        return False
 
     @model_validator(mode="after")
     def ensure_index_has_dna_data(self):
@@ -1073,6 +1072,9 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         Uses the first 8 characters of the SHA256 hash of the tanG to virtually prevent collisions.
         """
+        if self.submission.tan_g == REDACTED_TAN:
+            raise ValueError("Cannot compute submission ID from metadata with a redacted TAN.")
+
         return "_".join(
             (
                 self.submission.submitter_id,
@@ -1118,7 +1120,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return schema_version
 
     @model_validator(mode="after")
-    def validate_research_consent_after_minor_version_3(self):
+    def validate_research_consent_after_minor_version_3(self):  # noqa: C901
         if Version(self.get_schema_version()) >= Version("1.3"):
             for donor in self.donors:
                 if len(donor.research_consents) < 1:
@@ -1128,6 +1130,8 @@ class GrzSubmissionMetadata(StrictBaseModel):
                         raise ValueError("Research consents must have presentationDate as of metadata schema v1.3")
                     if consent.no_scope_justification is None and not consent.scope:
                         raise ValueError("Either a non-empty scope must be provided or a noScopeJustification")
+                    if (consent.scope is not None) and (not isinstance(consent.scope, Consent)):
+                        raise ValueError("scope must be a valid MII Broad Consent as of metadata v1.3")
         else:
             for donor in self.donors:
                 for consent in donor.research_consents:
@@ -1163,6 +1167,13 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 if len(self.donors) < 3:
                     raise ValueError("At least three donors are required for a trio study.")
 
+        return self
+
+    @model_validator(mode="after")
+    def ensure_all_donors_mv_consented_if_initial(self):
+        all_donors_mv_consented = all(donor.consents_to_mv() for donor in self.donors)
+        if (self.submission.submission_type == SubmissionType.initial) and not all_donors_mv_consented:
+            raise ValueError("All donors must consent to model project participation for initial submissions.")
         return self
 
     @model_validator(mode="after")
@@ -1243,7 +1254,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         """
         Check if the submission meets the minimum mean coverage requirements.
         """
-        threshold_definitions = _load_thresholds()
+        threshold_definitions = load_thresholds()
 
         for donor in self.donors:
             for lab_datum in donor.lab_data:
@@ -1315,15 +1326,6 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
             f"below threshold: {mean_depth_of_coverage_v} < {mean_depth_of_coverage_t}"
         )
 
-    read_length_t = thresholds.get("readLength")
-    for f in sequence_data.list_files(FileType.fastq) + sequence_data.list_files(FileType.bam):
-        read_length_v = f.read_length
-        if read_length_t and read_length_v < read_length_t:
-            raise_if_index(
-                f"Read length for donor '{pseudonym}', lab datum '{lab_data_name}' "
-                f"below threshold: {read_length_v} < {read_length_t}"
-            )
-
     if percent_bases_above_quality_threshold_t := thresholds.get("percentBasesAboveQualityThreshold"):
         minimum_quality_t = percent_bases_above_quality_threshold_t.get("qualityThreshold")
         minimum_quality_v = sequence_data.percent_bases_above_quality_threshold.minimum_quality
@@ -1365,7 +1367,7 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
 type Thresholds = dict[tuple[str, str, str], dict[str, Any]]
 
 
-def _load_thresholds() -> Thresholds:
+def load_thresholds() -> Thresholds:
     threshold_definitions = json.load(
         files("grz_pydantic_models").joinpath("resources", "thresholds.json").open("r", encoding="utf-8")
     )
