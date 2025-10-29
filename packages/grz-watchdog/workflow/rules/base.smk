@@ -415,6 +415,7 @@ rule qc:
     """
     input:
         submission_basepath=rules.download.output.data,
+        metadata=rules.metadata.output.metadata,
         decryption_marker=rules.decrypt.output.marker,
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
