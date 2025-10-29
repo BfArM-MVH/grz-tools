@@ -148,6 +148,7 @@ rule download:
         s3_secret=os.environ.get("GRZ_S3__SECRET"),
     resources:
         disk=estimate_download_size,
+        runtime=estimate_download_runtime,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
@@ -174,6 +175,7 @@ rule decrypt:
         ),
     resources:
         disk=estimate_decrypt_size,
+        runtime=estimate_decrypt_runtime,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
@@ -189,6 +191,7 @@ checkpoint validate:
     """
     input:
         data=rules.download.output.data,
+        metadata=rules.metadata.output.metadata,
         decrypted_marker=rules.decrypt.output.marker,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
@@ -201,10 +204,12 @@ checkpoint validate:
         ),
     benchmark:
         "<benchmarks>/validate/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
-    threads: 4
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stderr.log",
+    threads: 4
+    resources:
+        runtime=estimate_validate_runtime,
     script:
         "../scripts/validate.sh"
 
@@ -246,6 +251,7 @@ rule re_encrypt:
         "<benchmarks>/re_encrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
         disk=estimate_re_encrypt_size,
+        runtime=estimate_encrypt_runtime,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
@@ -268,6 +274,8 @@ rule archive:
         marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/archived"),
     benchmark:
         "<benchmarks>/archive/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
+    resources:
+        runtime=estimate_archive_runtime,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
@@ -426,6 +434,10 @@ rule qc:
         ),
     benchmark:
         "<benchmarks>/qc/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
+    resources:
+        runtime=estimate_qc_runtime,
+        mem="60G",
+        disk=estimate_qc_disk,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
