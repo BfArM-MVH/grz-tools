@@ -1,4 +1,4 @@
-FROM ghcr.io/prefix-dev/pixi:0.55.0 AS builder
+FROM ghcr.io/prefix-dev/pixi:0.59.0 AS builder
 
 RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
 
@@ -9,7 +9,7 @@ WORKDIR /build
 COPY packages/grz-check/ ./
 RUN cargo build --release --locked
 
-FROM ghcr.io/prefix-dev/pixi:0.55.0
+FROM ghcr.io/prefix-dev/pixi:0.59.0
 
 COPY --from=builder /build/target/release/grz-check /usr/local/bin/
 
