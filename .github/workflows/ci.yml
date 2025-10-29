@@ -13,7 +13,7 @@ env:
   UV_VERSION: '0.8.5'
   GRZ_CHECK_WORKSPACE: "packages/grz-check"
   RUST_TOOLCHAIN_VERSION: "1.89.0"
-  PIXI_VERSION: 'v0.55.0'
+  PIXI_VERSION: 'v0.59.0'
 
 jobs:
   determine-changes:
