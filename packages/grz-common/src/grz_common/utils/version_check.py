@@ -11,11 +11,6 @@ logger = logging.getLogger(__name__)
 def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: str = "version.json") -> None:
     """
     Check grz-cli version against the requirements in the version file.
-
-    Behavior:
-    case 1 - the version file is missing or inaccessible, `get_version_info` raises a hard error.
-    case 2 - if the version file exists but contains outdated version info, GRZ staff must fix it.
-    case 3 - if the CLI is too old, the LE must upgrade and possibly revalidate metadata.
     """
 
     # Fetch version information from S3
@@ -23,20 +18,20 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
     current_version = version("grz-cli")
 
     logger.debug(f"Current grz-cli version: {current_version}")
-    logger.debug(f"Version file: minimal={version_info.minimal_version}, latest={version_info.latest_version}")
+    logger.debug(f"Version file: minimal={version_info.minimal_version}, recommended={version_info.recommended_version}")
 
-    # case 2
-    if version_info.latest_version < current_version:
+    # case when the version file exists but contains outdated version info and GRZ needs to fix this.
+    if version_info.recommended_version < current_version:
         msg = (
-            f"The version file in S3 appears outdated — it lists latest_version={version_info.latest_version}, "
+            f"The version file in S3 appears outdated — it lists recommended_version={version_info.recommended_version}, "
             f"but you are running grz-cli {current_version}. "
-            "This means GRZ staff must update the version file to reflect the latest supported CLI versions."
+            "This means GRZ needs to update the version file to reflect the recommended CLI versions."
         )
         logger.critical(msg)
         click.echo(click.style(f"ERROR: {msg}", fg="red"))
         sys.exit(1)
 
-    # case 3
+    # case when the CLI is too old and the LE must upgrade and possibly revalidate metadata.
     elif current_version < version_info.minimal_version:
         msg = (
             f"Your grz-cli version ({current_version}) is too old and not supported anymore.\n"
@@ -51,10 +46,10 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
         click.echo(click.style(f"ERROR: {msg}", fg="red"))
         sys.exit(1)
 
-    # version is behind latest but still supported
-    elif version_info.minimal_version <= current_version < version_info.latest_version:
+    # case when the version is behind the latest but still supported
+    elif version_info.minimal_version <= current_version < version_info.recommended_version:
         msg = (
-            f"You are using grz-cli {current_version}, while the latest version is {version_info.latest_version}.\n"
+            f"You are using grz-cli {current_version}, while the recommended version is {version_info.recommended_version}.\n"
             "It is recommended to upgrade to the latest version for the newest features and bug fixes."
         )
         logger.warning(msg)

@@ -91,14 +91,15 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     return s3_resource
 
 class VersionFile(BaseModel):
+    schema_version: int = Field(1, description="Version of this schema")
     minimal_version: version.Version = Field(..., description="Minimum supported version")
-    latest_version: version.Version = Field(..., description="Latest available version")
+    recommended_version: version.Version = Field(..., description="Recommended version")
 
 def get_version_info(s3_options, version_file_path) -> VersionFile:
     """
     Download and validate the version file from S3.
     Raises:
-        1. FileNotFoundError: If the version file does not exist (GRZ staff must fix).
+        1. FileNotFoundError: If the version file does not exist (GRZ needs to fix).
         2. RuntimeError: For S3 access issues (network, permissions, etc.).
         3. ValueError: For outdated versions or validation issues.
     """
