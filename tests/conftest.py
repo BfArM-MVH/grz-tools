@@ -15,6 +15,7 @@ import pytest
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from moto import mock_aws
+from sqlmodel import SQLModel
 
 config_path = "tests/mock_files/mock_config.yaml"
 small_file_input_path = "tests/mock_files/mock_small_input_file.bed"
@@ -26,6 +27,11 @@ crypt4gh_submitter_private_key_file = "tests/mock_files/submitter_mock_private_k
 crypt4gh_submitter_public_key_file = "tests/mock_files/submitter_mock_public_key.pub"
 db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
 db_known_keys_file = "tests/mock_files/db/known_keys"
+
+
+@pytest.fixture(autouse=True)
+def clear_sqlmodel_metadata():
+    SQLModel.metadata.clear()
 
 
 @pytest.fixture()
