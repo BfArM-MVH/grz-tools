@@ -48,9 +48,9 @@ qc:
     configs:
       - "/workdir/config/nextflow.test.config"
     extra: >-
-      --fasta "/workdir/test_data/grz-mini-test-data/references/GRCh37/mini.fa.gz"
-      --target "/workdir/test_data/grz-mini-test-data/references/GRCh37/mini.genes.bed"
-      --submission_basepath "/workdir/test_data/grz-mini-test-data/submissions/wgs"
+      --fasta /workdir/test_data/grz-mini-test-data/references/GRCh37/mini.fa.gz
+      --target /workdir/test_data/grz-mini-test-data/references/GRCh37/mini.genes.bed
+      --submission_basepath /workdir/test_data/grz-mini-test-data/submissions/wgs
     run-qc:
       profiles:
         - conda
