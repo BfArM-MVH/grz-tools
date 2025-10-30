@@ -365,9 +365,6 @@ rule prepare_qc_workflow_references:
         profiles=get_prepare_qc_nextflow_profiles,
         configs=get_prepare_qc_nextflow_configs,
         extra=get_prepare_qc_nextflow_extra_params,
-        reference_path=lambda wildcards, output: os.path.abspath(output.references_dir),
-        outdir=lambda wildcards, output: os.path.abspath(output.references_dir),
-        absolute_pipeline_path=lambda wildcards, input: os.path.abspath(input.pipeline),
     threads: 1
     resources:
         mem="90G",
@@ -377,20 +374,8 @@ rule prepare_qc_workflow_references:
         stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
         stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
     handover: True
-    shell:
-        """
-        (
-        mkdir -p {output.work_dir}
-        mkdir -p {output.launch_dir}
-        cd {output.launch_dir}
-        nextflow run {params.absolute_pipeline_path} \
-        {params.configs} \
-        -profile {params.profiles} \
-        --outdir {params.outdir} \
-        --reference_path {params.reference_path} \
-        {params.extra}
-        ) > {log.stdout} 2> {log.stderr}
-        """
+    script:
+        "../scripts/prepare_qc.sh"
 
 
 rule qc:

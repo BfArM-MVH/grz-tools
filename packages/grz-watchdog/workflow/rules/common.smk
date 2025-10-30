@@ -335,15 +335,13 @@ def get_qc_workflow_references_directory() -> str:
 
 
 def get_prepare_qc_nextflow_extra_params(wildcards: Wildcards, input, output):
-    work_dir = os.path.abspath(output.work_dir)
     extra = config.get("qc", {}).get("prepare-qc", {}).get("extra", "")
-    return f"-resume -work-dir {work_dir} {extra}"
+    return f"-resume {extra}"
 
 
 def get_run_qc_nextflow_extra_params(wildcards: Wildcards, input, output):
-    work_dir = os.path.abspath(output.work_dir)
     extra = config.get("qc", {}).get("run-qc", {}).get("extra", "")
-    return f"-resume -work-dir {work_dir} {extra}"
+    return f"-resume {extra}"
 
 
 def get_prepare_qc_nextflow_configs(wildcards: Wildcards):
