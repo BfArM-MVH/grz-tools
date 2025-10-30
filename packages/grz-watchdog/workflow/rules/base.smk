@@ -393,22 +393,6 @@ rule prepare_qc_workflow_references:
         """
 
 
-rule set_status_to_qcing:
-    """
-    Set the submission status to 'qcing' in the database.
-    """
-    input:
-        db_config_path=cfg_path("config_paths/db"),
-        validation_flag=rules.validate.output.validation_flag,
-    output:
-        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/qcing.marker"),
-    log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/set_status_to_qcing.stderr.log",
-    script:
-        "../scripts/set_status_to_qcing.sh"
-
-
 rule qc:
     """
     Perform QC on a submission using the QC nextflow pipeline.
@@ -422,7 +406,6 @@ rule qc:
         workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
         pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
         launch_dir=rules.prepare_qc_workflow_references.output.launch_dir,
-        qcing_marker=rules.set_status_to_qcing.output.marker,
         reference_path=rules.prepare_qc_workflow_references.output.references_dir,
         custom_configs=lambda wc: config.get("qc", {})
         .get("run-qc", {})
@@ -454,21 +437,8 @@ rule qc:
             input.submission_basepath
         ),
     handover: True
-    shell:
-        """
-        (
-        mkdir -p {output.work_dir}
-        mkdir -p {output.out_dir}
-        cd {input.launch_dir}
-        nextflow run {params.absolute_pipeline_path} \
-        {params.configs} \
-        -profile {params.profiles} \
-        --outdir {params.outdir} \
-        --reference_path {params.reference_path} \
-        --submission_basepath {params.absolute_submission_basepath} \
-        {params.extra}
-        ) > {log.stdout} 2> {log.stderr}
-        """
+    script:
+        "../scripts/run_qc.sh"
 
 
 rule process_qc_results:
