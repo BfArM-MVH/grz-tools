@@ -30,6 +30,7 @@ extra="${snakemake_params[extra]}"
 
 mkdir -p "${work_dir}"
 mkdir -p "${out_dir}"
+mkdir -p "${launch_dir}"
 pushd "${launch_dir}"
 
 nextflow run "${pipeline}" \
