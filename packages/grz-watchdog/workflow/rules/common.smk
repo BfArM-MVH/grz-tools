@@ -3,12 +3,14 @@ import math
 import os
 import random
 import shutil
+from collections.abc import Callable
 from operator import itemgetter
 from os import PathLike
 from typing import Literal
 
 import humanfriendly
 import yaml
+from grz_cli.commands.validate import validate
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from snakemake.io import InputFiles, Wildcards
@@ -420,6 +422,33 @@ def estimate_download_size(wildcards: Wildcards, input: InputFiles) -> str:
     return humanfriendly.format_size(bytes)
 
 
+# if snakemake runtime is given as an int, will be interpreted as _minutes_
+def estimated_processing_time_in_minutes(
+    data_size_in_bytes: int, processing_speed_in_mb_per_s: int
+) -> int:
+    if processing_speed_in_mb_per_s <= 0:
+        raise ValueError("processing_speed_in_mb_per_s must be positive")
+    bytes_per_second = processing_speed_in_mb_per_s * 1024**2
+    bytes_per_minute = float(bytes_per_second) * 60
+    minutes = int(math.ceil(data_size_in_bytes / bytes_per_minute))
+    return minutes
+
+
+def estimate_runtime(what: str) -> Callable[[Wildcards, InputFiles], int]:
+    mb_per_s = config["estimates"]["speed"][what]
+
+    def inner(wildcards: Wildcards, input: InputFiles) -> int:
+        return estimated_processing_time_in_minutes(
+            dataset_size(parse_metadata(input.metadata)), mb_per_s
+        )
+
+    return inner
+
+
+for step in ("download", "decrypt", "validate", "encrypt", "archive", "qc"):
+    locals()[f"estimate_{step}_runtime"] = estimate_runtime(step)
+
+
 def estimate_decrypt_size(wildcards: Wildcards, input: InputFiles) -> str:
     """
     Estimate the total size of the files to be decrypted (plus the original files).
@@ -452,3 +481,8 @@ def estimate_re_encrypt_size(wildcards: Wildcards, input: InputFiles) -> str:
     bytes = dataset_size(parse_metadata(input.metadata))
     # TODO: check: returning double the size here because we double the files?
     return humanfriendly.format_size(2 * bytes)
+
+
+def estimate_qc_disk(wildcards: Wildcards, input: InputFiles) -> str:
+    bytes = dataset_size(parse_metadata(input.metadata))
+    return humanfriendly.format_size(bytes * 6)

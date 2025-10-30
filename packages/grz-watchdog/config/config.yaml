@@ -3,6 +3,15 @@ monitor:
 batch:
   limit: 2
 
+estimates:
+  speed:
+    download: 200
+    decrypt: 250
+    validate: 100
+    encrypt: 250
+    archive: 200
+    qc: 10
+
 temp-outputs: true
 on-failed-validation: "cleanup"
 auto-cleanup: "inbox+storage"

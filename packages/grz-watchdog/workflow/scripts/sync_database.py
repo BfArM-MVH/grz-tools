@@ -47,7 +47,6 @@ def register_submissions_with_db(submissions_json_list, db_config_path):  # noqa
                 log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploading'.")
                 shared.add_submission_to_db(db_config_path, submission_id)
                 shared.update_submission_state_in_db(db_config_path, submission_id, "uploading")
-                available_submissions.append(submission)
 
             # A new, already complete submission is found.
             case None, "uploaded":

@@ -18,6 +18,40 @@ properties:
         description: "The batch processing limit."
     required:
       - limit
+  estimates:
+    type: object
+    description: "Estimates of certain properties of grz-watchdog and its components"
+    properties:
+      speed:
+        type: object
+        description: "Estimates of download or processing speeds in MB/s"
+        properties:
+          download:
+            type: integer
+            minimum: 1
+            default: 200
+          decrypt:
+            type: integer
+            minimum: 1
+            default: 250
+          validate:
+            type: integer
+            minimum: 1
+            default: 100
+          encrypt:
+            type: integer
+            minimum: 1
+            default: 250
+          archive:
+            type: integer
+            minimum: 1
+            default: 200
+          qc:
+            type: integer
+            minimum 1:
+              default: 10
+    required:
+      - speed
   temp-outputs:
     type: boolean
     description: "If true, rule outputs are temporary (marked as `temp(…)`). If false, rule outputs will be kept."
@@ -129,6 +163,7 @@ properties:
 required:
   - monitor
   - batch
+  - estimates
   - on-failed-validation
   - auto-cleanup
   - config_paths

@@ -69,17 +69,28 @@ while (("$#")); do
 done
 
 SNAKEMAKE_OPTS=()
+TEMP_CONFIG_FILE=""
+trap 'rm -f "$TEMP_CONFIG_FILE"' EXIT
 
 case "$qc_mode" in
 "force_with_qc")
 	echo "qc mode: forcing qc for this submission."
-	config_json='{"qc": {"selection_strategy": {"enabled": true, "target_percentage": 100.0}}}'
-	SNAKEMAKE_OPTS+=("--config" "$config_json")
+	TEMP_CONFIG_FILE=$(mktemp /tmp/grz-watchdog.qc-override.XXXXXX.yaml)
+	printf '%s\n' \
+		"qc:" \
+		"  selection_strategy:" \
+		"    enabled: true" \
+		"    target_percentage: 100.0" >"$TEMP_CONFIG_FILE"
+	SNAKEMAKE_OPTS+=("--configfile" "$TEMP_CONFIG_FILE")
 	;;
 "force_without_qc")
 	echo "qc mode: forcing no qc for this submission."
-	config_json='{"qc": {"selection_strategy": {"enabled": false}}}'
-	SNAKEMAKE_OPTS+=("--config" "$config_json")
+	TEMP_CONFIG_FILE=$(mktemp /tmp/grz-watchdog.qc-override.XXXXXX.yaml)
+	printf '%s\n' \
+		"qc:" \
+		"  selection_strategy:" \
+		"    enabled: false" >"$TEMP_CONFIG_FILE"
+	SNAKEMAKE_OPTS+=("--configfile" "$TEMP_CONFIG_FILE")
 	;;
 "auto_qc")
 	echo "qc mode: using automatic selection from main configuration."
