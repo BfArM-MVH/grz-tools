@@ -10,6 +10,7 @@ _error_handler() {
 	echo "$error_message" >&2
 	echo "$error_message" >>"${log_stderr}"
 
+  popd  # needed so relative paths specified in db_config can be resolved correctly, since nextflow is called from within $launch_dir
 	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
 }
 
@@ -17,18 +18,18 @@ trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
 
 submission_id="${snakemake_wildcards[submission_id]}"
 db_config="${snakemake_input[db_config_path]}"
-log_stdout="${snakemake_log[stdout]}"
-log_stderr="${snakemake_log[stderr]}"
+log_stdout=$(realpath "${snakemake_log[stdout]}")
+log_stderr=$(realpath "${snakemake_log[stderr]}")
 
-launch_dir="${snakemake_input[launch_dir]}"
+launch_dir=$(realpath "${snakemake_input[launch_dir]}")
+work_dir=$(realpath "${snakemake_output[work_dir]}")
+out_dir=$(realpath "${snakemake_output[out_dir]}")
 
-work_dir="${snakemake_output[work_dir]}"
+pipeline=$(realpath "${snakemake_input[pipeline]}")
+reference_path=$(realpath "${snakemake_input[reference_path]}")
+submission_basepath=$(realpath "${snakemake_input[submission_basepath]}")
 
-out_dir="${snakemake_params[out_dir]}"
-absolute_pipeline_path="${snakemake_params[absolute_pipeline_path]}"
-absolute_submission_basepath="${snakemake_params[absolute_submission_basepath]}"
-reference_path="${snakemake_params[reference_path]}"
-configs="${snakemake_params[configs]}"
+configs="${snakemake_params[configs]}" # these already are absolute paths
 profiles="${snakemake_params[profiles]}"
 
 extra="${snakemake_params[extra]}"
@@ -37,14 +38,16 @@ grzctl db --config-file "${db_config}" submission update --ignore-error-state "$
 
 mkdir -p "${work_dir}"
 mkdir -p "${out_dir}"
-cd "${launch_dir}"
-nextflow run "${absolute_pipeline_path}" \
-	"${configs}" \
-	-profile "${profiles}" \
+pushd "${launch_dir}"
+
+nextflow run "${pipeline}" \
+	${configs} \
+	-profile ${profiles} \
 	--outdir "${out_dir}" \
 	--reference_path "${reference_path}" \
-	--submission_basepath "${absolute_submission_basepath}" \
-	"${extra}" \
+	--submission_basepath "${submission_basepath}" \
+	${extra} \
 	>>"$log_stdout" 2>>"$log_stderr"
 
+popd
 grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" qced >>"$log_stdout" 2>>"$log_stderr"

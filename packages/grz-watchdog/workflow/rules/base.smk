@@ -430,12 +430,6 @@ rule qc:
         profiles=get_run_qc_nextflow_profiles,
         configs=get_run_qc_nextflow_configs,
         extra=get_run_qc_nextflow_extra_params,
-        outdir=lambda wildcards, output: os.path.abspath(output.out_dir),
-        reference_path=lambda wildcards, input: os.path.abspath(input.reference_path),
-        absolute_pipeline_path=lambda wildcards, input: os.path.abspath(input.pipeline),
-        absolute_submission_basepath=lambda wildcards, input: os.path.abspath(
-            input.submission_basepath
-        ),
     handover: True
     script:
         "../scripts/run_qc.sh"
