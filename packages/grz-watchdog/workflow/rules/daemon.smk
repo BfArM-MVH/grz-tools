@@ -48,7 +48,7 @@ def monitor_and_queue_submissions(shutdown_event):
         "Starting monitoring thread with a scan interval of %s seconds.",
         interval,
     )
-    print("Starting monitoring thread with a scan interval of %s seconds.", interval)
+    print(f"Starting monitoring thread with a scan interval of {interval} seconds.")
 
     try:
         while not shutdown_event.is_set():
