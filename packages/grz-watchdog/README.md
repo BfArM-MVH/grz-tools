@@ -96,7 +96,15 @@ Otherwise, `grz-watchdog` will build the references the first time they are need
 
 ### Resources
 
-To help snakemake schedule jobs
+To help snakemake schedule jobs, define available resources either in your snakemake profile or 
+via the corresponding cli options.
+For example
+```yaml
+cores: 64
+resources:
+  mem_mb: 60_000      # total available memory
+  disk_mb: 4_000_000  # total available storage space
+```
 
 ### Miscellaneous remarks
 
