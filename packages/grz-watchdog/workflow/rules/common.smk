@@ -484,3 +484,7 @@ def estimate_re_encrypt_size(wildcards: Wildcards, input: InputFiles) -> str:
 def estimate_qc_disk(wildcards: Wildcards, input: InputFiles) -> str:
     bytes = dataset_size(parse_metadata(input.metadata))
     return humanfriendly.format_size(bytes * 6)
+
+
+def estimate_qc_memory(wildcards: Wildcards, input: InputFiles) -> str:
+    return "60G"

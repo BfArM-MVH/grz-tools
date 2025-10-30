@@ -428,7 +428,7 @@ rule qc:
         "<benchmarks>/qc/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
         runtime=estimate_qc_runtime,
-        mem="60G",
+        mem=estimate_qc_memory,
         disk=estimate_qc_disk,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
