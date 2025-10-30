@@ -113,7 +113,7 @@ That means you can easily:
 - specify snakemake profiles to use,
 - enable verbose output (`-v`/`-vv`/`…`),
 - use custom loggers,
-- enable `--keep-running`
+- enable `--keep-going`
 - enable `--rerun-incomplete`,
 - control how temp files are handled,
 - … etc …
