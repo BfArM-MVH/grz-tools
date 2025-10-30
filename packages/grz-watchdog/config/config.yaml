@@ -43,6 +43,7 @@ qc:
     target_percentage: 2.0
     salt: 鹽
   prepare-qc:
+    mode: "create"  # if using default references, can set to "download"
     profiles:
       - conda
     configs:

@@ -346,36 +346,58 @@ rule setup_qc_workflow:
         """
 
 
-rule prepare_qc_workflow_references:
-    input:
-        # marked as ancient so as not to re-generate references if not needed
-        # if you need to re-generate references, you can delete the references directory manually
-        workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
-        pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
-        custom_configs=lambda wc: config.get("qc", {})
-        .get("prepare-qc", {})
-        .get("configs", []),
-    output:
-        references_dir=get_qc_workflow_references_directory(),
-        launch_dir=directory("<resources>/shared_qc_launchdir"),
-        work_dir=temp(directory("<resources>/prepare_qc_workflow/work")),
-    benchmark:
-        "<benchmarks>/prepare_qc_workflow_references/benchmark.tsv"
-    params:
-        profiles=get_prepare_qc_nextflow_profiles,
-        configs=get_prepare_qc_nextflow_configs,
-        extra=get_prepare_qc_nextflow_extra_params,
-    threads: 1
-    resources:
-        mem="90G",
-        disk="60G",
-        runtime="3h",
-    log:
-        stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
-        stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
-    handover: True
-    script:
-        "../scripts/prepare_qc.sh"
+qc_prepare_references_mode = (
+    config.get("qc", {}).get("prepare-qc", {}).get("mode", "download")
+)
+if qc_prepare_references_mode == "download":
+
+    rule download_qc_workflow_references:
+        output:
+            references_dir=get_qc_workflow_references_directory(),
+            launch_dir=directory("<resources>/shared_qc_launchdir"),
+        resources:
+            disk="50G",
+        shell:
+            """
+            mkdir -p {output.references_dir}
+            pushd {output.references_dir}
+            wget --recursive --no-parent -nH --cut-dirs=3 -R "index.html*" https://www.cmm.in.tum.de/public/grz/reference/
+            popd
+            mkdir -p {output.launch_dir}
+            """
+
+else:
+
+    rule prepare_qc_workflow_references:
+        input:
+            # marked as ancient so as not to re-generate references if not needed
+            # if you need to re-generate references, you can delete the references directory manually
+            workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
+            pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
+            custom_configs=lambda wc: config.get("qc", {})
+            .get("prepare-qc", {})
+            .get("configs", []),
+        output:
+            references_dir=get_qc_workflow_references_directory(),
+            launch_dir=directory("<resources>/shared_qc_launchdir"),
+            work_dir=temp(directory("<resources>/prepare_qc_workflow/work")),
+        benchmark:
+            "<benchmarks>/prepare_qc_workflow_references/benchmark.tsv"
+        params:
+            profiles=get_prepare_qc_nextflow_profiles,
+            configs=get_prepare_qc_nextflow_configs,
+            extra=get_prepare_qc_nextflow_extra_params,
+        threads: 1
+        resources:
+            mem="90G",
+            disk="60G",
+            runtime="3h",
+        log:
+            stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
+            stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
+        handover: True
+        script:
+            "../scripts/prepare_qc.sh"
 
 
 rule qc:
