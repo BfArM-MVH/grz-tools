@@ -243,6 +243,7 @@ class InboxSubmissionSummary(BaseModel):
     state: InboxSubmissionState
     oldest_upload: datetime.datetime
     newest_upload: datetime.datetime
+    total_size_bytes: int
 
 
 def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSubmissionSummary]:
@@ -266,6 +267,8 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
         oldest_object = submission_objects_sorted[next(iter(submission_objects_sorted))]
         newest_object = submission_objects_sorted[next(reversed(submission_objects_sorted))]
 
+        total_size_bytes = sum(map(itemgetter("Size"), submission_objects))
+
         cleaning_key = f"{submission_id}/cleaning"
         cleaned_key = f"{submission_id}/cleaned"
         if (cleaning_key in submission_objects_sorted) and (cleaned_key in submission_objects_sorted):
@@ -287,6 +290,7 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
             state=state,
             oldest_upload=oldest_object["LastModified"],
             newest_upload=newest_object["LastModified"],
+            total_size_bytes=total_size_bytes,
         )
 
         if state in {InboxSubmissionState.CLEANING, InboxSubmissionState.CLEANED} and (not show_cleaned):

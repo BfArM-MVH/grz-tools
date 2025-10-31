@@ -103,16 +103,21 @@ class SubmissionCountByConsentTable(Static):
 class SubmissionCountByDetailedQCByLETable(Static):
     def on_mount(self) -> None:
         self.loading = True
-        self.border_title = "Detailed QC by LE (Non-Test)"
+        self.border_title = "Detailed QC by LE"
+        self.border_subtitle = "not test & basic QC pass"
         self.styles.border = ("round", self.app.theme_variables["foreground"])
 
     @textual.work
     async def load(self, database: SubmissionDb) -> None:
         self.loading = True
         with database._get_session() as session:
-            statement = select(  # type: ignore[type-var]
-                Submission.submitter_id, Submission.submission_date, Submission.detailed_qc_passed
-            ).where(Submission.submission_type != SubmissionType.test)
+            statement = (
+                select(  # type: ignore[type-var]
+                    Submission.submitter_id, Submission.submission_date, Submission.detailed_qc_passed
+                )
+                .where(Submission.submission_type != SubmissionType.test)
+                .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
+            )
             submission_qc_states = session.exec(statement).all()
 
         today = datetime.date.today()

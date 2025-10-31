@@ -2,4 +2,4 @@
 Common library for grz applications.
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"

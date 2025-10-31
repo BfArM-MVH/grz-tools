@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.4.0...grz-cli-v1.5.0) (2025-10-29)
+
+
+### Features
+
+* **grz-cli:** bump grz-common to upload version marker ([#448](https://github.com/BfArM-MVH/grz-tools/issues/448)) ([a82a120](https://github.com/BfArM-MVH/grz-tools/commit/a82a120d39e4aadd5197f737eca0d5c8ed7f74a6))
+
 ## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.3.1...grz-cli-v1.4.0) (2025-10-23)
 
 
