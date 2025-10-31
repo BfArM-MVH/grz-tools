@@ -34,4 +34,3 @@ qc_status=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'yes'; else 
 
 grzctl db --config-file "${db_config}" submission modify "${submission_id}" detailed_qc_passed "${qc_status}" >"$log_stdout" 2>"$log_stderr"
 grzctl db --config-file "${db_config}" submission populate-qc --no-confirm "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" qced >>"$log_stdout" 2>>"$log_stderr"
