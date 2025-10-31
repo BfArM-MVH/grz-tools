@@ -50,5 +50,10 @@ nextflow run "${pipeline}" \
 	${extra} \
 	>>"$log_stdout" 2>>"$log_stderr"
 
+index_detailed_qc_status=$(awk -F, '$2 == "index"' < "${out_dir}/report.csv" | python -c 'import csv,sys; print("\n".join(row[6] for row in csv.reader(sys.stdin)))' | sort | uniq)
+detailed_qc_passed=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'yes'; else echo 'no'; fi)
+grzctl db --config-file "${db_config}" submission modify "${submission_id}" detailed_qc_passed "${detailed_qc_passed}"
+grzctl db --config-file "${db_config}" submission populate-qc "${submission_id}" "${out_dir}/report.csv"
+
 popd
 grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" qced >>"$log_stdout" 2>>"$log_stderr"
