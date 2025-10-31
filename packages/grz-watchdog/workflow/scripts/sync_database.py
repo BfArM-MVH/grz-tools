@@ -61,8 +61,13 @@ def register_submissions_with_db(submissions_json_list, db_config_path):  # noqa
                 shared.update_submission_state_in_db(db_config_path, submission_id, "uploaded")
                 available_submissions.append(submission)
 
+            # If we already set the state to "uploaded" in a previous run which subsequently got interrupted,
+            # the submission is still available for processing
+            case "uploaded", "uploaded":
+                available_submissions.append(submission)
+
             # "no-op" cases for clarity, nothing to be done here
-            case "uploading", "uploading" | "uploaded", "uploaded":
+            case "uploading", "uploading":
                 continue
 
             # catch-all for any other transition, which should be skipped.
