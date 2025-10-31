@@ -50,7 +50,7 @@ def get_db_states(db_config_path):
     """
     Fetches all submissions from the db and returns their latest states and timestamps.
     """
-    result = run_grzctl_command(["db", "--config-file", db_config_path, "list", "--json"])
+    result = run_grzctl_command(["db", "--config-file", db_config_path, "list", "--json", "--limit", "1000000"])
     if not result.stdout:
         return {}
 
