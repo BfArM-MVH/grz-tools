@@ -23,6 +23,9 @@ from .db.cli import get_submission_db_instance
 log = logging.getLogger(__name__)
 
 
+BYTES_PER_GIGABYTE = 1_000_000_000
+
+
 def _get_latest_state_str(submission_db: SubmissionDb, submission_id: str) -> str | None:
     submission_from_db = submission_db.get_submission(submission_id)
     if submission_from_db:
@@ -83,6 +86,7 @@ def _prepare_table(
         table.add_column("Database State", no_wrap=True, justify="center", style="green")
     table.add_column("Upload Duration", overflow="fold", justify="center")
     table.add_column("Newest Upload", overflow="fold")
+    table.add_column("Size (GB)", justify="center")
     for summary in summaries:
         match summary.state:
             case InboxSubmissionState.INCOMPLETE:
@@ -103,6 +107,7 @@ def _prepare_table(
             status_text,
             _format_upload_duration(summary.newest_upload - summary.oldest_upload),
             summary.newest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+            f"{summary.total_size_bytes / BYTES_PER_GIGABYTE:.1f}",
         ]
         if database_states:
             latest_state_txt = _get_latest_state_txt(database_states[summary.submission_id])
