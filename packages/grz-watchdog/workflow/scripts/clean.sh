@@ -18,11 +18,27 @@ trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
 
 submission_id="${snakemake_wildcards[submission_id]}"
 inbox_config="${snakemake_input[inbox_config_path]}"
-local_data_dir="${snakemake_input[data]}"
 db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 mode="${snakemake_params[mode]}"
+
+artifacts_to_remove=(
+	"${snakemake_input[downloaded_data]}"
+	"${snakemake_input[decrypted_data]}"
+	"${snakemake_input[re_encrypted_data]}"
+	"${snakemake_input[metadata_file]}"
+	"${snakemake_input[validation_flag]}"
+	"${snakemake_input[validation_errors]}"
+	"${snakemake_input[consent_flag]}"
+)
+
+read -r -a progress_log_files <<<"${snakemake_input[progress_logs]}"
+
+if [ ${#progress_log_files[@]} -gt 0 ]; then
+	progress_logs_dir="$(dirname "${progress_log_files[0]}")"
+	artifacts_to_remove+=("$progress_logs_dir")
+fi
 
 # If mode is 'none', do nothing and exit successfully.
 if [[ "$mode" == "none" ]]; then
@@ -35,40 +51,28 @@ grzctl db --config-file "${db_config}" submission update --ignore-error-state "$
 
 echo "Auto-cleanup mode: '${mode}'" >>"$log_stdout"
 
-case "$mode" in
-"inbox")
-	echo "Cleaning S3 inbox..." >>"$log_stdout"
-	grzctl clean --config-file "${inbox_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"$log_stderr"
-	;;
-
-"storage")
-	echo "Cleaning local storage at: ${local_data_dir}" >>"$log_stdout"
-	if [[ -d "$local_data_dir" ]]; then
-		rm -rf "$local_data_dir"
+if [[ "$mode" == "none" ]]; then
+	echo "Auto-cleanup mode is 'none'. No local storage action taken." >>"$log_stdout"
+else
+	if [[ "$mode" == "storage" || "$mode" == "inbox+storage" ]]; then
+		echo "Cleaning all local submission artifacts..." >>"$log_stdout"
+		for item in "${artifacts_to_remove[@]}"; do
+			if [[ -e "$item" ]]; then
+				echo "Removing: $item" >>"$log_stdout"
+				rm -rf "$item"
+			else
+				echo "[WARNING] Not found, skipping: $item" >>"$log_stdout"
+			fi
+		done
 		echo "Local storage successfully removed." >>"$log_stdout"
-	else
-		echo "[WARNING] Local storage directory not found, skipping." >>"$log_stdout"
 	fi
-	;;
+fi
 
-"inbox+storage")
+if [[ "$mode" == "inbox" || "$mode" == "inbox+storage" ]]; then
 	echo "Cleaning S3 inbox..." >>"$log_stdout"
-	grzctl clean --config-file "${inbox_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"$log_stderr"
-
-	echo "Cleaning local storage at: ${local_data_dir}" >>"$log_stdout"
-	if [[ -d "$local_data_dir" ]]; then
-		rm -rf "$local_data_dir"
-		echo "Local storage successfully removed." >>"$log_stdout"
-	else
-		echo "[WARNING] Local storage directory not found, skipping." >>"$log_stdout"
-	fi
-	;;
-
-*)
-	echo "[ERROR] Unknown auto-cleanup mode: '${mode}'" >>"$log_stderr"
-	exit 1
-	;;
-esac
+	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaning >"$log_stdout" 2>"$log_stderr"
+	grzctl clean --config-file "${inbox_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"${log_stderr}"
+fi
 
 details=""
 if [[ "$mode" == "inbox" || "$mode" == "inbox+storage" ]]; then
@@ -80,6 +84,8 @@ if [[ "$mode" == "storage" || "$mode" == "inbox+storage" ]]; then
 fi
 json_data="{\"targets\": [${details}]}"
 
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
+if [[ "$mode" != "none" ]]; then
+	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
+fi
 
 echo 'true' >"${snakemake_output[clean_results]}"

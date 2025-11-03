@@ -10,7 +10,7 @@ _error_handler() {
 	echo "$error_message" >&2
 	echo "$error_message" >>"${log_stderr}"
 
-  popd  # needed so relative paths specified in db_config can be resolved correctly, since nextflow is called from within $launch_dir
+	popd # needed so relative paths specified in db_config can be resolved correctly, since nextflow is called from within $launch_dir
 	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
 }
 

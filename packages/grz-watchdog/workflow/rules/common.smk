@@ -42,7 +42,6 @@ def cleanup_stale_temp_outputs():
     logger.info("Checking for stale temporary state files...")
     relevant_temp_outputs = [
         str(rules.scan_inbox.output.submissions),
-        str(rules.sync_database.output.submissions),
     ]
     if hasattr(rules, "daemon_keepalive"):
         relevant_temp_outputs.append(str(rules.daemon_keepalive.output.marker))

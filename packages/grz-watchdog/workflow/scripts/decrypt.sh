@@ -27,12 +27,18 @@ submission_id="${snakemake_wildcards[submission_id]}"
 db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
+inbox_config_path="${snakemake_input[inbox_config_path]}"
+encrypted_dir="${snakemake_input[data]}"
+output_dir="${snakemake_output[data]}"
 
 grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" decrypting >"$log_stdout" 2>"$log_stderr"
 
 grzctl decrypt \
-	--submission-dir "${snakemake_input[data]}" \
-	--config-file "${snakemake_input[inbox_config_path]}" \
+	--config-file "${inbox_config_path}" \
+	--metadata-dir "${encrypted_dir}/metadata" \
+	--encrypted-files-dir "${encrypted_dir}/encrypted_files" \
+	--output-files-dir "${output_dir}/files" \
+	--output-logs-dir "${output_dir}/logs" \
 	>>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" decrypted >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" decrypted >>"${log_stdout}" 2>>"${log_stderr}"

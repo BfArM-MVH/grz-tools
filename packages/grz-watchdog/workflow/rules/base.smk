@@ -59,22 +59,24 @@ rule filter_single_submission:
         """
 
 
-rule sync_database:
+rule check_and_register:
     """
-    Extend the submission database with new submissions (as obtained from `scan_inbox`)
-    or update states of submissions that already exist in the database to 'uploading' or 'uploaded'.
+    Checks S3 for a 'complete' submission status and ensures the
+    submission is registered in the DB with the state 'uploaded'.
     """
     input:
-        submissions=get_submission_to_sync,
+        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:
-        submissions=temp("<results>/sync_database/submissions.json"),
+        marker=touch(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/registered.marker"
+        ),
     log:
-        stdout="<logs>/sync_database.stdout.log",
-        stderr="<logs>/sync_database.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stderr.log",
     script:
-        "../scripts/sync_database.py"
+        "../scripts/check_and_register.py"
 
 
 checkpoint select_submissions:
@@ -82,7 +84,12 @@ checkpoint select_submissions:
     Determine which submissions are to be processed.
     """
     input:
-        submissions=rules.sync_database.output.submissions,
+        scans=expand(
+            "<results>/scan_inbox/{submitter}/{inbox}/submissions.json",
+            zip,
+            submitter=map(itemgetter(0), ALL_INBOX_PAIRS),
+            inbox=map(itemgetter(1), ALL_INBOX_PAIRS),
+        ),
         db_config_path=cfg_path("config_paths/db"),
     output:
         submissions_batch=temp("<results>/select_submissions/pending_batch.txt"),
@@ -110,9 +117,7 @@ rule metadata:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        metadata=perhaps_temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}.metadata.json"
-        ),
+        metadata="<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json",
     params:
         s3_access_key=register_s3_access_key,
         s3_secret=register_s3_secret,
@@ -133,13 +138,12 @@ rule download:
     Download a submission from S3 to the local filesystem.
     """
     input:
+        registered_marker=rules.check_and_register.output.marker,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         metadata=rules.metadata.output.metadata,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        data=perhaps_temp(
-            directory("<results>/{submitter_id}/{inbox}/{submission_id}/data")
-        ),
+        data=directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded"),
     benchmark:
         "<benchmarks>/download/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
@@ -165,7 +169,7 @@ rule decrypt:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
+        data=directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
     benchmark:
         "<benchmarks>/decrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
@@ -189,16 +193,17 @@ checkpoint validate:
     This is a checkpoint because the downstream workflow (success path vs. failure path) depends on its output.
     """
     input:
-        data=rules.download.output.data,
+        data=rules.decrypt.output.data,
         metadata=rules.metadata.output.metadata,
-        decrypted_marker=rules.decrypt.output.marker,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        validation_flag=perhaps_temp(
+        checksum_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_checksum_validation.cjson",
+        seq_data_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_sequencing_data_validation.cjson",
+        validation_flag=(
             "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag"
         ),
-        validation_errors=perhaps_temp(
+        validation_errors=(
             "<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"
         ),
     benchmark:
@@ -218,12 +223,9 @@ rule consent:
     Check if a submission is research consented.
     """
     input:
-        data=rules.download.output.data,
-        decrypted_marker=rules.decrypt.output.marker,
+        metadata=rules.metadata.output.metadata,
     output:
-        consent_flag=perhaps_temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag"
-        ),
+        consent_flag=("<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag"),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
@@ -236,16 +238,18 @@ rule re_encrypt:
     Re-encrypt a submission using the target public key (depending on whether research consent was given).
     """
     input:
-        data=rules.download.output.data,
         metadata=rules.metadata.output.metadata,
+        data=rules.decrypt.output.data,
         consent_flag=rules.consent.output.consent_flag,
         validation_flag=rules.validate.output.validation_flag,
-        decrypted_marker=rules.decrypt.output.marker,
         consented_config_path=cfg_path("config_paths/archive/consented"),
         nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
         db_config_path=cfg_path("config_paths/db"),
+        validation_checksum_log=rules.validate.output.checksum_log,
+        validation_seq_data_log=rules.validate.output.seq_data_log,
     output:
-        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted"),
+        data=directory("<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted"),
+        encryption_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_encrypt.cjson",
     benchmark:
         "<benchmarks>/re_encrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
@@ -263,10 +267,25 @@ rule archive:
     Archive a submission to the target s3 bucket (depending on whether research consent was given).
     """
     input:
-        data=rules.download.output.data,
         metadata=rules.metadata.output.metadata,
+        re_encrypted_data=rules.re_encrypt.output.data,
         consent_flag=rules.consent.output.consent_flag,
-        encrypted_marker=rules.re_encrypt.output.marker,
+        logs_to_archive=[
+            rules.check_and_register.log.stdout,
+            rules.check_and_register.log.stderr,
+            rules.metadata.log.stdout,
+            rules.metadata.log.stderr,
+            rules.download.log.stdout,
+            rules.download.log.stderr,
+            rules.decrypt.log.stdout,
+            rules.decrypt.log.stderr,
+            rules.validate.log.stdout,
+            rules.validate.log.stderr,
+            rules.consent.log.stdout,
+            rules.consent.log.stderr,
+            rules.re_encrypt.log.stdout,
+            rules.re_encrypt.log.stderr,
+        ],
         consented_config_path=cfg_path("config_paths/archive/consented"),
         nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
         db_config_path=cfg_path("config_paths/db"),
@@ -307,7 +326,6 @@ rule submit_pruefbericht:
     Report a Prüfbericht to BfArM.
     """
     input:
-        data=rules.download.output.data,
         pruefbericht=rules.generate_pruefbericht.output.pruefbericht,
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
         db_config_path=cfg_path("config_paths/db"),
@@ -404,9 +422,8 @@ rule qc:
     Perform QC on a submission using the QC nextflow pipeline.
     """
     input:
-        submission_basepath=rules.download.output.data,
+        submission_basepath=rules.decrypt.output.data,
         metadata=rules.metadata.output.metadata,
-        decryption_marker=rules.decrypt.output.marker,
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
         workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
@@ -467,7 +484,18 @@ rule clean:
     """
     input:
         ready_marker=get_cleanup_prerequisite,
-        data=rules.download.output.data,
+        downloaded_data=rules.download.output.data,
+        decrypted_data=rules.decrypt.output.data,
+        re_encrypted_data=rules.re_encrypt.output.data,
+        metadata_file=rules.metadata.output.metadata,
+        validation_flag=rules.validate.output.validation_flag,
+        validation_errors=rules.validate.output.validation_errors,
+        consent_flag=rules.consent.output.consent_flag,
+        progress_logs=[
+            rules.validate.output.checksum_log,
+            rules.validate.output.seq_data_log,
+            rules.re_encrypt.output.encryption_log,
+        ],
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
@@ -560,5 +588,6 @@ rule process_submission:
     input:
         get_final_submission_target,
         db_config_path=cfg_path("config_paths/db"),
+        metadata=rules.metadata.output.metadata,
     output:
         touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed"),
