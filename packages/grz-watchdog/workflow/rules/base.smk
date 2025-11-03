@@ -109,7 +109,6 @@ rule metadata:
     input:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
-        db_sync_marker=rules.sync_database.output.submissions,
     output:
         metadata=perhaps_temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}.metadata.json"
@@ -560,7 +559,6 @@ rule finalize_success:
 rule process_submission:
     input:
         get_final_submission_target,
-        db_sync_marker=rules.sync_database.output.submissions,
         db_config_path=cfg_path("config_paths/db"),
     output:
         touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed"),
