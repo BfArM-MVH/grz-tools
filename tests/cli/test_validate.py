@@ -1,12 +1,30 @@
 import json
 import logging
+import os
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
 import grz_cli.cli
 import pytest
 from click.testing import CliRunner
 from grz_common.workers.submission import SubmissionValidationError
+
+
+@pytest.fixture
+def chdir(tmp_path):
+    """A fixture to temporarily change the working directory."""
+
+    @contextmanager
+    def _chdir(path):
+        current_dir = Path.cwd()
+        try:
+            os.chdir(path)
+            yield
+        finally:
+            os.chdir(current_dir)
+
+    return _chdir
 
 
 @pytest.mark.parametrize("grz_check_flag", ["--with-grz-check", "--no-grz-check"])
@@ -108,9 +126,10 @@ def test_validate_submission_with_symlink(
     working_dir_path,
     grz_check_flag,
     caplog,
+    chdir
 ):
     """
-    Tests that the validation can handle symlinked files correctly.
+    Tests that the validation can handle relative symlinked files correctly.
     """
     have_grz_check = shutil.which("grz-check") is not None
 
@@ -132,31 +151,39 @@ def test_validate_submission_with_symlink(
     submission_files_dir.mkdir()
 
     # create symlinks (from submission 'files/' to 'source_data/')
-    for real_file in source_data_dir.iterdir():
-        link_path = submission_files_dir / real_file.name
-        link_path.symlink_to(real_file.resolve())
+    for source_file in source_data_dir.iterdir():
+        link_path = submission_files_dir / source_file.name
+        relative_target_path = os.path.relpath(source_file, start=submission_files_dir)
+        link_path.symlink_to(relative_target_path)
 
     shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+
+    config_file = Path(temp_identifiers_config_file_path).resolve()
 
     testargs = [
         "validate",
         "--config-file",
-        temp_identifiers_config_file_path,
+        str(config_file),
         "--submission-dir",
-        str(working_dir_path),
+        ".",  # relative submission dir path
         grz_check_flag,
     ]
 
     runner = CliRunner()
     cli = grz_cli.cli.build_cli()
-    with caplog.at_level(logging.INFO):
-        result = runner.invoke(cli, testargs, catch_exceptions=False)
-        assert result.exit_code == 0, result.output
 
-        if grz_check_flag == "--no-grz-check":
-            assert "Starting checksum validation (fallback)..." in caplog.text
-        else:
-            assert "Starting file validation with `grz-check`..." in caplog.text
+    # trigger validation from within working_dir_path
+    with chdir(working_dir_path):
+        with caplog.at_level(logging.INFO):
+            result = runner.invoke(cli, testargs, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+
+    if grz_check_flag == "--no-grz-check":
+        assert "Starting checksum validation (fallback)..." in caplog.text
+    else:
+        assert "Starting file validation with `grz-check`..." in caplog.text
+        assert "Could not find metadata for file in grz-check report" not in caplog.text
 
 
 @pytest.mark.parametrize("grz_check_flag", ["--with-grz-check", "--no-grz-check"])
@@ -198,7 +225,7 @@ def test_validate_submission_with_broken_symlink(
         temp_identifiers_config_file_path,
         "--submission-dir",
         str(working_dir_path),
-        grz_check_flag
+        grz_check_flag,
     ]
 
     runner = CliRunner()
