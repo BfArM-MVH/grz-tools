@@ -6,7 +6,9 @@ import json
 import logging
 import subprocess
 import typing
+from collections import UserDict
 from collections.abc import Generator
+from functools import cached_property
 from itertools import groupby
 from os import PathLike
 from pathlib import Path
@@ -170,6 +172,49 @@ class SubmissionMetadata:
         return self._checksum
 
 
+class SubmissionFilesDict(UserDict):
+    """
+    A dictionary-like object that normalizes file path keys relative to a submission's root directory.
+
+    Ensures that any path used as a key is resolved to a canonical, absolute path on disk,
+    allowing for robust lookups regardless of whether the input path is absolute or relative to the submission root.
+    """
+
+    def __init__(self, base_path: Path):
+        # base directory against which relative paths will be resolved.
+        # should always be the root of the submission directory.
+        self.base_path = base_path.resolve()
+        super().__init__()
+
+    def _normalize_key(self, key: object) -> Path:
+        """Converts any given key into a canonical, absolute path."""
+        if not isinstance(key, str | PathLike):
+            raise ValueError(f"Invalid key type {type(key)} for submission file key {key}")
+        path = Path(key)
+        if path.is_absolute():
+            # if the path is already absolute, just resolve
+            return path.resolve()
+
+        # if relative, join with base path and then resolve.
+        return (self.base_path / path).resolve()
+
+    def __setitem__(self, key: object, value: SubmissionFileMetadata):  # noqa: D105
+        normalized_key = self._normalize_key(key)
+        super().__setitem__(normalized_key, value)
+
+    def __getitem__(self, key: object) -> SubmissionFileMetadata:  # noqa: D105
+        normalized_key = self._normalize_key(key)
+        return super().__getitem__(normalized_key)
+
+    def __contains__(self, key: object) -> bool:  # noqa: D105
+        normalized_key = self._normalize_key(key)
+        return super().__contains__(normalized_key)
+
+    def get(self, key: object, default=None) -> SubmissionFileMetadata | None:
+        normalized_key = self._normalize_key(key)
+        return super().get(normalized_key, default)
+
+
 class Submission:
     """Class for handling submission data"""
 
@@ -182,25 +227,27 @@ class Submission:
         :param metadata_dir: Path to the metadata directory
         :param files_dir: Path to the files directory
         """
+        self.submission_dir = Path(files_dir).parent
         self.metadata_dir = Path(metadata_dir)
         self.files_dir = Path(files_dir)
 
         self.metadata = SubmissionMetadata(self.metadata_dir / "metadata.json")
 
-    @property
-    def files(self) -> dict[Path, SubmissionFileMetadata]:
+    @cached_property
+    def files(self) -> SubmissionFilesDict:
         """
-        The files liked in the metadata.
+        The files linked in the metadata.
 
-        :return: Dictionary of `local_file_path` -> `SubmissionFileMetadata` pairs.
+        Returns a `SubmissionFilesDict` that can be accessed with paths relative to the submission root
+        (e.g., 'files/foo.fastq.gz').
         """
-        retval = {}
-        for file_path, file_metadata in self.metadata.files.items():
-            local_file_path = self.files_dir / file_path
+        submission_files = SubmissionFilesDict(base_path=self.submission_dir)
 
-            retval[local_file_path] = file_metadata
+        for file_path_relative_to_files_dir, file_metadata in self.metadata.files.items():
+            local_file_path = self.files_dir / file_path_relative_to_files_dir
+            submission_files[local_file_path] = file_metadata
 
-        return retval
+        return submission_files
 
     def validate_files_with_grz_check(  # noqa: C901, PLR0915, PLR0912
         self, checksum_progress_file: str | PathLike, seq_data_progress_file: str | PathLike, threads: int | None
@@ -405,12 +452,9 @@ class Submission:
         (Fallback method)
 
         :param metadata: Metadata model object
-        :param local_file_path: Path to the actual file (resolved if symlinked)
+        :param local_file_path: Path to the actual file
         :return: Generator of errors
         """
-        # Resolve file path
-        local_file_path = local_file_path.resolve()
-
         # Check if path exists
         if not local_file_path.exists():
             yield f"{str(Path('files') / metadata.file_path)} does not exist! Ensure filePath is relative to the files/ directory under the submission root."
