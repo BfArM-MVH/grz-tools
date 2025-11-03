@@ -3,20 +3,21 @@ Common methods for transferring data to and from GRZ buckets.
 """
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import boto3
+import botocore
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
-import botocore
 from packaging import version
 from pydantic import BaseModel, Field, ValidationError
+
 from .exceptions import (
-    VersionFileNotFoundError,
     VersionFileAccessError,
+    VersionFileNotFoundError,
     VersionFileValidationError,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,15 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
 
     return s3_resource
 
+
 class VersionFile(BaseModel):
     schema_version: int = Field(1, description="Version of this schema")
     minimal_version: version.Version = Field(..., description="Minimum supported version")
     recommended_version: version.Version = Field(..., description="Recommended version")
+
+    # allow arbitrary types like packaging.version.Version
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
 
 def get_version_info(s3_options, version_file_path) -> VersionFile:
     """
@@ -103,7 +109,6 @@ def get_version_info(s3_options, version_file_path) -> VersionFile:
         2. RuntimeError: For S3 access issues (network, permissions, etc.).
         3. ValueError: For outdated versions or validation issues.
     """
-
     try:
         s3_client = init_s3_client(s3_options)
         logger.debug(f"Attempting to fetch version file from S3: s3://{s3_options.bucket}/{version_file_path}")
@@ -137,4 +142,3 @@ def get_version_info(s3_options, version_file_path) -> VersionFile:
         msg = f"Invalid version file format or content: {e}"
         logger.error(msg, exc_info=e)
         raise VersionFileValidationError(msg) from e
-

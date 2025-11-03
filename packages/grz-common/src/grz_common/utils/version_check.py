@@ -1,24 +1,26 @@
+import logging
 import sys
 from importlib.metadata import version
-import logging
-import click
 
+import click
 from grz_common.models.s3 import S3Options
 from grz_common.transfer import get_version_info
 
 logger = logging.getLogger(__name__)
 
+
 def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: str = "version.json") -> None:
     """
     Check grz-cli version against the requirements in the version file.
     """
-
     # Fetch version information from S3
     version_info = get_version_info(s3_options, version_file_path)
     current_version = version("grz-cli")
 
     logger.debug(f"Current grz-cli version: {current_version}")
-    logger.debug(f"Version file: minimal={version_info.minimal_version}, recommended={version_info.recommended_version}")
+    logger.debug(
+        f"Version file: minimal={version_info.minimal_version}, recommended={version_info.recommended_version}"
+    )
 
     # case when the version file exists but contains outdated version info and GRZ needs to fix this.
     if version_info.recommended_version < current_version:

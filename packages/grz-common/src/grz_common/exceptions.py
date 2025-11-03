@@ -12,4 +12,3 @@ class VersionFileAccessError(VersionFileError):
 
 class VersionFileValidationError(VersionFileError):
     """Raised when the version file content is invalid or cannot be parsed."""
-
