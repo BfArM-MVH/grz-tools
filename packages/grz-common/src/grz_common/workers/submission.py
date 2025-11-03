@@ -348,7 +348,7 @@ class Submission:
                 if not file_path_str:
                     continue
 
-                file_path = Path(file_path_str).resolve()
+                file_path = Path(file_path_str)
                 file_metadata = self.files.get(file_path)
 
                 if not file_metadata:
