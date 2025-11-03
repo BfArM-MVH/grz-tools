@@ -122,11 +122,7 @@ def test_validate_submission_incorrect_grz_id(
 
 @pytest.mark.parametrize("grz_check_flag", ["--with-grz-check", "--no-grz-check"])
 def test_validate_submission_with_symlink(
-    temp_identifiers_config_file_path,
-    working_dir_path,
-    grz_check_flag,
-    caplog,
-    chdir
+    temp_identifiers_config_file_path, working_dir_path, grz_check_flag, caplog, chdir
 ):
     """
     Tests that the validation can handle relative symlinked files correctly.
