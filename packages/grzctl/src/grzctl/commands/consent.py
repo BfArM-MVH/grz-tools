@@ -10,7 +10,7 @@ import click
 import rich.console
 import rich.table
 import rich.text
-from grz_common.cli import output_json, show_details, submission_dir
+from grz_common.cli import FILE_R_E, output_json, show_details, submission_dir
 from grz_common.workers.submission import GrzSubmissionMetadata, SubmissionMetadata
 
 log = logging.getLogger(__name__)
@@ -18,18 +18,36 @@ log = logging.getLogger(__name__)
 
 @click.command()
 @submission_dir
+@click.option(
+    "--metadata-file",
+    metavar="PATH",
+    type=FILE_R_E,
+    required=False,
+    help="Direct path to the metadata.json file.",
+)
 @output_json
 @show_details
 @click.option("--date", help="date for which to check consent validity in ISO format (default: today)")
-def consent(submission_dir, output_json, show_details, date):
+def consent(submission_dir, metadata_file, output_json, show_details, date):
     """
     Check if a submission is consented for research.
 
     Returns 'true' if consented, 'false' if not.
-    A submission is considered consented if all donors have consented for research, that is
-    the FHIR MII IG Consent profiles all have a "permit" provision for code 2.16.840.1.113883.3.1937.777.24.5.3.8
     """
-    metadata = SubmissionMetadata(Path(submission_dir) / "metadata" / "metadata.json").content
+    in_legacy_mode = submission_dir is not None
+    in_flexible_mode = metadata_file is not None
+
+    if in_legacy_mode and in_flexible_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with '--metadata-file'.")
+
+    if in_legacy_mode:
+        metadata_path = Path(submission_dir) / "metadata" / "metadata.json"
+    elif in_flexible_mode:
+        metadata_path = Path(metadata_file)
+    else:
+        raise click.UsageError("You must specify either '--submission-dir' or '--metadata-file'.")
+
+    metadata = SubmissionMetadata(metadata_path).content
 
     date = datetime.date.today() if date is None else datetime.date.fromisoformat(date)
     consents = _gather_consent_information(metadata, date)

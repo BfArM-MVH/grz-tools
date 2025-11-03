@@ -6,7 +6,15 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import click
-from grz_common.cli import config_file, force, submission_dir
+from grz_common.cli import (
+    config_file,
+    files_dir,
+    force,
+    metadata_dir,
+    output_encrypted_files_dir,
+    output_logs_dir,
+    submission_dir,
+)
 from grz_common.workers.worker import Worker
 
 from ..models.config import EncryptConfig
@@ -16,6 +24,10 @@ log = logging.getLogger(__name__)
 
 @click.command()
 @submission_dir
+@metadata_dir
+@files_dir
+@output_encrypted_files_dir
+@output_logs_dir
 @config_file
 @force
 @click.option(
@@ -24,13 +36,38 @@ log = logging.getLogger(__name__)
     default=True,
     help="Check validation logs before encrypting.",
 )
-def encrypt(submission_dir, config_file, force, check_validation_logs):
+def encrypt(submission_dir, metadata_dir, files_dir, output_encrypted_files_dir, output_logs_dir, config_file, force, check_validation_logs):
     """
     Encrypt a submission.
 
     Encryption is done with the recipient's public key.
-    Sub-folders 'encrypted_files' and 'logs' are created within the submission directory.
     """
+    in_legacy_mode = submission_dir is not None
+    in_flexible_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, output_logs_dir]))
+
+    if in_legacy_mode and in_flexible_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
+
+    if in_legacy_mode:
+        base = Path(submission_dir)
+        _metadata_dir = base / "metadata"
+        _files_dir = base / "files"
+        _encrypted_files_dir = base / "encrypted_files"
+        _logs_dir = base / "logs"
+    elif in_flexible_mode:
+        required = {
+            "--metadata-dir": metadata_dir,
+            "--files-dir": files_dir,
+            "--output-encrypted-files-dir": output_encrypted_files_dir,
+            "--output-logs-dir": output_logs_dir,
+        }
+        missing = [name for name, path in required.items() if path is None]
+        if missing:
+            raise click.UsageError(f"Flexible mode requires: {', '.join(missing)}")
+        _metadata_dir, _files_dir, _encrypted_files_dir, _logs_dir = Path(metadata_dir), Path(files_dir), Path(output_encrypted_files_dir), Path(output_logs_dir)
+    else:
+        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
+
     config = EncryptConfig.from_path(config_file)
 
     submitter_privkey_path = config.keys.submitter_private_key_path
@@ -39,13 +76,14 @@ def encrypt(submission_dir, config_file, force, check_validation_logs):
 
     log.info("Starting encryption...")
 
-    submission_dir = Path(submission_dir)
+    _encrypted_files_dir.parent.mkdir(parents=True, exist_ok=True)
+    _logs_dir.parent.mkdir(parents=True, exist_ok=True)
 
     worker_inst = Worker(
-        metadata_dir=submission_dir / "metadata",
-        files_dir=submission_dir / "files",
-        log_dir=submission_dir / "logs",
-        encrypted_files_dir=submission_dir / "encrypted_files",
+        metadata_dir=_metadata_dir,
+        files_dir=_files_dir,
+        log_dir=_logs_dir,
+        encrypted_files_dir=_encrypted_files_dir,
     )
     if pubkey := config.keys.grz_public_key:
         with NamedTemporaryFile("w") as f:
