@@ -70,6 +70,19 @@ def register_submissions_with_db(submissions_json_list, db_config_path):  # noqa
                 log_print(
                     f"Skipping update for {submission_id}: No transition defined from '{from_state}' to '{to_state}'."
                 )
+                # if a submission is in any of the following states, also make them available.
+                # i.e., still skip `*ing` and `error` states
+                if from_state in {
+                    "downloaded",
+                    "decrypted",
+                    "validated",
+                    "encrypted",
+                    "archived",
+                    "reported",
+                    "qced",
+                    "cleaned",
+                }:
+                    available_submissions.append(submission)
                 continue
 
     return available_submissions
