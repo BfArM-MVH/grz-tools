@@ -77,16 +77,7 @@ def register_submissions_with_db(submissions_json_list, db_config_path):  # noqa
                 )
                 # if a submission is in any of the following states, also make them available.
                 # i.e., still skip `*ing` and `error` states
-                if from_state in {
-                    "downloaded",
-                    "decrypted",
-                    "validated",
-                    "encrypted",
-                    "archived",
-                    "reported",
-                    "qced",
-                    "cleaned",
-                }:
+                if from_state in shared.CONTINUABLE_STATES:
                     available_submissions.append(submission)
                 continue
 

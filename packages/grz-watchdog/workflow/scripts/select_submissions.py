@@ -19,7 +19,9 @@ def select_submissions(submissions_path, db_config_path, limit):
         submission_id = submission["submission_id"]
         latest_db_state = db_states.get(submission_id)
 
-        if latest_db_state and latest_db_state["state"] == "uploaded":
+        if latest_db_state and (
+            latest_db_state["state"] == "uploaded" or latest_db_state["state"] in shared.CONTINUABLE_STATES
+        ):
             submission["timestamp"] = latest_db_state["timestamp"]
             pending_submissions.append(submission)
 

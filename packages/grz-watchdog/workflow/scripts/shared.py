@@ -7,6 +7,17 @@ sys.path.append(os.path.dirname(__file__))
 
 SUBPROCESS_TIMEOUT = 120
 
+CONTINUABLE_STATES = {
+    "downloaded",
+    "decrypted",
+    "validated",
+    "encrypted",
+    "archived",
+    "reported",
+    "qced",
+    "cleaned",
+}
+
 
 def log_print(*args, **kwargs):
     print(*args, **kwargs, file=sys.stdout)
