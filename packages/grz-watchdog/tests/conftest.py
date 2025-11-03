@@ -170,6 +170,30 @@ def container_test_env(test_environment, setup_mc_alias, request):
             run_in_container(*PIXI_RUN_PREFIX, "mc", "rm", "--recursive", "--force", f"adm/{bucket}")
             run_in_container(*PIXI_RUN_PREFIX, "mc", "mb", "--ignore-existing", f"adm/{bucket}")
         run_in_container(*PIXI_RUN_PREFIX, "rm", "-rf", "/workdir/results", "/workdir/.snakemake", "/tmp/*")
+        run_in_container(*PIXI_RUN_PREFIX, "mkdir", "-p", "/workdir/results")
+
+        print("Initializing a fresh database for the test...")
+        db_config_path_in_container = "/workdir/config/configs/db.yaml"
+        try:
+            run_in_container(
+                *PIXI_RUN_PREFIX,
+                "grzctl",
+                "db",
+                "--config-file",
+                db_config_path_in_container,
+                "init",
+            )
+            print("Database initialization command completed successfully.")
+        except subprocess.CalledProcessError as e:
+            is_just_a_warning = "SyntaxWarning: invalid escape sequence" in e.stderr
+            if e.returncode == 0 and is_just_a_warning:
+                print(f"Database initialization succeeded with acceptable warnings:\n{e.stderr}")
+            else:
+                pytest.fail(
+                    f"Failed to initialize the database for the test. Error: {e.stderr}",
+                    pytrace=False,
+                )
+
     except Exception as e:
         pytest.fail(f"Failed during pre-test cleanup: {e}")
     yield
@@ -346,12 +370,13 @@ class BaseTest:
             cmd.extend(["--configfile", container_temp_path])
         return cmd
 
-    def _run_watchdog(self, target: str, cores: int = 1, config_overrides: dict | None = None):
+    def _run_watchdog(self, target: str, cores: int = 1, config_overrides: dict | None = None) -> subprocess.CompletedProcess | None:
         """Run grz-watchdog and handle failures."""
         print(f"Running grz-watchdog for target: {target}…")
         cmd = self._build_snakemake_cmd(target, cores, config_overrides)
         try:
-            run_in_container(*cmd)
+            result = run_in_container(*cmd)
+            return result
         except subprocess.CalledProcessError as e:
             self._handle_watchdog_failure(e)
             pytest.fail("grz-watchdog failed. See dumped log contents above for details.", pytrace=False)
