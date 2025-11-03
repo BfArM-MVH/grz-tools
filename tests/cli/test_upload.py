@@ -1,6 +1,7 @@
 import filecmp
 import os
 import shutil
+from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
 
@@ -89,8 +90,10 @@ def test_upload_download_submission(
 
         submission_id = result.stdout.strip()
 
-        objects_in_bucket = list(remote_bucket.objects.all())
+        objects_in_bucket = {obj.key: obj for obj in remote_bucket.objects.all()}
         assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
+
+        assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
 
         # download
         download_dir = tmpdir_factory.mktemp("submission_download")

@@ -220,7 +220,7 @@ def get_failed_finalize_inputs(wildcards: Wildcards):
 
 
 def perhaps_temp(f):
-    if config.get("temp-outputs", False):
+    if bool(config.get("temp-outputs", False)):
         return f
     else:
         return temp(f)

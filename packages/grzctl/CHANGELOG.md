@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.2.0...grzctl-v1.3.0) (2025-10-29)
+
+
+### Features
+
+* **grzctl,grz-common:** show size in inbox listing ([#446](https://github.com/BfArM-MVH/grz-tools/issues/446)) ([3bee924](https://github.com/BfArM-MVH/grz-tools/commit/3bee92413f537fc4c087b0aca472548c557e3f78))
+
+
+### Bug Fixes
+
+* **grzctl:** bump grz-common dependency for new functionality ([#449](https://github.com/BfArM-MVH/grz-tools/issues/449)) ([27415bd](https://github.com/BfArM-MVH/grz-tools/commit/27415bddd9f6647f57f16d2029621030853da35f))
+* **grzctl:** restrict detailed QC table to basic QC passed submissions ([#444](https://github.com/BfArM-MVH/grz-tools/issues/444)) ([217cf74](https://github.com/BfArM-MVH/grz-tools/commit/217cf74aafa3ebbbeadbcb36efbbe6b08ca9b423))
+
 ## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.1.0...grzctl-v1.2.0) (2025-10-23)
 
 

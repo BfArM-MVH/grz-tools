@@ -37,7 +37,9 @@ def scan_inbox_and_augment(inbox_config, submitter_id, inbox):
     """
     Scans a single inbox using 'grzctl list' and augments submission data with its origin (submitter_id, inbox).
     """
-    result = run_grzctl_command(["list", "--config-file", inbox_config, "--json", "--show-cleaned"])
+    result = run_grzctl_command(
+        ["list", "--config-file", inbox_config, "--json", "--show-cleaned", "--limit", "1000000"]
+    )
     submissions = json.loads(result.stdout)
     for submission in submissions:
         submission["origin"] = {"submitter_id": submitter_id, "inbox": inbox}
@@ -48,7 +50,7 @@ def get_db_states(db_config_path):
     """
     Fetches all submissions from the db and returns their latest states and timestamps.
     """
-    result = run_grzctl_command(["db", "--config-file", db_config_path, "list", "--json"])
+    result = run_grzctl_command(["db", "--config-file", db_config_path, "list", "--json", "--limit", "1000000"])
     if not result.stdout:
         return {}
 

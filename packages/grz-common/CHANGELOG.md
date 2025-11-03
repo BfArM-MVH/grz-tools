@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.4.0...grz-common-v1.5.0) (2025-10-29)
+
+
+### Features
+
+* **grz-common:** upload version marker first ([#447](https://github.com/BfArM-MVH/grz-tools/issues/447)) ([156807f](https://github.com/BfArM-MVH/grz-tools/commit/156807f6cf00ef16d8f3223e83c4135b0591cdc7))
+* **grzctl,grz-common:** show size in inbox listing ([#446](https://github.com/BfArM-MVH/grz-tools/issues/446)) ([3bee924](https://github.com/BfArM-MVH/grz-tools/commit/3bee92413f537fc4c087b0aca472548c557e3f78))
+
 ## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.3.1...grz-common-v1.4.0) (2025-10-23)
 
 
