@@ -588,6 +588,5 @@ rule process_submission:
     input:
         get_final_submission_target,
         db_config_path=cfg_path("config_paths/db"),
-        metadata=rules.metadata.output.metadata,
     output:
         touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed"),
