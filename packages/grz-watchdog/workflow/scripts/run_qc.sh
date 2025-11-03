@@ -27,9 +27,11 @@ out_dir=$(realpath "${snakemake_output[out_dir]}")
 
 pipeline=$(realpath "${snakemake_input[pipeline]}")
 reference_path=$(realpath "${snakemake_input[reference_path]}")
-submission_basepath=$(realpath "${snakemake_input[submission_basepath]}")
 
-configs="${snakemake_params[configs]}" # these already are absolute paths
+decrypted_data_dir_abs=$(realpath "${snakemake_input[submission_basepath]}")
+metadata_file_abs=$(realpath "${snakemake_input[metadata]}")
+
+configs="${snakemake_params[configs]}"
 profiles="${snakemake_params[profiles]}"
 
 extra="${snakemake_params[extra]}"
@@ -40,12 +42,22 @@ mkdir -p "${work_dir}"
 mkdir -p "${out_dir}"
 pushd "${launch_dir}"
 
+qc_submission_stage_dir="qc_stage_${submission_id}"
+mkdir -p "$qc_submission_stage_dir"
+trap 'rm -rf "$qc_submission_stage_dir"' EXIT SIGHUP SIGINT SIGTERM
+
+ln -sfn "${decrypted_data_dir_abs}/files" "${qc_submission_stage_dir}/files"
+mkdir -p "${qc_submission_stage_dir}/metadata"
+ln -sfn "${metadata_file_abs}" "${qc_submission_stage_dir}/metadata/metadata.json"
+
+submission_basepath_for_nextflow="$qc_submission_stage_dir"
+
 nextflow run "${pipeline}" \
 	${configs} \
 	-profile ${profiles} \
 	--outdir "${out_dir}" \
 	--reference_path "${reference_path}" \
-	--submission_basepath "${submission_basepath}" \
+	--submission_basepath "${submission_basepath_for_nextflow}" \
 	-work-dir "${work_dir}" \
 	${extra} \
 	>>"$log_stdout" 2>>"$log_stderr"
