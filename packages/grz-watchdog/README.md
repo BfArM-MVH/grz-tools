@@ -48,9 +48,8 @@ estimates: # Estimates of certain properties of grz-watchdog and its components
     archive: 200
     qc: 10
 
-temp-outputs: true  # If true, rule outputs are temporary (marked as `temp(…)`). If false, rule outputs will be kept.
 on-failed-validation: "cleanup"  # Action to take on failed validation.
-auto-cleanup: "inbox+storage"  # "The auto-cleanup strategy."
+auto-cleanup: "inbox"  # The auto-cleanup strategy. Note that storage is automatically cleaned, most outputs are marked as temp. To circumvent that, pass `--notemp` to snakemake (and occasionally perform `--delete-temp-output`) 
 
 handlers:
   # What to do when the workflow encounters an error.

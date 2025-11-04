@@ -69,9 +69,7 @@ rule check_and_register:
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:
-        marker=touch(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/registered.marker"
-        ),
+        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/registered.marker"),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stderr.log",
@@ -117,7 +115,7 @@ rule metadata:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        metadata="<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json",
+        metadata=temp("<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json"),
     params:
         s3_access_key=register_s3_access_key,
         s3_secret=register_s3_secret,
@@ -143,16 +141,18 @@ rule download:
         metadata=rules.metadata.output.metadata,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        base_dir=directory(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded"
+        base_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded")),
+        metadata_dir=temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/metadata")
         ),
-        metadata_dir=directory(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/metadata"
+        encrypted_files_dir=temp(
+            directory(
+                "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/encrypted_files"
+            )
         ),
-        encrypted_files_dir=directory(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/encrypted_files"
+        progress_log=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_download.cjson"
         ),
-        progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_download.cjson",
     benchmark:
         "<benchmarks>/download/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
@@ -173,23 +173,25 @@ rule decrypt:
     Decrypt a downloaded submission.
     """
     input:
+        base_dir=rules.download.output.base_dir,
         encrypted_files_dir=rules.download.output.encrypted_files_dir,
+        metadata_dir=rules.download.output.metadata_dir,
         download_progress_log=rules.download.output.progress_log,
         metadata=rules.metadata.output.metadata,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        base_dir=directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
-        files_dir=directory(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/files"
+        base_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted")),
+        files_dir=temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/files")
         ),
-        progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_decrypt.cjson",
+        progress_log=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_decrypt.cjson"
+        ),
     benchmark:
         "<benchmarks>/decrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
-        grz_private_key_passphrase=os.environ.get(
-            "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"
-        ),
+        grz_private_key_passphrase=os.environ.get("GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"),
     resources:
         disk=estimate_decrypt_size,
         runtime=estimate_decrypt_runtime,
@@ -207,20 +209,21 @@ checkpoint validate:
     This is a checkpoint because the downstream workflow (success path vs. failure path) depends on its output.
     """
     input:
+        base_dir=rules.decrypt.output.base_dir,
         files_dir=rules.decrypt.output.files_dir,
         decrypt_progress_log=rules.decrypt.output.progress_log,
         metadata=rules.metadata.output.metadata,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        checksum_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_checksum_validation.cjson",
-        seq_data_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_sequencing_data_validation.cjson",
-        validation_flag=(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag"
+        checksum_log=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_checksum_validation.cjson"
         ),
-        validation_errors=(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"
+        seq_data_log=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_sequencing_data_validation.cjson"
         ),
+        validation_flag=("<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag"),
+        validation_errors=("<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"),
     benchmark:
         "<benchmarks>/validate/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     log:
@@ -240,7 +243,7 @@ rule consent:
     input:
         metadata=rules.metadata.output.metadata,
     output:
-        consent_flag=("<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag"),
+        consent_flag="<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag",
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
@@ -254,7 +257,9 @@ rule re_encrypt:
     """
     input:
         metadata=rules.metadata.output.metadata,
+        base_dir=rules.decrypt.output.base_dir,
         files_dir=rules.decrypt.output.files_dir,
+        decrypt_progress_log=rules.decrypt.output.progress_log,
         consent_flag=rules.consent.output.consent_flag,
         validation_flag=rules.validate.output.validation_flag,
         consented_config_path=cfg_path("config_paths/archive/consented"),
@@ -263,10 +268,14 @@ rule re_encrypt:
         validation_checksum_log=rules.validate.output.checksum_log,
         validation_seq_data_log=rules.validate.output.seq_data_log,
     output:
-        encrypted_files_dir=directory(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files"
+        encrypted_files_dir=temp(
+            directory(
+                "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files"
+            )
         ),
-        encryption_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_encrypt.cjson",
+        encryption_log=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_encrypt.cjson"
+        ),
     benchmark:
         "<benchmarks>/re_encrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
@@ -319,9 +328,7 @@ rule generate_pruefbericht:
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
     output:
-        pruefbericht=perhaps_temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"
-        ),
+        pruefbericht=temp("<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
@@ -338,14 +345,10 @@ rule submit_pruefbericht:
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        answer=perhaps_temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"
-        ),
+        answer=temp("<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"),
     params:
         custom_ca_cert=lambda _: (
-            "/workdir/config/cert.pem"
-            if os.environ.get("GRZ_PRUEFBERICHT_MOCK", False)
-            else ""
+            "/workdir/config/cert.pem" if os.environ.get("GRZ_PRUEFBERICHT_MOCK", False) else ""
         ),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
@@ -371,9 +374,7 @@ rule setup_qc_workflow:
         """
 
 
-qc_prepare_references_mode = (
-    config.get("qc", {}).get("prepare-qc", {}).get("mode", "download")
-)
+qc_prepare_references_mode = config.get("qc", {}).get("prepare-qc", {}).get("mode", "download")
 if qc_prepare_references_mode == "download":
 
     rule download_qc_workflow_references:
@@ -399,9 +400,7 @@ else:
             # if you need to re-generate references, you can delete the references directory manually
             workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
             pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
-            custom_configs=lambda wc: config.get("qc", {})
-            .get("prepare-qc", {})
-            .get("configs", []),
+            custom_configs=lambda wc: config.get("qc", {}).get("prepare-qc", {}).get("configs", []),
         output:
             references_dir=get_qc_workflow_references_directory(),
             launch_dir=directory("<resources>/shared_qc_launchdir"),
@@ -430,6 +429,7 @@ rule qc:
     Perform QC on a submission using the QC nextflow pipeline.
     """
     input:
+        base_dir=rules.decrypt.output.base_dir,
         files_dir=rules.decrypt.output.files_dir,
         metadata=rules.metadata.output.metadata,
         validation_flag=rules.validate.output.validation_flag,
@@ -438,16 +438,10 @@ rule qc:
         pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
         launch_dir="<resources>/shared_qc_launchdir",
         reference_path=get_qc_workflow_references_directory(),
-        custom_configs=lambda wc: config.get("qc", {})
-        .get("run-qc", {})
-        .get("configs", []),
+        custom_configs=lambda wc: config.get("qc", {}).get("run-qc", {}).get("configs", []),
     output:
-        out_dir=perhaps_temp(
-            directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out")
-        ),
-        work_dir=perhaps_temp(
-            directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work")
-        ),
+        out_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out")),
+        work_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work")),
     benchmark:
         "<benchmarks>/qc/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
@@ -471,9 +465,7 @@ rule process_qc_results:
         qc_results=rules.qc.output.out_dir,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        marker=touch(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"
-        ),
+        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"),
     params:
         report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
     log:
@@ -492,27 +484,13 @@ rule clean:
     """
     input:
         ready_marker=get_cleanup_prerequisite,
-        downloaded_metadata_dir=rules.download.output.metadata_dir,
-        downloaded_encrypted_files_dir=rules.download.output.encrypted_files_dir,
-        decrypted_files_dir=rules.decrypt.output.files_dir,
-        re_encrypted_files_dir=rules.re_encrypt.output.encrypted_files_dir,
-        metadata_file=rules.metadata.output.metadata,
         validation_flag=rules.validate.output.validation_flag,
         validation_errors=rules.validate.output.validation_errors,
         consent_flag=rules.consent.output.consent_flag,
-        progress_logs=[
-            rules.download.output.progress_log,
-            rules.decrypt.output.progress_log,
-            rules.validate.output.checksum_log,
-            rules.validate.output.seq_data_log,
-            rules.re_encrypt.output.encryption_log,
-        ],
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        clean_results=perhaps_temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}"
-        ),
+        clean_results="<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
     benchmark:
         "<benchmarks>/clean/{submitter_id}/{inbox}/{submission_id}/{qc_status}/benchmark.tsv"
     params:
@@ -529,9 +507,7 @@ rule clean:
 #     Update the Taetigkeitsbericht with information from the submission DB.
 #     """
 #     output:
-#         taetigkeitsbericht=perhaps_temp(
-#             "<results>/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.pdf"
-#         ),
+#         taetigkeitsbericht="<results>/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.pdf",
 #     params:
 #         db_config_path=cfg_path("config_paths/db"),
 #     log:

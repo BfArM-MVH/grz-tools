@@ -12,9 +12,8 @@ estimates:
     archive: 200
     qc: 10
 
-temp-outputs: true
 on-failed-validation: "cleanup"
-auto-cleanup: "inbox+storage"
+auto-cleanup: "inbox"
 
 handlers:
   # What to do when the workflow encounters an error.

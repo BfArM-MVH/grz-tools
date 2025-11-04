@@ -52,9 +52,6 @@ properties:
               default: 10
     required:
       - speed
-  temp-outputs:
-    type: boolean
-    description: "If true, rule outputs are temporary (marked as `temp(…)`). If false, rule outputs will be kept."
   on-failed-validation:
     type: string
     description: "Action to take on failed validation."
@@ -66,8 +63,6 @@ properties:
     description: "The auto-cleanup strategy."
     enum:
       - "inbox"
-      - "storage"
-      - "inbox+storage"
       - "none"
   handlers:
     type: object

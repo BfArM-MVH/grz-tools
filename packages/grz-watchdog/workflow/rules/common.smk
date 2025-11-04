@@ -218,13 +218,6 @@ def get_failed_finalize_inputs(wildcards: Wildcards):
 ## PARAMETER / HELPER FUNCTIONS
 
 
-def perhaps_temp(f):
-    if bool(config.get("temp-outputs", False)):
-        return f
-    else:
-        return temp(f)
-
-
 def get_endpoint_url(wildcards: Wildcards, input: InputFiles) -> str:
     """
     Get the endpoint URL from the inbox config file.
@@ -265,9 +258,7 @@ def get_s3_metadata_key(wildcards: Wildcards) -> str:
     return f"{wildcards.submission_id}/metadata/metadata.json"
 
 
-def register_s3_access_key(
-    wildcards: Wildcards, input: InputFiles
-) -> Literal["success"]:
+def register_s3_access_key(wildcards: Wildcards, input: InputFiles) -> Literal["success"]:
     """
     Export the S3 access key in the environment as AWS_ACCESS_KEY_ID.
 
@@ -385,9 +376,7 @@ def get_target_qc_percentage(wildcards: Wildcards) -> float | None:
 def parse_metadata(metadata_path: PathLike | str) -> GrzSubmissionMetadata:
     with open(metadata_path) as f:
         json_str = f.read()
-        metadata: GrzSubmissionMetadata = GrzSubmissionMetadata.model_validate_json(
-            json_str
-        )
+        metadata: GrzSubmissionMetadata = GrzSubmissionMetadata.model_validate_json(json_str)
     return metadata
 
 
