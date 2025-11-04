@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime
+from datetime import UTC, datetime
 
 sys.path.append(os.path.dirname(__file__))
 import shared
@@ -22,12 +22,16 @@ def select_submissions(inbox_scans, db_config_path, limit):
         s3_state = submission.get("state")
         latest_db_state = db_states.get(submission_id)
 
-        if latest_db_state and latest_db_state.get("timestamp"):
-            submission["timestamp"] = latest_db_state["timestamp"]
+        # ensure everything is UTC
+        if latest_db_state and (timestamp_str := latest_db_state.get("timestamp")):
+            timestamp = datetime.fromisoformat(timestamp_str)
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
         else:
-            s3_timestamp_str = submission.get("latest_modification", "1970-01-01T00:00:00Z")
-            dt_object = datetime.fromisoformat(s3_timestamp_str.replace("Z", "+00:00"))
-            submission["timestamp"] = dt_object.isoformat()
+            timestamp_str = submission.get("latest_modification", "1970-01-01T00:00:00Z")
+            timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+
+        submission["timestamp_key"] = timestamp
 
         if (
             latest_db_state
@@ -35,7 +39,8 @@ def select_submissions(inbox_scans, db_config_path, limit):
         ) or (not latest_db_state and s3_state == "complete"):
             pending_submissions.append(submission)
 
-    pending_submissions.sort(key=lambda s: datetime.fromisoformat(s["timestamp"]))
+    pending_submissions.sort(key=lambda s: s["timestamp_key"])
+
     if limit is not None:
         pending_submissions = pending_submissions[:limit]
 
