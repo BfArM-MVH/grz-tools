@@ -47,4 +47,4 @@ grzctl download \
 
 grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" downloaded >>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "${db_config}" submission populate --no-confirm "${submission_id}" "${snakemake_output[data]}/metadata/metadata.json" >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission populate --no-confirm "${submission_id}" "${output_metadata_dir}/metadata.json" >>"$log_stdout" 2>>"$log_stderr"

@@ -25,7 +25,6 @@ metadata_dir="$(dirname "$metadata_file_path")"
 unencrypted_files_dir="${snakemake_input[files_dir]}"
 output_encrypted_files_dir="${snakemake_output[encrypted_files_dir]}"
 progress_logs_dir="$(dirname "${snakemake_output[encryption_log]}")"
-output_dir="${snakemake_output[data]}"
 
 CONSENT=$(cat "${snakemake_input[consent_flag]}")
 if [[ "$CONSENT" == "true" ]]; then
