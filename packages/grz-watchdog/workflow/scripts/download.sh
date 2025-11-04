@@ -34,6 +34,7 @@ log_stderr="${snakemake_log[stderr]}"
 output_metadata_dir="${snakemake_output[metadata_dir]}"
 output_encrypted_files_dir="${snakemake_output[encrypted_files_dir]}"
 progress_logs_dir="$(dirname "${snakemake_output[progress_log]}")"
+mkdir -p "${progress_logs_dir}"
 
 grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" downloading >"$log_stdout" 2>"$log_stderr"
 

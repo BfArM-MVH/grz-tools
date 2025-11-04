@@ -29,11 +29,11 @@ log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 inbox_config_path="${snakemake_input[inbox_config_path]}"
 
-input_metadata_file="${snakemake_input[metadata]}"
-metadata_dir="$(dirname "$metadata_file_path")"
-input_encrypted_files_dir="${snakemake_input[encrypted_files_dir]}"
+metadata_file_path="${snakemake_input[metadata]}"
+metadata_dir="$(dirname "${metadata_file_path}")"
+encrypted_files_dir="${snakemake_input[encrypted_files_dir]}"
 output_files_dir="${snakemake_output[files_dir]}"
-output_logs_dir="${snakemake_output[logs_dir]}"
+mkdir -p "${output_files_dir}"
 progress_logs_dir="$(dirname "${snakemake_output[progress_log]}")"
 
 grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" decrypting >"$log_stdout" 2>"$log_stderr"
@@ -41,7 +41,7 @@ grzctl db --config-file "${db_config}" submission update --ignore-error-state "$
 grzctl decrypt \
 	--config-file "${inbox_config_path}" \
 	--metadata-dir "${metadata_dir}" \
-	--encrypted-files-dir "${input_encrypted_files_dir}" \
+	--encrypted-files-dir "${encrypted_files_dir}" \
 	--files-dir "${output_files_dir}" \
 	--logs-dir "${progress_logs_dir}" \
 	>>"$log_stdout" 2>>"$log_stderr"

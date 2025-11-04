@@ -24,6 +24,7 @@ metadata_file_path="${snakemake_input[metadata]}"
 metadata_dir="$(dirname "$metadata_file_path")"
 unencrypted_files_dir="${snakemake_input[files_dir]}"
 output_encrypted_files_dir="${snakemake_output[encrypted_files_dir]}"
+mkdir -p "${output_encrypted_files_dir}"
 progress_logs_dir="$(dirname "${snakemake_output[encryption_log]}")"
 
 CONSENT=$(cat "${snakemake_input[consent_flag]}")

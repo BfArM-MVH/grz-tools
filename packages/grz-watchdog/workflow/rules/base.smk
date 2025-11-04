@@ -152,9 +152,6 @@ rule download:
         encrypted_files_dir=directory(
             "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/encrypted_files"
         ),
-        logs_dir=directory(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/logs"
-        ),
         progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_download.cjson",
     benchmark:
         "<benchmarks>/download/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
@@ -185,9 +182,6 @@ rule decrypt:
         base_dir=directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
         files_dir=directory(
             "<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/files"
-        ),
-        logs_dir=directory(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/logs"
         ),
         progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_decrypt.cjson",
     benchmark:
