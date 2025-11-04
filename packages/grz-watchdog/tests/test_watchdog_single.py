@@ -28,7 +28,9 @@ class TestProcessSingle(BaseTest):
     """Testing setup for the process-single branch of grz-watchdog"""
 
     @pytest.mark.parametrize("submission_type, submission_id", TEST_CASES)
-    def test_single_valid_submission(self, test_data_dir: Path, tmp_path: Path, submission_type: str, submission_id: str):
+    def test_single_valid_submission(
+        self, test_data_dir: Path, tmp_path: Path, submission_type: str, submission_id: str
+    ):
         """
         Test the successful end-to-end processing of a single valid submission.
         """
@@ -154,7 +156,6 @@ class TestProcessSingle(BaseTest):
         self._verify_inbox_cleaned(pass_id)
         self._verify_archived(pass_id, bucket=BUCKET_NONCONSENTED)
 
-
     def test_single_submission_with_existing_db(self, test_data_dir: Path, tmp_path: Path):
         """
         Tests that processing a new submission does not affect submissions already
@@ -163,9 +164,7 @@ class TestProcessSingle(BaseTest):
         base_submission_dir = test_data_dir / "panel"
         config_overrides = {"qc": {"selection_strategy": {"enabled": False}}}
 
-        pre_existing_dir, pre_existing_id = _create_variant_submission(
-            base_submission_dir, "pre_existing", tmp_path
-        )
+        pre_existing_dir, pre_existing_id = _create_variant_submission(base_submission_dir, "pre_existing", tmp_path)
         self._submit_data(pre_existing_dir)
 
         pre_existing_target = f"results/{SUBMITTER_ID}/{INBOX}/{pre_existing_id}/processed"
@@ -189,7 +188,6 @@ class TestProcessSingle(BaseTest):
 
         self._verify_db_state(pre_existing_id, expected_state="Finished")
 
-
     def test_resumability_after_decrypt_interrupt(self, test_data_dir: Path, tmp_path: Path):
         """
         Tests that an interrupted workflow resumes correctly.
@@ -201,31 +199,32 @@ class TestProcessSingle(BaseTest):
         submission_dir, submission_id = _create_variant_submission(test_data_dir, "resume-test", tmp_path)
         self._submit_data(submission_dir)
 
-        # to ensure the target directory exists and can be inspected: set temp-outputs to false and auto-cleanup to none
+        # to ensure the target directory exists and can be inspected: set auto-cleanup to none
         config_overrides = {
-            "temp-outputs": False,
             "auto-cleanup": "none",
             "qc": {"selection_strategy": {"enabled": False}},
         }
 
-        # run to an arbitrary intermediate target
-        intermediate_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/decrypted"
-        print(f"\n--- Running to intermediate target: {intermediate_target} ---")
-        result = self._run_watchdog(intermediate_target, config_overrides=config_overrides)
+        # run to an arbitrary intermediate target by supplying `--until RULE`
+        final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
+        print(f"\n--- Running to final target: {final_target}, but only until rule decrypt ---")
+        result = self._run_watchdog(final_target, config_overrides=config_overrides, extra=["--until", "decrypt"])
         snakemake_log_output = result.stderr
 
         # check logs to verify snakemake did indeed trigger running some necessary rules
         assert "localrule download:" in snakemake_log_output, "Rule 'download' was not run as expected."
         assert "localrule decrypt:" in snakemake_log_output, "Rule 'decrypt' was not run as expected."
         # but not ones past the target
-        assert "localcheckpoint validate:" not in snakemake_log_output, "Rule 'validate' was run, even though it should not have been."
+        assert "localcheckpoint validate:" not in snakemake_log_output, (
+            "Rule 'validate' was run, even though it should not have been."
+        )
 
         # verify intermediate dir exists
+        intermediate_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/decrypted"
         run_in_container("test", "-d", f"/workdir/{intermediate_target}")
         print("--- Intermediate target successfully created. ---")
 
         # try to continue from intermediate target
-        final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
         print(f"\n--- Resuming run to final target: {final_target} ---")
 
         result = self._run_watchdog(final_target, config_overrides=config_overrides)

@@ -370,23 +370,25 @@ class BaseTest:
             cmd.extend(["--configfile", container_temp_path])
         return cmd
 
-    def _run_watchdog(self, target: str, cores: int = 1, config_overrides: dict | None = None) -> subprocess.CompletedProcess | None:
+    def _run_watchdog(self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None) -> subprocess.CompletedProcess | None:
         """Run grz-watchdog and handle failures."""
         print(f"Running grz-watchdog for target: {target}…")
         cmd = self._build_snakemake_cmd(target, cores, config_overrides)
+        extra = extra or []
         try:
-            result = run_in_container(*cmd)
+            result = run_in_container(*cmd, *extra)
             return result
         except subprocess.CalledProcessError as e:
             self._handle_watchdog_failure(e)
             pytest.fail("grz-watchdog failed. See dumped log contents above for details.", pytrace=False)
 
-    def _run_watchdog_expect_fail(self, target: str, cores: int = 1, config_overrides: dict | None = None):
+    def _run_watchdog_expect_fail(self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None):
         """Run grz-watchdog and assert that it fails."""
         print(f"Running grz-watchdog for target: {target} (expecting failure)…")
         cmd = self._build_snakemake_cmd(target, cores, config_overrides)
+        extra = extra or []
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
-            run_in_container(*cmd)
+            run_in_container(*cmd, *extra)
 
         self._handle_watchdog_failure(excinfo.value)
         return excinfo.value
