@@ -1150,7 +1150,7 @@ packages:
   editable: true
 - pypi: ../grz-common
   name: grz-common
-  version: 1.4.0
+  version: 1.5.0
   sha256: 89457845309a872a77897582e12228debee1ff82018b70eaf4b3359e20b691f3
   requires_dist:
   - boto3>=1.36,<2

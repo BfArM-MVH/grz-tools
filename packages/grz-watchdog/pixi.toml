@@ -26,6 +26,7 @@ minio-client = ">=2025.8.13.8.35.41,<2026"
 sqlite = ">=3.50.4,<4"
 pytest = ">=8.4.2,<9"
 requests = ">=2.32.5,<3"
+coin-or-cbc = ">=2.10.12,<3"
 
 [pypi-dependencies]
 grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
