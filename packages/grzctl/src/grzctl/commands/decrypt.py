@@ -8,10 +8,10 @@ import click
 from grz_common.cli import (
     config_file,
     encrypted_files_dir,
+    files_dir,
     force,
+    logs_dir,
     metadata_dir,
-    output_files_dir,
-    output_logs_dir,
     submission_dir,
 )
 from grz_common.workers.worker import Worker
@@ -25,40 +25,44 @@ log = logging.getLogger(__name__)
 @submission_dir
 @metadata_dir
 @encrypted_files_dir
-@output_files_dir
-@output_logs_dir
+@files_dir
+@logs_dir
 @config_file
 @force
-def decrypt(submission_dir, metadata_dir, encrypted_files_dir, output_files_dir, output_logs_dir, config_file, force):
+def decrypt(submission_dir, metadata_dir, encrypted_files_dir, files_dir, logs_dir, config_file, force):
     """
     Decrypt a submission.
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
-    in_legacy_mode = submission_dir is not None
-    in_flexible_mode = any([metadata_dir, encrypted_files_dir, output_files_dir, output_logs_dir])
+    bundled_mode = submission_dir is not None
+    granular_mode = any([metadata_dir, encrypted_files_dir, files_dir, logs_dir])
 
-    if in_legacy_mode and in_flexible_mode:
+    if bundled_mode and granular_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
 
-    if in_legacy_mode:
-        log.warning("Using deprecated '--submission-dir'. Please switch to explicit path options.")
+    if bundled_mode:
         base = Path(submission_dir)
         _metadata_dir = base / "metadata"
         _encrypted_files_dir = base / "encrypted_files"
         _files_dir = base / "files"
         _logs_dir = base / "logs"
-    elif in_flexible_mode:
+    elif granular_mode:
         required = {
             "--metadata-dir": metadata_dir,
             "--encrypted-files-dir": encrypted_files_dir,
-            "--output-files-dir": output_files_dir,
-            "--output-logs-dir": output_logs_dir,
+            "--files-dir": files_dir,
+            "--logs-dir": logs_dir,
         }
         missing = [name for name, path in required.items() if path is None]
         if missing:
             raise click.UsageError(f"Flexible mode requires: {', '.join(missing)}")
-        _metadata_dir, _encrypted_files_dir, _files_dir, _logs_dir = Path(metadata_dir), Path(encrypted_files_dir), Path(output_files_dir), Path(output_logs_dir)
+        _metadata_dir, _encrypted_files_dir, _files_dir, _logs_dir = (
+            Path(metadata_dir),
+            Path(encrypted_files_dir),
+            Path(files_dir),
+            Path(logs_dir),
+        )
     else:
         raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 

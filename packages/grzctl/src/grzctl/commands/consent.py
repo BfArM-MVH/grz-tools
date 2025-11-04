@@ -34,15 +34,15 @@ def consent(submission_dir, metadata_file, output_json, show_details, date):
 
     Returns 'true' if consented, 'false' if not.
     """
-    in_legacy_mode = submission_dir is not None
-    in_flexible_mode = metadata_file is not None
+    bundled_mode = submission_dir is not None
+    granular_mode = metadata_file is not None
 
-    if in_legacy_mode and in_flexible_mode:
+    if bundled_mode and granular_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with '--metadata-file'.")
 
-    if in_legacy_mode:
+    if bundled_mode:
         metadata_path = Path(submission_dir) / "metadata" / "metadata.json"
-    elif in_flexible_mode:
+    elif granular_mode:
         metadata_path = Path(metadata_file)
     else:
         raise click.UsageError("You must specify either '--submission-dir' or '--metadata-file'.")
