@@ -10,9 +10,9 @@ from grz_common.cli import (
     config_file,
     files_dir,
     force,
+    logs_dir,
     metadata_dir,
     output_encrypted_files_dir,
-    output_logs_dir,
     submission_dir,
 )
 from grz_common.workers.worker import Worker
@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 @metadata_dir
 @files_dir
 @output_encrypted_files_dir
-@output_logs_dir
+@logs_dir
 @config_file
 @force
 @click.option(
@@ -36,14 +36,25 @@ log = logging.getLogger(__name__)
     default=True,
     help="Check validation logs before encrypting.",
 )
-def encrypt(submission_dir, metadata_dir, files_dir, output_encrypted_files_dir, output_logs_dir, config_file, force, check_validation_logs):
+def encrypt(
+    submission_dir,
+    metadata_dir,
+    files_dir,
+    output_encrypted_files_dir,
+    logs_dir,
+    config_file,
+    force,
+    check_validation_logs,
+):
     """
     Encrypt a submission.
 
     Encryption is done with the recipient's public key.
     """
     in_legacy_mode = submission_dir is not None
-    in_flexible_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, output_logs_dir]))
+    in_flexible_mode = any(
+        map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir])
+    )
 
     if in_legacy_mode and in_flexible_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
@@ -58,13 +69,18 @@ def encrypt(submission_dir, metadata_dir, files_dir, output_encrypted_files_dir,
         required = {
             "--metadata-dir": metadata_dir,
             "--files-dir": files_dir,
+            "--logs-dir": logs_dir,
             "--output-encrypted-files-dir": output_encrypted_files_dir,
-            "--output-logs-dir": output_logs_dir,
         }
         missing = [name for name, path in required.items() if path is None]
         if missing:
             raise click.UsageError(f"Flexible mode requires: {', '.join(missing)}")
-        _metadata_dir, _files_dir, _encrypted_files_dir, _logs_dir = Path(metadata_dir), Path(files_dir), Path(output_encrypted_files_dir), Path(output_logs_dir)
+        _metadata_dir, _files_dir, _encrypted_files_dir, _logs_dir = (
+            Path(metadata_dir),
+            Path(files_dir),
+            Path(output_encrypted_files_dir),
+            Path(logs_dir),
+        )
     else:
         raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 

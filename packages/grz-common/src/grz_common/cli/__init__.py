@@ -86,14 +86,6 @@ output_encrypted_files_dir = click.option(
     help="Output directory where the 'encrypted_files/' subdirectory will be created.",
 )
 
-output_logs_dir = click.option(
-    "--output-logs-dir",
-    metavar="PATH",
-    type=DIR_RW_C,
-    required=False,
-    help="Output directory where the 'logs/' subdirectory will be created.",
-)
-
 config_file = click.option(
     "--config-file",
     metavar="STRING",
