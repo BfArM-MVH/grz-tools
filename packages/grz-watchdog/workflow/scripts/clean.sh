@@ -24,9 +24,10 @@ log_stderr="${snakemake_log[stderr]}"
 mode="${snakemake_params[mode]}"
 
 artifacts_to_remove=(
-	"${snakemake_input[downloaded_data]}"
-	"${snakemake_input[decrypted_data]}"
-	"${snakemake_input[re_encrypted_data]}"
+	"${snakemake_input[downloaded_metadata_dir]}"
+	"${snakemake_input[downloaded_encrypted_files_dir]}"
+	"${snakemake_input[decrypted_files_dir]}"
+	"${snakemake_input[re_encrypted_files_dir]}"
 	"${snakemake_input[metadata_file]}"
 	"${snakemake_input[validation_flag]}"
 	"${snakemake_input[validation_errors]}"

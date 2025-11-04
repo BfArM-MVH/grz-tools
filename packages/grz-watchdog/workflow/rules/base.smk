@@ -143,7 +143,19 @@ rule download:
         metadata=rules.metadata.output.metadata,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        data=directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded"),
+        base_dir=directory(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded"
+        ),
+        metadata_dir=directory(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/metadata"
+        ),
+        encrypted_files_dir=directory(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/encrypted_files"
+        ),
+        logs_dir=directory(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/logs"
+        ),
+        progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_download.cjson",
     benchmark:
         "<benchmarks>/download/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
@@ -164,12 +176,20 @@ rule decrypt:
     Decrypt a downloaded submission.
     """
     input:
-        data=rules.download.output.data,
+        encrypted_files_dir=rules.download.output.encrypted_files_dir,
+        download_progress_log=rules.download.output.progress_log,
         metadata=rules.metadata.output.metadata,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        data=directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
+        base_dir=directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted"),
+        files_dir=directory(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/files"
+        ),
+        logs_dir=directory(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/logs"
+        ),
+        progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_decrypt.cjson",
     benchmark:
         "<benchmarks>/decrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
@@ -193,7 +213,8 @@ checkpoint validate:
     This is a checkpoint because the downstream workflow (success path vs. failure path) depends on its output.
     """
     input:
-        data=rules.decrypt.output.data,
+        files_dir=rules.decrypt.output.files_dir,
+        decrypt_progress_log=rules.decrypt.output.progress_log,
         metadata=rules.metadata.output.metadata,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
@@ -239,7 +260,7 @@ rule re_encrypt:
     """
     input:
         metadata=rules.metadata.output.metadata,
-        data=rules.decrypt.output.data,
+        files_dir=rules.decrypt.output.files_dir,
         consent_flag=rules.consent.output.consent_flag,
         validation_flag=rules.validate.output.validation_flag,
         consented_config_path=cfg_path("config_paths/archive/consented"),
@@ -248,7 +269,9 @@ rule re_encrypt:
         validation_checksum_log=rules.validate.output.checksum_log,
         validation_seq_data_log=rules.validate.output.seq_data_log,
     output:
-        data=directory("<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted"),
+        encrypted_files_dir=directory(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files"
+        ),
         encryption_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_encrypt.cjson",
     benchmark:
         "<benchmarks>/re_encrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
@@ -268,23 +291,14 @@ rule archive:
     """
     input:
         metadata=rules.metadata.output.metadata,
-        re_encrypted_data=rules.re_encrypt.output.data,
+        re_encrypted_files_dir=rules.re_encrypt.output.encrypted_files_dir,
         consent_flag=rules.consent.output.consent_flag,
-        logs_to_archive=[
-            rules.check_and_register.log.stdout,
-            rules.check_and_register.log.stderr,
-            rules.metadata.log.stdout,
-            rules.metadata.log.stderr,
-            rules.download.log.stdout,
-            rules.download.log.stderr,
-            rules.decrypt.log.stdout,
-            rules.decrypt.log.stderr,
-            rules.validate.log.stdout,
-            rules.validate.log.stderr,
-            rules.consent.log.stdout,
-            rules.consent.log.stderr,
-            rules.re_encrypt.log.stdout,
-            rules.re_encrypt.log.stderr,
+        progress_logs_to_archive=[
+            rules.download.output.progress_log,
+            rules.decrypt.output.progress_log,
+            rules.validate.output.checksum_log,
+            rules.validate.output.seq_data_log,
+            rules.re_encrypt.output.encryption_log,
         ],
         consented_config_path=cfg_path("config_paths/archive/consented"),
         nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
@@ -422,7 +436,7 @@ rule qc:
     Perform QC on a submission using the QC nextflow pipeline.
     """
     input:
-        submission_basepath=rules.decrypt.output.data,
+        files_dir=rules.decrypt.output.files_dir,
         metadata=rules.metadata.output.metadata,
         validation_flag=rules.validate.output.validation_flag,
         db_config_path=cfg_path("config_paths/db"),
@@ -484,14 +498,17 @@ rule clean:
     """
     input:
         ready_marker=get_cleanup_prerequisite,
-        downloaded_data=rules.download.output.data,
-        decrypted_data=rules.decrypt.output.data,
-        re_encrypted_data=rules.re_encrypt.output.data,
+        downloaded_metadata_dir=rules.download.output.metadata_dir,
+        downloaded_encrypted_files_dir=rules.download.output.encrypted_files_dir,
+        decrypted_files_dir=rules.decrypt.output.files_dir,
+        re_encrypted_files_dir=rules.re_encrypt.output.encrypted_files_dir,
         metadata_file=rules.metadata.output.metadata,
         validation_flag=rules.validate.output.validation_flag,
         validation_errors=rules.validate.output.validation_errors,
         consent_flag=rules.consent.output.consent_flag,
         progress_logs=[
+            rules.download.output.progress_log,
+            rules.decrypt.output.progress_log,
             rules.validate.output.checksum_log,
             rules.validate.output.seq_data_log,
             rules.re_encrypt.output.encryption_log,

@@ -20,9 +20,10 @@ db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-unencrypted_data_dir="${snakemake_input[data]}"
 metadata_file_path="${snakemake_input[metadata]}"
 metadata_dir="$(dirname "$metadata_file_path")"
+unencrypted_files_dir="${snakemake_input[files_dir]}"
+output_encrypted_files_dir="${snakemake_output[encrypted_files_dir]}"
 progress_logs_dir="$(dirname "${snakemake_output[encryption_log]}")"
 output_dir="${snakemake_output[data]}"
 
@@ -40,9 +41,9 @@ grzctl db --config-file "${db_config}" submission update --ignore-error-state "$
 grzctl encrypt \
 	--config-file "$CONFIG_FILE" \
 	--metadata-dir "${metadata_dir}" \
-	--files-dir "${unencrypted_data_dir}/files" \
-	--output-encrypted-files-dir "${output_dir}/encrypted_files" \
-	--output-logs-dir "${progress_logs_dir}" \
+	--files-dir "${unencrypted_files_dir}" \
+	--output-encrypted-files-dir "${output_encrypted_files_dir}" \
+	--logs-dir "${progress_logs_dir}" \
 	--force \
 	>>"$log_stdout" 2>>"$log_stderr"
 

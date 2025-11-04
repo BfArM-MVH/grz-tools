@@ -7,7 +7,7 @@ inbox_config="${snakemake_input[inbox_config_path]}"
 
 metadata_file_path="${snakemake_input[metadata]}"
 metadata_dir="$(dirname "$metadata_file_path")"
-decrypted_data_dir="${snakemake_input[data]}"
+files_dir="${snakemake_input[files_dir]}"
 progress_logs_dir="$(dirname "${snakemake_output[checksum_log]}")"
 mkdir -p "${progress_logs_dir}"
 
@@ -23,7 +23,7 @@ grzctl db --config-file "${db_config}" submission update --ignore-error-state "$
 if grzctl validate \
 	--config-file "${inbox_config}" \
 	--metadata-dir "${metadata_dir}" \
-	--files-dir "${decrypted_data_dir}/files" \
+	--files-dir "${files_dir}" \
 	--logs-dir "${progress_logs_dir}" \
 	>>"$log_stdout" 2>"$validation_errors"; then
 	echo "true" >"$validation_flag"

@@ -28,7 +28,7 @@ out_dir=$(realpath "${snakemake_output[out_dir]}")
 pipeline=$(realpath "${snakemake_input[pipeline]}")
 reference_path=$(realpath "${snakemake_input[reference_path]}")
 
-decrypted_data_dir_abs=$(realpath "${snakemake_input[submission_basepath]}")
+decrypted_files_dir_abs=$(realpath "${snakemake_input[files_dir]}")
 metadata_file_abs=$(realpath "${snakemake_input[metadata]}")
 
 configs="${snakemake_params[configs]}"
@@ -46,7 +46,7 @@ qc_submission_stage_dir="qc_stage_${submission_id}"
 mkdir -p "$qc_submission_stage_dir"
 trap 'rm -rf "$qc_submission_stage_dir"' EXIT SIGHUP SIGINT SIGTERM
 
-ln -sfn "${decrypted_data_dir_abs}/files" "${qc_submission_stage_dir}/files"
+ln -sfn "${decrypted_files_dir_abs}" "${qc_submission_stage_dir}"
 mkdir -p "${qc_submission_stage_dir}/metadata"
 ln -sfn "${metadata_file_abs}" "${qc_submission_stage_dir}/metadata/metadata.json"
 
