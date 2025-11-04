@@ -41,18 +41,18 @@ def validate(submission_dir, metadata_dir, files_dir, logs_dir, config_file, for
     This validates the submission by checking its checksums, as well as performing basic sanity checks on the supplied metadata.
     Must be executed before calling `encrypt` and `upload`.
     """
-    in_legacy_mode = submission_dir is not None
-    in_flexible_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, logs_dir]))
+    bundled_mode = submission_dir is not None
+    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, logs_dir]))
 
-    if in_legacy_mode and in_flexible_mode:
+    if bundled_mode and granular_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
 
-    if in_legacy_mode:
+    if bundled_mode:
         base = Path(submission_dir)
         _metadata_dir = base / "metadata"
         _files_dir = base / "files"
         _logs_dir = base / "logs"
-    elif in_flexible_mode:
+    elif granular_mode:
         required = {
             "--metadata-dir": metadata_dir,
             "--files-dir": files_dir,

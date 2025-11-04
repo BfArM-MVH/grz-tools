@@ -51,21 +51,19 @@ def encrypt(
 
     Encryption is done with the recipient's public key.
     """
-    in_legacy_mode = submission_dir is not None
-    in_flexible_mode = any(
-        map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir])
-    )
+    bundled_mode = submission_dir is not None
+    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir]))
 
-    if in_legacy_mode and in_flexible_mode:
+    if bundled_mode and granular_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
 
-    if in_legacy_mode:
+    if bundled_mode:
         base = Path(submission_dir)
         _metadata_dir = base / "metadata"
         _files_dir = base / "files"
         _encrypted_files_dir = base / "encrypted_files"
         _logs_dir = base / "logs"
-    elif in_flexible_mode:
+    elif granular_mode:
         required = {
             "--metadata-dir": metadata_dir,
             "--files-dir": files_dir,
