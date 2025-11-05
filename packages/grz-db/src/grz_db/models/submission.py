@@ -102,7 +102,7 @@ class SubmissionBase(SQLModel):
     model_config = ConfigDict(validate_assignment=True)  # type: ignore
     immutable_fields: ClassVar[set[str]] = {"id"}
 
-    # id: str
+    id: str
     tan_g: Tan | None = Field(default=None, unique=True, index=True, alias="tanG")
     pseudonym: str | None = Field(default=None, index=True)
 

@@ -29,11 +29,6 @@ db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
 db_known_keys_file = "tests/mock_files/db/known_keys"
 
 
-@pytest.fixture(autouse=True)
-def clear_sqlmodel_metadata():
-    SQLModel.metadata.clear()
-
-
 @pytest.fixture()
 def crypt4gh_grz_private_key_file_path():
     return Path(crypt4gh_grz_private_key_file)
