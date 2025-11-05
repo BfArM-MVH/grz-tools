@@ -15,7 +15,6 @@ import pytest
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from moto import mock_aws
-from sqlmodel import SQLModel
 
 config_path = "tests/mock_files/mock_config.yaml"
 small_file_input_path = "tests/mock_files/mock_small_input_file.bed"
