@@ -201,6 +201,11 @@ def get_successful_finalize_inputs(wildcards: Wildcards):
 
     if wildcards.qc_status == "with_qc":
         inputs["qc_processed_marker"] = rules.process_qc_results.output.marker
+        # artificial dependencies to keep the decrypt output tempdirs alive across the validate checkpoint boundary
+        # needed to make qc re-sumable without having to re-run everything
+        inputs["decrypt_base_dir"] = rules.decrypt.output.base_dir
+        inputs["decrypt_files_dir"] = rules.decrypt.output.files_dir
+        inputs["decrypt_progress_log"] = rules.decrypt.output.progress_log
     return inputs
 
 
