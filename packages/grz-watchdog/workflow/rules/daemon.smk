@@ -19,13 +19,19 @@ def _run_grzctl_db_command(*args):
     try:
         db_config_path = config["config_paths"]["db"]
         full_cmd = ["grzctl", "db", "--config-file", db_config_path, *args]
-        result = subprocess.run(full_cmd, check=True, text=True, capture_output=True, timeout=120)
+        result = subprocess.run(
+            full_cmd, check=True, text=True, capture_output=True, timeout=120
+        )
         return result
     except subprocess.CalledProcessError as e:
-        daemon_logger.error("A grzctl command failed: %s\n%s", " ".join(full_cmd), e.stderr)
+        daemon_logger.error(
+            "A grzctl command failed: %s\n%s", " ".join(full_cmd), e.stderr
+        )
         return None
     except Exception as e:
-        daemon_logger.error("An unexpected error occurred while running a grzctl command: %s", e)
+        daemon_logger.error(
+            "An unexpected error occurred while running a grzctl command: %s", e
+        )
         return None
 
 
@@ -46,12 +52,17 @@ def monitor_and_queue_submissions(shutdown_event):
 
     try:
         while not shutdown_event.is_set():
-            if not submission_queue.empty() and submission_queue.queue[0] is finish_sentinel:
+            if (
+                not submission_queue.empty()
+                and submission_queue.queue[0] is finish_sentinel
+            ):
                 daemon_logger.info(
                     "Finish sentinel detected in queue. Shutting down monitoring thread."
                 )
                 break
-            daemon_logger.info("Checking for new submissions in all configured inboxes.")
+            daemon_logger.info(
+                "Checking for new submissions in all configured inboxes."
+            )
 
             # scan all inboxes
             all_s3_submissions = []
@@ -90,7 +101,9 @@ def monitor_and_queue_submissions(shutdown_event):
             # sync with db
             initial_db_submission_list = _run_grzctl_db_command("list", "--json")
             if initial_db_submission_list is None:
-                daemon_logger.critical("The database is unavailable. Shutting down monitoring.")
+                daemon_logger.critical(
+                    "The database is unavailable. Shutting down monitoring."
+                )
                 submission_queue.put(finish_sentinel)
                 return
 
@@ -124,13 +137,20 @@ def monitor_and_queue_submissions(shutdown_event):
                         target_db_state,
                     )
                     _run_grzctl_db_command("submission", "add", submission_id)
-                    _run_grzctl_db_command("submission", "update", submission_id, target_db_state)
-                elif db_states.get(submission_id) == "uploading" and target_db_state == "uploaded":
+                    _run_grzctl_db_command(
+                        "submission", "update", submission_id, target_db_state
+                    )
+                elif (
+                    db_states.get(submission_id) == "uploading"
+                    and target_db_state == "uploaded"
+                ):
                     daemon_logger.info(
                         "Submission '%s' has completed its upload. The database state is being updated to 'uploaded'.",
                         submission_id,
                     )
-                    _run_grzctl_db_command("submission", "update", submission_id, "uploaded")
+                    _run_grzctl_db_command(
+                        "submission", "update", submission_id, "uploaded"
+                    )
 
             # select pending submissions
             db_submissions_list = _run_grzctl_db_command("list", "--json")
@@ -145,7 +165,9 @@ def monitor_and_queue_submissions(shutdown_event):
                 e["id"]: e.get("latest_state", {}).get("state", "").casefold()
                 for e in json.loads(db_submissions_list.stdout or "[]")
             }
-            sub_id_to_origin = {s["submission_id"]: s["origin"] for s in all_s3_submissions}
+            sub_id_to_origin = {
+                s["submission_id"]: s["origin"] for s in all_s3_submissions
+            }
 
             new_targets_found = []
             for submission_id, state in final_db_states.items():
@@ -175,7 +197,9 @@ def monitor_and_queue_submissions(shutdown_event):
             "Monitoring thread received an interrupt signal. Signalling workflow to finish processing."
         )
     finally:
-        daemon_logger.info("Placing the finish sentinel on the queue to allow a graceful shutdown.")
+        daemon_logger.info(
+            "Placing the finish sentinel on the queue to allow a graceful shutdown."
+        )
 
 
 monitor_thread = None

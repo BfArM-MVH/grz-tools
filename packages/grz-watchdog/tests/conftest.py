@@ -255,9 +255,16 @@ def mock_api_certificates(project_root: Path):
         pytest.fail(f"Failed to generate self-signed certificates with openssl.\nError: {e.stderr}", pytrace=False)
 
 
-def run_in_container(*args: str, service: str = GRZ_WATCHDOG_SERVICE_NAME) -> subprocess.CompletedProcess:
+def run_in_container(
+    *args: str, service: str = GRZ_WATCHDOG_SERVICE_NAME, env: dict | None = None
+) -> subprocess.CompletedProcess:
     """Helper to execute a command inside the container via the compose service name."""
-    command = [*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "exec", "-T", service, *args]
+    env_args = []
+    if env:
+        for key, value in env.items():
+            env_args.extend(["-e", f"{key}={value}"])
+
+    command = [*CONTAINER_COMPOSE_CMD, "-f", DOCKER_COMPOSE_FILE, "exec", "-T", *env_args, service, *args]
     return subprocess.run(command, capture_output=True, text=True, check=True)
 
 
@@ -371,28 +378,38 @@ class BaseTest:
         return cmd
 
     def _run_watchdog(
-        self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None
+        self,
+        target: str,
+        cores: int = 1,
+        config_overrides: dict | None = None,
+        extra: list[str] | None = None,
+        env: dict | None = None,
     ) -> subprocess.CompletedProcess | None:
         """Run grz-watchdog and handle failures."""
         print(f"Running grz-watchdog for target: {target}…")
         cmd = self._build_snakemake_cmd(target, cores, config_overrides)
         extra = extra or []
         try:
-            result = run_in_container(*cmd, *extra)
+            result = run_in_container(*cmd, *extra, env=env)
             return result
         except subprocess.CalledProcessError as e:
             self._handle_watchdog_failure(e)
             pytest.fail("grz-watchdog failed. See dumped log contents above for details.", pytrace=False)
 
     def _run_watchdog_expect_fail(
-        self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None
+        self,
+        target: str,
+        cores: int = 1,
+        config_overrides: dict | None = None,
+        extra: list[str] | None = None,
+        env: dict | None = None,
     ):
         """Run grz-watchdog and assert that it fails."""
         print(f"Running grz-watchdog for target: {target} (expecting failure)…")
         cmd = self._build_snakemake_cmd(target, cores, config_overrides)
         extra = extra or []
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
-            run_in_container(*cmd, *extra)
+            run_in_container(*cmd, *extra, env=env)
 
         self._handle_watchdog_failure(excinfo.value)
         return excinfo.value

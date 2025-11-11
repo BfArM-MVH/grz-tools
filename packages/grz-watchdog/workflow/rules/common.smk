@@ -199,13 +199,16 @@ def get_successful_finalize_inputs(wildcards: Wildcards):
         "db_config_path": cfg_path("config_paths/db")(wildcards),
     }
 
+    # artificial dependencies to keep the decrypt output tempdirs alive across the validate checkpoint boundary
+    # needed to make the workflow robustly re-sumable without having to re-run everything
+    rules_to_protect = ("metadata", "download", "decrypt", "validate", "re_encrypt")
+    for rule_name in rules_to_protect:
+        r = getattr(rules, rule_name)
+        for name, output_file in r.output.items():
+            inputs[f"_{rule_name}_{name}_keepalive"] = output_file
+
     if wildcards.qc_status == "with_qc":
         inputs["qc_processed_marker"] = rules.process_qc_results.output.marker
-        # artificial dependencies to keep the decrypt output tempdirs alive across the validate checkpoint boundary
-        # needed to make qc re-sumable without having to re-run everything
-        inputs["decrypt_base_dir"] = rules.decrypt.output.base_dir
-        inputs["decrypt_files_dir"] = rules.decrypt.output.files_dir
-        inputs["decrypt_progress_log"] = rules.decrypt.output.progress_log
     return inputs
 
 
@@ -263,7 +266,9 @@ def get_s3_metadata_key(wildcards: Wildcards) -> str:
     return f"{wildcards.submission_id}/metadata/metadata.json"
 
 
-def register_s3_access_key(wildcards: Wildcards, input: InputFiles) -> Literal["success"]:
+def register_s3_access_key(
+    wildcards: Wildcards, input: InputFiles
+) -> Literal["success"]:
     """
     Export the S3 access key in the environment as AWS_ACCESS_KEY_ID.
 
@@ -381,7 +386,9 @@ def get_target_qc_percentage(wildcards: Wildcards) -> float | None:
 def parse_metadata(metadata_path: PathLike | str) -> GrzSubmissionMetadata:
     with open(metadata_path) as f:
         json_str = f.read()
-        metadata: GrzSubmissionMetadata = GrzSubmissionMetadata.model_validate_json(json_str)
+        metadata: GrzSubmissionMetadata = GrzSubmissionMetadata.model_validate_json(
+            json_str
+        )
     return metadata
 
 

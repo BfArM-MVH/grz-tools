@@ -2,11 +2,13 @@
 
 import queue
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from .conftest import (
     BUCKET_NONCONSENTED,
@@ -55,7 +57,7 @@ class TestWorkflowResumption(BaseTest):
 
         # run to an arbitrary intermediate target by supplying `--until RULE`
         final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
-        print(f"\n--- Running to final target: {final_target}, but only until rule decrypt ---")
+        print(f"\nRunning to final target: {final_target}, but only until rule decrypt")
         result = self._run_watchdog(final_target, config_overrides=config_overrides, extra=["--until", "decrypt"])
         snakemake_log_output = result.stderr
 
@@ -70,15 +72,15 @@ class TestWorkflowResumption(BaseTest):
         # verify intermediate dir exists
         intermediate_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/decrypted"
         run_in_container("test", "-d", f"/workdir/{intermediate_target}")
-        print("--- Intermediate target successfully created. ---")
+        print("Intermediate target successfully created.")
 
         # try to continue from intermediate target
-        print(f"\n--- Resuming run to final target: {final_target} ---")
+        print(f"\nResuming run to final target: {final_target}")
 
         result = self._run_watchdog(final_target, config_overrides=config_overrides)
         snakemake_log_output = result.stderr
 
-        print("\n--- Verifying that initial steps were skipped ---")
+        print("\nVerifying that initial steps were skipped")
         # check logs to verify snakemake did not re-run the corresponding rules
         assert "localrule download:" not in snakemake_log_output, "Rule 'download' was unexpectedly re-run."
         assert "localrule decrypt:" not in snakemake_log_output, "Rule 'decrypt' was unexpectedly re-run."
@@ -113,7 +115,7 @@ class TestWorkflowResumption(BaseTest):
         )
 
         config_overrides = {
-            "auto-cleanup": "none",
+            "auto-cleanup": "inbox",
             "qc": {
                 "selection_strategy": {"enabled": True, "target_percentage": 100.0},
                 "run-qc": {"extra": f"-params-file {slow_qc_params_container}"},
@@ -181,7 +183,7 @@ class TestWorkflowResumption(BaseTest):
             run_in_container("rm", "-rf", nextflow_work_dir)
             print(f"OK: Removed {nextflow_work_dir}.")
 
-            print("\nResetting DB state to 'validated' to allow resumption")
+            print("\nResetting DB state to 'reported' to allow resumption")
             run_in_container(
                 *PIXI_RUN_PREFIX,
                 "grzctl",
@@ -190,8 +192,9 @@ class TestWorkflowResumption(BaseTest):
                 "/workdir/config/configs/db.yaml",
                 "submission",
                 "update",
+                "--ignore-error-state",
                 submission_id,
-                "validated",
+                "reported",
             )
             print("OK: DB state reset.")
 
@@ -222,3 +225,96 @@ class TestWorkflowResumption(BaseTest):
             if log_thread:
                 stop_log_thread.set()
                 log_thread.join(timeout=5)
+
+    def test_resumability_after_pruefbericht_failure(self, test_data_dir: Path, tmp_path: Path):
+        """
+        Tests that a workflow failing while reporting pruefbericht resumes correctly from that step.
+        """
+        submission_dir, submission_id = _create_variant_submission(
+            test_data_dir / "panel", "failed-pruefbericht-test", tmp_path
+        )
+        self._submit_data(submission_dir)
+
+        final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
+
+        bad_config_content = yaml.dump(
+            {
+                "pruefbericht": {
+                    "api_base_url": "https://invalid-url.local",
+                    "authorization_url": "https://invalid-url.local/token",
+                    "client_id": "mock-client-id",
+                    "client_secret": "mock-client-password",
+                }
+            }
+        )
+
+        local_bad_config_path = tmp_path / f"{submission_id}_bad_pruefbericht.yaml"
+        local_bad_config_path.write_text(bad_config_content)
+
+        container_bad_config_path = f"/tmp/{local_bad_config_path.name}"
+        subprocess.run(
+            [
+                CONTAINER_RUNTIME,
+                "cp",
+                str(local_bad_config_path),
+                f"{GRZ_WATCHDOG_CONTAINER_NAME}:{container_bad_config_path}",
+            ],
+            check=True,
+        )
+        config_overrides_fail = {
+            "qc": {"selection_strategy": {"enabled": False}},
+            "config_paths": {"pruefbericht": container_bad_config_path},
+        }
+
+        print(f"\nRunning workflow for {submission_id}, expecting failure at submit_pruefbericht")
+        self._run_watchdog_expect_fail(final_target, config_overrides=config_overrides_fail)
+
+        # verify state after the expected failure
+        print("\nVerifying state after failure")
+        self._verify_db_state(submission_id, expected_state="Error")
+        self._verify_archived(submission_id, bucket=BUCKET_NONCONSENTED)
+        print("OK: DB state is 'Error' and data is archived, as expected.")
+
+        print("\nUnlocking workflow directory")
+        unlock_cmd = self._build_snakemake_cmd(final_target, config_overrides=config_overrides_fail)
+        unlock_cmd.append("--unlock")
+        run_in_container(*unlock_cmd)
+        print("OK: Directory unlocked.")
+
+        # reset DB state to "archived" (the one right before "reported")
+        print("\nResetting DB state to 'archived' to allow resumption")
+        run_in_container(
+            *PIXI_RUN_PREFIX,
+            "grzctl",
+            "db",
+            "--config-file",
+            "/workdir/config/configs/db.yaml",
+            "submission",
+            "update",
+            "--ignore-error-state",
+            submission_id,
+            "archived",
+        )
+        print("OK: DB state reset.")
+
+        # resume the workflow using the default (i.e., correct) pruefbericht config
+        print(f"\nResuming workflow for {submission_id}")
+        config_overrides_resume = {"qc": {"selection_strategy": {"enabled": False}}}
+        resume_result = self._run_watchdog(final_target, config_overrides=config_overrides_resume)
+        resume_log_output = resume_result.stderr
+
+        # verify resumption did not unnecessarily re-run previous rules
+        print("\nVerifying logs from resumed run")
+        for rule in ["download", "decrypt", "validate", "re_encrypt", "archive"]:
+            assert f"rule {rule}:" not in resume_log_output, f"Rule '{rule}' was unexpectedly re-run."
+
+        assert "rule submit_pruefbericht:" in resume_log_output, (
+            "Rule 'submit_pruefbericht' was not re-run as expected."
+        )
+        print("OK: Logs confirm workflow resumed correctly from the submit_pruefbericht step.")
+
+        # verify final state
+        print("\nVerifying final state of submission")
+        self._verify_db_state(submission_id, expected_state="Finished")
+        self._verify_inbox_cleaned(submission_id)
+        print("OK: Submission successfully processed and cleaned after resumption.")

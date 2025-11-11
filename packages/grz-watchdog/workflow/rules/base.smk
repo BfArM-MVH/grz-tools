@@ -150,9 +150,7 @@ rule download:
                 "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/encrypted_files"
             )
         ),
-        progress_log=temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_download.cjson"
-        ),
+        progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_download.cjson",
     benchmark:
         "<benchmarks>/download/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
@@ -219,11 +217,9 @@ checkpoint validate:
         checksum_log=temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_checksum_validation.cjson"
         ),
-        seq_data_log=temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_sequencing_data_validation.cjson"
-        ),
-        validation_flag=("<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag"),
-        validation_errors=("<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt"),
+        seq_data_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_sequencing_data_validation.cjson",
+        validation_flag="<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
+        validation_errors="<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt",
     benchmark:
         "<benchmarks>/validate/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     log:
@@ -273,9 +269,7 @@ rule re_encrypt:
                 "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files"
             )
         ),
-        encryption_log=temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_encrypt.cjson"
-        ),
+        encryption_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_encrypt.cjson",
     benchmark:
         "<benchmarks>/re_encrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
@@ -440,8 +434,15 @@ rule qc:
         reference_path=get_qc_workflow_references_directory(),
         custom_configs=lambda wc: config.get("qc", {}).get("run-qc", {}).get("configs", []),
     output:
-        out_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out")),
-        work_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work")),
+        out_dir=temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out")
+        ),
+        work_dir=temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/work")
+        ),
+        marker=touch(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/success.marker"
+        ),
     benchmark:
         "<benchmarks>/qc/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
@@ -463,9 +464,12 @@ rule qc:
 rule process_qc_results:
     input:
         qc_results=rules.qc.output.out_dir,
+        qc_done=rules.qc.output.marker,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"),
+        marker=touch(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"
+        ),
     params:
         report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
     log:
