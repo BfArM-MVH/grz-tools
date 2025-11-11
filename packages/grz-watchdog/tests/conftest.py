@@ -418,9 +418,12 @@ class BaseTest:
         )
         return process
 
-    def stop_background_process(self, process: subprocess.Popen, timeout: int = 120):
-        """Stops a running background process by sending SIGTERM."""
-        print("Stopping background process...")
+    def stop_background_process(self, process: subprocess.Popen, timeout: int = 10, force: bool = False):
+        """
+        Stops a running background process. By default, sends a SIGINT.
+        If force=True, it sends SIGINT followed by SIGKILL	.
+        """
+        print(f"Stopping background process (PID {process.pid}). Forceful: {force}")
 
         if process.poll() is not None:
             print("Background process was already stopped.")
@@ -428,14 +431,26 @@ class BaseTest:
 
         try:
             run_in_container("pkill", "-SIGINT", "-f", "snakemake")
-            process.wait(timeout=timeout)
-            print("Snakemake process terminated gracefully.")
+
+            if not force:
+                process.wait(timeout=timeout)
+                print("Snakemake process terminated gracefully.")
+            else:
+                try:
+                    process.wait(timeout=2)
+                    print("Snakemake process terminated quickly after SIGINT.")
+                except subprocess.TimeoutExpired:
+                    print("Snakemake did not exit after SIGINT. Sending SIGKILL to force interruption.")
+                    run_in_container("pkill", "-SIGKILL", "-f", "snakemake")
+                    process.wait(timeout=timeout)
+                    print("Snakemake process killed.")
+
         except subprocess.TimeoutExpired:
-            print(f"Process did not terminate gracefully after {timeout}s, killing.")
+            print(f"Process did not terminate within {timeout}s, killing.")
             process.kill()
             process.wait()
         except subprocess.CalledProcessError as e:
-            print(f"Could not send SIGINT to snakemake process, it might have already exited. Error: {e.stderr}")
+            print(f"Could not send signal to snakemake process, it might have already exited. Error: {e.stderr}")
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
