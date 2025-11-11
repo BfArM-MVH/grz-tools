@@ -15,6 +15,9 @@ from .conftest import (
     BaseTest,
     _create_variant_submission,
     run_in_container,
+    CONTAINER_RUNTIME,
+    GRZ_WATCHDOG_CONTAINER_NAME,
+    PIXI_RUN_PREFIX,
 )
 
 
@@ -88,58 +91,134 @@ class TestWorkflowResumption(BaseTest):
         self._verify_db_state(submission_id, expected_state="Finished")
         self._verify_archived(submission_id, bucket=BUCKET_NONCONSENTED)
 
-
-    def test_resumability_after_qc_failure(self, test_data_dir: Path, tmp_path: Path):
+    def test_resumability_after_qc_interrupt(self, test_data_dir: Path, tmp_path: Path, project_root: Path):
         """
-        Tests that a workflow failing during the QC step resumes from QC, not from download.
-        1. Runs workflow until decrypted files are available.
-        2. Corrupts a FASTQ file to ensure the QC step will fail.
-        3. Runs the rest of the workflow and confirms it fails at QC.
-        4. Restores the original FASTQ file.
-        5. Re-runs the workflow to completion.
-        6. Verifies that 'download' and 'decrypt' were skipped and 'qc' was re-run.
+        Tests that a workflow interrupted during QC resumes from QC, not from download.
         """
-        test_data_dir = Path(test_data_dir) / "panel"
-        submission_dir, submission_id = _create_variant_submission(test_data_dir, "resume-qc-fail", tmp_path)
+        test_data_dir = Path(test_data_dir) / "wgs_lr"
+        submission_dir, submission_id = _create_variant_submission(test_data_dir, "interrupt-qc-test", tmp_path)
         self._submit_data(submission_dir)
 
-        # force QC to run and prevent auto-cleanup of temp files on interruption/failure.
+        # to have a more reliable interrupt window, try to delay nextflow scripts by inserting `sleep` pre-script execution
+        slow_qc_params_host = project_root / "packages/grz-watchdog/tests/config/slow_qc.nextflow_params.yaml"
+        slow_qc_params_container = "/tmp/slow_qc.nextflow_params.yaml"
+        subprocess.run(
+            [
+                CONTAINER_RUNTIME,
+                "cp",
+                str(slow_qc_params_host),
+                f"{GRZ_WATCHDOG_CONTAINER_NAME}:{slow_qc_params_container}",
+            ],
+            check=True,
+        )
+
         config_overrides = {
             "auto-cleanup": "none",
-            "qc": {"selection_strategy": {"enabled": True, "target_percentage": 100.0}},
+            "qc": {
+                "selection_strategy": {"enabled": True, "target_percentage": 100.0},
+                "run-qc": {"extra": f"-params-file {slow_qc_params_container}"},
+            },
         }
 
-        # run until validated
         final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
-        self._run_watchdog(final_target, config_overrides=config_overrides, extra=["--until", "validate"])
+        snakemake_cmd = self._build_snakemake_cmd(final_target, cores=2, config_overrides=config_overrides)
 
-        decrypted_files_dir = f"/workdir/results/{SUBMITTER_ID}/{INBOX}/{submission_id}/decrypted/files"
-        file_to_corrupt = f"{decrypted_files_dir}/S1_R1.fastq.gz"
-        backup_file = f"/tmp/{submission_id}_backup.fastq.gz"
+        process_to_interrupt = None
+        log_thread = None
+        stop_log_thread = threading.Event()
 
-        # corrupt one of the decrypted files
-        run_in_container("cp", file_to_corrupt, backup_file)
-        run_in_container("sh", "-c", f"echo 'garbage' > {file_to_corrupt}")
+        try:
+            # run workflow until we see QC is running, then interrupt
+            print(f"\nStarting workflow for {submission_id}, will interrupt during QC")
+            process_to_interrupt = self.start_background_process(snakemake_cmd)
+            log_queue = queue.Queue()
+            log_thread = threading.Thread(
+                target=log_consumer, args=(process_to_interrupt.stdout, log_queue, stop_log_thread)
+            )
+            log_thread.start()
 
-        # resume run, should fail
-        self._run_watchdog_expect_fail(final_target, config_overrides=config_overrides)
-        self._verify_db_state(submission_id, expected_state="Error")
+            qc_started = False
+            timeout = 180
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    line = log_queue.get(timeout=2)
+                    print(line, end="")
+                    if "rule qc:" in line:
+                        print("\nQC started. Trying forceful interrupt.")
+                        self.stop_background_process(process_to_interrupt, force=True)
+                        qc_started = True
+                        break
+                except queue.Empty:
+                    if process_to_interrupt.poll() is not None:
+                        while not log_queue.empty():
+                            print(log_queue.get_nowait(), end="")
+                        pytest.fail("Snakemake process exited prematurely before QC started.")
 
-        # reinstate backuped file, re-run (update db state first to be able to continue)
-        run_in_container("cp", backup_file, file_to_corrupt)
-        run_in_container(
-            *self._build_snakemake_cmd(final_target)[1:-1],
-            "grzctl", "db", "--config-file", "/workdir/config/configs/db.yaml",
-            "submission", "update", submission_id, "validated"
-        )
-        resume_result = self._run_watchdog(final_target, config_overrides=config_overrides)
-        resume_log_output = resume_result.stderr
+            assert qc_started, f"QC did not start within {timeout} seconds."
 
-        assert "localrule download:" not in resume_log_output, "Rule 'download' was unexpectedly re-run."
-        assert "localrule decrypt:" not in resume_log_output, "Rule 'decrypt' was unexpectedly re-run."
-        assert "rule qc:" in resume_log_output, "Rule 'qc' was not re-run as expected."
+            # make sure post-interrupt state is as expected
+            print("\nVerifying state after interruption")
+            decrypted_dir = f"/workdir/results/{SUBMITTER_ID}/{INBOX}/{submission_id}/decrypted"
+            run_in_container("test", "-d", decrypted_dir)
+            print("OK: Decrypted directory exists, temp files were preserved.")
+            try:
+                self._verify_db_state(submission_id, expected_state="QCing")
+                print("OK: Database state is 'QCing'.")
+            except AssertionError:
+                self._verify_db_state(submission_id, expected_state="Error")
+                print("OK: Database state is 'Error' after interruption.")
 
-        self._verify_db_state(submission_id, expected_state="Finished")
-        self._verify_qc_results_populated(submission_id)
-        self._verify_inbox_cleaned(submission_id)
-        self._verify_archived(submission_id, bucket=BUCKET_NONCONSENTED)
+            # after interruption, to unlock/reset snakemake and nextflow
+            print("\nUnlocking workflow directory")
+            unlock_cmd = self._build_snakemake_cmd(final_target, config_overrides=config_overrides)
+            unlock_cmd.append("--unlock")
+            run_in_container(*unlock_cmd)
+            print("OK: Directory unlocked.")
+
+            print("\nCleaning up stale Nextflow work directory")
+            nextflow_work_dir = f"/workdir/results/{SUBMITTER_ID}/{INBOX}/{submission_id}/qc/work"
+            run_in_container("rm", "-rf", nextflow_work_dir)
+            print(f"OK: Removed {nextflow_work_dir}.")
+
+            print("\nResetting DB state to 'validated' to allow resumption")
+            run_in_container(
+                *PIXI_RUN_PREFIX,
+                "grzctl",
+                "db",
+                "--config-file",
+                "/workdir/config/configs/db.yaml",
+                "submission",
+                "update",
+                submission_id,
+                "validated",
+            )
+            print("OK: DB state reset.")
+
+            print(f"\nResuming workflow for {submission_id}")
+            resume_config_overrides = config_overrides.copy()
+            resume_config_overrides["qc"]["run-qc"].pop("extra", None)
+
+            resume_result = self._run_watchdog(final_target, config_overrides=resume_config_overrides)
+            resume_log_output = resume_result.stderr
+
+            # now, verify that we resumed successfully and did not re-do any unnecessary work
+            print("\nVerifying logs from resumed run")
+            for rule in ["download", "decrypt", "validate", "re_encrypt", "archive", "pruefbericht"]:
+                assert f"rule {rule}:" not in resume_log_output
+            assert "rule qc:" in resume_log_output
+            print("OK: Logs confirm workflow resumed correctly from the QC step.")
+
+            # as usual, verify final outcome as well
+            print("\nVerifying final state of submission")
+            self._verify_db_state(submission_id, expected_state="Finished")
+            self._verify_qc_results_populated(submission_id)
+            self._verify_inbox_cleaned(submission_id)
+            self._verify_archived(submission_id, bucket=BUCKET_NONCONSENTED)
+
+        finally:
+            if process_to_interrupt and process_to_interrupt.poll() is None:
+                self.stop_background_process(process_to_interrupt)
+            if log_thread:
+                stop_log_thread.set()
+                log_thread.join(timeout=5)
