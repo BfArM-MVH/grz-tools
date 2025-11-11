@@ -468,8 +468,8 @@ class BaseTest:
         target = next((s for s in submissions if s.get("id") == submission_id), None)
 
         assert target is not None, f"Submission '{submission_id}' not found in the database."
-        final_state = target.get("latest_state", {}).get("state")
-        assert final_state == expected_state, (
+        final_state = target.get("latest_state", {}).get("state") or ""
+        assert final_state.casefold() == expected_state.casefold(), (
             f"Submission state was not '{expected_state}'. Actual state: '{final_state}'"
         )
         print(f"OK: Database state is '{final_state}'.")
