@@ -402,7 +402,9 @@ rule setup_qc_workflow:
         """
 
 
-qc_prepare_references_mode = config.get("qc", {}).get("prepare-qc", {}).get("mode", "download")
+qc_prepare_references_mode = (
+    config.get("qc", {}).get("prepare-qc", {}).get("mode", "download")
+)
 if qc_prepare_references_mode == "download":
 
     rule download_qc_workflow_references:
@@ -429,7 +431,9 @@ else:
             # if you need to re-generate references, you can delete the references directory manually
             workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
             pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
-            custom_configs=lambda wc: config.get("qc", {}).get("prepare-qc", {}).get("configs", []),
+            custom_configs=lambda wc: config.get("qc", {})
+            .get("prepare-qc", {})
+            .get("configs", []),
         output:
             references_dir=get_qc_workflow_references_directory(),
             launch_dir=directory("<resources>/shared_qc_launchdir"),
@@ -467,7 +471,9 @@ rule qc:
         pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
         launch_dir="<resources>/shared_qc_launchdir",
         reference_path=get_qc_workflow_references_directory(),
-        custom_configs=lambda wc: config.get("qc", {}).get("run-qc", {}).get("configs", []),
+        custom_configs=lambda wc: config.get("qc", {})
+        .get("run-qc", {})
+        .get("configs", []),
     output:
         out_dir=temp(
             directory("<results>/{submitter_id}/{inbox}/{submission_id}/qc/out")
