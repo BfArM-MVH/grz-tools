@@ -14,6 +14,7 @@ rule init_db:
     log:
         stdout="<logs>/db/init.stdout.log",
         stderr="<logs>/db/init.stderr.log",
+    priority: 2
     script:
         "../scripts/init_db.sh"
 
@@ -34,6 +35,7 @@ rule scan_inbox:
     log:
         stdout="<logs>/scan_inbox/{submitter_id}/{inbox}.stdout.log",
         stderr="<logs>/scan_inbox/{submitter_id}/{inbox}.stderr.log",
+    priority: 2
     script:
         "../scripts/scan_inbox.py"
 
@@ -52,6 +54,7 @@ rule filter_single_submission:
         submission_id=lambda wildcards: wildcards.submission_id,
     log:
         stderr="<logs>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.stderr.log",
+    priority: 1
     shell:
         """(
         jq --arg sid "{params.submission_id}" '[.[] | select(.submission_id == $sid)]' {input.submissions} > {output.filtered_submission}
@@ -69,10 +72,13 @@ rule check_and_register:
         db_config_path=cfg_path("config_paths/db"),
         db_initialized=rules.init_db.output.marker,
     output:
-        marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/registered.marker"),
+        marker=touch(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/registered.marker"
+        ),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stderr.log",
+    priority: 2
     script:
         "../scripts/check_and_register.py"
 
@@ -96,6 +102,7 @@ checkpoint select_submissions:
     log:
         stdout="<logs>/select_submissions.stdout.log",
         stderr="<logs>/select_submissions.stderr.log",
+    priority: 2
     script:
         "../scripts/select_submissions.py"
 
@@ -104,6 +111,7 @@ rule pending:
     input:
         all_pending_submissions,
     default_target: True
+    priority: 3
 
 
 rule metadata:
@@ -115,7 +123,9 @@ rule metadata:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        metadata=temp("<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json"),
+        metadata=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json"
+        ),
     params:
         s3_access_key=register_s3_access_key,
         s3_secret=register_s3_secret,
@@ -125,6 +135,7 @@ rule metadata:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stderr.log",
+    priority: 1
     shell:
         """(
         s5cmd --endpoint-url {params.s3_endpoint_url} cp s3://{params.s3_bucket}/{params.s3_metadata_key} {output.metadata}
@@ -141,9 +152,13 @@ rule download:
         metadata=rules.metadata.output.metadata,
         db_config_path=cfg_path("config_paths/db"),
     output:
-        base_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded")),
+        base_dir=temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded")
+        ),
         metadata_dir=temp(
-            directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/metadata")
+            directory(
+                "<results>/{submitter_id}/{inbox}/{submission_id}/downloaded/metadata"
+            )
         ),
         encrypted_files_dir=temp(
             directory(
@@ -162,6 +177,7 @@ rule download:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
+    priority: 1
     script:
         "../scripts/download.sh"
 
@@ -179,23 +195,28 @@ rule decrypt:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        base_dir=temp(directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted")),
+        base_dir=temp(
+            directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted")
+        ),
         files_dir=temp(
-            directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/files")
+            directory(
+                "<results>/{submitter_id}/{inbox}/{submission_id}/decrypted/files"
+            )
         ),
-        progress_log=temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_decrypt.cjson"
-        ),
+        progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_decrypt.cjson",
     benchmark:
         "<benchmarks>/decrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     params:
-        grz_private_key_passphrase=os.environ.get("GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"),
+        grz_private_key_passphrase=os.environ.get(
+            "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"
+        ),
     resources:
         disk=estimate_decrypt_size,
         runtime=estimate_decrypt_runtime,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
+    priority: 1
     script:
         "../scripts/decrypt.sh"
 
@@ -228,6 +249,7 @@ checkpoint validate:
     threads: 4
     resources:
         runtime=estimate_validate_runtime,
+    priority: 2
     script:
         "../scripts/validate.sh"
 
@@ -243,6 +265,7 @@ rule consent:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
+    priority: 1
     script:
         "../scripts/consent.sh"
 
@@ -278,6 +301,7 @@ rule re_encrypt:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
+    priority: 1
     script:
         "../scripts/re_encrypt.sh"
 
@@ -309,6 +333,7 @@ rule archive:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
+    priority: 2
     script:
         "../scripts/archive.sh"
 
@@ -322,10 +347,13 @@ rule generate_pruefbericht:
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
     output:
-        pruefbericht=temp("<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"),
+        pruefbericht=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"
+        ),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
+    priority: 2
     script:
         "../scripts/generate_pruefbericht.sh"
 
@@ -339,14 +367,19 @@ rule submit_pruefbericht:
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        answer=temp("<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"),
+        answer=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"
+        ),
     params:
         custom_ca_cert=lambda _: (
-            "/workdir/config/cert.pem" if os.environ.get("GRZ_PRUEFBERICHT_MOCK", False) else ""
+            "/workdir/config/cert.pem"
+            if os.environ.get("GRZ_PRUEFBERICHT_MOCK", False)
+            else ""
         ),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",
+    priority: 2
     script:
         "../scripts/submit_pruefbericht.sh"
 
@@ -360,6 +393,7 @@ rule setup_qc_workflow:
     log:
         stdout="<logs>/qc/setup_qc_workflow.stdout.log",
         stderr="<logs>/qc/setup_qc_workflow.stderr.log",
+    priority: 0
     shell:
         """
         (
@@ -377,6 +411,7 @@ if qc_prepare_references_mode == "download":
             launch_dir=directory("<resources>/shared_qc_launchdir"),
         resources:
             disk="50G",
+        priority: 0
         shell:
             """
             mkdir -p {output.references_dir}
@@ -413,7 +448,7 @@ else:
         log:
             stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
             stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
-        handover: True
+        priority: 0
         script:
             "../scripts/prepare_qc.sh"
 
@@ -456,7 +491,7 @@ rule qc:
         profiles=get_run_qc_nextflow_profiles,
         configs=get_run_qc_nextflow_configs,
         extra=get_run_qc_nextflow_extra_params,
-    handover: True
+    priority: 0
     script:
         "../scripts/run_qc.sh"
 
@@ -475,6 +510,7 @@ rule process_qc_results:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
+    priority: 1
     script:
         "../scripts/process_qc_results.sh"
 
@@ -502,6 +538,7 @@ rule clean:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stderr.log",
+    priority: 2
     script:
         "../scripts/clean.sh"
 
@@ -536,6 +573,7 @@ rule finalize_fail:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stderr.log",
+    priority: 1
     shell:
         """
         (
@@ -560,6 +598,7 @@ rule finalize_success:
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stderr.log",
+    priority: 1
     shell:
         """
         (
@@ -581,3 +620,4 @@ rule process_submission:
         db_config_path=cfg_path("config_paths/db"),
     output:
         touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed"),
+    priority: 3
