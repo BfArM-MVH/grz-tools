@@ -17,6 +17,7 @@ def log_consumer(process_stdout, log_queue, stop_event):
     finally:
         process_stdout.close()
 
+
 @pytest.mark.usefixtures("container_test_env")
 class TestDaemonMode(BaseTest):
     """Testing the continuous monitoring (daemon) mode of grz-watchdog."""
@@ -35,9 +36,7 @@ class TestDaemonMode(BaseTest):
                 self._build_snakemake_cmd("daemon", cores=2, config_overrides=config_overrides)
             )
             log_queue = queue.Queue()
-            log_thread = threading.Thread(
-                target=log_consumer, args=(process.stdout, log_queue, stop_log_thread)
-            )
+            log_thread = threading.Thread(target=log_consumer, args=(process.stdout, log_queue, stop_log_thread))
             log_thread.start()
 
             ready = False
@@ -82,7 +81,9 @@ class TestDaemonMode(BaseTest):
                 except (AssertionError, Exception):
                     time.sleep(10)
 
-            assert success, f"Submission {submission_id} was not processed by the daemon within {processing_timeout} seconds."
+            assert success, (
+                f"Submission {submission_id} was not processed by the daemon within {processing_timeout} seconds."
+            )
 
             self._verify_inbox_cleaned(submission_id)
             self._verify_archived(submission_id, bucket=BUCKET_NONCONSENTED)

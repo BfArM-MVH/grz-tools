@@ -370,7 +370,9 @@ class BaseTest:
             cmd.extend(["--configfile", container_temp_path])
         return cmd
 
-    def _run_watchdog(self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None) -> subprocess.CompletedProcess | None:
+    def _run_watchdog(
+        self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None
+    ) -> subprocess.CompletedProcess | None:
         """Run grz-watchdog and handle failures."""
         print(f"Running grz-watchdog for target: {target}…")
         cmd = self._build_snakemake_cmd(target, cores, config_overrides)
@@ -382,7 +384,9 @@ class BaseTest:
             self._handle_watchdog_failure(e)
             pytest.fail("grz-watchdog failed. See dumped log contents above for details.", pytrace=False)
 
-    def _run_watchdog_expect_fail(self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None):
+    def _run_watchdog_expect_fail(
+        self, target: str, cores: int = 1, config_overrides: dict | None = None, extra: list[str] | None = None
+    ):
         """Run grz-watchdog and assert that it fails."""
         print(f"Running grz-watchdog for target: {target} (expecting failure)…")
         cmd = self._build_snakemake_cmd(target, cores, config_overrides)
