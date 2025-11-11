@@ -173,8 +173,7 @@ class TestWorkflowResumption(BaseTest):
 
             # after interruption, to unlock/reset snakemake and nextflow
             print("\nUnlocking workflow directory")
-            unlock_cmd = self._build_snakemake_cmd(final_target, config_overrides=config_overrides)
-            unlock_cmd.append("--unlock")
+            unlock_cmd = self._build_snakemake_cmd(final_target, config_overrides=config_overrides, extra=["--unlock"])
             run_in_container(*unlock_cmd)
             print("OK: Directory unlocked.")
 
@@ -276,8 +275,7 @@ class TestWorkflowResumption(BaseTest):
         print("OK: DB state is 'Error' and data is archived, as expected.")
 
         print("\nUnlocking workflow directory")
-        unlock_cmd = self._build_snakemake_cmd(final_target, config_overrides=config_overrides_fail)
-        unlock_cmd.append("--unlock")
+        unlock_cmd = self._build_snakemake_cmd(final_target, config_overrides=config_overrides_fail, extra=["--unlock"])
         run_in_container(*unlock_cmd)
         print("OK: Directory unlocked.")
 
@@ -314,6 +312,75 @@ class TestWorkflowResumption(BaseTest):
         print("OK: Logs confirm workflow resumed correctly from the submit_pruefbericht step.")
 
         # verify final state
+        print("\nVerifying final state of submission")
+        self._verify_db_state(submission_id, expected_state="Finished")
+        self._verify_inbox_cleaned(submission_id)
+        print("OK: Submission successfully processed and cleaned after resumption.")
+
+    def test_resumability_after_omit_from(self, test_data_dir: Path, tmp_path: Path):
+        """
+        Tests that a workflow run with `--omit-from submit_pruefbericht --notemp` resumes correctly.
+        1. Runs the workflow until the 'generate_pruefbericht' step (i.e., omitting from 'submit_pruefbericht' onwards)
+        2. Re-runs the workflow to completion.
+        3. Verifies that all upstream rules were skipped on the second run.
+        """
+        submission_dir, submission_id = _create_variant_submission(
+            test_data_dir / "panel", "until-pruefbericht-test", tmp_path
+        )
+        self._submit_data(submission_dir)
+
+        config_overrides = {
+            "qc": {"selection_strategy": {"enabled": False}},
+        }
+        final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
+        intermediate_target_file = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/pruefbericht.json"
+
+        print(f"\nRunning to final target, but only until rule 'generate_pruefbericht'")
+        result = self._run_watchdog(
+            final_target,
+            config_overrides=config_overrides,
+            extra=["--omit-from", "submit_pruefbericht", "--notemp"],
+        )
+        snakemake_log_output = result.stderr
+
+        # verify which rules ran and which did not
+        print("\nVerifying state of partial run")
+        for rule in [
+            "download",
+            "decrypt",
+            "re_encrypt",
+            "archive",
+            "generate_pruefbericht",
+        ]:  # "validate" is a checkpoint
+            assert f"rule {rule}:" in snakemake_log_output, (
+                f"Rule '{rule}' was expected to run but did not. {snakemake_log_output}"
+            )
+        for rule in ["submit_pruefbericht", "clean", "finalize_success"]:
+            assert f"rule {rule}:" not in snakemake_log_output, (
+                f"Rule '{rule}' ran but should have been stopped by --until."
+            )
+
+        # verify that the intermediate file exists and the DB is in the correct state
+        run_in_container("test", "-f", f"/workdir/{intermediate_target_file}")
+        self._verify_db_state(submission_id, expected_state="archived")
+        print("OK: Intermediate target created and DB state is 'archived'.")
+
+        print(f"\nResuming run to final target: {final_target}")
+        resume_result = self._run_watchdog(final_target, config_overrides=config_overrides)
+        resume_log_output = resume_result.stderr
+
+        # verify that we did not re-run any steps that were already completed in the previous run
+        print("\nVerifying logs from resumed run")
+        for rule in ["download", "decrypt", "validate", "re_encrypt", "archive", "generate_pruefbericht"]:
+            assert f"rule {rule}:" not in resume_log_output, f"Rule '{rule}' was unexpectedly re-run."
+
+        assert "rule submit_pruefbericht:" in resume_log_output, (
+            "Rule 'submit_pruefbericht' was not run on resume as expected."
+        )
+        assert "rule clean:" in resume_log_output, "Rule 'clean' was not run on resume as expected."
+        print("OK: Logs confirm workflow resumed correctly and skipped upstream rules.")
+
+        # verify the final state
         print("\nVerifying final state of submission")
         self._verify_db_state(submission_id, expected_state="Finished")
         self._verify_inbox_cleaned(submission_id)

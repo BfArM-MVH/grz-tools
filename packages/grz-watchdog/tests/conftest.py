@@ -356,8 +356,11 @@ class BaseTest:
             except subprocess.CalledProcessError as log_e:
                 print(f"Could not retrieve {log_path}:\n{log_e.stderr}")
 
-    def _build_snakemake_cmd(self, target: str, cores: int = 1, config_overrides: dict | None = None) -> list[str]:
-        cmd = [*SNAKEMAKE_BASE_CMD, target, "--cores", str(cores), "--nocolor", "--force-use-threads"]
+    def _build_snakemake_cmd(
+        self, target: str, cores: int = 1, extra: list[str] | None = None, config_overrides: dict | None = None
+    ) -> list[str]:
+        extra = extra or []
+        cmd = [*SNAKEMAKE_BASE_CMD, target, "--cores", str(cores), "--nocolor", "--force-use-threads", *extra]
         if config_overrides:
             with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as tmp:
                 yaml.dump(config_overrides, tmp)
@@ -387,10 +390,9 @@ class BaseTest:
     ) -> subprocess.CompletedProcess | None:
         """Run grz-watchdog and handle failures."""
         print(f"Running grz-watchdog for target: {target}…")
-        cmd = self._build_snakemake_cmd(target, cores, config_overrides)
-        extra = extra or []
+        cmd = self._build_snakemake_cmd(target, cores=cores, config_overrides=config_overrides, extra=extra)
         try:
-            result = run_in_container(*cmd, *extra, env=env)
+            result = run_in_container(*cmd, env=env)
             return result
         except subprocess.CalledProcessError as e:
             self._handle_watchdog_failure(e)
@@ -406,10 +408,9 @@ class BaseTest:
     ):
         """Run grz-watchdog and assert that it fails."""
         print(f"Running grz-watchdog for target: {target} (expecting failure)…")
-        cmd = self._build_snakemake_cmd(target, cores, config_overrides)
-        extra = extra or []
+        cmd = self._build_snakemake_cmd(target, cores=cores, config_overrides=config_overrides, extra=extra)
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
-            run_in_container(*cmd, *extra, env=env)
+            run_in_container(*cmd, env=env)
 
         self._handle_watchdog_failure(excinfo.value)
         return excinfo.value

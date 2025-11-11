@@ -347,9 +347,7 @@ rule generate_pruefbericht:
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
     output:
-        pruefbericht=temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json"
-        ),
+        pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
@@ -367,9 +365,7 @@ rule submit_pruefbericht:
         pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
         db_config_path=cfg_path("config_paths/db"),
     output:
-        answer=temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer"
-        ),
+        answer="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer",
     params:
         custom_ca_cert=lambda _: (
             "/workdir/config/cert.pem"
