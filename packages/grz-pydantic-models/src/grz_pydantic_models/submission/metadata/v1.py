@@ -1177,6 +1177,47 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
     @model_validator(mode="after")
+    def ensure_index_has_correct_sequence_subtype(self):
+        # index donors must have sequence subtype depending on genomic study subtype
+        # TODO: Should "addition"-type submissions be skipped?
+
+        match self.submission.genomic_study_subtype:
+            case GenomicStudySubtype.tumor_only:
+                required_sequencing_subtypes = {
+                    SequenceSubtype.somatic,
+                }
+            case GenomicStudySubtype.tumor_germline:
+                required_sequencing_subtypes = {
+                    SequenceSubtype.somatic,
+                    SequenceSubtype.germline,
+                }
+            case GenomicStudySubtype.germline_only:
+                required_sequencing_subtypes = {
+                    SequenceSubtype.germline,
+                }
+            case _:
+                # unreachable code due to prior validation
+                raise ValueError("Unknown genomic study subtype. This should never happen.")
+
+        for donor in self.donors:
+            if donor.relation != Relation.index_:
+                # only validate index donor
+                continue
+
+            # get donor sequence subtypes
+            donor_sequence_subtypes = {datum.sequence_subtype for datum in donor.lab_data}
+
+            missing_subtypes = required_sequencing_subtypes - donor_sequence_subtypes
+
+            if missing_subtypes:
+                raise ValueError(
+                    f"Index donor is missing sequence subtypes for submission type '{self.submission.genomic_study_subtype}': "
+                    f"{', '.join(missing_subtypes)}."
+                )
+
+            return self
+
+    @model_validator(mode="after")
     def check_for_tumor_cell_count(self):
         """
         Check if oncology samples have tumor cell counts.
