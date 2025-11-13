@@ -1181,22 +1181,23 @@ class GrzSubmissionMetadata(StrictBaseModel):
         # index donors must have sequence subtype depending on genomic study subtype
         # TODO: Should "addition"-type submissions be skipped?
 
-        if self.submission.genomic_study_subtype == GenomicStudySubtype.tumor_only:
-            required_sequencing_subtypes = {
-                SequenceSubtype.somatic,
-            }
-        elif self.submission.genomic_study_subtype == GenomicStudySubtype.tumor_germline:
-            required_sequencing_subtypes = {
-                SequenceSubtype.somatic,
-                SequenceSubtype.germline,
-            }
-        elif self.submission.genomic_study_subtype == GenomicStudySubtype.germline_only:
-            required_sequencing_subtypes = {
-                SequenceSubtype.germline,
-            }
-        else:
-            # unreachable code due to prior validation
-            raise ValueError("Unknown genomic study subtype. This should never happen.")
+        match self.submission.genomic_study_subtype:
+            case GenomicStudySubtype.tumor_only:
+                required_sequencing_subtypes = {
+                    SequenceSubtype.somatic,
+                }
+            case GenomicStudySubtype.tumor_germline:
+                required_sequencing_subtypes = {
+                    SequenceSubtype.somatic,
+                    SequenceSubtype.germline,
+                }
+            case GenomicStudySubtype.germline_only:
+                required_sequencing_subtypes = {
+                    SequenceSubtype.germline,
+                }
+            case _:
+                # unreachable code due to prior validation
+                raise ValueError("Unknown genomic study subtype. This should never happen.")
 
         for donor in self.donors:
             if donor.relation != Relation.index_:
