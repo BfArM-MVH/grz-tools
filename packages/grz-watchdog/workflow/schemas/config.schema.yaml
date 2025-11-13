@@ -137,6 +137,9 @@ properties:
             description: "Salt for random seed"
         required:
           - salt
+      tmpdir:
+        type: string
+        description: "Temporary directory used for nextflow / processes invoked by nextflow. Defaults to `tempfile.gettempdir()`."
       reference_directory:
         type: string
         default: "<resources>/references"

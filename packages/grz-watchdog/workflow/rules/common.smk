@@ -3,6 +3,7 @@ import math
 import os
 import random
 import shutil
+import tempfile
 from collections.abc import Callable
 from operator import itemgetter
 from os import PathLike
@@ -366,6 +367,10 @@ def get_run_qc_nextflow_configs(wildcards: Wildcards):
 def get_run_qc_nextflow_profiles(wildcards: Wildcards):
     profiles = config.get("qc", {}).get("run-qc", {}).get("profiles", ["conda"])
     return ",".join(profiles)
+
+
+def get_nextflow_tmpdir(wildcards: Wildcards) -> str:
+    return config.get("qc", {}).get("tmpdir", tempfile.gettempdir())
 
 
 def get_target_qc_percentage(wildcards: Wildcards) -> float | None:

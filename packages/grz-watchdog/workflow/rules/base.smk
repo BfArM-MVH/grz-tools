@@ -445,6 +445,7 @@ else:
             mem="90G",
             disk="60G",
             runtime="3h",
+            tmpdir=get_nextflow_tmpdir,
         log:
             stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
             stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
@@ -486,6 +487,7 @@ rule qc:
         runtime=estimate_qc_runtime,
         mem=estimate_qc_memory,
         disk=estimate_qc_disk,
+        tmpdir=get_nextflow_tmpdir,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
