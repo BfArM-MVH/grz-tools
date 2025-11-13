@@ -249,6 +249,9 @@ jobs:
         with:
           lfs: true
 
+      - name: Install PostgreSQL
+        run: sudo apt-get --update install postgresql
+
       - name: Download grz-check binary artifact
         uses: actions/download-artifact@v4
         with:

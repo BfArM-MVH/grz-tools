@@ -4,13 +4,14 @@ import json
 import os
 from os import PathLike
 from pathlib import Path
-from shutil import copyfile
+from shutil import copyfile, which
 
 import boto3
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
 import numpy as np
+import psycopg
 import pytest
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
@@ -58,11 +59,24 @@ def db_known_keys_file_path():
     return Path(db_known_keys_file)
 
 
-@pytest.fixture()
-def db_test_sqlite(tmpdir_factory: pytest.TempdirFactory):
-    db_dir = tmpdir_factory.mktemp("db")
-    db_file = db_dir / "test.db"
-    return f"sqlite:///{str(db_file)}"
+@pytest.fixture(
+    params=[
+        "sqlite",
+        pytest.param(
+            "postgresql",
+            marks=pytest.mark.skipif(condition=which("pg_config") is None, reason="postgresql not detected"),
+        ),
+    ]
+)
+def db_test_connection(request: pytest.FixtureRequest):
+    if request.param == "sqlite":
+        tmpdir_factory: pytest.TempdirFactory = request.getfixturevalue("tmpdir_factory")
+        db_dir = tmpdir_factory.mktemp("db")
+        db_file = db_dir / "test.db"
+        yield f"sqlite:///{str(db_file)}"
+    elif request.param == "postgresql":
+        postgresql: psycopg.Connection = request.getfixturevalue("postgresql")
+        yield f"postgresql+psycopg://{postgresql.info.user}:@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
 
 
 @pytest.fixture(scope="session")
@@ -252,11 +266,11 @@ def s3_config_content():
 def db_config_content(
     db_alice_private_key_file_path,
     db_known_keys_file_path,
-    db_test_sqlite,
+    db_test_connection,
 ):
     return {
         "db": {
-            "database_url": db_test_sqlite,
+            "database_url": db_test_connection,
             "author": {"name": "Alice", "private_key_path": str(db_alice_private_key_file_path)},
             "known_public_keys": str(db_known_keys_file_path),
         }

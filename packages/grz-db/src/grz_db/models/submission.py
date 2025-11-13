@@ -25,7 +25,7 @@ from grz_pydantic_models.submission.metadata import (
     Tan,
 )
 from pydantic import ConfigDict, field_serializer, field_validator
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -292,7 +292,11 @@ class Donor(SQLModel, table=True):
 
     submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
     pseudonym: str = Field(primary_key=True)
-    relation: Relation
+    # use values_callable so enum value is stored instead of name.
+    # SQLite stores string of value instead of name because it doesn't have
+    # native Enum support, so this keeps things consistent with other SQL
+    # server implementations.
+    relation: Relation = Field(sa_column=Column(Enum(Relation, values_callable=lambda e: [x.value for x in e])))
     library_types: set[LibraryType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     sequence_types: set[SequenceType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     sequence_subtypes: set[SequenceSubtype] = Field(sa_column=Column(SemicolonSeparatedStringSet))

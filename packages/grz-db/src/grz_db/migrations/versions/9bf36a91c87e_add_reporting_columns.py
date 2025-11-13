@@ -22,35 +22,34 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column("submissions", sa.Column("submission_date", sa.Date(), nullable=True))
+    submission_type_enum = sa.Enum("initial", "followup", "addition", "correction", "test", name="submissiontype")
+    submission_type_enum.create(op.get_bind())
     op.add_column(
         "submissions",
-        sa.Column(
-            "submission_type", sa.Enum("initial", "followup", "addition", "correction", "test", name="submissiontype")
-        ),
+        sa.Column("submission_type", submission_type_enum),
     )
     op.add_column("submissions", sa.Column("submitter_id", AutoString()))
     op.add_column("submissions", sa.Column("data_node_id", AutoString()))
-    op.add_column(
-        "submissions", sa.Column("disease_type", sa.Enum("oncological", "rare", "hereditary", name="diseasetype"))
+    disease_type_enum = sa.Enum("oncological", "rare", "hereditary", name="diseasetype")
+    disease_type_enum.create(op.get_bind())
+    op.add_column("submissions", sa.Column("disease_type", disease_type_enum))
+    library_type_enum = sa.Enum(
+        "panel",
+        "panel_lr",
+        "wes",
+        "wes_lr",
+        "wgs",
+        "wgs_lr",
+        "wxs",
+        "wxs_lr",
+        "other",
+        "unknown",
+        name="librarytype",
     )
+    library_type_enum.create(op.get_bind())
     op.add_column(
         "submissions",
-        sa.Column(
-            "library_type",
-            sa.Enum(
-                "panel",
-                "panel_lr",
-                "wes",
-                "wes_lr",
-                "wgs",
-                "wgs_lr",
-                "wxs",
-                "wxs_lr",
-                "other",
-                "unknown",
-                name="librarytype",
-            ),
-        ),
+        sa.Column("library_type", library_type_enum),
     )
     op.add_column("submissions", sa.Column("basic_qc_passed", sa.Boolean()))
     op.add_column("submissions", sa.Column("consented", sa.Boolean()))

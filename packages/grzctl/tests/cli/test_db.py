@@ -6,7 +6,6 @@ import hashlib
 import importlib.resources
 import json
 import random
-import sqlite3
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
@@ -14,8 +13,9 @@ from textwrap import dedent
 import click.testing
 import grzctl.cli
 import pytest
+import sqlalchemy
 import yaml
-from grz_db.models.submission import SubmissionDb
+from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
 
@@ -29,11 +29,13 @@ def test_all_migrations(blank_initial_database_config_path):
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_id = "123456789_2024-11-08_d0f805c5"
-    with sqlite3.connect(config.db.database_url[len("sqlite:///") :]) as connection:
+    engine = sqlalchemy.create_engine(config.db.database_url)
+    with engine.connect() as connection:
         connection.execute(
-            "INSERT INTO submissions(tan_g, pseudonym, id) VALUES(:tan_g, :pseudonym, :id)",
+            sqlalchemy.insert(Submission),
             {"tan_g": tan_g, "pseudonym": pseudonym, "id": submission_id},
         )
+        connection.commit()
 
     # ensure db command raises appropriate error before migration
     runner = click.testing.CliRunner()
@@ -60,7 +62,7 @@ def test_populate(blank_database_config_path: Path):
         (importlib.resources.files(test_resources) / "metadata.json").read_text()
     )
 
-    runner = click.testing.CliRunner()
+    runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
     result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
@@ -224,19 +226,33 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
         (importlib.resources.files(test_resources) / "metadata.json").read_text()
     )
 
-    runner = click.testing.CliRunner()
+    runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
     result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first to satisfy foreign key constraints
+    metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    metadata = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
 
     report_csv_path = tmp_path / "report.csv"
     with open(report_csv_path, "w") as report_csv_file:
         report_csv_file.write(
             dedent("""\
             sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
-            mother1_germline0,9e107d9d372bb6826bd81l3542a419d6cdebb5f6b8a32bdf8f7b77c61cbe3f30,Blood DNA normal,wgs,germline,germline-only,PASS,37.4,37.0,30.0,1.0810810810810774,PASS,91.672363717605,30,88.0,85,4.17314058818751,PASS,1.0,20,1.0,0.8,0.0,PASS
-            father2_germline0,9e107d9d372bb6826bd81d3542a419d6cdebb5f6b8a32ezf8f7b77c61cbe3f30,Blood DNA normal,wgs,germline,germline-only,FAIL,19.94,30.0,30.0,-33.53333333333333,TOO LOW,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
-            index0_germline0,index,Blood DNA normal,wgs,germline,germline-only,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,wes,germline,tumor+germline,FAIL,19.94,30.0,30.0,-33.53333333333333,TOO LOW,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            index0_somatic0,index,Blut DNA Tumor,wes,somatic,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
             """)
         )
 
