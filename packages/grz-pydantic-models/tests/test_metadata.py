@@ -87,18 +87,26 @@ def test_wgs_tumor_germline_missing_dna(version):
 
     # delete germline DNA
     metadata = json.loads(metadata_str)
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
     del metadata["donors"][0]["labData"][0]
 
     # missing germline DNA should fail
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'tumor\+germline': germline""",
+    ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
     # delete tumor DNA
     metadata = json.loads(metadata_str)
+    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
     del metadata["donors"][0]["labData"][1]
 
     # missing tumor DNA should fail
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'tumor\+germline': somatic""",
+    ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
     ### tumor-only
@@ -106,6 +114,7 @@ def test_wgs_tumor_germline_missing_dna(version):
     # delete germline DNA
     metadata = json.loads(metadata_str)
     metadata["submission"]["genomicStudySubtype"] = "tumor-only"
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
     del metadata["donors"][0]["labData"][0]
 
     # missing germline DNA should pass
@@ -114,10 +123,14 @@ def test_wgs_tumor_germline_missing_dna(version):
     # delete tumor DNA
     metadata = json.loads(metadata_str)
     metadata["submission"]["genomicStudySubtype"] = "tumor-only"
+    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
     del metadata["donors"][0]["labData"][1]
 
     # missing tumor DNA should fail
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'tumor-only': somatic""",
+    ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
     ### germline-only
@@ -125,15 +138,20 @@ def test_wgs_tumor_germline_missing_dna(version):
     # delete germline DNA
     metadata = json.loads(metadata_str)
     metadata["submission"]["genomicStudySubtype"] = "germline-only"
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
     del metadata["donors"][0]["labData"][0]
 
     # missing germline DNA should fail
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'germline-only': germline""",
+    ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
     # delete tumor DNA
     metadata = json.loads(metadata_str)
     metadata["submission"]["genomicStudySubtype"] = "germline-only"
+    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
     del metadata["donors"][0]["labData"][1]
 
     # missing tumor DNA should pass
