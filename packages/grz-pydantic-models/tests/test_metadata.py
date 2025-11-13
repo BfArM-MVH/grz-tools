@@ -18,7 +18,7 @@ TESTED_VERSIONS = ["1.2.1", "1.3.0"]
 
 @pytest.mark.parametrize(
     "dataset,version",
-    itertools.product(["panel", "wes_tumor_germline", "wgs_tumor_germline", "wgs_lr", "wgs_trio"], TESTED_VERSIONS),
+    itertools.product(["panel_tumor_only", "wes_tumor_germline", "wgs_tumor_germline", "wgs_lr_tumor_only", "wgs_trio"], TESTED_VERSIONS),
 )
 def test_examples(dataset: str, version: str):
     metadata_str = (
@@ -214,7 +214,7 @@ def test_wgs_trio_1_3_fail_malformed_consent(version: str):
 
 @pytest.mark.parametrize(
     "dataset,version",
-    itertools.product(["panel", "wes_tumor_germline", "wgs_tumor_germline", "wgs_trio"], TESTED_VERSIONS),
+    itertools.product(["panel_tumor_only", "wes_tumor_germline", "wgs_tumor_germline", "wgs_trio"], TESTED_VERSIONS),
 )
 def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
     """BAM files should only be allowed in *_lr lab data"""
