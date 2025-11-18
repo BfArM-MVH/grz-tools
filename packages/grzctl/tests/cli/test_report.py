@@ -1,14 +1,15 @@
 import csv
 import importlib.resources
 import json
-import sqlite3
 from datetime import date
 from operator import itemgetter
 from pathlib import Path
 from textwrap import dedent
 
 import grzctl.cli
+import sqlalchemy
 from click.testing import CliRunner
+from grz_db.models.submission import Submission
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grzctl.commands.report import date_to_quarter_year
 from grzctl.models.config import DbConfig
@@ -400,15 +401,13 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
     config = DbConfig.from_path(blank_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
-    submission_date = "2025-09-14"
+    submission_date = date(year=2025, month=9, day=14)
     submitter_id = "123456789"
-    submission_id = f"{submitter_id}_{submission_date}_d0f805c5"
-    with sqlite3.connect(config.db.database_url[len("sqlite:///") :]) as connection:
+    submission_id = f"{submitter_id}_{submission_date.isoformat()}_d0f805c5"
+    engine = sqlalchemy.create_engine(config.db.database_url)
+    with engine.connect() as connection:
         connection.execute(
-            """
-            INSERT INTO submissions(tan_g, pseudonym, id, submission_date, submission_type, submitter_id, data_node_id)
-            VALUES(:tan_g, :pseudonym, :id, :submission_date, :submission_type, :submitter_id, :data_node_id)
-            """,
+            sqlalchemy.insert(Submission),
             {
                 "tan_g": tan_g,
                 "pseudonym": pseudonym,
@@ -419,6 +418,7 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
                 "data_node_id": "GRZXYZ123",
             },
         )
+        connection.commit()
 
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",

@@ -1,16 +1,26 @@
+import shutil
 from pathlib import Path
 
 import click.testing
 import cryptography.hazmat.primitives.serialization as cryptser
 import grzctl.cli
+import psycopg
 import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from grzctl.models.config import DbConfig
 
 
-@pytest.fixture
-def blank_database_config(tmp_path: Path) -> DbConfig:
+@pytest.fixture(
+    params=[
+        "sqlite",
+        pytest.param(
+            "postgresql",
+            marks=pytest.mark.skipif(condition=shutil.which("pg_config") is None, reason="postgresql not detected"),
+        ),
+    ]
+)
+def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbConfig:
     private_key = Ed25519PrivateKey.generate()
     private_key_path = tmp_path / "alice.sec"
     with open(private_key_path, "wb") as private_key_file:
@@ -31,9 +41,14 @@ def blank_database_config(tmp_path: Path) -> DbConfig:
         # add the comment too
         public_key_file.write(b" alice")
 
+    database_url = "sqlite:///" + str((tmp_path / "submission.db.sqlite").resolve())
+    if request.param == "postgresql":
+        postgresql: psycopg.Connection = request.getfixturevalue("postgresql")
+        database_url = f"postgresql+psycopg://{postgresql.info.user}:@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
+
     return DbConfig(
         db={
-            "database_url": "sqlite:///" + str((tmp_path / "submission.db.sqlite").resolve()),
+            "database_url": database_url,
             "author": {
                 "name": "alice",
                 "private_key_path": str(private_key_path.resolve()),
