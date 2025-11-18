@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import enum
 import itertools
+import json
 import logging
 import math
 import re
@@ -111,8 +112,21 @@ class S3BotoDownloadWorker:
             # Ensure the local target directory exists
             metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
+            # Get object metadata to find upload date
+            s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=metadata_key)
+            upload_date = s3_object_meta["LastModified"].date()
+
             self._s3_client.download_file(self._s3_options.bucket, metadata_key, str(metadata_file_path))
             self.__log.info("Metadata download complete.")
+
+            # Modify submission_date in downloaded metadata.json
+            with metadata_file_path.open("r+") as f:
+                metadata_content = json.load(f)
+                metadata_content["submission"]["submissionDate"] = upload_date.isoformat()
+                f.seek(0)
+                json.dump(metadata_content, f, indent=2)
+                f.truncate()
+            self.__log.info("Set submissionDate in metadata.json to '%s'", upload_date.isoformat())
         except botocore.exceptions.ClientError as e:
             if e.response.get("Error", {}).get("Code") == "404":
                 error_msg = f"Metadata file '{metadata_key}' not found in S3 bucket '{self._s3_options.bucket}'."
