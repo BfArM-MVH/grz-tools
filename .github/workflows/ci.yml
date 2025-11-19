@@ -376,7 +376,17 @@ jobs:
       - name: Install dependencies for grz-watchdog tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y uidmap fuse-overlayfs slirp4netns
+          sudo apt-get install -y uidmap fuse-overlayfs slirp4netns passt
+
+      - name: Disable podman apparmor profile
+        # ubuntu 24.04 restricts podman to /usr/bin/podman.
+        # removing the profile altogether for now
+        run: |
+          if [ -f /etc/apparmor.d/podman ]; then
+            echo "removing apparmor profile for podman"
+            sudo apparmor_parser -R /etc/apparmor.d/podman
+            sudo rm /etc/apparmor.d/podman
+          fi
 
       - name: Install pixi
         uses: prefix-dev/setup-pixi@v0.9.1
