@@ -11,7 +11,7 @@ import botocore
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
 from packaging import version
-from pydantic import BaseModel, Field, ValidationError, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .exceptions import (
     VersionFileAccessError,
