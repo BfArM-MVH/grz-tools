@@ -121,7 +121,7 @@ jobs:
             echo "No Rust package changes detected."
           fi
 
-          if [[ " ${unique_test_dirs_array[@]} " =~ " packages/grz-watchdog " ]]; then
+          if [[ "${unique_test_dirs_array[@]}" =~ "packages/grz-watchdog" ]]; then
             echo "grz_watchdog_changed=true" >> $GITHUB_OUTPUT
             echo "Detected changes requiring grz-watchdog tests."
           else
