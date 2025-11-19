@@ -24,6 +24,7 @@ jobs:
       rust_matrix: ${{ steps.generate_matrix.outputs.rust_matrix }}
       has_python_changes: ${{ steps.generate_matrix.outputs.has_python_changes }}
       has_rust_changes: ${{ steps.generate_matrix.outputs.has_rust_changes }}
+      grz_watchdog_changed: ${{ steps.generate_matrix.outputs.grz_watchdog_changed }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
