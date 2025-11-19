@@ -373,16 +373,30 @@ jobs:
         with:
           lfs: true
       - name: Install Podman 5 from Ubuntu Plucky (25.04)
+        # see https://github.com/containers/podman/discussions/25582
         run: |
-          echo "deb http://archive.ubuntu.com/ubuntu plucky main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/plucky.list
-          cat <<EOF | sudo tee /etc/apt/preferences.d/podman-plucky
-          Package: podman* buildah* golang-github-containers-* crun conmon containers-storage netavark aardvark-dns
+          # Define file paths
+          PINNING_FILE="/etc/apt/preferences.d/podman-plucky.pref"
+          SOURCE_LIST="/etc/apt/sources.list.d/plucky.list"
+
+          # Write Plucky APT source list
+          echo "Adding Plucky repo to $SOURCE_LIST..."
+          sudo echo "deb http://archive.ubuntu.com/ubuntu plucky main universe" > "$SOURCE_LIST"
+
+          # Write APT pinning rules
+          echo "Writing APT pinning rules to $PINNING_FILE..."
+          sudo cat <<EOF > "$PINNING_FILE"
+          Package: podman podman-compose podman-docker buildah golang-github-containers-common crun libgpgme11t64 libgpg-error0 golang-github-containers-image catatonit conmon containers-storage
           Pin: release n=plucky
-          Pin-Priority: 900
+          Pin-Priority: 991
+
+          Package: libsubid4 netavark passt aardvark-dns containernetworking-plugins libslirp0 slirp4netns
+          Pin: release n=plucky
+          Pin-Priority: 991
 
           Package: *
           Pin: release n=plucky
-          Pin-Priority: -10
+          Pin-Priority: 400
           EOF
 
           sudo apt-get update
