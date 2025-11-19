@@ -376,7 +376,20 @@ jobs:
       - name: Install dependencies for grz-watchdog tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman podman-compose
+          sudo apt-get install -y uidmap fuse-overlayfs slirp4netns
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.9.1
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          cache: false
+
+      - name: Install podman & podman-compose
+        run: |
+          pixi global install podman podman-compose --channel conda-forge
+          echo "Podman path: $(which podman)"
+          podman --version
+          podman-compose --version
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
