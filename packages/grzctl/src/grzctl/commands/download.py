@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 @config_file
 @threads
 @force
-def download(submission_id, output_dir_base, metadata_dir, encrypted_files_dir, logs_dir, config_file, threads, force):
+def download(submission_id, output_dir_base, metadata_dir, encrypted_files_dir, logs_dir, config_file, threads, force):  # noqa: PLR0913
     """
     Download a submission from a GRZ.
     """

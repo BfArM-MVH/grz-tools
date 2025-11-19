@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 @logs_dir
 @config_file
 @threads
-def archive(submission_dir, metadata_dir, encrypted_files_dir, logs_dir, config_file, threads):
+def archive(submission_dir, metadata_dir, encrypted_files_dir, logs_dir, config_file, threads):  # noqa: PLR0913
     """
     Archive a pre-staged submission directory from within a GRZ/GDC.
     This command expects a directory containing redacted metadata, redacted logs,

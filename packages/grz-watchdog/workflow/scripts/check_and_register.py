@@ -8,7 +8,7 @@ import shared
 
 def run_command(cmd):
     try:
-        return subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=120)
+        return subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=120)  # noqa: S603
     except subprocess.CalledProcessError as e:
         print(f"Command failed: {' '.join(cmd)}\nSTDERR:\n{e.stderr}", file=sys.stderr)
         raise

@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 @logs_dir
 @config_file
 @force
-def decrypt(submission_dir, metadata_dir, encrypted_files_dir, files_dir, logs_dir, config_file, force):
+def decrypt(submission_dir, metadata_dir, encrypted_files_dir, files_dir, logs_dir, config_file, force):  # noqa: PLR0913
     """
     Decrypt a submission.
 

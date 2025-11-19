@@ -9,7 +9,7 @@ import shared
 from shared import error_print, log_print
 
 
-def register_submissions_with_db(submissions_json_list, db_config_path):  # noqa: C901
+def register_submissions_with_db(submissions_json_list, db_config_path):  # noqa: C901, PLR0912
     try:
         db_states_info = shared.get_db_states(db_config_path)
     except Exception as e:

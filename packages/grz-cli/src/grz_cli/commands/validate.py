@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
     hidden=True,
     help="Whether to use grz-check to perform validation",
 )
-def validate(submission_dir, metadata_dir, files_dir, logs_dir, config_file, force, threads, with_grz_check):
+def validate(submission_dir, metadata_dir, files_dir, logs_dir, config_file, force, threads, with_grz_check):  # noqa: PLR0913
     """
     Validate the submission.
 

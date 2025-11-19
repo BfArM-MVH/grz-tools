@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
     default=True,
     help="Check validation logs before encrypting.",
 )
-def encrypt(
+def encrypt(  # noqa: PLR0913
     submission_dir,
     metadata_dir,
     files_dir,
