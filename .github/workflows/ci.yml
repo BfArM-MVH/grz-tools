@@ -382,6 +382,7 @@ jobs:
         uses: prefix-dev/setup-pixi@v0.9.1
         with:
           pixi-version: ${{ env.PIXI_VERSION }}
+          run-install: false
           cache: false
 
       - name: Install podman & podman-compose
