@@ -381,11 +381,11 @@ jobs:
 
           # Write Plucky APT source list
           echo "Adding Plucky repo to $SOURCE_LIST..."
-          sudo echo "deb http://archive.ubuntu.com/ubuntu plucky main universe" > "$SOURCE_LIST"
+          echo "deb http://archive.ubuntu.com/ubuntu plucky main universe" | sudo tee "$SOURCE_LIST"
 
           # Write APT pinning rules
           echo "Writing APT pinning rules to $PINNING_FILE..."
-          sudo cat <<EOF > "$PINNING_FILE"
+          cat <<EOF | sudo tee "$PINNING_FILE"
           Package: podman podman-compose podman-docker buildah golang-github-containers-common crun libgpgme11t64 libgpg-error0 golang-github-containers-image catatonit conmon containers-storage
           Pin: release n=plucky
           Pin-Priority: 991
