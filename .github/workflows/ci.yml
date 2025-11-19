@@ -381,6 +381,13 @@ jobs:
       - name: Disable AppArmor on the GitHub runner
         uses: cisagov/action-disable-apparmor@437d94f26a2e4bf8c03acfb500a6afc688b497db # v1.0.0
 
+      - name: Disable AppArmor Namespace Restrictions
+        run: |
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+              echo "Disabling AppArmor unprivileged user namespace restriction."
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
       - name: Install pixi
         uses: prefix-dev/setup-pixi@v0.9.1
         with:
