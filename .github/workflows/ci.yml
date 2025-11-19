@@ -372,44 +372,35 @@ jobs:
         uses: actions/checkout@v4
         with:
           lfs: true
-
-      - name: Install dependencies for grz-watchdog tests
+      - name: Install Podman 5 from Ubuntu Plucky (25.04)
         run: |
+          echo "deb http://archive.ubuntu.com/ubuntu plucky main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/plucky.list
+          cat <<EOF | sudo tee /etc/apt/preferences.d/podman-plucky
+          Package: podman* buildah* golang-github-containers-* crun conmon containers-storage netavark aardvark-dns
+          Pin: release n=plucky
+          Pin-Priority: 900
+
+          Package: *
+          Pin: release n=plucky
+          Pin-Priority: -10
+          EOF
+
           sudo apt-get update
-          sudo apt-get install -y uidmap fuse-overlayfs slirp4netns passt
+          sudo apt-get install -y podman podman-docker podman-compose
 
-      - name: Disable AppArmor on the GitHub runner
-        uses: cisagov/action-disable-apparmor@437d94f26a2e4bf8c03acfb500a6afc688b497db # v1.0.0
+          podman-compose --version
 
-      - name: Disable AppArmor Namespace Restrictions
+      - name: Configure Podman for CI
         run: |
-          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-              echo "Disabling AppArmor unprivileged user namespace restriction."
-              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-
           mkdir -p $HOME/.config/containers
           cat <<EOF > $HOME/.config/containers/containers.conf
           [containers]
           netns="host"
+
           [engine]
           cgroup_manager = "cgroupfs"
           events_logger = "file"
           EOF
-
-      - name: Install pixi
-        uses: prefix-dev/setup-pixi@v0.9.1
-        with:
-          pixi-version: ${{ env.PIXI_VERSION }}
-          run-install: false
-          cache: false
-
-      - name: Install podman & podman-compose
-        run: |
-          pixi global install podman podman-compose --channel conda-forge
-          echo "Podman path: $(which podman)"
-          podman --version
-          podman-compose --version
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
