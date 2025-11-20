@@ -13,7 +13,7 @@ from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionM
 from .. import mock_files
 
 
-def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_path):
+def test_archive(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
@@ -48,12 +48,12 @@ def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_
         cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
-    uploaded_keys = {o.key for o in remote_bucket.objects.all()}
+    uploaded_keys = {o.key for o in remote_bucket_with_version.objects.all()}
     assert "260914050_2024-07-15_c64603a7/metadata/metadata.json" in uploaded_keys
     assert "260914050_2024-07-15_c64603a7/logs/progress_upload.cjson" in uploaded_keys
     assert "260914050_2024-07-15_c64603a7/files/target_regions.bed.c4gh" in uploaded_keys
 
-    remote_bucket.download_file(
+    remote_bucket_with_version.download_file(
         Key="260914050_2024-07-15_c64603a7/metadata/metadata.json", Filename=tmp_path / "metadata.json"
     )
     with open(tmp_path / "metadata.json") as metadata_file:
