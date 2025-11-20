@@ -11,7 +11,7 @@ import botocore
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
 from packaging import version
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .exceptions import (
     VersionFileAccessError,
@@ -99,6 +99,12 @@ class VersionFile(BaseModel):
 
     # allow arbitrary types like packaging.version.Version
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    @field_validator('minimal_version', 'recommended_version', mode='before')  
+    @classmethod  
+    def parse_version(cls, v):  
+        if isinstance(v, str):  
+            return version.Version(v)  
+        return v
 
 
 def get_version_info(s3_options, version_file_path) -> VersionFile:
