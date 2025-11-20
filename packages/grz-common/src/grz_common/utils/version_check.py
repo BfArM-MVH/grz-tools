@@ -31,7 +31,6 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
             "This means GRZ needs to update the version file to reflect the recommended CLI versions."
         )
         logger.critical(msg)
-        click.echo(click.style(f"ERROR: {msg}", fg="red"))
         sys.exit(1)
 
     # case when the CLI is too old and the LE must upgrade and possibly revalidate metadata.
@@ -46,7 +45,6 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
             "  - Check release notes for any breaking changes\n"
         )
         logger.error(msg)
-        click.echo(click.style(f"ERROR: {msg}", fg="red"))
         sys.exit(1)
 
     # case when the version is behind the latest but still supported
@@ -56,10 +54,8 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
             "It is recommended to upgrade to the latest version for the newest features and bug fixes."
         )
         logger.warning(msg)
-        click.echo(click.style(f"WARNING: {msg}", fg="yellow"))
 
     # version is up-to-date
     else:
         msg = f"grz-cli {current_version} is up to date."
         logger.info(msg)
-        click.echo(click.style(msg, fg="green"))
