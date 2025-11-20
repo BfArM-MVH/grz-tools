@@ -5,6 +5,7 @@ from importlib.metadata import version
 import click
 from grz_common.models.s3 import S3Options
 from grz_common.transfer import get_version_info
+from packaging import version as pkg_version  
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
     """
     # Fetch version information from S3
     version_info = get_version_info(s3_options, version_file_path)
-    current_version = version("grz-cli")
+    current_version = pkg_version.Version(version("grz-cli"))
 
     logger.debug(f"Current grz-cli version: {current_version}")
     logger.debug(
