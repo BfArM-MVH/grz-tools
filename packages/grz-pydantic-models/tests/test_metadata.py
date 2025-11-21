@@ -18,7 +18,10 @@ TESTED_VERSIONS = ["1.2.1", "1.3.0"]
 
 @pytest.mark.parametrize(
     "dataset,version",
-    itertools.product(["panel", "wes_tumor_germline", "wgs_tumor_germline", "wgs_lr", "wgs_trio"], TESTED_VERSIONS),
+    itertools.product(
+        ["panel_tumor_only", "wes_tumor_germline", "wgs_tumor_germline", "wgs_lr_tumor_only", "wgs_trio"],
+        TESTED_VERSIONS,
+    ),
 )
 def test_examples(dataset: str, version: str):
     metadata_str = (
@@ -66,6 +69,95 @@ def test_wgs_trio_no_vcf(version):
     # delete the VCF file for the index donor
     del metadata["donors"][0]["labData"][0]["sequenceData"]["files"][2]
 
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize(
+    "version",
+    TESTED_VERSIONS,
+)
+def test_wgs_tumor_germline_missing_dna(version):
+    """
+    Ensure that both tumor and germline DNA lab data are required for WGS tumor-germline submissions.
+    """
+    metadata_str = (
+        importlib.resources.files(resources)
+        .joinpath("example_metadata", "wgs_tumor_germline", f"v{version}.json")
+        .read_text()
+    )
+
+    ### tumor+germline
+
+    # delete germline DNA
+    metadata = json.loads(metadata_str)
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
+    del metadata["donors"][0]["labData"][0]
+
+    # missing germline DNA should fail
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'tumor\+germline': germline""",
+    ):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # delete tumor DNA
+    metadata = json.loads(metadata_str)
+    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
+    del metadata["donors"][0]["labData"][1]
+
+    # missing tumor DNA should fail
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'tumor\+germline': somatic""",
+    ):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    ### tumor-only
+
+    # delete germline DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "tumor-only"
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
+    del metadata["donors"][0]["labData"][0]
+
+    # missing germline DNA should pass
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # delete tumor DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "tumor-only"
+    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
+    del metadata["donors"][0]["labData"][1]
+
+    # missing tumor DNA should fail
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'tumor-only': somatic""",
+    ):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    ### germline-only
+
+    # delete germline DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "germline-only"
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
+    del metadata["donors"][0]["labData"][0]
+
+    # missing germline DNA should fail
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'germline-only': germline""",
+    ):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+    # delete tumor DNA
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["genomicStudySubtype"] = "germline-only"
+    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
+    del metadata["donors"][0]["labData"][1]
+
+    # missing tumor DNA should pass
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
@@ -125,7 +217,7 @@ def test_wgs_trio_1_3_fail_malformed_consent(version: str):
 
 @pytest.mark.parametrize(
     "dataset,version",
-    itertools.product(["panel", "wes_tumor_germline", "wgs_tumor_germline", "wgs_trio"], TESTED_VERSIONS),
+    itertools.product(["panel_tumor_only", "wes_tumor_germline", "wgs_tumor_germline", "wgs_trio"], TESTED_VERSIONS),
 )
 def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
     """BAM files should only be allowed in *_lr lab data"""

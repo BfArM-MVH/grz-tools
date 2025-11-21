@@ -2,7 +2,7 @@ import datetime
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
-from typing import Annotated, Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 import sqlalchemy as sa
 from alembic import command as alembic_command
@@ -24,8 +24,8 @@ from grz_pydantic_models.submission.metadata import (
     SubmitterId,
     Tan,
 )
-from pydantic import AfterValidator, ConfigDict, StringConstraints
-from sqlalchemy import JSON, Column
+from pydantic import ConfigDict, field_serializer, field_validator
+from sqlalchemy import JSON, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -74,7 +74,11 @@ class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
 
     cache_ok = True
 
-    def process_bind_param(self, value: set[str] | None, dialect: sa.engine.Dialect):
+    @property
+    def python_type(self):
+        return set
+
+    def process_bind_param(self, value: set[str] | None, dialect: sa.engine.Dialect) -> str | None:
         if not value:
             # empty sets are stored as null to distinguish from a set of a single empty string
             return None
@@ -88,7 +92,7 @@ class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
         # sort the set for consistent serialization behavior / deterministic output
         return ";".join(sorted(value))
 
-    def process_result_value(self, value: str | None, dialect: sa.engine.Dialect):
+    def process_result_value(self, value: str | None, dialect: sa.engine.Dialect) -> set[str] | None:
         return None if value is None else set(value.split(";"))
 
 
@@ -122,10 +126,19 @@ class Submission(SubmissionBase, table=True):
     """Submission table model."""
 
     __tablename__ = "submissions"
+    __table_args__ = {"extend_existing": True}
 
-    id: Annotated[str, StringConstraints(pattern=r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$")] = Field(
-        primary_key=True, index=True
-    )
+    id: str = Field(primary_key=True, index=True)
+
+    @field_validator("id")
+    @classmethod
+    def validate_id_pattern(cls, v: str) -> str:
+        import re
+
+        pattern = r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$"
+        if not re.match(pattern, v):
+            raise ValueError(f"Submission ID '{v}' does not match the required pattern.")
+        return v
 
     states: list["SubmissionStateLog"] = Relationship(back_populates="submission")
 
@@ -153,9 +166,12 @@ class SubmissionStateLogBase(SQLModel):
     )
 
     model_config = ConfigDict(  # type: ignore
-        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, ts: datetime.datetime) -> str:
+        return serialize_datetime_to_iso_z(ts)
 
 
 class SubmissionStateLogPayload(SubmissionStateLogBase, BaseSignablePayload):
@@ -171,8 +187,9 @@ class SubmissionStateLog(SubmissionStateLogBase, VerifiableLog[SubmissionStateLo
     """Submission state log table model."""
 
     __tablename__ = "submission_states"
+    __table_args__ = {"extend_existing": True}
 
-    _payload_model_class = SubmissionStateLogPayload
+    _payload_model_class: ClassVar = SubmissionStateLogPayload
 
     id: int | None = Field(default=None, primary_key=True, index=True)
     submission_id: str = Field(foreign_key="submissions.id", index=True)
@@ -220,9 +237,12 @@ class ChangeRequestLogBase(SQLModel):
     )
 
     model_config = ConfigDict(  # type: ignore[assignment]
-        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, ts: datetime.datetime) -> str:
+        return serialize_datetime_to_iso_z(ts)
 
 
 class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
@@ -238,8 +258,9 @@ class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPaylo
     """Change-request log table model."""
 
     __tablename__ = "submission_change_requests"
+    __table_args__ = {"extend_existing": True}
 
-    _payload_model_class = ChangeRequestLogPayload
+    _payload_model_class: ClassVar = ChangeRequestLogPayload
 
     id: int | None = Field(default=None, primary_key=True, index=True)
     submission_id: str = Field(foreign_key="submissions.id", index=True)
@@ -267,18 +288,28 @@ class Donor(SQLModel, table=True):
     """Donor database model."""
 
     __tablename__ = "donors"
+    __table_args__ = {"extend_existing": True}
 
     submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
     pseudonym: str = Field(primary_key=True)
-    relation: Relation
+    # use values_callable so enum value is stored instead of name.
+    # SQLite stores string of value instead of name because it doesn't have
+    # native Enum support, so this keeps things consistent with other SQL
+    # server implementations.
+    relation: Relation = Field(sa_column=Column(Enum(Relation, values_callable=lambda e: [x.value for x in e])))
     library_types: set[LibraryType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     sequence_types: set[SequenceType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     sequence_subtypes: set[SequenceSubtype] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     mv_consented: bool
     research_consented: bool | None = None
-    research_consent_missing_justifications: Annotated[
-        set[ResearchConsentNoScopeJustification] | None, AfterValidator(coerce_empty_set_to_none)
-    ] = Field(sa_column=Column(SemicolonSeparatedStringSet))
+    research_consent_missing_justifications: set[ResearchConsentNoScopeJustification] | None = Field(
+        default=None, sa_column=Column(SemicolonSeparatedStringSet, nullable=True)
+    )
+
+    @field_validator("research_consent_missing_justifications")
+    @classmethod
+    def validate_and_coerce_justifications(cls, v: set | None) -> set | None:
+        return coerce_empty_set_to_none(v)
 
 
 class DetailedQCResult(SQLModel, table=True):
@@ -287,6 +318,7 @@ class DetailedQCResult(SQLModel, table=True):
     __tablename__ = "detailed_qc_results"
     __table_args__ = (
         sa.ForeignKeyConstraint(["submission_id", "pseudonym"], ["donors.submission_id", "donors.pseudonym"]),
+        {"extend_existing": True},
     )
 
     submission_id: str = Field(primary_key=True)
@@ -312,9 +344,12 @@ class DetailedQCResult(SQLModel, table=True):
     targeted_regions_above_min_coverage_percent_deviation: float
 
     model_config = ConfigDict(  # type: ignore
-        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, ts: datetime.datetime) -> str:
+        return serialize_datetime_to_iso_z(ts)
 
 
 class SubmissionDb:

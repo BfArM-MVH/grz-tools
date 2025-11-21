@@ -30,3 +30,6 @@ One can also look at the generated schema for a newly initialized database:
 ```
 sqlite3 submission.db.sqlite .schema
 ```
+
+For PostgreSQL, Enums must be explicitly created if not added as part of a `create_table` operation (e.g. `add_column`).
+See the existing migrations for hints.

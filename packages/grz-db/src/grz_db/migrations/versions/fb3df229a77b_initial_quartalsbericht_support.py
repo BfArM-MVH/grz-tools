@@ -51,24 +51,47 @@ def upgrade() -> None:
         sa.Column("research_consent_missing_justifications", AutoString(), nullable=True),
     )
 
+    # explicitly create enums if needed (PostgreSQL)
+    genomic_study_type_enum = sa.Enum("single", "duo", "trio", name="genomicstudytype")
+    genomic_study_type_enum.create(op.get_bind())
+    genomic_study_subtype_enum = sa.Enum("tumor_only", "tumor_germline", "germline_only", name="genomicstudysubtype")
+    genomic_study_subtype_enum.create(op.get_bind())
+    coverage_type_enum = sa.Enum(
+        "GKV", "PKV", "BG", "SEL", "SOZ", "GPV", "PPV", "BEI", "SKT", "UNK", name="coveragetype"
+    )
+    coverage_type_enum.create(op.get_bind())
+
     # we have to batch alter because SQLite doesn't support ALTER on column types
     with op.batch_alter_table("submissions") as batch_op:
         # will need to be repopulated in donors table before reporting, so just drop
         batch_op.drop_column("library_type")
         # modified/extra submission table columns
-        batch_op.add_column(sa.Column("genomic_study_type", sa.Enum("single", "duo", "trio", name="genomicstudytype")))
+        batch_op.add_column(sa.Column("genomic_study_type", genomic_study_type_enum))
         batch_op.add_column(
             sa.Column(
                 "genomic_study_subtype",
-                sa.Enum("tumor_only", "tumor_germline", "germline_only", name="genomicstudysubtype"),
+                genomic_study_subtype_enum,
             ),
         )
-        batch_op.add_column(
-            sa.Column(
-                "coverage_type",
-                sa.Enum("GKV", "PKV", "BG", "SEL", "SOZ", "GPV", "PPV", "BEI", "SKT", "UNK", name="coveragetype"),
-            )
-        )
+        batch_op.add_column(sa.Column("coverage_type", coverage_type_enum))
+
+    # already should exist so don't need to re-create, just define
+    # but must be postgresql.ENUM until fixed in sqlalchemy 2.1
+    # see https://github.com/sqlalchemy/alembic/issues/1347
+    library_type_enum = sa.dialects.postgresql.ENUM(
+        "panel",
+        "panel_lr",
+        "wes",
+        "wes_lr",
+        "wgs",
+        "wgs_lr",
+        "wxs",
+        "wxs_lr",
+        "other",
+        "unknown",
+        name="librarytype",
+        create_type=False,
+    )
 
     # new detailed QC results table
     op.create_table(
@@ -90,19 +113,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "library_type",
-            sa.Enum(
-                "panel",
-                "panel_lr",
-                "wes",
-                "wes_lr",
-                "wgs",
-                "wgs_lr",
-                "wxs",
-                "wxs_lr",
-                "other",
-                "unknown",
-                name="librarytype",
-            ),
+            library_type_enum,
             nullable=False,
         ),
         sa.Column("percent_bases_above_quality_threshold_minimum_quality", sa.Float(), nullable=False),

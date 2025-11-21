@@ -1,7 +1,8 @@
 import filecmp  
+import json  # From main  
 import os  
 import shutil  
-from importlib.metadata import version as get_version  # Add alias here  
+from importlib.metadata import version as get_version  ## 
 from pathlib import Path  
 from unittest import mock  
   
@@ -10,8 +11,10 @@ import grzctl.cli
 from click.testing import CliRunner  
 from grz_common.progress import EncryptionState, FileProgressLogger  
 from grz_common.workers.submission import Submission, SubmissionValidationError  
-from grz_common.transfer import VersionFile   
-from packaging import version
+from grz_common.transfer import VersionFile  ## 
+from packaging import version ##
+
+
 
 
 def are_dir_trees_equal(dir1, dir2):
@@ -70,69 +73,74 @@ def test_upload_download_submission(
             state=EncryptionState(encryption_successful=True),
         )
 
-    # code for the version mock, wrapping both existing mock and test code  
-    with mock.patch("grz_common.transfer.get_version_info") as mock_version_info:  
-        mock_version_info.return_value = VersionFile(  
-            schema_version=1,  
-            minimal_version=version.Version("1.0.0"),  
-            recommended_version=version.Version("2.0.0")  
-        )
 
-        with mock.patch(
-            "grz_common.models.s3.S3Options.__getattr__",
-            lambda self, name: None if name == "endpoint_url" else AttributeError,
-        ):
-            # upload encrypted submission
-            upload_args = [
-                "upload",
-                "--submission-dir",
-                str(working_dir_path),
-                "--config-file",
-                temp_s3_config_file_path,
-            ]
+  with mock.patch("grz_common.transfer.get_version_info") as mock_version_info:    
+      mock_version_info.return_value = VersionFile(    
+          schema_version=1,    
+          minimal_version=version.Version("1.0.0"),    
+          recommended_version=version.Version("2.0.0")    
+      )  
 
-            runner = CliRunner()
-            cli = grz_cli.cli.build_cli()
-            result = runner.invoke(cli, upload_args, catch_exceptions=False)
+      with mock.patch(  
+          "grz_common.models.s3.S3Options.__getattr__",  
+          lambda self, name: None if name == "endpoint_url" else AttributeError,  
+      ):  
+          # upload encrypted submission  
+          upload_args = [  
+              "upload",  
+              "--submission-dir",  
+              str(working_dir_path),  
+              "--config-file",  
+              temp_s3_config_file_path,  
+          ]  
 
-            assert result.exit_code == 0, result.output
-            assert len(result.output) != 0, result.stderr
+          runner = CliRunner()  
+          cli = grz_cli.cli.build_cli()  
+          result = runner.invoke(cli, upload_args, catch_exceptions=False)  
 
-            submission_id = result.stdout.strip()
+          assert result.exit_code == 0, result.output  
+          assert len(result.output) != 0, result.stderr  
 
-            objects_in_bucket = {obj.key: obj for obj in remote_bucket.objects.all()}
-            assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
+          submission_id = result.stdout.strip()  
 
-            assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == get_version("grz-cli")
+          objects_in_bucket = {obj.key: obj for obj in remote_bucket.objects.all()}  
+          assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"  
 
+          assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == get_version("grz-cli")  # Use your alias  
 
-            # download
-            download_dir = tmpdir_factory.mktemp("submission_download")
-            download_dir_path = Path(download_dir.strpath)
+          # Get the upload date of the metadata file from S3 (from main)  
+          metadata_s3_object = objects_in_bucket[f"{submission_id}/metadata/metadata.json"]  
+          upload_date = metadata_s3_object.last_modified.date()  
 
-            # download encrypted submission
-            download_args = [
-                "download",
-                "--submission-id",
-                submission_id,
-                "--output-dir",
-                str(download_dir_path),
-                "--config-file",
-                temp_s3_config_file_path,
-            ]
-            cli = grzctl.cli.build_cli()
-            result = runner.invoke(cli, download_args, catch_exceptions=False)
+          # download  
+          download_dir = tmpdir_factory.mktemp("submission_download")  
+          download_dir_path = Path(download_dir.strpath)  
 
-            assert result.exit_code == 0, result.output
+          # download encrypted submission  
+          download_args = [  
+              "download",  
+              "--submission-id",  
+              submission_id,  
+              "--output-dir",  
+              str(download_dir_path),  
+              "--config-file",  
+              temp_s3_config_file_path,  
+          ]  
+          cli = grzctl.cli.build_cli()  
+          result = runner.invoke(cli, download_args, catch_exceptions=False)  
 
-        assert are_dir_trees_equal(
-            working_dir_path / "encrypted_files",
-            download_dir_path / "encrypted_files",
-        ), "Encrypted files are different!"
-        assert are_dir_trees_equal(
-            working_dir_path / "metadata",
-            download_dir_path / "metadata",
-        ), "Metadata is different!"
+          assert result.exit_code == 0, result.output  
+
+      assert are_dir_trees_equal(  
+          working_dir_path / "encrypted_files",  
+          download_dir_path / "encrypted_files",  
+      ), "Encrypted files are different!"  
+
+      # The submission date in the downloaded metadata is updated (from main)  
+      with open(download_dir_path / "metadata" / "metadata.json") as f:  
+          downloaded_metadata = json.load(f)  
+
+      assert downloaded_metadata["submission"]["submissionDate"] == upload_date.isoformat()
 
 
 def test_upload_aborts_on_incomplete_encryption(

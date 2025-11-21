@@ -160,7 +160,7 @@
       "meanDepthOfCoverage": 200,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 100,
@@ -176,7 +176,7 @@
       "meanDepthOfCoverage": 200,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 100,
@@ -192,7 +192,7 @@
       "meanDepthOfCoverage": 200,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 100,
@@ -208,7 +208,7 @@
       "meanDepthOfCoverage": 200,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 100,
@@ -224,7 +224,7 @@
       "meanDepthOfCoverage": 100,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 30,
@@ -240,7 +240,7 @@
       "meanDepthOfCoverage": 100,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 30,
@@ -256,7 +256,7 @@
       "meanDepthOfCoverage": 100,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 30,
@@ -272,7 +272,7 @@
       "meanDepthOfCoverage": 30,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 20,
@@ -288,7 +288,7 @@
       "meanDepthOfCoverage": 30,
       "percentBasesAboveQualityThreshold": {
         "qualityThreshold": 20,
-        "percentBasesAbove": 80
+        "percentBasesAbove": 70
       },
       "targetedRegionsAboveMinCoverage": {
         "minCoverage": 20,
