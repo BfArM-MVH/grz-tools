@@ -411,10 +411,3 @@ def working_dir(tmpdir_factory: pytest.TempdirFactory):
 @pytest.fixture
 def working_dir_path(working_dir) -> Path:
     return Path(working_dir.strpath)
-
-@pytest.fixture  
-def remote_bucket_with_version(remote_bucket):  
-    """Remote bucket with version.json pre-uploaded"""  
-    version_file_path = Path("tests/mock_files/version.json")  
-    remote_bucket.upload_file(str(version_file_path), "version.json")  
-    return remote_bucket

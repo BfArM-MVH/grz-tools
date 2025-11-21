@@ -3,6 +3,7 @@ Tests for the Prüfbericht submission functionality.
 """
 
 import importlib.resources
+from unittest import mock
 import json
 import shutil
 
@@ -11,9 +12,10 @@ import grzctl
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 
 from .. import mock_files
+from grz_common.transfer import VersionFile 
+from packaging import version
 
-
-def test_archive(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
+def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
@@ -32,6 +34,13 @@ def test_archive(temp_s3_config_file_path, remote_bucket_with_version, working_d
             json.dump(metadata_json, metadata_file)
             metadata_file.truncate()
 
+    with mock.patch("grz_common.transfer.get_version_info") as mock_version_info:  
+        mock_version_info.return_value = VersionFile(  
+            schema_version=1,  
+            minimal_version=version.Version("1.0.0"),  
+            recommended_version=version.Version("2.0.0")  
+        ) 
+
         args = [
             "archive",
             "--config-file",
@@ -48,12 +57,12 @@ def test_archive(temp_s3_config_file_path, remote_bucket_with_version, working_d
         cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args, catch_exceptions=False)
 
-    uploaded_keys = {o.key for o in remote_bucket_with_version.objects.all()}
+    uploaded_keys = {o.key for o in remote_bucket.objects.all()}
     assert "260914050_2024-07-15_c64603a7/metadata/metadata.json" in uploaded_keys
     assert "260914050_2024-07-15_c64603a7/logs/progress_upload.cjson" in uploaded_keys
     assert "260914050_2024-07-15_c64603a7/files/target_regions.bed.c4gh" in uploaded_keys
 
-    remote_bucket_with_version.download_file(
+    remote_bucket.download_file(
         Key="260914050_2024-07-15_c64603a7/metadata/metadata.json", Filename=tmp_path / "metadata.json"
     )
     with open(tmp_path / "metadata.json") as metadata_file:

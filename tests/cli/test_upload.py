@@ -1,15 +1,17 @@
-import filecmp
-import os
-import shutil
-from importlib.metadata import version
-from pathlib import Path
-from unittest import mock
-
-import grz_cli.cli
-import grzctl.cli
-from click.testing import CliRunner
-from grz_common.progress import EncryptionState, FileProgressLogger
-from grz_common.workers.submission import Submission, SubmissionValidationError
+import filecmp  
+import os  
+import shutil  
+from importlib.metadata import version as get_version  # Add alias here  
+from pathlib import Path  
+from unittest import mock  
+  
+import grz_cli.cli  
+import grzctl.cli  
+from click.testing import CliRunner  
+from grz_common.progress import EncryptionState, FileProgressLogger  
+from grz_common.workers.submission import Submission, SubmissionValidationError  
+from grz_common.transfer import VersionFile   
+from packaging import version
 
 
 def are_dir_trees_equal(dir1, dir2):
@@ -41,7 +43,7 @@ def test_upload_download_submission(
     working_dir_path,
     tmpdir_factory,
     temp_s3_config_file_path,
-    remote_bucket_with_version,
+    remote_bucket,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
@@ -68,66 +70,75 @@ def test_upload_download_submission(
             state=EncryptionState(encryption_successful=True),
         )
 
-    with mock.patch(
-        "grz_common.models.s3.S3Options.__getattr__",
-        lambda self, name: None if name == "endpoint_url" else AttributeError,
-    ):
-        # upload encrypted submission
-        upload_args = [
-            "upload",
-            "--submission-dir",
-            str(working_dir_path),
-            "--config-file",
-            temp_s3_config_file_path,
-        ]
+    # code for the version mock, wrapping both existing mock and test code  
+    with mock.patch("grz_common.transfer.get_version_info") as mock_version_info:  
+        mock_version_info.return_value = VersionFile(  
+            schema_version=1,  
+            minimal_version=version.Version("1.0.0"),  
+            recommended_version=version.Version("2.0.0")  
+        )
 
-        runner = CliRunner()
-        cli = grz_cli.cli.build_cli()
-        result = runner.invoke(cli, upload_args, catch_exceptions=False)
+        with mock.patch(
+            "grz_common.models.s3.S3Options.__getattr__",
+            lambda self, name: None if name == "endpoint_url" else AttributeError,
+        ):
+            # upload encrypted submission
+            upload_args = [
+                "upload",
+                "--submission-dir",
+                str(working_dir_path),
+                "--config-file",
+                temp_s3_config_file_path,
+            ]
 
-        assert result.exit_code == 0, result.output
-        assert len(result.output) != 0, result.stderr
+            runner = CliRunner()
+            cli = grz_cli.cli.build_cli()
+            result = runner.invoke(cli, upload_args, catch_exceptions=False)
 
-        submission_id = result.stdout.strip()
+            assert result.exit_code == 0, result.output
+            assert len(result.output) != 0, result.stderr
 
-        objects_in_bucket = {obj.key: obj for obj in remote_bucket_with_version.objects.all()}
-        assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
+            submission_id = result.stdout.strip()
 
-        assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
+            objects_in_bucket = {obj.key: obj for obj in remote_bucket.objects.all()}
+            assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
 
-        # download
-        download_dir = tmpdir_factory.mktemp("submission_download")
-        download_dir_path = Path(download_dir.strpath)
+            assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == get_version("grz-cli")
 
-        # download encrypted submission
-        download_args = [
-            "download",
-            "--submission-id",
-            submission_id,
-            "--output-dir",
-            str(download_dir_path),
-            "--config-file",
-            temp_s3_config_file_path,
-        ]
-        cli = grzctl.cli.build_cli()
-        result = runner.invoke(cli, download_args, catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
+            # download
+            download_dir = tmpdir_factory.mktemp("submission_download")
+            download_dir_path = Path(download_dir.strpath)
 
-    assert are_dir_trees_equal(
-        working_dir_path / "encrypted_files",
-        download_dir_path / "encrypted_files",
-    ), "Encrypted files are different!"
-    assert are_dir_trees_equal(
-        working_dir_path / "metadata",
-        download_dir_path / "metadata",
-    ), "Metadata is different!"
+            # download encrypted submission
+            download_args = [
+                "download",
+                "--submission-id",
+                submission_id,
+                "--output-dir",
+                str(download_dir_path),
+                "--config-file",
+                temp_s3_config_file_path,
+            ]
+            cli = grzctl.cli.build_cli()
+            result = runner.invoke(cli, download_args, catch_exceptions=False)
+
+            assert result.exit_code == 0, result.output
+
+        assert are_dir_trees_equal(
+            working_dir_path / "encrypted_files",
+            download_dir_path / "encrypted_files",
+        ), "Encrypted files are different!"
+        assert are_dir_trees_equal(
+            working_dir_path / "metadata",
+            download_dir_path / "metadata",
+        ), "Metadata is different!"
 
 
 def test_upload_aborts_on_incomplete_encryption(
     working_dir_path,
     temp_s3_config_file_path,
-    remote_bucket_with_version,
+    remote_bucket,
 ):
     """Verify that the upload command fails if the encryption log marks a file as not successful."""
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -154,42 +165,49 @@ def test_upload_aborts_on_incomplete_encryption(
         state=EncryptionState(encryption_successful=False, errors=["Interrupted"]),
     )
 
-    # Mark the rest as successful
-    for file_path, file_metadata in files_iter:
-        progress_logger.set_state(
-            file_path,
-            file_metadata,
-            state=EncryptionState(encryption_successful=True),
+    with mock.patch("grz_common.transfer.get_version_info") as mock_version_info:  
+        mock_version_info.return_value = VersionFile(  
+            schema_version=1,  
+            minimal_version=version.Version("1.0.0"),  
+            recommended_version=version.Version("2.0.0")  
         )
 
-    # Attempt upload
-    upload_args = [
-        "upload",
-        "--submission-dir",
-        str(working_dir_path),
-        "--config-file",
-        temp_s3_config_file_path,
-    ]
-    runner = CliRunner()
-    cli = grz_cli.cli.build_cli()
-    result = runner.invoke(cli, upload_args, catch_exceptions=True)
+        # Mark the rest as successful
+        for file_path, file_metadata in files_iter:
+            progress_logger.set_state(
+                file_path,
+                file_metadata,
+                state=EncryptionState(encryption_successful=True),
+            )
 
-    assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], SubmissionValidationError)
-    error_message = str(result.exc_info[1])
-    assert "Will not upload" in error_message
-    relative_failed_path = failed_file_path.relative_to(working_dir_path / "files")
-    assert str(relative_failed_path) in error_message
+        # Attempt upload
+        upload_args = [
+            "upload",
+            "--submission-dir",
+            str(working_dir_path),
+            "--config-file",
+            temp_s3_config_file_path,
+        ]
+        runner = CliRunner()
+        cli = grz_cli.cli.build_cli()
+        result = runner.invoke(cli, upload_args, catch_exceptions=True)
 
-    # Ensure it really did fail
-    objects_in_bucket = list(remote_bucket_with_version.objects.all())
-    assert len(objects_in_bucket) == 0, "Upload should not have happened!"
+        assert result.exit_code != 0
+        assert isinstance(result.exc_info[1], SubmissionValidationError)
+        error_message = str(result.exc_info[1])
+        assert "Will not upload" in error_message
+        relative_failed_path = failed_file_path.relative_to(working_dir_path / "files")
+        assert str(relative_failed_path) in error_message
+
+        # Ensure it really did fail
+        objects_in_bucket = list(remote_bucket.objects.all())
+        assert len(objects_in_bucket) == 0, "Upload should not have happened!"
 
 
 def test_upload_aborts_if_encryption_log_missing(
     working_dir_path,
     temp_s3_config_file_path,
-    remote_bucket_with_version,
+    remote_bucket,
 ):
     """Verify that the upload command fails if the encryption log is missing entirely."""
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -198,26 +216,34 @@ def test_upload_aborts_if_encryption_log_missing(
     (working_dir_path / "encrypted_files").mkdir()
     (working_dir_path / "logs").mkdir()
 
-    # Attempt upload
-    upload_args = [
-        "upload",
-        "--submission-dir",
-        str(working_dir_path),
-        "--config-file",
-        temp_s3_config_file_path,
-    ]
-    runner = CliRunner()
-    cli = grz_cli.cli.build_cli()
-    result = runner.invoke(cli, upload_args, catch_exceptions=True)
+    #### Add here ###
+    with mock.patch("grz_common.transfer.get_version_info") as mock_version_info:  
+        mock_version_info.return_value = VersionFile(  
+            schema_version=1,  
+            minimal_version=version.Version("1.0.0"),  
+            recommended_version=version.Version("2.0.0")  
+        )
 
-    assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], SubmissionValidationError)
-    error_message = str(result.exc_info[1])
-    assert "Will not upload" in error_message
+        # Attempt upload
+        upload_args = [
+            "upload",
+            "--submission-dir",
+            str(working_dir_path),
+            "--config-file",
+            temp_s3_config_file_path,
+        ]
+        runner = CliRunner()
+        cli = grz_cli.cli.build_cli()
+        result = runner.invoke(cli, upload_args, catch_exceptions=True)
 
-    # Check if at least one of the files is listed as unencrypted
-    assert "target_regions.bed" in error_message
+        assert result.exit_code != 0
+        assert isinstance(result.exc_info[1], SubmissionValidationError)
+        error_message = str(result.exc_info[1])
+        assert "Will not upload" in error_message
 
-    # Ensure it really did fail
-    objects_in_bucket = list(remote_bucket_with_version.objects.all())
-    assert len(objects_in_bucket) == 0, "Upload should not have happened!"
+        # Check if at least one of the files is listed as unencrypted
+        assert "target_regions.bed" in error_message
+
+        # Ensure it really did fail
+        objects_in_bucket = list(remote_bucket.objects.all())
+        assert len(objects_in_bucket) == 0, "Upload should not have happened!"
