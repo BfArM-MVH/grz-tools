@@ -193,23 +193,46 @@ def get_successful_finalize_inputs(wildcards: Wildcards):
     Conditionally include the QC result marker based on the qc_status wildcard.
     """
     inputs = {
-        "archived_marker": rules.archive.output.marker,
         "pruefbericht_answer": rules.submit_pruefbericht.output.answer,
         "pruefbericht": rules.generate_pruefbericht.output.pruefbericht,
         "clean_results": rules.clean.output.clean_results,
         "db_config_path": cfg_path("config_paths/db")(wildcards),
     }
 
-    # artificial dependencies to keep the decrypt output tempdirs alive across the validate checkpoint boundary
-    # needed to make the workflow robustly re-sumable without having to re-run everything
-    rules_to_protect = ("metadata", "download", "decrypt", "validate", "re_encrypt")
-    for rule_name in rules_to_protect:
-        r = getattr(rules, rule_name)
-        for name, output_file in r.output.items():
-            inputs[f"_{rule_name}_{name}_keepalive"] = output_file
+    archive_marker_path = rules.archive.output.marker.format(**wildcards)
+    is_archived = os.path.exists(archive_marker_path)
 
-    if wildcards.qc_status == "with_qc":
-        inputs["qc_processed_marker"] = rules.process_qc_results.output.marker
+    if is_archived:
+        # if archived, prevent re-running archive logic even if metadata changed
+        inputs["archived_marker"] = ancient(rules.archive.output.marker)
+    else:
+        inputs["archived_marker"] = rules.archive.output.marker
+
+    qc_needed = wildcards.qc_status == "with_qc"
+    is_qced = False
+
+    if qc_needed:
+        # check if the QC processing marker already exists
+        qc_marker_path = rules.process_qc_results.output.marker.format(**wildcards)
+        is_qced = os.path.exists(qc_marker_path)
+
+        if is_qced:
+            # if QC has been done, prevent re-running QC logic
+            inputs["qc_processed_marker"] = ancient(
+                rules.process_qc_results.output.marker
+            )
+        else:
+            inputs["qc_processed_marker"] = rules.process_qc_results.output.marker
+
+    archive_or_qc_todo = (not is_archived) or (qc_needed and not is_qced)
+
+    if archive_or_qc_todo:
+        rules_to_protect = ("metadata", "download", "decrypt", "validate", "re_encrypt")
+        for rule_name in rules_to_protect:
+            r = getattr(rules, rule_name)
+            for name, output_file in r.output.items():
+                inputs[f"_{rule_name}_{name}_keepalive"] = output_file
+
     return inputs
 
 

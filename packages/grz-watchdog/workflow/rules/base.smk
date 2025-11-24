@@ -345,7 +345,7 @@ rule generate_pruefbericht:
     input:
         metadata=rules.metadata.output.metadata,
         validation_flag=rules.validate.output.validation_flag,
-        archived_marker=rules.archive.output.marker,
+        archived_marker=ancient(rules.archive.output.marker),
     output:
         pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
     log:
