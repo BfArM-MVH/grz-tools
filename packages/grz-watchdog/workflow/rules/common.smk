@@ -14,7 +14,7 @@ import yaml
 from grz_cli.commands.validate import validate
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
-from snakemake.io import InputFiles, Wildcards
+from snakemake.io import InputFiles, Wildcards, ancient
 
 cfg_path = lambda dpath: lambda wildcards: (
     lookup(dpath=dpath, within=config)(wildcards)
@@ -161,6 +161,44 @@ def get_validation_state(wildcards):
         return ancient(flag)
 
     return flag
+
+
+def anchor(target_pattern, source):
+    """
+    If the 'target_pattern' file exists, returns 'ancient(source)'.
+    Otherwise, returns 'source'.
+    This prevents Snakemake from checking timestamps if the job is already done.
+    """
+
+    def inner(wildcards):
+        target = target_pattern.format(**wildcards)
+        # Handle dynamic inputs (lambdas/functions) or static strings
+        src = source(wildcards) if callable(source) else source
+
+        if os.path.exists(target):
+            return ancient(src)
+        return src
+
+    return inner
+
+
+def payload(target_pattern, source):
+    """
+    If the 'target_pattern' file exists, returns empty list [] (input not needed).
+    Otherwise, returns 'source'.
+    This prevents Snakemake from erroring on missing temp files if the job is done.
+    """
+
+    def inner(wildcards):
+        target = target_pattern.format(**wildcards)
+
+        if os.path.exists(target):
+            return []
+
+        src = source(wildcards) if callable(source) else source
+        return src
+
+    return inner
 
 
 def get_final_submission_target(wildcards: Wildcards):

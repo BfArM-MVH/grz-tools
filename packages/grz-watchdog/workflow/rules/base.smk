@@ -1,5 +1,4 @@
 import os
-
 from snakemake.io import temp, directory, touch
 
 
@@ -221,16 +220,31 @@ rule decrypt:
         "../scripts/decrypt.sh"
 
 
-rule validate:
+checkpoint validate:
     """
     Validate a decrypted submission.
     """
     input:
-        base_dir=rules.decrypt.output.base_dir,
-        files_dir=rules.decrypt.output.files_dir,
-        decrypt_progress_log=rules.decrypt.output.progress_log,
-        metadata=rules.metadata.output.metadata,
-        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
+        metadata=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
+            rules.metadata.output.metadata,
+        ),
+        base_dir=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
+            rules.decrypt.output.base_dir,
+        ),
+        files_dir=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
+            rules.decrypt.output.files_dir,
+        ),
+        decrypt_progress_log=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
+            rules.decrypt.output.progress_log,
+        ),
+        inbox_config_path=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
+            cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
+        ),
         db_config_path=cfg_path("config_paths/db"),
     output:
         checksum_log=temp(
@@ -250,21 +264,6 @@ rule validate:
     priority: 2
     script:
         "../scripts/validate.sh"
-
-
-checkpoint validation_gate:
-    """
-    Checkpoint that triggers DAG update after validation is complete.
-    """
-    input:
-        validation_flag=get_validation_state,
-    output:
-        marker="<results>/{submitter_id}/{inbox}/{submission_id}/validation_gate.marker",
-    priority: 2
-    shell:
-        """
-        cp {input.validation_flag} {output.marker}
-        """
 
 
 rule consent:
@@ -288,17 +287,38 @@ rule re_encrypt:
     Re-encrypt a submission using the target public key (depending on whether research consent was given).
     """
     input:
-        metadata=rules.metadata.output.metadata,
-        base_dir=rules.decrypt.output.base_dir,
-        files_dir=rules.decrypt.output.files_dir,
-        decrypt_progress_log=rules.decrypt.output.progress_log,
+        metadata=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
+            rules.metadata.output.metadata,
+        ),
+        files_dir=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
+            rules.decrypt.output.files_dir,
+        ),
+        base_dir=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
+            rules.decrypt.output.base_dir,
+        ),
+        decrypt_progress_log=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
+            rules.decrypt.output.progress_log,
+        ),
+        validation_flag=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
+            rules.validate.output.validation_flag,
+        ),
+        validation_checksum_log=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
+            rules.validate.output.checksum_log,
+        ),
+        validation_seq_data_log=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
+            rules.validate.output.seq_data_log,
+        ),
         consent_flag=rules.consent.output.consent_flag,
-        validation_flag=rules.validate.output.validation_flag,
         consented_config_path=cfg_path("config_paths/archive/consented"),
         nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
         db_config_path=cfg_path("config_paths/db"),
-        validation_checksum_log=rules.validate.output.checksum_log,
-        validation_seq_data_log=rules.validate.output.seq_data_log,
     output:
         encrypted_files_dir=temp(
             directory(
@@ -324,8 +344,14 @@ rule archive:
     Archive a submission to the target s3 bucket (depending on whether research consent was given).
     """
     input:
-        metadata=rules.metadata.output.metadata,
-        re_encrypted_files_dir=rules.re_encrypt.output.encrypted_files_dir,
+        metadata=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/archived",
+            rules.metadata.output.metadata,
+        ),
+        re_encrypted_files_dir=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/archived",
+            rules.re_encrypt.output.encrypted_files_dir,
+        ),
         consent_flag=rules.consent.output.consent_flag,
         progress_logs_to_archive=[
             rules.download.output.progress_log,
@@ -357,8 +383,8 @@ rule generate_pruefbericht:
     """
     input:
         metadata=rules.metadata.output.metadata,
-        validation_flag=get_validation_state,
-        archived_marker=ancient(rules.archive.output.marker),
+        validation_flag=rules.validate.output.validation_flag,
+        archived_marker=rules.archive.output.marker,
     output:
         pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
     log:
@@ -472,10 +498,22 @@ rule qc:
     Perform QC on a submission using the QC nextflow pipeline.
     """
     input:
-        base_dir=rules.decrypt.output.base_dir,
-        files_dir=rules.decrypt.output.files_dir,
-        metadata=rules.metadata.output.metadata,
-        validation_flag=get_validation_state,
+        metadata=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/success.marker",
+            rules.metadata.output.metadata,
+        ),
+        base_dir=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/success.marker",
+            rules.decrypt.output.base_dir,
+        ),
+        files_dir=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/success.marker",
+            rules.decrypt.output.files_dir,
+        ),
+        validation_flag=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/qc/success.marker",
+            rules.validate.output.validation_flag,
+        ),
         db_config_path=cfg_path("config_paths/db"),
         workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
         pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
@@ -540,12 +578,30 @@ rule clean:
     submission_id multiple times.
     """
     input:
-        ready_marker=get_cleanup_prerequisite,
-        validation_flag=get_validation_state,
-        validation_errors=rules.validate.output.validation_errors,
-        consent_flag=rules.consent.output.consent_flag,
-        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
-        db_config_path=cfg_path("config_paths/db"),
+        db_config_path=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
+            cfg_path("config_paths/db"),
+        ),
+        ready_marker=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
+            get_cleanup_prerequisite,
+        ),
+        validation_flag=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
+            rules.validate.output.validation_flag,
+        ),
+        validation_errors=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
+            rules.validate.output.validation_errors,
+        ),
+        consent_flag=payload(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
+            rules.consent.output.consent_flag,
+        ),
+        inbox_config_path=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
+            cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
+        ),
     output:
         clean_results="<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
     benchmark:
@@ -558,23 +614,6 @@ rule clean:
     priority: 2
     script:
         "../scripts/clean.sh"
-
-
-# rule taetigkeitsbericht:
-#     """
-#     Update the Taetigkeitsbericht with information from the submission DB.
-#     """
-#     output:
-#         taetigkeitsbericht="<results>/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.pdf",
-#     params:
-#         db_config_path=cfg_path("config_paths/db"),
-#     log:
-#         "<logs>/{submitter_id}/{inbox}/{submission_id}/taetigkeitsbericht.log",
-#     shell:
-#         """
-#         # (generate taetigkeitsbericht using submission DB via {input.db_config_path}) 2> {log}
-#         echo "TODO" > {output.taetigkeitsbericht} 2> {log}
-#         """
 
 
 rule finalize_fail:
