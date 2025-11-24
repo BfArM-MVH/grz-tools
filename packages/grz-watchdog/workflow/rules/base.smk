@@ -344,7 +344,7 @@ rule generate_pruefbericht:
     """
     input:
         metadata=rules.metadata.output.metadata,
-        validation_flag=rules.validate.output.validation_flag,
+        validation_flag=get_validation_state,
         archived_marker=ancient(rules.archive.output.marker),
     output:
         pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
@@ -462,7 +462,7 @@ rule qc:
         base_dir=rules.decrypt.output.base_dir,
         files_dir=rules.decrypt.output.files_dir,
         metadata=rules.metadata.output.metadata,
-        validation_flag=rules.validate.output.validation_flag,
+        validation_flag=get_validation_state,
         db_config_path=cfg_path("config_paths/db"),
         workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
         pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
@@ -528,7 +528,7 @@ rule clean:
     """
     input:
         ready_marker=get_cleanup_prerequisite,
-        validation_flag=rules.validate.output.validation_flag,
+        validation_flag=get_validation_state,
         validation_errors=rules.validate.output.validation_errors,
         consent_flag=rules.consent.output.consent_flag,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),

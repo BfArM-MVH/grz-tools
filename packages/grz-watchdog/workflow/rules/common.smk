@@ -151,15 +151,33 @@ def should_run_qc(
     return current_index_in_block >= block - 1
 
 
-def get_final_submission_target(wildcards: Wildcards):
-    validation_flag_file = checkpoints.validate.get(
-        submitter_id=wildcards.submitter_id,
-        inbox=wildcards.inbox,
-        submission_id=wildcards.submission_id,
-    ).output.validation_flag
+def get_validation_state(wildcards):
+    """
+    If validation is complete (i.e., flag exists), prevent Snakemake from looking for missing upstream (temp) files.
+    """
+    flag = rules.validate.output.validation_flag.format(**wildcards)
 
-    with open(validation_flag_file) as f:
-        is_valid = f.read().strip() == "true"
+    if os.path.exists(flag):
+        return ancient(flag)
+
+    return flag
+
+
+def get_final_submission_target(wildcards: Wildcards):
+    flag_path = rules.validate.output.validation_flag.format(**wildcards)
+
+    if os.path.exists(flag_path):
+        with open(flag_path) as f:
+            is_valid = f.read().strip() == "true"
+    else:
+        # only ask Snakemake to evaluate the checkpoint if the file is missing
+        out = checkpoints.validate.get(
+            submitter_id=wildcards.submitter_id,
+            inbox=wildcards.inbox,
+            submission_id=wildcards.submission_id,
+        ).output
+        with open(out.validation_flag) as f:
+            is_valid = f.read().strip() == "true"
 
     if not is_valid:
         return rules.finalize_fail.output.target.format(
