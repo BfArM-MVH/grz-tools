@@ -221,11 +221,9 @@ rule decrypt:
         "../scripts/decrypt.sh"
 
 
-checkpoint validate:
+rule validate:
     """
     Validate a decrypted submission.
-
-    This is a checkpoint because the downstream workflow (success path vs. failure path) depends on its output.
     """
     input:
         base_dir=rules.decrypt.output.base_dir,
@@ -252,6 +250,21 @@ checkpoint validate:
     priority: 2
     script:
         "../scripts/validate.sh"
+
+
+checkpoint validation_gate:
+    """
+    Checkpoint that triggers DAG update after validation is complete.
+    """
+    input:
+        validation_flag=get_validation_state,
+    output:
+        marker="<results>/{submitter_id}/{inbox}/{submission_id}/validation_gate.marker",
+    priority: 2
+    shell:
+        """
+        cp {input.validation_flag} {output.marker}
+        """
 
 
 rule consent:
