@@ -36,6 +36,12 @@ with open(log_stdout, "w") as f_out, open(log_stderr, "w") as f_err:
     if s3_state != "complete":
         raise RuntimeError(f"Submission '{submission_id}' is not ready for processing. S3 status is '{s3_state}'.")
 
+    db_state: str = submission.get("database_state")
+    print(f"Found database state: '{db_state}'", file=f_out)
+    if not db_state.casefold() in {"missing", "uploaded"}:
+        print(f"Submission '{submission_id}' already registered, skipping.", file=f_out)
+        sys.exit(0)
+
     try:
         print(f"Registering submission '{submission_id}' in the database...", file=f_out)
         add_cmd = ["grzctl", "db", "--config-file", db_config, "submission", "add", submission_id]
