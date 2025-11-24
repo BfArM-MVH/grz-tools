@@ -36,7 +36,7 @@ with open(log_stdout, "w") as f_out, open(log_stderr, "w") as f_err:
     if s3_state != "complete":
         raise RuntimeError(f"Submission '{submission_id}' is not ready for processing. S3 status is '{s3_state}'.")
 
-    db_state: str = submission.get("database_state")
+    db_state: str = submission.get("database_state", "missing")
     print(f"Found database state: '{db_state}'", file=f_out)
     if not db_state.casefold() in {"missing", "uploaded"}:
         print(f"Submission '{submission_id}' already registered, skipping.", file=f_out)
