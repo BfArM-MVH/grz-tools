@@ -96,11 +96,11 @@ def get_cleanup_prerequisite(wildcards: Wildcards):
     - If validation was successful, it depends on the downstream QC/reporting rules.
     - If validation failed, it depends directly on the validation flag.
     """
-    validation_flag_file = checkpoints.validation_gate.get(
+    validation_flag_file = checkpoints.validate.get(
         submitter_id=wildcards.submitter_id,
         inbox=wildcards.inbox,
         submission_id=wildcards.submission_id,
-    ).output.marker
+    ).output.validation_flag
 
     with open(validation_flag_file) as f:
         is_valid = f.read().strip() == "true"
@@ -209,12 +209,12 @@ def get_final_submission_target(wildcards: Wildcards):
             is_valid = f.read().strip() == "true"
     else:
         # only ask Snakemake to evaluate the checkpoint if the file is missing
-        out = checkpoints.validation_gate.get(
+        out = checkpoints.validate.get(
             submitter_id=wildcards.submitter_id,
             inbox=wildcards.inbox,
             submission_id=wildcards.submission_id,
         ).output
-        with open(out.marker) as f:
+        with open(out.validation_flag) as f:
             is_valid = f.read().strip() == "true"
 
     if not is_valid:
