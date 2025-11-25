@@ -331,11 +331,13 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
                 "number_of_deletions",
             ]
         )
-        for data_node_id, submitter_id in sorted(node_submitter_id_combos):
-            if data_node_id is None:
-                raise ValueError("At least one submission for the reporting quarter has a null data_node_id")
-            if submitter_id is None:
-                raise ValueError("At least one submission for the reporting quarter has a null submitter_id")
+        # skip over combos with no recorded submitter or data node ID
+        for data_node_id, submitter_id in sorted(
+            filter(lambda p: all(map(lambda i: i is not None, p)), node_submitter_id_combos)
+        ):
+            if (data_node_id is None) or (submitter_id is None):
+                # needed for type checking
+                raise ValueError("Encountered null data node ID or submitter ID after they should have been filtered")
 
             writer.writerow(
                 [
