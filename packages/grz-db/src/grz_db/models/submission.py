@@ -292,11 +292,11 @@ class Donor(SQLModel, table=True):
 
     submission_id: str = Field(foreign_key="submissions.id", primary_key=True)
     pseudonym: str = Field(primary_key=True)
-    # use values_callable so enum value is stored instead of name.
-    # SQLite stores string of value instead of name because it doesn't have
-    # native Enum support, so this keeps things consistent with other SQL
-    # server implementations.
-    relation: Relation = Field(sa_column=Column(Enum(Relation, values_callable=lambda e: [x.value for x in e])))
+    # use values_callable so enum name is explicitly stored across all
+    # dialects. SQLite stores string of member name without any enforcement on
+    # values because it doesn't have native Enum support, so this keeps things
+    # consistent with other SQL server implementations.
+    relation: Relation = Field(sa_column=Column(Enum(Relation, values_callable=lambda e: [x.name for x in e])))
     library_types: set[LibraryType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     sequence_types: set[SequenceType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
     sequence_subtypes: set[SequenceSubtype] = Field(sa_column=Column(SemicolonSeparatedStringSet))
