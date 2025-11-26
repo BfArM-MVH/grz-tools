@@ -1,4 +1,4 @@
-FROM ghcr.io/prefix-dev/pixi:0.58.0 AS builder
+FROM ghcr.io/prefix-dev/pixi:0.59.0 AS builder
 
 RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
 
