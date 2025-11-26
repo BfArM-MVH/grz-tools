@@ -174,3 +174,7 @@ pixi run daemon --configfile /path/to/watchdog/config.yaml
 This will constantly monitor the configured inboxes and check for new submissions and sync them to the database.
 Then, submissions available for processing (determined by their state in the database) are pushed to the job queue
 automatically.
+
+## Running with different executors
+Because `grz-watchdog` is a snakemake workflow, you can choose from any of the [available executor plugins](https://snakemake.github.io/snakemake-plugin-catalog/index.html), e.g., `slurm` or `kubernetes`. ([Or write your own](https://github.com/snakemake/snakemake-interface-executor-plugins))
+For example, to use slurm, additionally install `snakemake-executor-plugin-slurm`, then enable `--executor slurm` on the commandline ad-hoc or in your snakemake profile. You will likely also want to specify `--jobs N` to specify the number of jobs to be run in parallel.
