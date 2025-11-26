@@ -40,7 +40,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "relation",
-            sa.Enum("mother", "father", "brother", "sister", "child", "index", "other", name="relation"),
+            sa.Enum("mother", "father", "brother", "sister", "child", "index_", "other", name="relation"),
             nullable=False,
         ),
         sa.Column("library_types", AutoString(), nullable=False),
