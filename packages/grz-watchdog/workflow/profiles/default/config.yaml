@@ -1,3 +1,7 @@
 cores: all
 printshellcmds: true
+rerun-triggers:
+  - input
+  - mtime
+  - params
 # note absence of sdm: conda, expected to run from within pixi env with everything pre-installed
