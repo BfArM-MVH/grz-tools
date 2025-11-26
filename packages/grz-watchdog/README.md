@@ -30,6 +30,7 @@ GRZ_WATCHDOG_SNAKEMAKE_PROFILE=/path/to/your/custom/snakemake/profile
 
 Setting `GRZ_WATCHDOG_WORKDIR` is strongly recommended, otherwise the default workdir is relative to the project
 directory of grz-watchdog, i.e., `grz-watchdog/workdir`.
+Note that `GRZ_WATCHDOG_SNAKEMAKE_PROFILE` isn't respected properly at the moment, please supply `--configfile ${GRZ_WATCHDOG_SNAKEMAKE_PROFILE}` to your invocations for the time being.
 
 Example grz-watchdog configuration (refer to schema at `workflow/schemas/config.schema.yaml` for details):
 
@@ -48,7 +49,7 @@ estimates: # Estimates of certain properties of grz-watchdog and its components
     archive: 200
     qc: 10
 
-on-failed-validation: "cleanup"  # Action to take on failed validation.
+on-failed-validation: "do-nothing"  # Action to take on failed validation. "do-nothing" or "cleanup"
 auto-cleanup: "inbox"  # The auto-cleanup strategy. Note that storage is automatically cleaned, most outputs are marked as temp. To circumvent that, pass `--notemp` to snakemake (and occasionally perform `--delete-temp-output`) 
 
 handlers:
@@ -82,8 +83,14 @@ qc:
     enabled: false  # Whether automatic qc selection is enabled or not.
     target_percentage: 2.0  # Target percentage of submissions to run QC on per LE per month.
     salt: 鹽  # Salt for random seed
+  prepare-qc:
+    mode: download  # download pre-built indices (or build yourself)
   run-qc:
     extra: "" # extra args to GRZ_QC_Workflow nextflow invocation
+    configs:
+      - "/path/to/configs/nextflow.cfg"
+    profiles:
+      - conda  # or docker or …
 ```
 
 ### QC references
@@ -122,7 +129,7 @@ That means you can easily:
 - use custom loggers,
 - enable `--keep-going`
 - enable `--rerun-incomplete`,
-- control how temp files are handled,
+- control how temp files are handled (`--notemp`, `--delete-temp-output`),
 - … etc …
 
 ### Processing a specific submission ID
@@ -154,7 +161,7 @@ pixi run process-batch --configfile /path/to/watchdog/config.yaml
 ```
 
 (will be executed within `$GRZ_WATCHDOG_WORKDIR` by default; can be overwritten by appending
-`--directory /some/other/path` or re-defining `$$GRZ_WATCHDOG_WORKDIR`).
+`--directory /some/other/path` or re-defining `$GRZ_WATCHDOG_WORKDIR`).
 
 ### Daemon Mode
 
