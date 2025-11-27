@@ -245,8 +245,13 @@ class SearchResultsDataTable(DataTable):
             submissions = session.exec(statement).all()
         logger.debug("Populating search table from the following statement: '%s'", str(statement))
         for submission in submissions:
-            latest_state = max(submission.states, key=lambda st: st.timestamp)
-            self.add_row(submission.id, submission.pseudonym, latest_state.state, latest_state.timestamp)
+            latest_state = submission.get_latest_state()
+            self.add_row(
+                submission.id,
+                submission.pseudonym,
+                latest_state.state if latest_state else None,
+                latest_state.timestamp if latest_state else None,
+            )
 
         self.loading = False
 
