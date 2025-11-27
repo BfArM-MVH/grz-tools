@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.1.0...grz-db-v1.2.0) (2025-11-27)
+
+
+### Features
+
+* **grz-db,grzctl:** add PostgreSQL support ([#459](https://github.com/BfArM-MVH/grz-tools/issues/459)) ([9c0f941](https://github.com/BfArM-MVH/grz-tools/commit/9c0f941d156d19305d1603d65793f1a7dfda4756))
+
+
+### Bug Fixes
+
+* **grz-db:** fix relation SQL Enum values ([#465](https://github.com/BfArM-MVH/grz-tools/issues/465)) ([8bb7330](https://github.com/BfArM-MVH/grz-tools/commit/8bb733001b50df6d645d21d252dad91917afebf1))
+
 ## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.0.1...grz-db-v1.1.0) (2025-10-23)
 
 
