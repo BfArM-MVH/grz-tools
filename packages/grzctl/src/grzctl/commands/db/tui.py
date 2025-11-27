@@ -249,8 +249,8 @@ class SearchResultsDataTable(DataTable):
             self.add_row(
                 submission.id,
                 submission.pseudonym,
-                latest_state.state if latest_state else None,
-                latest_state.timestamp if latest_state else None,
+                latest_state.state if latest_state else rich.text.Text("missing", style="italic yellow"),
+                latest_state.timestamp if latest_state else rich.text.Text("missing", style="italic yellow"),
             )
 
         self.loading = False
