@@ -14,6 +14,8 @@ rule init_db:
         stdout="<logs>/db/init.stdout.log",
         stderr="<logs>/db/init.stderr.log",
     priority: 2
+    resources:
+        db_handles=1,
     script:
         "../scripts/init_db.sh"
 
@@ -78,6 +80,8 @@ rule check_and_register:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stderr.log",
     priority: 2
+    resources:
+        db_handles=1,
     script:
         "../scripts/check_and_register.py"
 
@@ -173,6 +177,7 @@ rule download:
     resources:
         disk=estimate_download_size,
         runtime=estimate_download_runtime,
+        db_handles=1,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
@@ -212,6 +217,7 @@ rule decrypt:
     resources:
         disk=estimate_decrypt_size,
         runtime=estimate_decrypt_runtime,
+        db_handles=1,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
@@ -261,6 +267,7 @@ checkpoint validate:
     threads: 4
     resources:
         runtime=estimate_validate_runtime,
+        db_handles=1,
     priority: 2
     script:
         "../scripts/validate.sh"
@@ -331,6 +338,7 @@ rule re_encrypt:
     resources:
         disk=estimate_re_encrypt_size,
         runtime=estimate_encrypt_runtime,
+        db_handles=1,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
@@ -369,6 +377,7 @@ rule archive:
         "<benchmarks>/archive/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     resources:
         runtime=estimate_archive_runtime,
+        db_handles=1,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
@@ -415,6 +424,8 @@ rule submit_pruefbericht:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",
     priority: 2
+    resources:
+        db_handles=1,
     script:
         "../scripts/submit_pruefbericht.sh"
 
@@ -539,6 +550,7 @@ rule qc:
         mem=estimate_qc_memory,
         disk=estimate_qc_disk,
         tmpdir=get_nextflow_tmpdir,
+        db_handles=1,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
@@ -612,6 +624,8 @@ rule clean:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stderr.log",
     priority: 2
+    resources:
+        db_handles=1,
     script:
         "../scripts/clean.sh"
 
@@ -630,6 +644,8 @@ rule finalize_fail:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_fail/{qc_status}.stderr.log",
     priority: 1
+    resources:
+        db_handles=1,
     shell:
         """
         (
@@ -655,6 +671,8 @@ rule finalize_success:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/finalize_success/{qc_status}.stderr.log",
     priority: 1
+    resources:
+        db_handles=1,
     shell:
         """
         (
