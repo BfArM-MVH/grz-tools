@@ -30,8 +30,6 @@ if [[ "$mode" == "none" ]]; then
 	exit 0
 fi
 
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaning >"$log_stdout" 2>"$log_stderr"
-
 echo "Auto-cleanup mode: '${mode}'" >>"$log_stdout"
 
 details=""
