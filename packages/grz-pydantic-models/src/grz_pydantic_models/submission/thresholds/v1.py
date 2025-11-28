@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from ...common import StrictBaseModel
 

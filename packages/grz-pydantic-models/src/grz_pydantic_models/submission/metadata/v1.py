@@ -11,7 +11,7 @@ from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Self
+from typing import Annotated, Self
 
 from pydantic import (
     AfterValidator,
