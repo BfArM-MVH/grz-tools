@@ -1,0 +1,36 @@
+[workspace]
+authors = ["Travis Wrightsman <travis.wrightsman@uni-tuebingen.de>", "Till Hartmann <till.hartmann@bih-charite.de>"]
+channels = ["conda-forge", "bioconda"]
+name = "grz-watchdog"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+process-single = { cmd = "bash ./container_utils/scripts/process-single" }
+process-batch = { cmd = "bash ./container_utils/scripts/process-batch" }
+daemon = { cmd = "bash ./container_utils/scripts/daemon" }
+test = { cmd = "pytest" }
+
+[dependencies]
+snakemake = ">=9.13.2,<10"
+snakefmt = ">=0.11.2,<0.12"
+#snakemake-storage-plugin-s3 = ">=0.3.6,<0.4"
+#snakemake-executor-plugin-slurm = ">=1.8.0,<2"
+conda = ">=25.9.0,<26"
+git = ">=2.51.0,<3"
+jq = ">=1.8.1,<2"
+ripgrep = ">=14.1.1,<15"
+nextflow = ">=25.4.8,<26"
+s5cmd = ">=2.3.0,<3"
+minio-client = ">=2025.8.13.8.35.41,<2026"
+sqlite = ">=3.50.4,<4"
+pytest = ">=8.4.2,<9"
+requests = ">=2.32.5,<3"
+coin-or-cbc = ">=2.10.12,<3"
+
+[pypi-dependencies]
+grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
+grz-common = { path = "../grz-common", editable = true }
+grz-db = { path = "../grz-db", editable = true }
+grz-cli = { path = "../grz-cli", editable = true }
+grzctl = { path = "../grzctl", editable = true }

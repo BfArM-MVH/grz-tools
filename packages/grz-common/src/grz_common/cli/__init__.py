@@ -34,8 +34,56 @@ submission_dir = click.option(
     "--submission-dir",
     metavar="PATH",
     type=DIR_R_E,
-    required=True,
-    help="Path to the submission directory containing 'metadata/', 'files/', 'encrypted_files/' and 'logs/' directories",
+    required=False,
+    help="Base directory for all submission components. Mutually exclusive with explicit path options.",
+)
+
+metadata_dir = click.option(
+    "--metadata-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing 'metadata.json'.",
+)
+
+files_dir = click.option(
+    "--files-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing the unencrypted data files.",
+)
+
+encrypted_files_dir = click.option(
+    "--encrypted-files-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing the 'encrypted_files/'.",
+)
+
+logs_dir = click.option(
+    "--logs-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing the log files.",
+)
+
+output_files_dir = click.option(
+    "--output-files-dir",
+    metavar="PATH",
+    type=DIR_RW_C,
+    required=False,
+    help="Output directory where the 'files/' subdirectory will be created.",
+)
+
+output_encrypted_files_dir = click.option(
+    "--output-encrypted-files-dir",
+    metavar="PATH",
+    type=DIR_RW_C,
+    required=False,
+    help="Output directory where the 'encrypted_files/' subdirectory will be created.",
 )
 
 config_file = click.option(

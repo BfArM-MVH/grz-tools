@@ -579,7 +579,7 @@ requires-dist = [
     { name = "pysam", specifier = "==0.23.*" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "requests", specifier = ">=2.32.3,<3" },
-    { name = "rich", specifier = "==13.*" },
+    { name = "rich", specifier = ">=13.0.0,<15" },
     { name = "tqdm", specifier = ">=4.66.5,<5" },
 ]
 
@@ -621,7 +621,7 @@ requires-dist = [
     { name = "pysam", specifier = "==0.23.*" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "requests", specifier = ">=2.32.3,<3" },
-    { name = "rich", specifier = "==13.*" },
+    { name = "rich", specifier = ">=13.0.0,<15" },
     { name = "tqdm", specifier = ">=4.66.5,<5" },
 ]
 
@@ -832,7 +832,7 @@ requires-dist = [
     { name = "pysam", specifier = "==0.23.*" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "requests", specifier = ">=2.32.3,<3" },
-    { name = "rich", specifier = "==13.*" },
+    { name = "rich", specifier = ">=13.0.0,<15" },
     { name = "textual", specifier = "~=5.3" },
     { name = "tqdm", specifier = ">=4.66.5,<5" },
 ]
