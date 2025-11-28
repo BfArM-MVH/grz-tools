@@ -750,7 +750,7 @@ class SubmissionDb:
             qcing_state = sa.orm.aliased(SubmissionStateLog, name="qcing_state")
 
             stmt = (
-                select(Submission, qcing_state.state)
+                select(Submission, qcing_state.state, uploaded_state.timestamp)
                 .join(uploaded_state, Submission.id == uploaded_state.submission_id)  # type: ignore[arg-type]
                 .join(validated_state, Submission.id == validated_state.submission_id)  # type: ignore[arg-type]
                 .outerjoin(
@@ -776,7 +776,7 @@ class SubmissionDb:
             qcing_this_month: int = 0
             last_qcing_index: int | None = None
 
-            for i, (_submission, qcing_state_value) in enumerate(query_results):
+            for i, (_submission, qcing_state_value, _timestamp) in enumerate(query_results):
                 if qcing_state_value is not None:
                     qcing_this_month += 1
                     last_qcing_index = i
