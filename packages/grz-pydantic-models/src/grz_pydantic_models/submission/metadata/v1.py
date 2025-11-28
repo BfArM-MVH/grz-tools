@@ -1308,8 +1308,8 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         thresholds = threshold_definitions.get(key)
         if thresholds is None:
-            allowed_combinations = sorted(list(threshold_definitions.keys()))
-            allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations])
+            allowed_combinations_list = sorted(list(threshold_definitions.keys()))
+            allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations_list])
             names = (
                 "submission.genomicStudySubtype",
                 "labData.libraryType",
@@ -1326,7 +1326,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 f"Skipping threshold validation."
             )
 
-        return threshold_definitions.get(key)
+        return thresholds
 
     def get_thresholds(self, on_error: str = "warn") -> dict[tuple[str, str], thresholds_model.Thresholds]:
         """
@@ -1447,7 +1447,10 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: thresholds_
             )
 
 
-type ThresholdsDict = dict[tuple[str, str, str, bool], thresholds_model.Thresholds]
+ThresholdsDict = dict[
+    tuple[GenomicStudySubtype, LibraryType, SequenceSubtype, bool],
+    thresholds_model.Thresholds,
+]
 
 
 class _ThresholdEntry(StrictBaseModel):
@@ -1463,23 +1466,23 @@ class _ThresholdEntry(StrictBaseModel):
 
 @cache
 def load_thresholds() -> ThresholdsDict:
-    threshold_definitions_raw = json.load(
+    threshold_definitions_json = json.load(
         files("grz_pydantic_models").joinpath("resources", "thresholds.json").open("r", encoding="utf-8")
     )
     try:
-        threshold_definitions_raw: list[_ThresholdEntry] = [
-            _ThresholdEntry.model_validate(item) for item in threshold_definitions_raw
+        threshold_definitions: list[_ThresholdEntry] = [
+            _ThresholdEntry.model_validate(item) for item in threshold_definitions_json
         ]
     except ValidationError as err:
         raise RuntimeError("Invalid threshold definitions JSON") from err
 
     threshold_definitions_dict = {
         (d.genomic_study_subtype, d.library_type, d.sequence_subtype, False): d.thresholds
-        for d in threshold_definitions_raw
+        for d in threshold_definitions
     }
-    for d in threshold_definitions_raw:
+    # add thresholds for oncomine panels
+    for d in threshold_definitions:
         if d.library_type == LibraryType.panel:
-            # add thresholds for oncomine panels
             thresholds = d.thresholds.model_copy(deep=True)
             # we have different thresholds_model.percentBasesAboveQualityThreshold for oncomine panels:
             # percentage of bases ≥ Q20 should be at least 70%
