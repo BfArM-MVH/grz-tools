@@ -528,7 +528,6 @@ rule qc:
         db_config_path=cfg_path("config_paths/db"),
         workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
         pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
-        launch_dir="<resources>/shared_qc_launchdir",
         reference_path=get_qc_workflow_references_directory(),
         custom_configs=lambda wc: config.get("qc", {})
         .get("run-qc", {})

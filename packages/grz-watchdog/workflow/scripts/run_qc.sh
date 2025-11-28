@@ -21,9 +21,10 @@ db_config="${snakemake_input[db_config_path]}"
 log_stdout=$(realpath "${snakemake_log[stdout]}")
 log_stderr=$(realpath "${snakemake_log[stderr]}")
 
-launch_dir=$(realpath "${snakemake_input[launch_dir]}")
 work_dir=$(realpath "${snakemake_output[work_dir]}")
 out_dir=$(realpath "${snakemake_output[out_dir]}")
+launch_dir="$(dirname -- "$work_dir")"
+mkdir -p "${launch_dir}"
 
 pipeline=$(realpath "${snakemake_input[pipeline]}")
 reference_path=$(realpath "${snakemake_input[reference_path]}")
