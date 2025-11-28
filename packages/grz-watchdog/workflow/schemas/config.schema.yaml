@@ -113,7 +113,7 @@ properties:
     properties:
       revision:
         type: string
-        pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        pattern: "^(v[0-9]+\\.[0-9]+\\.[0-9]+|[0-9a-f]+)$"
         description: "Revision of the GRZ_QC_Workflow to use."
       selection_strategy:
         type: object

@@ -443,7 +443,10 @@ rule setup_qc_workflow:
     shell:
         """
         (
-          git clone --branch {params.revision} --depth 1 https://github.com/BfArM-MVH/GRZ_QC_Workflow.git {output.workflow_dir}
+          git clone https://github.com/BfArM-MVH/GRZ_QC_Workflow.git {output.workflow_dir}
+          pushd {output.workflow_dir}
+          git reset --hard {params.revision}
+          popd
         ) >{log.stdout} 2> {log.stderr}
         """
 
