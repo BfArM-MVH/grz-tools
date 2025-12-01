@@ -1402,7 +1402,7 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: thresholds_
             # TODO also print out genomic study subtype because that determines thresholds, but is defined at submission level
             # this should error regardless of relation because it should match the official threshold
             raise ValueError(
-                f"Expected minimumQuality '{minimum_quality_t}' for library type '{lab_datum.library_type}'"
+                f"Expected minimumQuality '{minimum_quality_t}' for library type '{lab_datum.library_type}' "
                 f"and sequence subtype '{lab_datum.sequence_subtype}'. Got '{minimum_quality_v}' instead."
             )
         percent_t = percent_bases_above_quality_threshold_t.percent_bases_above
