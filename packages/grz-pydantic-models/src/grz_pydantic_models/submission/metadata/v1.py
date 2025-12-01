@@ -1302,7 +1302,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         :param donor: The donor for which to determine the thresholds.
         :param lab_datum: The lab datum for which to determine the thresholds.
-        :raise ValueError: If no thresholds are found for the given combination.
+        :raise MissingThresholdsException: If no thresholds are found for the given combination.
         :return: The thresholds for the given donor and lab datum.
         """
         threshold_definitions = _load_thresholds()
@@ -1324,7 +1324,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
             info = dict(zip(names, key, strict=True))
 
-            raise ValueError(
+            raise MissingThresholdsException(
                 f"No thresholds for the specified combination {info} found (donor {donor.donor_pseudonym})!\n"
                 f"Valid combinations:\n{allowed_combinations}.\n"
                 f"See https://www.bfarm.de/SharedDocs/Downloads/DE/Forschung/modellvorhaben-genomsequenzierung/Qs-durch-GRZ.pdf?__blob=publicationFile for more details.\n"
