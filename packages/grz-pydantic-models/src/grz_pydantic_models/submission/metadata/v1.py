@@ -1300,7 +1300,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         """
         Determine the thresholds for a given donor and lab datum.
         """
-        threshold_definitions = load_thresholds()
+        threshold_definitions = _load_thresholds()
 
         genomic_study_subtype = self.submission.genomic_study_subtype
         is_oncomine_panel = "oncomine" in lab_datum.kit_name.lower()
@@ -1446,8 +1446,9 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: thresholds_
                 f"{fraction_above_v} < {fraction_above_t}"
             )
 
-
-ThresholdsDict = dict[
+# Dictionary type for thresholds lookup:
+# Keys are (GenomicStudySubtype, LibraryType, SequenceSubtype, is_oncomine_panel)
+_ThresholdsDict = dict[
     tuple[GenomicStudySubtype, LibraryType, SequenceSubtype, bool],
     thresholds_model.Thresholds,
 ]
@@ -1465,7 +1466,7 @@ class _ThresholdEntry(StrictBaseModel):
 
 
 @cache
-def load_thresholds() -> ThresholdsDict:
+def _load_thresholds() -> _ThresholdsDict:
     threshold_definitions_json = json.load(
         files("grz_pydantic_models").joinpath("resources", "thresholds.json").open("r", encoding="utf-8")
     )
