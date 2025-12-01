@@ -1298,7 +1298,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         lab_datum: LabDatum,
     ) -> thresholds_model.Thresholds:
         """
-        Determine the thresholds for a given combination of genomic study subtype, library type and sequence subtype.
+        Determine the thresholds for a given donor and lab datum.
         """
         threshold_definitions = load_thresholds()
 
