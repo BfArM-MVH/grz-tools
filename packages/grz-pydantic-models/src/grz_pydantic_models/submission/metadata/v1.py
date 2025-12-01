@@ -1479,7 +1479,7 @@ def _load_thresholds() -> _ThresholdsDict:
             )
 
             # add new entry for oncomine panels
-            threshold_definitions_dict[(d.genomic_study_subtype, d.library_type, d.sequence_subtype, False)] = (
+            threshold_definitions_dict[(d.genomic_study_subtype, d.library_type, d.sequence_subtype, True)] = (
                 thresholds
             )
 
