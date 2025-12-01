@@ -1328,27 +1328,17 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         return thresholds
 
-    def get_thresholds(self, on_error: str = "warn") -> dict[tuple[str, str], thresholds_model.Thresholds]:
+    def get_thresholds(self) -> dict[tuple[str, str], thresholds_model.Thresholds]:
         """
         Get the thresholds for all lab data in the submission.
 
-        :param on_error: What to do if no thresholds are found for a given lab datum. One of "warn", "error", or "ignore".
         :return: A dictionary mapping (donor pseudonym, lab data name) to the thresholds.
         """
         thresholds_dict = {}
         for donor in self.donors:
             for lab_datum in donor.lab_data:
-                try:
-                    thresholds = self.determine_thresholds_for(donor, lab_datum)
-                    thresholds_dict[(donor.donor_pseudonym, lab_datum.lab_data_name)] = thresholds
-                except ValueError as e:
-                    match on_error:
-                        case "warn":
-                            log.warning(e.args[0])
-                        case "error":
-                            raise e
-                        case _:
-                            pass
+                thresholds = self.determine_thresholds_for(donor, lab_datum)
+                thresholds_dict[(donor.donor_pseudonym, lab_datum.lab_data_name)] = thresholds
 
         return thresholds_dict
 
@@ -1359,13 +1349,9 @@ class GrzSubmissionMetadata(StrictBaseModel):
         """
         for donor in self.donors:
             for lab_datum in donor.lab_data:
-                try:
-                    thresholds = self.determine_thresholds_for(donor, lab_datum)
+                thresholds = self.determine_thresholds_for(donor, lab_datum)
 
-                    _check_thresholds(donor, lab_datum, thresholds)
-                except ValueError as e:
-                    log.warning(e.args[0])
-
+                _check_thresholds(donor, lab_datum, thresholds)
         return self
 
     @model_validator(mode="after")
