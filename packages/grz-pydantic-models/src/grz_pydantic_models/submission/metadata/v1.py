@@ -1299,6 +1299,11 @@ class GrzSubmissionMetadata(StrictBaseModel):
     ) -> thresholds_model.Thresholds:
         """
         Determine the thresholds for a given donor and lab datum.
+
+        :param donor: The donor for which to determine the thresholds.
+        :param lab_datum: The lab datum for which to determine the thresholds.
+        :raise ValueError: If no thresholds are found for the given combination.
+        :return: The thresholds for the given donor and lab datum.
         """
         threshold_definitions = _load_thresholds()
 
@@ -1337,7 +1342,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
         thresholds_dict = {}
         for donor in self.donors:
             for lab_datum in donor.lab_data:
-                thresholds = self.determine_thresholds_for(donor, lab_datum)
+                try:
+                    thresholds = self.determine_thresholds_for(donor, lab_datum)
+                except MissingThresholdsException:
+                    # assign None if no thresholds are found
+                    thresholds = None
+
                 thresholds_dict[(donor.donor_pseudonym, lab_datum.lab_data_name)] = thresholds
 
         return thresholds_dict
@@ -1349,7 +1359,11 @@ class GrzSubmissionMetadata(StrictBaseModel):
         """
         for donor in self.donors:
             for lab_datum in donor.lab_data:
-                thresholds = self.determine_thresholds_for(donor, lab_datum)
+                try:
+                    thresholds = self.determine_thresholds_for(donor, lab_datum)
+                except MissingThresholdsException as e:
+                    log.warning(str(e))
+                    continue
 
                 _check_thresholds(donor, lab_datum, thresholds)
         return self
@@ -1432,6 +1446,13 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: thresholds_
                 f"{fraction_above_v} < {fraction_above_t}"
             )
 
+
+class MissingThresholdsException(ValueError):
+    """Exception raised when no thresholds are found for a given combination."""
+
+    pass
+
+
 # Dictionary type for thresholds lookup:
 # Keys are (GenomicStudySubtype, LibraryType, SequenceSubtype, is_oncomine_panel)
 _ThresholdsDict = dict[
@@ -1479,8 +1500,6 @@ def _load_thresholds() -> _ThresholdsDict:
             )
 
             # add new entry for oncomine panels
-            threshold_definitions_dict[(d.genomic_study_subtype, d.library_type, d.sequence_subtype, True)] = (
-                thresholds
-            )
+            threshold_definitions_dict[(d.genomic_study_subtype, d.library_type, d.sequence_subtype, True)] = thresholds
 
     return threshold_definitions_dict
