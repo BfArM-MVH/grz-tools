@@ -1333,11 +1333,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         return thresholds
 
-    def get_thresholds(self) -> dict[tuple[str, str], thresholds_model.Thresholds]:
+    def get_thresholds(self) -> dict[tuple[str, str], thresholds_model.Thresholds | None]:
         """
         Get the thresholds for all lab data in the submission.
 
-        :return: A dictionary mapping (donor pseudonym, lab data name) to the thresholds.
+        :return: A dictionary mapping (donor pseudonym, lab data name) to the thresholds,
+                 or None if no thresholds are defined for this lab datum.
         """
         thresholds_dict = {}
         for donor in self.donors:
