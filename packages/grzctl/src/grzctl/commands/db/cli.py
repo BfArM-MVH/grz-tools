@@ -22,6 +22,7 @@ import rich.text
 import textual.logging
 from grz_common.cli import FILE_R_E, config_file, output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
+from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     DatabaseConfigurationError,
     DuplicateSubmissionError,
@@ -51,9 +52,10 @@ from grz_pydantic_models.submission.metadata import (
 )
 from pydantic import Field
 
-from ...models.config import DbConfig
+from ...models.config import DbConfig, ListConfig
 from .. import limit
 from . import SignatureStatus, _verify_signature
+from .sync import sync_submissions
 from .tui import DatabaseBrowser
 
 console = rich.console.Console()
@@ -72,6 +74,10 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 @click.pass_context
 def db(ctx: click.Context, config_file: str):
     """Database operations"""
+    # store config file path in context so subcommands can re-read it if needed
+    ctx.ensure_object(dict)
+    ctx.obj["config_file_path"] = config_file
+
     config = DbConfig.from_path(config_file)
     db_config = config.db
     if not db_config:
@@ -103,7 +109,7 @@ def db(ctx: click.Context, config_file: str):
         private_key_bytes=private_key_bytes,
         private_key_passphrase=db_config.author.private_key_passphrase,
     )
-    ctx.obj = {"author": author, "public_keys": public_keys, "db_url": db_config.database_url}
+    ctx.obj.update({"author": author, "public_keys": public_keys, "db_url": db_config.database_url})
 
 
 @db.group()
@@ -905,3 +911,36 @@ def show(ctx: click.Context, submission_id: str):
         title=f"Submission {submission.id}",
     )
     console.print(panel)
+
+
+@db.command("sync-from-inbox")
+@click.pass_context
+def sync_from_inbox(ctx: click.Context):
+    """
+    Synchronize the database with submissions found in the inbox.
+    """
+    db_url = ctx.obj["db_url"]
+    author = ctx.obj["author"]
+    config_file_path = ctx.obj["config_file_path"]
+
+    try:
+        list_config = ListConfig.from_path(config_file_path)
+    except Exception as e:
+        console_err.print(f"[red]Error loading S3 configuration from {config_file_path}: {e}[/red]")
+        sys.exit(1)
+
+    db_service = get_submission_db_instance(db_url, author=author)
+
+    try:
+        console_err.print(f"[cyan]Scanning inbox '{list_config.s3.bucket}'...[/cyan]")
+        s3_submissions = query_submissions(list_config.s3, show_cleaned=False)
+
+        console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
+        sync_submissions(db_service, s3_submissions, author)
+
+        console_err.print("[green]Synchronization complete.[/green]")
+
+    except Exception as e:
+        console_err.print(f"[red]Error during synchronization: {e}[/red]")
+        traceback.print_exc()
+        sys.exit(1)
