@@ -10,9 +10,9 @@
     "genomicDataCenterId": "GRZK00007",
     "clinicalDataNodeId": "KDKK00007",
     "genomicStudyType": "duo",
-    "genomicStudySubtype": "germline-only",
+    "genomicStudySubtype": "tumor+germline",
     "coverageType": "GKV",
-    "diseaseType": "rare"
+    "diseaseType": "oncological"
   },
   "donors": [
     {
@@ -62,7 +62,7 @@
           "sequenceType": "dna",
           "sequenceSubtype": "germline",
           "fragmentationMethod": "sonication",
-          "libraryType": "wes",
+          "libraryType": "wgs",
           "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
           "libraryPrepKitManufacturer": "Agilent",
           "sequencerModel": "Illumina HiSeq X",
@@ -82,7 +82,7 @@
               "percent": 95.4
             },
             "meanDepthOfCoverage": 102.4,
-            "minCoverage": 30,
+            "minCoverage": 20,
             "targetedRegionsAboveMinCoverage": 0.96,
             "nonCodingVariants": true,
             "callerUsed": [
@@ -144,7 +144,7 @@
           "sequenceType": "dna",
           "sequenceSubtype": "somatic",
           "fragmentationMethod": "sonication",
-          "libraryType": "wes",
+          "libraryType": "wgs",
           "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
           "libraryPrepKitManufacturer": "Agilent",
           "sequencerModel": "Illumina HiSeq X",
@@ -170,7 +170,7 @@
               "percent": 95.4
             },
             "meanDepthOfCoverage": 252.4,
-            "minCoverage": 100,
+            "minCoverage": 30,
             "targetedRegionsAboveMinCoverage": 0.96,
             "nonCodingVariants": true,
             "callerUsed": [
@@ -269,7 +269,7 @@
           "sequenceType": "dna",
           "sequenceSubtype": "germline",
           "fragmentationMethod": "sonication",
-          "libraryType": "wes",
+          "libraryType": "wgs",
           "libraryPrepKit": "Agilent SureSelect Human All Exon v6",
           "libraryPrepKitManufacturer": "Agilent",
           "sequencerModel": "Illumina HiSeq X",
@@ -289,7 +289,7 @@
               "percent": 95.4
             },
             "meanDepthOfCoverage": 252.4,
-            "minCoverage": 30,
+            "minCoverage": 20,
             "targetedRegionsAboveMinCoverage": 0.96,
             "nonCodingVariants": true,
             "callerUsed": [

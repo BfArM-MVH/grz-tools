@@ -6,11 +6,12 @@ import logging
 import re
 from datetime import date
 from enum import StrEnum
+from functools import cache
 from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Self
+from typing import Annotated, Self
 
 from pydantic import (
     AfterValidator,
@@ -25,6 +26,7 @@ from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel
 from ...mii.consent import Consent, ProvisionType
+from .. import thresholds as thresholds_model
 from .versioning import Version
 
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
@@ -1290,40 +1292,81 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         return self
 
+    def determine_thresholds_for(
+        self,
+        donor: Donor,
+        lab_datum: LabDatum,
+    ) -> thresholds_model.Thresholds:
+        """
+        Determine the thresholds for a given donor and lab datum.
+
+        :param donor: The donor for which to determine the thresholds.
+        :param lab_datum: The lab datum for which to determine the thresholds.
+        :raise MissingThresholdsException: If no thresholds are found for the given combination.
+        :return: The thresholds for the given donor and lab datum.
+        """
+        threshold_definitions = _load_thresholds()
+
+        genomic_study_subtype = self.submission.genomic_study_subtype
+        is_oncomine_panel = "oncomine" in lab_datum.kit_name.lower()
+        key = (genomic_study_subtype, lab_datum.library_type, lab_datum.sequence_subtype, is_oncomine_panel)
+
+        thresholds = threshold_definitions.get(key)
+        if thresholds is None:
+            allowed_combinations_list = sorted(list(threshold_definitions.keys()))
+            allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations_list])
+            names = (
+                "submission.genomicStudySubtype",
+                "labData.libraryType",
+                "labData.sequenceSubtype",
+                "isOncominePanel",
+            )
+
+            info = dict(zip(names, key, strict=True))
+
+            raise MissingThresholdsException(
+                f"No thresholds for the specified combination {info} found (donor {donor.donor_pseudonym})!\n"
+                f"Valid combinations:\n{allowed_combinations}.\n"
+                f"See https://www.bfarm.de/SharedDocs/Downloads/DE/Forschung/modellvorhaben-genomsequenzierung/Qs-durch-GRZ.pdf?__blob=publicationFile for more details.\n"
+                f"Skipping threshold validation."
+            )
+
+        return thresholds
+
+    def get_thresholds(self) -> dict[tuple[str, str], thresholds_model.Thresholds | None]:
+        """
+        Get the thresholds for all lab data in the submission.
+
+        :return: A dictionary mapping (donor pseudonym, lab data name) to the thresholds,
+                 or None if no thresholds are defined for this lab datum.
+        """
+        thresholds_dict = {}
+        for donor in self.donors:
+            for lab_datum in donor.lab_data:
+                try:
+                    thresholds = self.determine_thresholds_for(donor, lab_datum)
+                except MissingThresholdsException:
+                    # assign None if no thresholds are found
+                    thresholds = None
+
+                thresholds_dict[(donor.donor_pseudonym, lab_datum.lab_data_name)] = thresholds
+
+        return thresholds_dict
+
     @model_validator(mode="after")
     def validate_thresholds(self):
         """
         Check if the submission meets the minimum mean coverage requirements.
         """
-        threshold_definitions = load_thresholds()
-
         for donor in self.donors:
             for lab_datum in donor.lab_data:
-                key = (
-                    self.submission.genomic_study_subtype,
-                    lab_datum.library_type,
-                    lab_datum.sequence_subtype,
-                )
-                thresholds = threshold_definitions.get(key)
-                if thresholds is None:
-                    allowed_combinations = sorted(list(threshold_definitions.keys()))
-                    allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations])
-                    names = (
-                        "submission.genomicStudySubtype",
-                        "labData.libraryType",
-                        "labData.sequenceSubtype",
-                    )
-                    info = dict(zip(names, key, strict=True))
-                    log.warning(
-                        f"No thresholds for the specified combination {info} found (donor {donor.donor_pseudonym})!\n"
-                        f"Valid combinations:\n{allowed_combinations}.\n"
-                        f"See https://www.bfarm.de/SharedDocs/Downloads/DE/Forschung/modellvorhaben-genomsequenzierung/Qs-durch-GRZ.pdf?__blob=publicationFile for more details.\n"
-                        f"Skipping threshold validation."
-                    )
+                try:
+                    thresholds = self.determine_thresholds_for(donor, lab_datum)
+                except MissingThresholdsException as e:
+                    log.warning(str(e))
                     continue
 
                 _check_thresholds(donor, lab_datum, thresholds)
-
         return self
 
     @model_validator(mode="after")
@@ -1345,7 +1388,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return self
 
 
-def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, Any]):  # noqa: C901
+def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: thresholds_model.Thresholds):  # noqa: C901
     def raise_if_index(message: str) -> None:
         if donor.relation == Relation.index_:
             raise ValueError(message)
@@ -1359,7 +1402,7 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
     lab_data_name = lab_datum.lab_data_name
     sequence_data = lab_datum.sequence_data
 
-    mean_depth_of_coverage_t = thresholds.get("meanDepthOfCoverage")
+    mean_depth_of_coverage_t = thresholds.mean_depth_of_coverage
     mean_depth_of_coverage_v = sequence_data.mean_depth_of_coverage
     if mean_depth_of_coverage_t and mean_depth_of_coverage_v < mean_depth_of_coverage_t:
         raise_if_index(
@@ -1367,28 +1410,28 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
             f"below threshold: {mean_depth_of_coverage_v} < {mean_depth_of_coverage_t}"
         )
 
-    if percent_bases_above_quality_threshold_t := thresholds.get("percentBasesAboveQualityThreshold"):
-        minimum_quality_t = percent_bases_above_quality_threshold_t.get("qualityThreshold")
+    if percent_bases_above_quality_threshold_t := thresholds.percent_bases_above_quality_threshold:
+        minimum_quality_t = percent_bases_above_quality_threshold_t.quality_threshold
         minimum_quality_v = sequence_data.percent_bases_above_quality_threshold.minimum_quality
         if minimum_quality_t and (minimum_quality_t != minimum_quality_v):
             # TODO also print out genomic study subtype because that determines thresholds, but is defined at submission level
             # this should error regardless of relation because it should match the official threshold
             raise ValueError(
-                f"Expected minimumQuality '{minimum_quality_t}' for library type '{lab_datum.library_type}'"
+                f"Expected minimumQuality '{minimum_quality_t}' for library type '{lab_datum.library_type}' "
                 f"and sequence subtype '{lab_datum.sequence_subtype}'. Got '{minimum_quality_v}' instead."
             )
-        percent_t = percent_bases_above_quality_threshold_t.get("percentBasesAbove")
+        percent_t = percent_bases_above_quality_threshold_t.percent_bases_above
         percent_v = sequence_data.percent_bases_above_quality_threshold.percent
         if percent_t and (percent_v < percent_t):
             raise_if_index(
                 f"Percentage of bases above quality threshold are below threshold: {percent_v} < {percent_t}"
             )
 
-    if t := thresholds.get("targetedRegionsAboveMinCoverage"):
-        min_coverage_t = t.get("minCoverage")
+    if t := thresholds.targeted_regions_above_min_coverage:
+        min_coverage_t = t.min_coverage
         min_coverage_v = sequence_data.min_coverage
 
-        fraction_above_t = t.get("fractionAbove")
+        fraction_above_t = t.fraction_above
         fraction_above_v = sequence_data.targeted_regions_above_min_coverage
 
         if min_coverage_t and min_coverage_v != min_coverage_t:
@@ -1405,15 +1448,59 @@ def _check_thresholds(donor: Donor, lab_datum: LabDatum, thresholds: dict[str, A
             )
 
 
-type Thresholds = dict[tuple[str, str, str], dict[str, Any]]
+class MissingThresholdsException(ValueError):
+    """Exception raised when no thresholds are found for a given combination."""
+
+    pass
 
 
-def load_thresholds() -> Thresholds:
-    threshold_definitions = json.load(
+# Dictionary type for thresholds lookup:
+# Keys are (GenomicStudySubtype, LibraryType, SequenceSubtype, is_oncomine_panel)
+_ThresholdsDict = dict[
+    tuple[GenomicStudySubtype, LibraryType, SequenceSubtype, bool],
+    thresholds_model.Thresholds,
+]
+
+
+class _ThresholdEntry(StrictBaseModel):
+    """Threshold configuration for a particular sequencing setup."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    library_type: LibraryType = Field(alias="libraryType")
+    sequence_subtype: SequenceSubtype = Field(alias="sequenceSubtype")
+    genomic_study_subtype: GenomicStudySubtype = Field(alias="genomicStudySubtype")
+    thresholds: thresholds_model.Thresholds
+
+
+@cache
+def _load_thresholds() -> _ThresholdsDict:
+    threshold_definitions_json = json.load(
         files("grz_pydantic_models").joinpath("resources", "thresholds.json").open("r", encoding="utf-8")
     )
-    threshold_definitions = {
-        (d["genomicStudySubtype"], d["libraryType"], d["sequenceSubtype"]): d["thresholds"]
+    try:
+        threshold_definitions: list[_ThresholdEntry] = [
+            _ThresholdEntry.model_validate(item) for item in threshold_definitions_json
+        ]
+    except ValidationError as err:
+        raise RuntimeError("Invalid threshold definitions JSON") from err
+
+    threshold_definitions_dict = {
+        (d.genomic_study_subtype, d.library_type, d.sequence_subtype, False): d.thresholds
         for d in threshold_definitions
     }
-    return threshold_definitions
+    # add thresholds for oncomine panels
+    for d in threshold_definitions:
+        if d.library_type == LibraryType.panel:
+            thresholds = d.thresholds.model_copy(deep=True)
+            # we have different thresholds_model.percentBasesAboveQualityThreshold for oncomine panels:
+            # percentage of bases ≥ Q20 should be at least 70%
+            thresholds.percent_bases_above_quality_threshold = thresholds_model.PercentBasesAboveQualityThreshold(
+                qualityThreshold=20,
+                percentBasesAbove=70,
+            )
+
+            # add new entry for oncomine panels
+            threshold_definitions_dict[(d.genomic_study_subtype, d.library_type, d.sequence_subtype, True)] = thresholds
+
+    return threshold_definitions_dict
