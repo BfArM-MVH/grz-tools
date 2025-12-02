@@ -35,8 +35,9 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
     now = datetime.now(UTC)
 
     # complete in inbox + new in db → uploaded
-    sub_new_complete = InboxSubmissionSummary(
-        submission_id="123456789_1970-01-01_00000000",
+    submission_new_complete_id = "123456789_1970-01-01_00000000"
+    submission_new_complete = InboxSubmissionSummary(
+        submission_id=submission_new_complete_id,
         state=InboxSubmissionState.COMPLETE,
         oldest_upload=old,
         newest_upload=now,
@@ -44,8 +45,9 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
     )
 
     # incomplete in inbox + new in db → uploading
-    sub_new_incomplete = InboxSubmissionSummary(
-        submission_id="123456789_1970-01-01_11111111",
+    submission_new_incomplete_id = "123456789_1970-01-01_11111111"
+    submission_new_incomplete = InboxSubmissionSummary(
+        submission_id=submission_new_incomplete_id,
         state=InboxSubmissionState.INCOMPLETE,
         oldest_upload=old,
         newest_upload=now,
@@ -53,8 +55,9 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
     )
 
     # complete in inbox + uploading in db → uploaded
-    sub_update_needed = InboxSubmissionSummary(
-        submission_id="123456789_1970-01-01_22222222",
+    submission_update_needed_id = "123456789_1970-01-01_22222222"
+    submission_update_needed = InboxSubmissionSummary(
+        submission_id=submission_update_needed_id,
         state=InboxSubmissionState.COMPLETE,
         oldest_upload=old,
         newest_upload=now,
@@ -62,8 +65,9 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
     )
 
     # uploaded in db + incomplete in inbox (mismatch!) → no change
-    sub_no_change = InboxSubmissionSummary(
-        submission_id="123456789_1970-01-01_33333333",
+    submission_no_change_id = "123456789_1970-01-01_33333333"
+    submission_no_change = InboxSubmissionSummary(
+        submission_id=submission_no_change_id,
         state=InboxSubmissionState.INCOMPLETE,
         oldest_upload=old,
         newest_upload=now,
@@ -71,10 +75,10 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
     )
 
     mock_s3_submissions = [
-        sub_new_complete,
-        sub_new_incomplete,
-        sub_update_needed,
-        sub_no_change,
+        submission_new_complete,
+        submission_new_incomplete,
+        submission_update_needed,
+        submission_no_change,
     ]
 
     db_config = DbConfig.from_path(blank_database_config_path)
@@ -85,11 +89,11 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
 
     db = SubmissionDb(db_url=db_config.db.database_url, author=author)
 
-    db.add_submission("123456789_1970-01-01_22222222")
-    db.update_submission_state("123456789_1970-01-01_22222222", SubmissionStateEnum.UPLOADING)
+    db.add_submission(submission_update_needed_id)
+    db.update_submission_state(submission_update_needed_id, SubmissionStateEnum.UPLOADING)
 
-    db.add_submission("123456789_1970-01-01_33333333")
-    db.update_submission_state("123456789_1970-01-01_33333333", SubmissionStateEnum.UPLOADED)
+    db.add_submission(submission_no_change_id)
+    db.update_submission_state(submission_no_change_id, SubmissionStateEnum.UPLOADED)
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -100,16 +104,16 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
         assert result.exit_code == 0, result.stderr
         mock_query.assert_called_once()
 
-    s1 = db.get_submission("123456789_1970-01-01_00000000")
+    s1 = db.get_submission(submission_new_complete_id)
     assert s1 is not None
     assert s1.get_latest_state().state == SubmissionStateEnum.UPLOADED
 
-    s2 = db.get_submission("123456789_1970-01-01_11111111")
+    s2 = db.get_submission(submission_new_incomplete_id)
     assert s2 is not None
     assert s2.get_latest_state().state == SubmissionStateEnum.UPLOADING
 
-    s3 = db.get_submission("123456789_1970-01-01_22222222")
+    s3 = db.get_submission(submission_update_needed_id)
     assert s3.get_latest_state().state == SubmissionStateEnum.UPLOADED
 
-    s4 = db.get_submission("123456789_1970-01-01_33333333")
+    s4 = db.get_submission(submission_no_change_id)
     assert s4.get_latest_state().state == SubmissionStateEnum.UPLOADED
