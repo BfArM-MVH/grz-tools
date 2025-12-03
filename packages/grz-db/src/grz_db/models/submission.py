@@ -843,5 +843,11 @@ class SubmissionDb:
         rng = random.Random(seed)  # noqa: S311
 
         target_index_in_block = rng.randint(0, block_size - 1)
-        current_index_in_block = [submission.id for submission in submitter_submissions_quarter].index(submission_id)
+        try:
+            current_index_in_block = [submission.id for submission in submitter_submissions_quarter].index(
+                submission_id
+            )
+        except ValueError:
+            # if the submission ID isn't in the quarter list, it hasn't met the requirements to be detailed QCed (e.g. passed basic QC)
+            return False
         return current_index_in_block == target_index_in_block
