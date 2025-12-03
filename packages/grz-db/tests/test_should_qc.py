@@ -129,7 +129,13 @@ class TestQcStrategy:
 
         submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
         _add_submission_with_history(
-            db, submission_id, SUBMITTER_ID, base_date, ["qced"], base_timestamp=start_time, is_qced=True
+            db,
+            submission_id,
+            SUBMITTER_ID,
+            base_date,
+            [*DEFAULT_HISTORY, "qcing", "qced"],
+            base_timestamp=start_time,
+            is_qced=True,
         )
 
         for i in range(1, 10):
