@@ -1,4 +1,8 @@
+import calendar
 import datetime
+import logging
+import math
+import random
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
@@ -9,6 +13,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
+from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
     CoverageType,
     DiseaseType,
@@ -39,6 +44,8 @@ from ..common import (
 from ..errors import DuplicateSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from .author import Author
 from .base import BaseSignablePayload, VerifiableLog
+
+logger = logging.getLogger(__name__)
 
 
 class OutdatedDatabaseSchemaError(Exception):
@@ -737,3 +744,110 @@ class SubmissionDb:
             )
             change_requests = session.exec(statement).all()
             return change_requests
+
+    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:
+        """
+        Determines whether or not a submission should go through detailed QC or not.
+        """
+        target_proportion = target_percentage / 100.0
+        submission = self.get_submission(submission_id)
+
+        if submission is None:
+            raise SubmissionNotFoundError(submission_id)
+        submission_date = submission.submission_date
+        if submission_date is None:
+            raise ValueError("Submission has no submission date set.")
+        submission_type = submission.submission_type
+        if submission_type is None:
+            raise ValueError("Submission has no type set.")
+        if submission_type != SubmissionType.initial:
+            # only initial submissions matter for detailed QC selection
+            return False
+
+        submission_month = submission_date.month
+        submission_quarter, submission_year = date_to_quarter_year(submission_date)
+        submission_quarter_start, submission_quarter_end = quarter_date_bounds(
+            quarter=submission_quarter, year=submission_year
+        )
+        _, days_in_submission_month = calendar.monthrange(submission_year, submission_month)
+
+        # used instead of a lambda below to type check properly (get_latest_state() can return None)
+        def latest_state_is_qcing(submission: Submission):
+            latest_state = submission.get_latest_state()
+            return latest_state.state == SubmissionStateEnum.QCING if latest_state is not None else False
+
+        # yes if none QCed/QCing from submitter yet for the submission month
+        with self._get_session() as session:
+            submitter_submissions_month = session.exec(
+                select(Submission)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .where(Submission.submission_type == SubmissionType.initial)
+                .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
+                .where(
+                    Submission.submission_date.between(  # type: ignore[union-attr]
+                        datetime.date(year=submission_year, month=submission_month, day=1),
+                        datetime.date(year=submission_year, month=submission_month, day=days_in_submission_month),
+                    )
+                )
+                .where(Submission.submitter_id == submission.submitter_id)
+            ).all()
+            submitter_submissions_month_total_qced = sum(
+                map(lambda s: s.detailed_qc_passed is not None, submitter_submissions_month)
+            )
+            logger.debug(
+                f"Total QCed submissions for submitter in submission's month: {submitter_submissions_month_total_qced}"
+            )
+            submitter_submissions_month_total_qcing = sum(map(latest_state_is_qcing, submitter_submissions_month))
+            logger.debug(
+                f"Total QCing submissions for submitter in submission's month: {submitter_submissions_month_total_qcing}"
+            )
+            if not (submitter_submissions_month_total_qced + submitter_submissions_month_total_qcing):
+                return True
+
+        # yes if we are under target percentage for submitter for the submission's quarter
+        with self._get_session() as session:
+            submitter_submissions_quarter = session.exec(
+                select(Submission)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .where(Submission.submission_type == SubmissionType.initial)
+                .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
+                .where(Submission.submission_date.between(submission_quarter_start, submission_quarter_end))  # type: ignore[union-attr]
+                .where(Submission.submitter_id == submission.submitter_id)
+                .order_by(Submission.submission_date)  # type: ignore[arg-type]
+            ).all()
+            submitter_submissions_quarter_total_qced = sum(
+                map(lambda s: s.detailed_qc_passed is not None, submitter_submissions_quarter)
+            )
+            logger.debug(
+                f"Total QCed submissions for submitter in submission's quarter: {submitter_submissions_quarter_total_qced}"
+            )
+            submitter_submissions_quarter_total_qcing = sum(map(latest_state_is_qcing, submitter_submissions_quarter))
+            logger.debug(
+                f"Total QCing submissions for submitter in submission's quarter: {submitter_submissions_quarter_total_qcing}"
+            )
+            qc_ratio = (submitter_submissions_quarter_total_qced + submitter_submissions_quarter_total_qcing) / len(
+                submitter_submissions_quarter
+            )
+            logger.debug(
+                f"Total submissions for submitter in submission's quarter: {len(submitter_submissions_quarter)}"
+            )
+            logger.debug(f"Ratio of submissions QCing/QCed for submitter in submission's quarter: {qc_ratio:.2%}")
+            if qc_ratio <= target_proportion:
+                return True
+
+        # randomly, but reproducibly, select submissions for a given submitter, quarter, block, and salt
+        logger.debug("Randomly choosing whether to QC or not.")
+        block_size = math.floor(1 / target_proportion)
+        block_index = len(submitter_submissions_quarter) // block_size
+        seed = f"{submission.submitter_id}-{submission_year}-{submission_quarter}-{block_index}-{salt}"
+        rng = random.Random(seed)  # noqa: S311
+
+        target_index_in_block = rng.randint(0, block_size - 1)
+        try:
+            current_index_in_block = [submission.id for submission in submitter_submissions_quarter].index(
+                submission_id
+            )
+        except ValueError:
+            # if the submission ID isn't in the quarter list, it hasn't met the requirements to be detailed QCed (e.g. passed basic QC)
+            return False
+        return current_index_in_block == target_index_in_block

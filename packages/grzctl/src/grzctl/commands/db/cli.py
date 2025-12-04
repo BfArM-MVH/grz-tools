@@ -317,6 +317,33 @@ def tui(ctx: click.Context):
     app.run()
 
 
+@db.command("should-qc")
+@click.argument("submission_id")
+@click.option(
+    "--target-percentage",
+    "target_percentage",
+    type=click.FloatRange(0.0, 100.0),
+    metavar="FLOAT",
+    help="Minimum proportion of submissions that should be QCed (default = 2.0).",
+    default=2.0,
+)
+@click.option(
+    "--salt",
+    "salt",
+    help="Secret random string used as part of seed for random generator.",
+    envvar="GRZCTL_SHOULD_QC_SALT",
+)
+@click.pass_context
+def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, salt: str | None):
+    """Check whether a submission should be QCed."""
+    database_url = ctx.obj["db_url"]
+    database = get_submission_db_instance(database_url)
+
+    click.echo(
+        str(database.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)).lower()
+    )
+
+
 def _build_submission_dict_from(
     log_obj: SubmissionStateLog | ChangeRequestLog | None,
     submission: Submission,

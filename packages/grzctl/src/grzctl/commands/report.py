@@ -1,6 +1,5 @@
 """Command for generating various reports related to GRZ activities."""
 
-import calendar
 import csv
 import datetime
 import itertools
@@ -14,6 +13,7 @@ from pathlib import Path
 import click
 import sqlalchemy as sa
 from grz_common.cli import config_file
+from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -23,14 +23,19 @@ from grz_db.models.submission import (
     SubmissionDb,
     SubmissionStateEnum,
 )
+from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, SubmissionType
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
 
 from ..models.config import ReportConfig
-from .db.cli import get_submission_db_instance
 
 log = logging.getLogger(__name__)
+
+
+def get_submission_db_instance(db_url: str, author: Author | None = None) -> SubmissionDb:
+    """Creates and returns an instance of SubmissionDb."""
+    return SubmissionDb(db_url=db_url, author=author)
 
 
 @click.group()
@@ -105,15 +110,6 @@ def processed(ctx: click.Context, since: datetime.date | None, until: datetime.d
                 ]
             )
         )
-
-
-def _get_quarter_date_bounds(year: int, quarter: int) -> tuple[datetime.date, datetime.date]:
-    quarter_start_date = datetime.date(year=year, month=((quarter - 1) * 3) + 1, day=1)
-    quarter_end_month = quarter_start_date.month + 2
-    _quarter_end_month_first_weekday, days_in_quarter_end_month = calendar.monthrange(year, quarter_end_month)
-    quarter_end_date = quarter_start_date.replace(month=quarter_end_month, day=days_in_quarter_end_month)
-
-    return quarter_start_date, quarter_end_date
 
 
 def _get_consent_revocations(
@@ -230,7 +226,7 @@ def _get_consent_revocations(
 
 
 def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, quarter: int) -> None:
-    quarter_start_date, quarter_end_date = _get_quarter_date_bounds(year=year, quarter=quarter)
+    quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     node_submitter_id_combos: set[tuple[str | None, str | None]] = set()
     with database._get_session() as session:
@@ -374,7 +370,7 @@ class DetailedQCPassedReportState(StrEnum):
 
 
 def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, quarter: int) -> None:
-    quarter_start_date, quarter_end_date = _get_quarter_date_bounds(year=year, quarter=quarter)
+    quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     with database._get_session() as session:
         query_quarter_submissions = (
@@ -482,7 +478,7 @@ def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, q
 
 
 def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarter: int) -> None:
-    quarter_start_date, quarter_end_date = _get_quarter_date_bounds(year=year, quarter=quarter)
+    quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     with database._get_session() as session:
         query_submissions_that_failed_detailed_qc = (
@@ -575,11 +571,6 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
                     report.targeted_regions_above_min_coverage_percent_deviation,
                 ]
             )
-
-
-def date_to_quarter_year(date: datetime.date) -> tuple[int, int]:
-    """Return (1-based quarter, year) given a date."""
-    return (date.month - 1) // 3 + 1, date.year
 
 
 @report.command()
