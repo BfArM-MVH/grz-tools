@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.0...grz-cli-v1.5.1) (2025-12-04)
+
+
+### Bug Fixes
+
+* **grz-cli:** bump grz-pydantic-models version ([#474](https://github.com/BfArM-MVH/grz-tools/issues/474)) ([f3bce93](https://github.com/BfArM-MVH/grz-tools/commit/f3bce9305cbae948cac6d056cffd461c635f0f0d))
+
 ## [1.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.4.0...grz-cli-v1.5.0) (2025-10-29)
 
 
