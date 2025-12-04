@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-check-v0.2.0...grz-check-v0.2.1) (2025-12-04)
+
+
+### Bug Fixes
+
+* **grz-check:** add minimum required rust version to pacakge definition ([253e618](https://github.com/BfArM-MVH/grz-tools/commit/253e6189c6daeffa606e63a07908c1e24819aa6a)), closes [#456](https://github.com/BfArM-MVH/grz-tools/issues/456)
+* **grz-check:** add minimum required rust version to package definition ([#457](https://github.com/BfArM-MVH/grz-tools/issues/457)) ([253e618](https://github.com/BfArM-MVH/grz-tools/commit/253e6189c6daeffa606e63a07908c1e24819aa6a))
+
 ## [0.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-check-v0.1.0...grz-check-v0.2.0) (2025-10-23)
 
 

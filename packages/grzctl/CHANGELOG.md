@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.3.0...grzctl-v1.4.0) (2025-12-04)
+
+
+### Features
+
+* **grz-db,grzctl:** add PostgreSQL support ([#459](https://github.com/BfArM-MVH/grz-tools/issues/459)) ([9c0f941](https://github.com/BfArM-MVH/grz-tools/commit/9c0f941d156d19305d1603d65793f1a7dfda4756))
+* **grz-pydantic-models:** add quarter date calculation functions ([d6a9618](https://github.com/BfArM-MVH/grz-tools/commit/d6a96182ecf7d827fe6d7dc12dd1efe3cf94c47a))
+* **grzctl,grz-db:** add should-qc as db subcommand ([#473](https://github.com/BfArM-MVH/grz-tools/issues/473)) ([d6a9618](https://github.com/BfArM-MVH/grz-tools/commit/d6a96182ecf7d827fe6d7dc12dd1efe3cf94c47a))
+* **grzctl:** add grzctl db sync-from-inbox subcommand ([#472](https://github.com/BfArM-MVH/grz-tools/issues/472)) ([57c49e1](https://github.com/BfArM-MVH/grz-tools/commit/57c49e1148582a5f0e8c704561c9eea27c5fd43f)), closes [#409](https://github.com/BfArM-MVH/grz-tools/issues/409)
+
+
+### Bug Fixes
+
+* **grzctl:** ignore submissions with null IDs in quarterly reports ([#466](https://github.com/BfArM-MVH/grz-tools/issues/466)) ([0bd31aa](https://github.com/BfArM-MVH/grz-tools/commit/0bd31aa6250f043428be1cca587ff5cdde1ed5a2))
+
 ## [1.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.2.0...grzctl-v1.3.0) (2025-10-29)
 
 

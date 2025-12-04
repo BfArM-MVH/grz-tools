@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.5.0...grz-common-v1.6.0) (2025-12-04)
+
+
+### Features
+
+* **grz-pydantic-models:** Add a thresholds model and implement check for oncomine panel submissions ([#469](https://github.com/BfArM-MVH/grz-tools/issues/469)) ([165a37c](https://github.com/BfArM-MVH/grz-tools/commit/165a37c697e1191c6c32d4162a32e531a18e2369)), closes [#462](https://github.com/BfArM-MVH/grz-tools/issues/462)
+
+
+### Bug Fixes
+
+* **grz-common,grzctl:** submission date should be date of finished upload ([#460](https://github.com/BfArM-MVH/grz-tools/issues/460)) ([907f194](https://github.com/BfArM-MVH/grz-tools/commit/907f194dda3b14ea2b69189febf3e490430f2a5d))
+
 ## [1.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.4.0...grz-common-v1.5.0) (2025-10-29)
 
 

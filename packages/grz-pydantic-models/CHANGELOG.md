@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.4.0...grz-pydantic-models-v2.5.0) (2025-12-04)
+
+
+### Features
+
+* **grz-pydantic-models:** Add a thresholds model and implement check for oncomine panel submissions ([#469](https://github.com/BfArM-MVH/grz-tools/issues/469)) ([165a37c](https://github.com/BfArM-MVH/grz-tools/commit/165a37c697e1191c6c32d4162a32e531a18e2369)), closes [#462](https://github.com/BfArM-MVH/grz-tools/issues/462)
+* **grz-pydantic-models:** add quarter date calculation functions ([d6a9618](https://github.com/BfArM-MVH/grz-tools/commit/d6a96182ecf7d827fe6d7dc12dd1efe3cf94c47a))
+* **grz-pydantic-models:** lower long-read base quality thresholds to match BfArM ([#461](https://github.com/BfArM-MVH/grz-tools/issues/461)) ([d55800b](https://github.com/BfArM-MVH/grz-tools/commit/d55800b428e97b48d753b57fe59d1e66bb0aaeaf))
+* **grzctl,grz-db:** add should-qc as db subcommand ([#473](https://github.com/BfArM-MVH/grz-tools/issues/473)) ([d6a9618](https://github.com/BfArM-MVH/grz-tools/commit/d6a96182ecf7d827fe6d7dc12dd1efe3cf94c47a))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** Check for presence of necessary labData depending on the genomicStudySubtype ([#443](https://github.com/BfArM-MVH/grz-tools/issues/443)) ([6eac517](https://github.com/BfArM-MVH/grz-tools/commit/6eac517322efc3d0c40994f93d6d3c9fa7f55515))
+
 ## [2.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.3.1...grz-pydantic-models-v2.4.0) (2025-10-23)
 
 
