@@ -3,6 +3,7 @@ Tests for the Prüfbericht submission functionality.
 """
 
 import importlib.resources
+from unittest import mock
 import json
 import shutil
 
@@ -11,7 +12,8 @@ import grzctl
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 
 from .. import mock_files
-
+from grz_common.transfer import VersionFile 
+from packaging import version
 
 def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
@@ -31,6 +33,13 @@ def test_archive(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_
             metadata_file.seek(0)
             json.dump(metadata_json, metadata_file)
             metadata_file.truncate()
+
+    with mock.patch("grz_common.transfer.get_version_info") as mock_version_info:  
+        mock_version_info.return_value = VersionFile(  
+            schema_version=1,  
+            minimal_version=version.Version("1.0.0"),  
+            recommended_version=version.Version("2.0.0")  
+        ) 
 
         args = [
             "archive",
