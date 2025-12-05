@@ -16,7 +16,7 @@ __all__ = [
 class PercentBasesAboveQualityThreshold(StrictBaseModel):
     """Fraction of bases above a given base quality threshold."""
 
-    quality_threshold: Annotated[float, Field(strict=True, ge=0.0)]
+    quality_threshold: Annotated[int, Field(strict=True, ge=0)]
     percent_bases_above: Annotated[float, Field(strict=True, ge=0.0, le=100.0)]
 
 
