@@ -99,11 +99,12 @@ class VersionFile(BaseModel):
 
     # allow arbitrary types like packaging.version.Version
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    @field_validator('minimal_version', 'recommended_version', mode='before')  
-    @classmethod  
-    def parse_version(cls, v):  
-        if isinstance(v, str):  
-            return version.Version(v)  
+
+    @field_validator("minimal_version", "recommended_version", mode="before")
+    @classmethod
+    def parse_version(cls, v):
+        if isinstance(v, str):
+            return version.Version(v)
         return v
 
 
