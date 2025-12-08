@@ -72,7 +72,6 @@ lint = [
     "pydantic",
     "mypy",
     "packaging",
-    "types-packaging",
 ]
 
 [tool.ruff]
