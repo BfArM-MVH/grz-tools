@@ -41,7 +41,7 @@ def test_upload_download_submission(
     working_dir_path,
     tmpdir_factory,
     temp_s3_config_file_path,
-    remote_bucket,
+    remote_bucket_with_version,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
@@ -90,7 +90,7 @@ def test_upload_download_submission(
 
         submission_id = result.stdout.strip()
 
-        objects_in_bucket = {obj.key: obj for obj in remote_bucket.objects.all()}
+        objects_in_bucket = {obj.key: obj for obj in remote_bucket_with_version.objects.all()}
         assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
 
         assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
@@ -127,7 +127,7 @@ def test_upload_download_submission(
 def test_upload_aborts_on_incomplete_encryption(
     working_dir_path,
     temp_s3_config_file_path,
-    remote_bucket,
+    remote_bucket_with_version
 ):
     """Verify that the upload command fails if the encryption log marks a file as not successful."""
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -182,14 +182,14 @@ def test_upload_aborts_on_incomplete_encryption(
     assert str(relative_failed_path) in error_message
 
     # Ensure it really did fail
-    objects_in_bucket = list(remote_bucket.objects.all())
-    assert len(objects_in_bucket) == 0, "Upload should not have happened!"
+    objects_in_bucket = list(remote_bucket_with_version.objects.all())
+    assert len(objects_in_bucket) == 1, "Upload should not have happened!"
 
 
 def test_upload_aborts_if_encryption_log_missing(
     working_dir_path,
     temp_s3_config_file_path,
-    remote_bucket,
+    remote_bucket_with_version
 ):
     """Verify that the upload command fails if the encryption log is missing entirely."""
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -219,5 +219,5 @@ def test_upload_aborts_if_encryption_log_missing(
     assert "target_regions.bed" in error_message
 
     # Ensure it really did fail
-    objects_in_bucket = list(remote_bucket.objects.all())
-    assert len(objects_in_bucket) == 0, "Upload should not have happened!"
+    objects_in_bucket = list(remote_bucket_with_version.objects.all())
+    assert len(objects_in_bucket) == 1, "Upload should not have happened!"

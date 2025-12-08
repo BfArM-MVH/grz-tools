@@ -145,6 +145,20 @@ def create_large_file(content: str | bytes, output_file: str | PathLike, target_
             current_size += bytes_written
     return current_size
 
+@pytest.fixture  
+def remote_bucket_with_version(remote_bucket):  
+    """Mock S3 bucket with version.json file at root."""  
+    from importlib.metadata import version  
+    current_version = version("grz-cli")  
+      
+    version_content = json.dumps({  
+        "schema_version": 1,  
+        "minimal_version": current_version,  
+        "recommended_version": current_version  
+    })  
+    remote_bucket.put_object(Key="version.json", Body=version_content)  
+    return remote_bucket
+
 
 @pytest.fixture
 def temp_large_file_path(temp_data_dir_path) -> Path:
