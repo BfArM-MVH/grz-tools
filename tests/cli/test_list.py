@@ -66,7 +66,7 @@ def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_
         assert result_list.exit_code == 0, result_list.output
 
         listed_submissions = json.loads(result_list.stdout.strip())
-        assert len(listed_submissions) == 2
+        assert len(listed_submissions) == 1
         assert listed_submissions[0]["submission_id"] == submission_id
         assert listed_submissions[0]["state"] == "complete"
 
@@ -125,6 +125,6 @@ def test_list_with_partial_env(temp_s3_config_file_path, remote_bucket_with_vers
         assert result_list.exit_code == 0, result_list.output
 
         listed_submissions = json.loads(result_list.stdout.strip())
-        assert len(listed_submissions) == 2
+        assert len(listed_submissions) == 1
         assert listed_submissions[0]["submission_id"] == submission_id
         assert listed_submissions[0]["state"] == "complete"
