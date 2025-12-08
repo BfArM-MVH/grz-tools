@@ -2,7 +2,6 @@ import logging
 import sys
 from importlib.metadata import version
 
-import click
 from grz_common.models.s3 import S3Options
 from grz_common.transfer import get_version_info
 from packaging import version as pkg_version
