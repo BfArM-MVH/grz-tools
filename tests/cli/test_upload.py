@@ -220,4 +220,4 @@ def test_upload_aborts_if_encryption_log_missing(
 
     # Ensure it really did fail
     objects_in_bucket = list(remote_bucket_with_version.objects.all())
-    assert len(objects_in_bucket) == 1, "Upload should not have happened!"
+    assert len(objects_in_bucket) == 0, "Upload should not have happened!"
