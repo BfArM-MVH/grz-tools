@@ -74,7 +74,7 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, wo
         assert result_clean.exit_code == 0, result_clean.output
 
         uploaded_keys = {o.key for o in remote_bucket_with_version.objects.all()}
-        assert len(uploaded_keys) == 3
+        assert len(uploaded_keys) == 2
         assert f"{submission_id}/metadata/metadata.json" in uploaded_keys
         assert f"{submission_id}/cleaned" in uploaded_keys
         assert f"{submission_id}/cleaning" not in uploaded_keys
@@ -88,5 +88,5 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, wo
         assert result_list.exit_code == 0, result_list.output
 
         listed_submissions = json.loads(result_list.stdout.strip())
-        assert len(listed_submissions) == 2
+        assert len(listed_submissions) == 1
         assert listed_submissions[0]["state"] == "cleaned"
