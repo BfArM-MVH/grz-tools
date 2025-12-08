@@ -2,11 +2,25 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
+import json
+import logging
 from typing import TYPE_CHECKING
 
 import boto3
+import botocore
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
+from packaging import version
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from .exceptions import (
+    VersionFileAccessError,
+    VersionFileNotFoundError,
+    VersionFileValidationError,
+)
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -76,3 +90,61 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     )
 
     return s3_resource
+
+
+class VersionFile(BaseModel):
+    schema_version: int = Field(1, description="Version of this schema")
+    minimal_version: version.Version = Field(..., description="Minimum supported version")
+    recommended_version: version.Version = Field(..., description="Recommended version")
+
+    # allow arbitrary types like packaging.version.Version
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    @field_validator('minimal_version', 'recommended_version', mode='before')  
+    @classmethod  
+    def parse_version(cls, v):  
+        if isinstance(v, str):  
+            return version.Version(v)  
+        return v
+
+
+def get_version_info(s3_options, version_file_path) -> VersionFile:
+    """
+    Download and validate the version file from S3.
+    Raises:
+        1. FileNotFoundError: If the version file does not exist (GRZ needs to fix).
+        2. RuntimeError: For S3 access issues (network, permissions, etc.).
+        3. ValueError: For outdated versions or validation issues.
+    """
+    try:
+        s3_client = init_s3_client(s3_options)
+        logger.debug(f"Attempting to fetch version file from S3: s3://{s3_options.bucket}/{version_file_path}")
+
+        # try to get the object
+        response = s3_client.get_object(Bucket=s3_options.bucket, Key=version_file_path)
+        version_content = response["Body"].read().decode("utf-8").strip()
+        version_data = json.loads(version_content)
+
+        version_file = VersionFile(**version_data)
+        logger.info("Successfully retrieved and parsed version file from S3.")
+        return version_file
+
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code")
+        if error_code == "NoSuchKey":
+            msg = (
+                f"Version file not found at s3://{s3_options.bucket}/{version_file_path}. "
+                "Please contact GRZ to resolve this."
+            )
+            logger.critical(msg)
+            raise VersionFileNotFoundError(msg) from e
+        else:
+            msg = (
+                f"Unable to access s3://{s3_options.bucket}/{version_file_path} "
+                f"(Error code: {error_code}). Possible permission or policy issue."
+            )
+            logger.error(msg, exc_info=e)
+            raise VersionFileAccessError(msg) from e
+    except (ValidationError, json.JSONDecodeError, KeyError) as e:
+        msg = f"Invalid version file format or content: {e}"
+        logger.error(msg, exc_info=e)
+        raise VersionFileValidationError(msg) from e

@@ -10,6 +10,7 @@ from grz_common.workers.worker import Worker
 log = logging.getLogger(__name__)
 
 import grz_common.cli as grzcli
+from grz_common.utils.version_check import check_version_and_exit_if_needed
 
 from ..models.config import UploadConfig
 
@@ -28,6 +29,7 @@ def upload(
     Upload a submission to a GRZ/GDC.
     """
     config = UploadConfig.model_validate(configuration)
+    check_version_and_exit_if_needed(config.s3)
 
     log.info("Starting upload...")
 
