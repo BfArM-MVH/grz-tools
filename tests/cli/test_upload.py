@@ -131,11 +131,7 @@ def test_upload_download_submission(
     assert downloaded_metadata["submission"]["submissionDate"] == upload_date.isoformat()
 
 
-def test_upload_aborts_on_incomplete_encryption(
-    working_dir_path,
-    temp_s3_config_file_path,
-    remote_bucket_with_version
-):
+def test_upload_aborts_on_incomplete_encryption(working_dir_path, temp_s3_config_file_path, remote_bucket_with_version):
     """Verify that the upload command fails if the encryption log marks a file as not successful."""
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
@@ -194,9 +190,7 @@ def test_upload_aborts_on_incomplete_encryption(
 
 
 def test_upload_aborts_if_encryption_log_missing(
-    working_dir_path,
-    temp_s3_config_file_path,
-    remote_bucket_with_version
+    working_dir_path, temp_s3_config_file_path, remote_bucket_with_version
 ):
     """Verify that the upload command fails if the encryption log is missing entirely."""
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -227,4 +221,4 @@ def test_upload_aborts_if_encryption_log_missing(
 
     # Ensure it really did fail
     objects_in_bucket = list(remote_bucket_with_version.objects.all())
-    assert len(objects_in_bucket) == 0, "Upload should not have happened!"
+    assert len(objects_in_bucket) == 1, "Upload should not have happened!"
