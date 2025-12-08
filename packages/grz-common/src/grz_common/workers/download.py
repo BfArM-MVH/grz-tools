@@ -255,8 +255,8 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
         page["Contents"] for page in paginator.paginate(Bucket=s3_options.bucket) if "Contents" in page
     )
 
-    # Filter out non-submission objects (like version.json)  
-    objects = [obj for obj in objects if "/" in obj["Key"]] 
+    # Filter out non-submission objects (like version.json)
+    objects = [obj for obj in objects if "/" in obj["Key"]]
     objects_sorted = sorted(objects, key=itemgetter("Key"))
     submission2objects = {
         key: tuple(group) for key, group in itertools.groupby(objects_sorted, key=lambda o: o["Key"].split("/")[0])
