@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.6.0...grz-common-v1.6.1) (2025-12-14)
+
+
+### Bug Fixes
+
+* **grz-common,grzctl:** Revert submission date should be date of finished upload ([#460](https://github.com/BfArM-MVH/grz-tools/issues/460)) ([#478](https://github.com/BfArM-MVH/grz-tools/issues/478)) ([405793e](https://github.com/BfArM-MVH/grz-tools/commit/405793e1b40e5578d0f90d5d4d2daeb261d3da1f))
+
 ## [1.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.5.0...grz-common-v1.6.0) (2025-12-04)
 
 
