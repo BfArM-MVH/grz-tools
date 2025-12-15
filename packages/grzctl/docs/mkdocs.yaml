@@ -1,0 +1,43 @@
+---
+site_name: grzctl
+site_url: 'https://BfArM-MVH.github.io/grz-tools/grzctl/'
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - toc.follow
+nav:
+  - Home: index.md
+  - Processing Submissions: submissions.md
+  - Command Line Interface: cli.md
+docs_dir: src
+site_dir: site
+strict: true
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - toc:
+      permalink: '#'
+      toc_depth: 3
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - gen_click_docs.py
+  - mike:
+      canonical_version: stable
+      deploy_prefix: 'grzctl'
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+extra:
+  version:
+    provider: mike
+    alias: true

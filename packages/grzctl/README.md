@@ -1,6 +1,5 @@
 # grzctl
 
-Command-line tool for internal GRZ operations.
 
 ## Running a development version
 
@@ -39,3 +38,18 @@ Use the `TEXTUAL=devtools` environment variable to instruct Textual to connect t
 TEXTUAL=devtools uv run grzctl db --config-file config.db.yaml tui
 ```
 
+# `grzctl`
+
+A command-line tool for internal GRZ operations.
+
+## Documentation
+
+Usage documentation for both clinic and genome data center staff can be found [here](https://BfArM-MVH.github.io/grz-tools/grzctl/).
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## Acknowledgements
+
+Parts of [Crypt4GH](https://github.com/EGA-archive/crypt4gh) are used in modified form.
