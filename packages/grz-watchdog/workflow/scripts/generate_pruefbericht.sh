@@ -12,9 +12,11 @@ log_stderr="${snakemake_log[stderr]}"
 		pruefbericht_params="--fail"
 	fi
 
+	jq --arg date $(cat "${snakemake_input[timestamp]}") '.submission.submissionDate = $date' "${snakemake_input[metadata]}" >"${snakemake_output[tmp]}"
+
 	grzctl pruefbericht \
 		generate \
-		from-metadata "${snakemake_input[metadata]}" \
+		from-metadata "${snakemake_output[tmp]}" \
 		${pruefbericht_params} \
 		>"${snakemake_output[pruefbericht]}"
 ) >"$log_stdout" 2>"$log_stderr"

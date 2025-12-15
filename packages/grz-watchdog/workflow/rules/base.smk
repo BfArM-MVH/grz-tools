@@ -129,6 +129,9 @@ rule metadata:
         metadata=temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json"
         ),
+        timestamp=temp(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/timestamp.txt"
+        )
     params:
         s3_access_key=register_s3_access_key,
         s3_secret=register_s3_secret,
@@ -142,6 +145,7 @@ rule metadata:
     shell:
         """(
         s5cmd --endpoint-url {params.s3_endpoint_url} cp s3://{params.s3_bucket}/{params.s3_metadata_key} {output.metadata}
+        s5cmd --endpoint-url {params.s3_endpoint_url} head s3://{params.s3_bucket}/{params.s3_metadata_key} | jq -r '.last_modified | fromdate | strftime("%Y-%m-%d")' > {output.timestamp}
         ) >{log.stdout} 2> {log.stderr}"""
 
 
@@ -392,10 +396,12 @@ rule generate_pruefbericht:
     """
     input:
         metadata=rules.metadata.output.metadata,
+        timestamp=rules.metadata.output.timestamp,
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
     output:
         pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
+        tmp="<results>/{submitter_id}/{inbox}/{submission_id}/.metadata.with-updated-timestamp.json"
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
