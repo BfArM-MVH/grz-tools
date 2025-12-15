@@ -503,6 +503,7 @@ else:
             stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
             stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
         priority: 0
+        handover: True
         script:
             "../scripts/prepare_qc.sh"
 
@@ -560,6 +561,7 @@ rule qc:
         profiles=get_run_qc_nextflow_profiles,
         configs=get_run_qc_nextflow_configs,
         extra=get_run_qc_nextflow_extra_params,
+    handover: True
     priority: 0
     script:
         "../scripts/run_qc.sh"
