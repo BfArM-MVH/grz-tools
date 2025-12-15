@@ -11,18 +11,16 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
+import grz_pydantic_models.submission.thresholds as thresholds_model
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
     File,
     FileType,
     GrzSubmissionMetadata,
-    LibraryType,
     ReadOrder,
     SequenceData,
-    SequenceSubtype,
     SequencingLayout,
-    load_thresholds,
 )
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import ValidationError
@@ -236,15 +234,8 @@ class Submission:
                 if not lab_data.sequence_data:
                     continue
 
-                threshold_definitions = load_thresholds()
-                thresholds = threshold_definitions[
-                    (
-                        self.metadata.content.submission.genomic_study_subtype,
-                        lab_data.library_type,
-                        lab_data.sequence_subtype,
-                    )
-                ]
-                mean_read_length_threshold = thresholds.get("meanReadLength", 0)
+                thresholds = self.metadata.content.determine_thresholds_for(donor, lab_data)
+                mean_read_length_threshold = thresholds.mean_read_length
 
                 sequence_data = lab_data.sequence_data
                 fastq_files = [f for f in sequence_data.files if f.file_type == FileType.fastq]
@@ -501,22 +492,26 @@ class Submission:
             return [f for f in sequence_data.files if f.file_type == FileType.bam]
 
         for donor in self.metadata.content.donors:
-            for lab_data in donor.lab_data:
-                sequencing_layout = lab_data.sequencing_layout
-                sequence_data = lab_data.sequence_data
+            for lab_datum in donor.lab_data:
+                sequencing_layout = lab_datum.sequencing_layout
+                sequence_data = lab_datum.sequence_data
                 # find all FASTQ files
                 fastq_files = find_fastq_files(sequence_data) if sequence_data else []
                 bam_files = find_bam_files(sequence_data) if sequence_data else []
 
-                if not lab_data.library_type.endswith("_lr"):
+                if not lab_datum.library_type.endswith("_lr"):
                     match sequencing_layout:
                         case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
                             yield from self._validate_single_end_fallback(
-                                fastq_files, progress_logger, lab_data.library_type, lab_data.sequence_subtype
+                                fastq_files,
+                                progress_logger,
+                                self.metadata.content.determine_thresholds_for(donor, lab_datum),
                             )
                         case SequencingLayout.paired_end:
                             yield from self._validate_paired_end_fallback(
-                                fastq_files, progress_logger, lab_data.library_type, lab_data.sequence_subtype
+                                fastq_files,
+                                progress_logger,
+                                self.metadata.content.determine_thresholds_for(donor, lab_datum),
                             )
                 yield from self._validate_bams_fallback(bam_files, progress_logger)
 
@@ -559,22 +554,13 @@ class Submission:
         self,
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
-        library_type: LibraryType,
-        sequence_subtype: SequenceSubtype,
+        thresholds: thresholds_model.Thresholds,
     ) -> Generator[str, None, None]:
         def validate_file(local_file_path, file_metadata: SubmissionFileMetadata) -> ValidationState:
             self.__log.debug("Validating '%s'...", str(local_file_path))
 
             # validate the file
-            threshold_definitions = load_thresholds()
-            thresholds = threshold_definitions[
-                (
-                    self.metadata.content.submission.genomic_study_subtype,
-                    library_type,
-                    sequence_subtype,
-                )
-            ]
-            mean_read_length_threshold = thresholds["meanReadLength"]
+            mean_read_length_threshold = thresholds.mean_read_length
             errors = list(
                 validate_single_end_reads(local_file_path, mean_read_length_threshold=mean_read_length_threshold)
             )
@@ -596,18 +582,9 @@ class Submission:
         self,
         fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
-        library_type: LibraryType,
-        sequence_subtype: SequenceSubtype,
+        thresholds: thresholds_model.Thresholds,
     ) -> Generator[str, None, None]:
-        threshold_definitions = load_thresholds()
-        thresholds = threshold_definitions[
-            (
-                self.metadata.content.submission.genomic_study_subtype,
-                library_type,
-                sequence_subtype,
-            )
-        ]
-        mean_read_length_threshold = thresholds["meanReadLength"]
+        mean_read_length_threshold = thresholds.mean_read_length
         key = lambda f: (f.flowcell_id, f.lane_id)
         fastq_files.sort(key=key)
         for _key, group in groupby(fastq_files, key):

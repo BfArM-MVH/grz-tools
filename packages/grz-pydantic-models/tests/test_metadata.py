@@ -19,7 +19,14 @@ TESTED_VERSIONS = ["1.2.1", "1.3.0"]
 @pytest.mark.parametrize(
     "dataset,version",
     itertools.product(
-        ["panel_tumor_only", "wes_tumor_germline", "wgs_tumor_germline", "wgs_lr_tumor_only", "wgs_trio"],
+        [
+            "oncomine_panel_tumor_only",
+            "panel_tumor_only",
+            "wes_tumor_germline",
+            "wgs_tumor_germline",
+            "wgs_lr_tumor_only",
+            "wgs_trio",
+        ],
         TESTED_VERSIONS,
     ),
 )

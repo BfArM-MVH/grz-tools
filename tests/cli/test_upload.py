@@ -1,5 +1,4 @@
 import filecmp
-import json
 import os
 import shutil
 from importlib.metadata import version
@@ -96,10 +95,6 @@ def test_upload_download_submission(
 
         assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
 
-        # Get the upload date of the metadata file from S3
-        metadata_s3_object = objects_in_bucket[f"{submission_id}/metadata/metadata.json"]
-        upload_date = metadata_s3_object.last_modified.date()
-
         # download
         download_dir = tmpdir_factory.mktemp("submission_download")
         download_dir_path = Path(download_dir.strpath)
@@ -123,12 +118,10 @@ def test_upload_download_submission(
         working_dir_path / "encrypted_files",
         download_dir_path / "encrypted_files",
     ), "Encrypted files are different!"
-
-    # The submission date in the downloaded metadata is updated, so we expect the metadata to be different.
-    with open(download_dir_path / "metadata" / "metadata.json") as f:
-        downloaded_metadata = json.load(f)
-
-    assert downloaded_metadata["submission"]["submissionDate"] == upload_date.isoformat()
+    assert are_dir_trees_equal(
+        working_dir_path / "metadata",
+        download_dir_path / "metadata",
+    ), "Metadata is different!"
 
 
 def test_upload_aborts_on_incomplete_encryption(
