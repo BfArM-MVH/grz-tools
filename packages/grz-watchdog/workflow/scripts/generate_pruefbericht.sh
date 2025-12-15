@@ -12,7 +12,7 @@ log_stderr="${snakemake_log[stderr]}"
 		pruefbericht_params="--fail"
 	fi
 
-	jq --arg date $(cat "${snakemake_input[timestamp]}") '.submission.submissionDate = $date' "${snakemake_input[metadata]}" >"${snakemake_output[tmp]}"
+	jq --rawfile date "${snakemake_input[timestamp]}" '.submission.submissionDate = ($date | rtrimstr("\n"))' "${snakemake_input[metadata]}" >"${snakemake_output[tmp]}"
 
 	grzctl pruefbericht \
 		generate \
