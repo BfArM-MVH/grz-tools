@@ -71,7 +71,7 @@ rule check_and_register:
     input:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         db_config_path=cfg_path("config_paths/db"),
-        db_initialized=rules.init_db.output.marker,
+        db_initialized=ancient(rules.init_db.output.marker),
     output:
         marker=touch(
             "<results>/{submitter_id}/{inbox}/{submission_id}/registered.marker"
