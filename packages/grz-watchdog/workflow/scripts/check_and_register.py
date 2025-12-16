@@ -4,6 +4,7 @@ import sys
 
 sys.path.append(os.path.dirname(__file__))
 import shared
+from shared import log_print
 
 
 def run_command(cmd):
@@ -18,7 +19,7 @@ submission_id = snakemake.wildcards.submission_id
 submitter_id = snakemake.wildcards.submitter_id
 inbox = snakemake.wildcards.inbox
 inbox_config = snakemake.input.inbox_config_path
-db_config = snakemake.input.db_config_path
+db_config_path = snakemake.input.db_config_path
 log_stdout = snakemake.log.stdout
 log_stderr = snakemake.log.stderr
 
@@ -30,29 +31,51 @@ with open(log_stdout, "w") as f_out, open(log_stderr, "w") as f_err:
     except StopIteration:
         raise RuntimeError(f"Submission '{submission_id}' not found in S3 inbox.") from None
 
-    s3_state = submission.get("state")
-    print(f"Found S3 state: '{s3_state}'", file=f_out)
+    db_state: str = (submission.get("database_state", "missing") or "missing").casefold()
 
-    if s3_state != "complete":
-        raise RuntimeError(f"Submission '{submission_id}' is not ready for processing. S3 status is '{s3_state}'.")
+    submission_id = submission["submission_id"]
+    s3_state = submission["state"]
 
-    db_state: str = submission.get("database_state", "missing") or "missing"
-    print(f"Found database state: '{db_state}'", file=f_out)
-    if not db_state.casefold() in {"missing", "uploaded"}:
-        print(f"Submission '{submission_id}' already registered, skipping.", file=f_out)
+    if s3_state == "complete":
+        target_db_state = "uploaded"
+    elif s3_state == "incomplete":
+        target_db_state = "uploading"
+    else:
+        log_print(f"Skipping submission {submission_id} with state {s3_state}.")
         sys.exit(0)
 
-    try:
-        print(f"Registering submission '{submission_id}' in the database...", file=f_out)
-        add_cmd = ["grzctl", "db", "--config-file", db_config, "submission", "add", submission_id]
-        subprocess.run(add_cmd, capture_output=True, text=True)  # noqa: S603
+    current_db_state = None if db_state == "missing" else db_state
 
-        print("Setting database state to 'uploaded'...", file=f_out)
-        update_cmd = ["grzctl", "db", "--config-file", db_config, "submission", "update", submission_id, "uploaded"]
-        run_command(update_cmd)
+    match (current_db_state, target_db_state):
+        # A new, incomplete submission is found.
+        case None, "uploading":
+            log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploading'.")
+            shared.add_submission_to_db(db_config_path, submission_id)
+            shared.update_submission_state_in_db(db_config_path, submission_id, "uploading")
 
-        print("Submission successfully checked and registered.", file=f_out)
+        # A new, already complete submission is found.
+        case None, "uploaded":
+            log_print(f"Submission {submission_id} is new. Adding and setting state to 'uploaded'.")
+            shared.add_submission_to_db(db_config_path, submission_id)
+            shared.update_submission_state_in_db(db_config_path, submission_id, "uploaded")
 
-    except Exception as e:
-        print(str(e), file=f_err)
-        sys.exit(1)
+        # An existing incomplete submission is now complete.
+        case "uploading", "uploaded":
+            log_print(f"Updating state for {submission_id} from 'uploading' to 'uploaded'.")
+            shared.update_submission_state_in_db(db_config_path, submission_id, "uploaded")
+
+        # If we already set the state to "uploaded" in a previous run which subsequently got interrupted,
+        # the submission is still available for processing
+        case "uploaded", "uploaded":
+            pass
+
+        # "no-op" cases for clarity, nothing to be done here
+        case "uploading", "uploading":
+            pass
+
+        # catch-all for any other transition, which should be skipped.
+        case from_state, to_state:
+            log_print(
+                f"Skipping update for {submission_id}: No transition defined from '{from_state}' to '{to_state}'."
+            )
+            pass
