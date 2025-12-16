@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from contextlib import redirect_stderr, redirect_stdout
 
 sys.path.append(os.path.dirname(__file__))
 import shared
@@ -23,8 +24,8 @@ db_config_path = snakemake.input.db_config_path
 log_stdout = snakemake.log.stdout
 log_stderr = snakemake.log.stderr
 
-with open(log_stdout, "w") as f_out, open(log_stderr, "w") as f_err:
-    print(f"Checking S3 status for submission '{submission_id}'...", file=f_out)
+with redirect_stdout(open(log_stdout, "w")), redirect_stderr(open(log_stderr, "w")):
+    log_print(f"Checking S3 status for submission '{submission_id}'...")
     submissions = shared.scan_inbox_and_augment(inbox_config=inbox_config, submitter_id=submitter_id, inbox=inbox)
     try:
         submission = next(filter(lambda s: s["submission_id"] == submission_id, submissions))
