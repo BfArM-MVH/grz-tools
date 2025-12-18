@@ -1,7 +1,5 @@
-import datetime
 import math
 import os
-import random
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -11,7 +9,6 @@ from typing import Literal
 
 import humanfriendly
 import yaml
-from grz_cli.commands.validate import validate
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from snakemake.io import InputFiles, Wildcards, ancient
