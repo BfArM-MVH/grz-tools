@@ -1,5 +1,6 @@
 """Tests for the file_operations module."""
 
+import filecmp
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,5 @@ def test_crypt4gh_encrypt_file(
     private_key = Crypt4GH.retrieve_private_key(crypt4gh_grz_private_key_file_path)
 
     Crypt4GH.decrypt_file(tmp_encrypted_file, tmp_decrypted_file, private_key=private_key)
-
-    import filecmp
 
     assert filecmp.cmp(temp_small_file_path, tmp_decrypted_file)

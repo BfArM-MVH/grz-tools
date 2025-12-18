@@ -13,6 +13,7 @@ env:
   UV_VERSION: '0.8.5'
   GRZ_CHECK_WORKSPACE: "packages/grz-check"
   RUST_TOOLCHAIN_VERSION: "1.89.0"
+  PIXI_VERSION: 'v0.58.0'
 
 jobs:
   determine-changes:
@@ -23,6 +24,7 @@ jobs:
       rust_matrix: ${{ steps.generate_matrix.outputs.rust_matrix }}
       has_python_changes: ${{ steps.generate_matrix.outputs.has_python_changes }}
       has_rust_changes: ${{ steps.generate_matrix.outputs.has_rust_changes }}
+      grz_watchdog_changed: ${{ steps.generate_matrix.outputs.grz_watchdog_changed }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,7 +50,7 @@ jobs:
             package_dir=$(echo "$file_path" | cut -d/ -f1-2)
 
             # Check if it's a valid package dir (Python or Rust)
-            if [[ -f "$package_dir/pyproject.toml" || -f "$package_dir/Cargo.toml" ]]; then
+            if [[ -f "$package_dir/pyproject.toml" || -f "$package_dir/Cargo.toml" || -f "$package_dir/tests/pixi.toml" ]]; then
               if [[ ! " ${directly_changed_package_dirs[@]} " =~ " ${package_dir} " ]]; then
                 directly_changed_package_dirs+=("$package_dir")
               fi
@@ -58,11 +60,11 @@ jobs:
 
           # Define dependency graph (source package name -> space-separated list of dependent package names)
           declare -A DEPENDENCY_GRAPH
-          DEPENDENCY_GRAPH["grz-pydantic-models"]="grz-cli grzctl grz-common grz-db"
-          DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl"
-          DEPENDENCY_GRAPH["grz-db"]="grzctl"
-          DEPENDENCY_GRAPH["grz-cli"]="grzctl"
-          DEPENDENCY_GRAPH["grz-check"]="grz-cli"
+          DEPENDENCY_GRAPH["grz-pydantic-models"]="grz-cli grzctl grz-common grz-db grz-watchdog"
+          DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl grz-watchdog"
+          DEPENDENCY_GRAPH["grz-db"]="grzctl grz-watchdog"
+          DEPENDENCY_GRAPH["grz-cli"]="grzctl grz-watchdog"
+          DEPENDENCY_GRAPH["grz-check"]="grz-cli grz-watchdog"
           # Add other dependencies as needed: DEPENDENCY_GRAPH["pkg-x"]="pkg-y pkg-z"
 
           final_test_dirs=("${directly_changed_package_dirs[@]}")
@@ -118,6 +120,14 @@ jobs:
           else
             echo "has_rust_changes=false" >> $GITHUB_OUTPUT
             echo "No Rust package changes detected."
+          fi
+
+          if [[ "${unique_test_dirs_array[*]}" =~ "packages/grz-watchdog" ]]; then
+            echo "grz_watchdog_changed=true" >> $GITHUB_OUTPUT
+            echo "Detected changes requiring grz-watchdog tests."
+          else
+            echo "grz_watchdog_changed=false" >> $GITHUB_OUTPUT
+            echo "No changes requiring grz-watchdog tests."
           fi
 
   quality-checks-python:
@@ -328,8 +338,113 @@ jobs:
         id: pkg_info
         run: echo "name=$(basename ${{ matrix.package.path }})" >> $GITHUB_OUTPUT
 
+      - name: Install Pixi
+        if: steps.pkg_info.outputs.name == 'grz-watchdog'
+        uses: prefix-dev/setup-pixi@v0.9.1
+        with:
+          pixi-version: ${{ env.PIXI_VERSION }}
+          cache: true
+
+      - name: Run grz-watchdog specific checks
+        if: steps.pkg_info.outputs.name == 'grz-watchdog'
+        run: |
+          cd ${{ matrix.package.path }}
+          pixi install --frozen
+          pixi run snakemake --lint    # TODO: check output and error if there are recommendations left
+          pixi run snakefmt --check workflow
+
       - name: Ensure package uv lockfile is up-to-date
+        if: steps.pkg_info.outputs.name != 'grz-watchdog'
         run: cd ${{ matrix.package.path }} && uv lock --check
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
+        if: steps.pkg_info.outputs.name != 'grz-watchdog'
         run: cd ${{ matrix.package.path }} && uv run tox -e py${{ matrix.python-version }}
+
+  test-grz-watchdog:
+    name: Test grz-watchdog
+    runs-on: ubuntu-latest
+    needs: [determine-changes, quality-checks-python, build-grz-check-binary]
+    if: ${{ !cancelled() && needs.determine-changes.outputs.grz_watchdog_changed == 'true' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Configure Host for Rootless Podman
+        run: |
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+              echo "Disabling AppArmor unprivileged user namespace restriction..."
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+          USER=$(whoami)
+          echo "Setting up subuid/subgid for user: $USER"
+
+          if ! grep -q "^$USER:" /etc/subuid; then
+            sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 $USER
+          fi
+
+      - name: Install Podman 5 from Ubuntu Plucky (25.04)
+        # see https://github.com/containers/podman/discussions/25582
+        run: |
+          # Define file paths
+          PINNING_FILE="/etc/apt/preferences.d/podman-plucky.pref"
+          SOURCE_LIST="/etc/apt/sources.list.d/plucky.list"
+
+          # Write Plucky APT source list
+          echo "Adding Plucky repo to $SOURCE_LIST..."
+          echo "deb http://archive.ubuntu.com/ubuntu plucky main universe" | sudo tee "$SOURCE_LIST"
+
+          # Write APT pinning rules
+          echo "Writing APT pinning rules to $PINNING_FILE..."
+          cat <<EOF | sudo tee "$PINNING_FILE"
+          Package: podman podman-compose podman-docker buildah golang-github-containers-common crun libgpgme11t64 libgpg-error0 golang-github-containers-image catatonit conmon containers-storage
+          Pin: release n=plucky
+          Pin-Priority: 991
+
+          Package: libsubid4 netavark passt aardvark-dns containernetworking-plugins libslirp0 slirp4netns
+          Pin: release n=plucky
+          Pin-Priority: 991
+
+          Package: *
+          Pin: release n=plucky
+          Pin-Priority: 400
+          EOF
+
+          sudo apt-get update
+          sudo apt-get install -y podman podman-docker podman-compose
+
+          podman-compose --version
+
+      - name: Configure Podman for CI
+        run: |
+          mkdir -p $HOME/.config/containers
+          cat <<EOF > $HOME/.config/containers/containers.conf
+          [containers]
+          netns="host"
+
+          [engine]
+          cgroup_manager = "cgroupfs"
+          events_logger = "file"
+          EOF
+
+          podman system migrate
+          podman info
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install grz-watchdog dependencies
+        run: uv sync --all-extras --all-groups --all-packages
+
+      - name: Run grz-watchdog
+        run: uv run pytest packages/grz-watchdog/tests -v

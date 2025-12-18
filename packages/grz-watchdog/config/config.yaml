@@ -1,0 +1,56 @@
+monitor:
+  interval: 5
+batch:
+  limit: 2
+
+estimates:
+  speed:
+    download: 200
+    decrypt: 250
+    validate: 100
+    encrypt: 250
+    archive: 200
+    qc: 10
+
+on-failed-validation: "cleanup"
+auto-cleanup: "inbox"
+
+handlers:
+  # What to do when the workflow encounters an error.
+  # Placeholder '{log}' points to main snakemake log.
+  # For example, to send a mail with the contents of the log:
+  #   "mail -s 'grz-watchdog error' send-mail-to@recipient.domain < {log}"
+  on-error: "echo 'Failed running grz-watchdog, check logs at {log}'; cat {log}"
+  on-start: "echo 'Starting grz-watchdog.'"
+  on-success: "echo 'Successfully finished grz-watchdog run.'"
+
+
+config_paths:
+  inbox:
+    "123456789":
+      test1: "config/configs/inbox.test1.yaml"
+  archive:
+    consented: "config/configs/consented.yaml"
+    nonconsented: "config/configs/nonconsented.yaml"
+  db: "config/configs/db.yaml"
+  pruefbericht: "config/configs/pruefbericht.yaml"
+
+qc:
+  revision: "v1.2.0"
+  selection_strategy:
+    enabled: false
+    target_percentage: 2.0
+    salt: 鹽
+  prepare-qc:
+    mode: "create"  # if using default references, can set to "download"
+    profiles:
+      - conda
+    configs:
+      - "/workdir/config/nextflow.test.config"
+    extra: >-
+      --fasta /workdir/test_data/grz-mini-test-data/references/GRCh37/mini.fa.gz
+      --target /workdir/test_data/grz-mini-test-data/references/GRCh37/mini.genes.bed
+      --submission_basepath /workdir/test_data/grz-mini-test-data/submissions/wgs
+    run-qc:
+      profiles:
+        - conda

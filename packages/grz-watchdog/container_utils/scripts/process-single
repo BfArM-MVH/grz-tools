@@ -1,0 +1,106 @@
+#!/bin/bash
+set -euo pipefail
+
+usage() {
+	cat <<EOF
+Usage: $0 <submitter_id> <inbox> <submission_id> [MODE] [snakemake_options...]
+
+Processes a single submission using grz-watchdog.
+
+Required Arguments:
+  <submitter_id>      The id of the submitter.
+  <inbox>             The inbox name.
+  <submission_id>     The submission id.
+
+QC Mode (optional):
+  --force-with-qc     Forces the submission to run through the QC pipeline.
+  --force-without-qc  Forces the submission to skip the QC pipeline.
+  (default)           Uses the automatic QC selection strategy defined in the main config.
+
+Snakemake Options:
+  Any additional arguments are passed directly to the underlying snakemake command.
+
+Example (force QC):
+  $0 123456789 test1 123456789_2025-09-22_aabbccdd --force-with-qc --cores 4
+
+Example (force no QC):
+  $0 123456789 test1 123456789_2025-09-22_aabbccdd --force-without-qc --cores 4
+
+Example (automatically determine whether to do QC):
+  $0 123456789 test1 123456789_2025-09-22_aabbccdd --cores 4
+EOF
+	exit 1
+}
+
+if [ "$#" -lt 3 ]; then
+	usage
+fi
+
+submitter_id="$1"
+shift
+inbox="$1"
+shift
+submission_id="$1"
+shift
+
+qc_mode="auto_qc" # default to automatically determining whether to do qc or not
+snakemake_args=()
+
+# separate qc mode flag from extra snakemake arguments
+while (("$#")); do
+	case "$1" in
+	--force-with-qc)
+		qc_mode="force_with_qc"
+		shift
+		;;
+	--force-without-qc)
+		qc_mode="force_without_qc"
+		shift
+		;;
+	-h | --help)
+		usage
+		;;
+	*)
+		# pass other args on to snakemake
+		snakemake_args+=("$1")
+		shift
+		;;
+	esac
+done
+
+SNAKEMAKE_OPTS=()
+TEMP_CONFIG_FILE=""
+trap 'rm -f "$TEMP_CONFIG_FILE"' EXIT
+
+case "$qc_mode" in
+"force_with_qc")
+	echo "qc mode: forcing qc for this submission."
+	TEMP_CONFIG_FILE=$(mktemp /tmp/grz-watchdog.qc-override.XXXXXX.yaml)
+	printf '%s\n' \
+		"qc:" \
+		"  selection_strategy:" \
+		"    enabled: true" \
+		"    target_percentage: 100.0" >"$TEMP_CONFIG_FILE"
+	SNAKEMAKE_OPTS+=("--configfile" "$TEMP_CONFIG_FILE")
+	;;
+"force_without_qc")
+	echo "qc mode: forcing no qc for this submission."
+	TEMP_CONFIG_FILE=$(mktemp /tmp/grz-watchdog.qc-override.XXXXXX.yaml)
+	printf '%s\n' \
+		"qc:" \
+		"  selection_strategy:" \
+		"    enabled: false" >"$TEMP_CONFIG_FILE"
+	SNAKEMAKE_OPTS+=("--configfile" "$TEMP_CONFIG_FILE")
+	;;
+"auto_qc")
+	echo "qc mode: using automatic selection from main configuration."
+	;;
+esac
+
+target_path="results/${submitter_id}/${inbox}/${submission_id}/processed"
+
+echo "Processing single submission. Target: ${target_path}"
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+RUNNER_SCRIPT="$SCRIPT_DIR/runner.py"
+python3 "$RUNNER_SCRIPT" "${target_path}" "${SNAKEMAKE_OPTS[@]}" "${snakemake_args[@]}"

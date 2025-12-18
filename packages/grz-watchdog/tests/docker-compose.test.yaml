@@ -1,0 +1,132 @@
+x-image-def: &grz-image
+  image: grz-watchdog-test-image:latest
+
+services:
+  minio:
+    image: docker.io/minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_TEST_USER_ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
+      - MINIO_TEST_USER_SECRET_KEY=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
+    command: server /data --console-address :9001
+#    healthcheck:
+#      test: ["CMD-SHELL", "mc ready local"]
+##      test: ["CMD-SHELL", "wget -q --spider http://localhost:9000/minio/health/live"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 30
+
+  setup-minio:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started  # service_healthy
+    volumes:
+      - ./config/submitter-policy.json:/config/submitter-policy.json
+    environment:
+      - MINIO_TEST_USER_ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
+      - MINIO_TEST_USER_SECRET_KEY=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
+    entrypoint: /bin/sh
+    command: >
+      -c "
+      set -ex;
+      
+      echo 'Waiting for MinIO to be ready...';
+      until mc alias set adm http://minio:9000 minioadmin minioadmin; do
+        echo '... MinIO not ready, waiting 5s';
+        sleep 5;
+      done;
+      
+      echo 'Creating submitter policy...';
+      mc admin policy create adm submitter-policy /config/submitter-policy.json;
+
+      echo 'Creating submitter user...';
+      mc admin user add adm 'Gd4G0VqhHTmi28twgsmF' 'KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f';
+      
+      echo 'Attaching submitter policy to submitter user...';
+      mc admin policy attach adm submitter-policy --user 'Gd4G0VqhHTmi28twgsmF';
+      
+      echo 'Creating buckets...';
+      mc mb --ignore-existing adm/test1;
+      mc mb --ignore-existing adm/consented;
+      mc mb --ignore-existing adm/nonconsented;
+      
+      echo 'MinIO setup complete.';
+      "
+
+
+  bfarm-mock-api:
+    build:
+      context: ./mock_api
+    hostname: bfarm-mock-api
+    volumes:
+      - ./generated/cert.pem:/app/cert.pem:ro
+      - ./generated/key.pem:/app/key.pem:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:5000/token || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+
+  builder:
+    <<: *grz-image
+    build:
+      context: ../../..
+      dockerfile: ./packages/grz-watchdog/Dockerfile
+    command: ["echo", "Build complete."]
+
+  grz-watchdog:
+    <<: *grz-image
+    container_name: grz-watchdog-test-runner
+    depends_on:
+      setup-minio:
+        condition: service_completed_successfully
+      bfarm-mock-api:
+        condition: service_started
+    volumes:
+      - ./config:/workdir/config
+      - ./config:/config
+      - ./generated/cert.pem:/workdir/config/cert.pem:ro
+    working_dir: /workdir
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GRZ_S3__ENDPOINT_URL=http://minio:9000
+      - GRZ_S3__ACCESS_KEY=minioadmin
+      - GRZ_S3__SECRET=minioadmin
+      - GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE=test
+      - GRZ_PRUEFBERICHT_MOCK=true
+      - GRZ_WATCHDOG_WORKDIR=/workdir
+      - GRZ_WATCHDOG_SNAKEFILE=/grz-watchdog/workflow/Snakefile
+      - GRZ_WATCHDOG_SNAKEMAKE_PROFILE=/grz-watchdog/workflow/profiles/test
+    # Keep the service alive for testing after startup
+    entrypoint: /bin/sh
+    command: -c 'trap "exit 0" TERM; while true; do sleep 1; done'
+
+  grz-submitter:
+    <<: *grz-image
+    container_name: grz-submitter-test-runner
+    depends_on:
+      setup-minio:
+        condition: service_completed_successfully
+    volumes:
+      - ./config:/workdir/config
+      - ./config:/config
+    working_dir: /workdir
+    environment:
+      - GRZ_S3__ENDPOINT_URL=http://minio:9000
+      - GRZ_S3__ACCESS_KEY=Gd4G0VqhHTmi28twgsmF
+      - GRZ_S3__SECRET=KEx8ABzui36NhyXbiQwYXxps3HahqD7EKL54v65f
+    entrypoint: /bin/sh
+    command: -c 'trap "exit 0" TERM; while true; do sleep 1; done'
+
+
+volumes:
+  minio_data:

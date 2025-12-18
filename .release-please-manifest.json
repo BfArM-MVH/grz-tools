@@ -4,5 +4,6 @@
   "packages/grz-db": "1.2.0",
   "packages/grz-common": "1.6.1",
   "packages/grzctl": "1.4.0",
-  "packages/grz-check": "0.2.1"
+  "packages/grz-check": "0.2.1",
+  "packages/grz-watchdog": "0.1.0"
 }
