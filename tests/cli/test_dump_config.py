@@ -62,6 +62,7 @@ def test_dump_config_with_files(
 
     assert logged_config == expected_config
 
+
 def test_dump_config_global_args(
     caplog,
     temp_s3_config_file_path,
