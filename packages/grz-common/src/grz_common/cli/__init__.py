@@ -8,8 +8,6 @@ from pathlib import Path
 import click
 import platformdirs
 
-DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grz-cli")) / "config.yaml"
-
 # Aliases for path types for click options
 # Naming convention: {DIR,FILE}_{Read,Write}_{Exists,Create}
 DIR_R_E = click.Path(
@@ -43,9 +41,52 @@ config_file = click.option(
     metavar="STRING",
     type=FILE_R_E,
     required=False,
-    default=DEFAULT_CONFIG_PATH,
+    multiple=True,
+    default=[],
     help="Path to config file",
 )
+
+
+def get_default_config_path() -> Path:
+    """
+    Get the default config file path.
+
+    :return: Path to the default config file
+    """
+    return Path(platformdirs.user_config_dir("grz-cli")) / "config.yaml"
+
+
+def config_files_from_ctx(ctx: click.Context) -> list[Path]:
+    """
+    Helper to get config files from click context.
+
+    :param ctx: click context
+    :return: List of config file paths
+    """
+    retval: list[Path] = []
+    if "config_file" in ctx.params:
+        # add config files from current context if any
+        retval = [
+            *[Path(p) for p in ctx.params["config_file"]],
+            *retval,
+        ]
+
+    while ctx.parent is not None:
+        # traverse up the context tree and add config files from parent contexts
+        ctx = ctx.parent
+        if "config_file" in ctx.params:
+            retval = [
+                *[Path(p) for p in ctx.params["config_file"]],
+                *retval,
+            ]
+
+    default_config_path = get_default_config_path()
+    if default_config_path.is_file():
+        # prepend default config path if it exists
+        retval.insert(0, default_config_path)
+
+    return retval
+
 
 threads = click.option(
     "--threads",

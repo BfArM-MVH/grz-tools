@@ -1,4 +1,13 @@
+import json
 from copy import deepcopy
+from pathlib import Path
+
+import yaml
+
+__all__ = [
+    "merge_config_dicts",
+    "read_and_merge_config_files",
+]
 
 
 def _merge_config_dicts_recursive(a: dict, b: dict, path) -> dict:
@@ -53,3 +62,29 @@ def merge_config_dicts(a: dict, b: dict) -> dict:
     # Create a deep copy of `a` to avoid modifying the original dictionary
     a = deepcopy(a)
     return _merge_config_dicts_recursive(a, b, path=[])
+
+
+def read_and_merge_config_files(config_files: list[Path]) -> dict:
+    """
+    Read and merge multiple configuration files in YAML or JSON format.
+
+    :param config_files:
+    :return: Merged configuration dictionary.
+    :raises RuntimeError: If there is an error reading any of the configuration files.
+    """
+    configuration: dict[str, object] = {}
+    for curr_config_file in config_files:
+        try:
+            if curr_config_file.suffix.lower() == ".json":
+                with open(curr_config_file) as fd:
+                    curr_config = json.load(fd)
+            else:
+                with open(curr_config_file) as fd:
+                    curr_config = yaml.safe_load(fd)
+
+            # merge configurations
+            configuration = merge_config_dicts(configuration, curr_config)
+        except Exception as e:
+            raise RuntimeError(f"Error reading configuration file: '{curr_config_file}'") from e
+
+    return configuration

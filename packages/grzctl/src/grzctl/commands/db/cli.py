@@ -20,8 +20,9 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from grz_common.cli import FILE_R_E, config_file, output_json
+from grz_common.cli import FILE_R_E, config_file, config_files_from_ctx, output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
+from grz_common.utils.config import read_and_merge_config_files
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     DatabaseConfigurationError,
@@ -72,13 +73,15 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 @click.group(help="Database operations")
 @config_file
 @click.pass_context
-def db(ctx: click.Context, config_file: str):
+def db(ctx: click.Context, config_file: list[Path]):
     """Database operations"""
-    # store config file path in context so subcommands can re-read it if needed
+    # set up context object
     ctx.ensure_object(dict)
-    ctx.obj["config_file_path"] = config_file
 
-    config = DbConfig.from_path(config_file)
+    # determine configuration files to load
+    config_files = config_files_from_ctx(ctx)
+
+    config = DbConfig.model_validate(read_and_merge_config_files(config_files))
     db_config = config.db
     if not db_config:
         raise ValueError("DB config not found")
@@ -948,12 +951,13 @@ def sync_from_inbox(ctx: click.Context):
     """
     db_url = ctx.obj["db_url"]
     author = ctx.obj["author"]
-    config_file_path = ctx.obj["config_file_path"]
+
+    config_files = config_files_from_ctx(ctx)
 
     try:
-        list_config = ListConfig.from_path(config_file_path)
-    except Exception as e:
-        console_err.print(f"[red]Error loading S3 configuration from {config_file_path}: {e}[/red]")
+        list_config = ListConfig.model_validate(read_and_merge_config_files(config_files))
+    except Exception:
+        console_err.print(f"[red]Error loading S3 configuration from {config_files}: {traceback.format_exc()}[/red]")
         sys.exit(1)
 
     db_service = get_submission_db_instance(db_url, author=author)
@@ -967,7 +971,7 @@ def sync_from_inbox(ctx: click.Context):
 
         console_err.print("[green]Synchronization complete.[/green]")
 
-    except Exception as e:
-        console_err.print(f"[red]Error during synchronization: {e}[/red]")
+    except Exception:
+        console_err.print(f"[red]Error during synchronization: {traceback.format_exc()}[/red]")
         traceback.print_exc()
         sys.exit(1)

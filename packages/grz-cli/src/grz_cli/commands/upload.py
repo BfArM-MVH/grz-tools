@@ -4,11 +4,12 @@ import logging
 from pathlib import Path
 
 import click
+from grz_common.utils.config import read_and_merge_config_files
 from grz_common.workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
-from grz_common.cli import config_file, submission_dir, threads
+from grz_common.cli import config_file, config_files_from_ctx, submission_dir, threads
 
 from ..models.config import UploadConfig
 
@@ -17,15 +18,20 @@ from ..models.config import UploadConfig
 @submission_dir
 @config_file
 @threads
+@click.pass_context
 def upload(
+    ctx,
     submission_dir,
-    config_file,
+    config_file: list[Path],
     threads,
 ):
     """
     Upload a submission to a GRZ/GDC.
     """
-    config = UploadConfig.from_path(config_file)
+    # determine configuration files to load
+    config_files = config_files_from_ctx(ctx)
+
+    config = UploadConfig.model_validate(read_and_merge_config_files(config_files))
 
     log.info("Starting upload...")
 

@@ -2,16 +2,18 @@
 CLI module for handling command-line interface operations.
 """
 
-import logging
 import logging.config
 import shutil
 import subprocess
 import sys
 from importlib.metadata import version
+from pathlib import Path
 from textwrap import dedent
 
 import click
 import grz_pydantic_models.submission.metadata
+from grz_common.cli import config_file
+from grz_common.cli.dump_config import dump_config
 from grz_common.logging import setup_cli_logging
 
 from .commands.encrypt import encrypt
@@ -64,7 +66,9 @@ def build_cli():
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
         help="Set the log level (default: INFO)",
     )
-    def cli(log_file: str | None = None, log_level: str = "INFO"):
+    @config_file
+    @click.pass_context
+    def cli(ctx, config_file: list[Path], log_file: str | None = None, log_level: str = "INFO"):
         """
         Command-line interface function for setting up logging.
 
@@ -81,6 +85,7 @@ def build_cli():
     cli.add_command(upload)
     cli.add_command(submit)
     cli.add_command(get_id)
+    cli.add_command(dump_config)
 
     return cli
 
