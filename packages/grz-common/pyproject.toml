@@ -37,8 +37,7 @@ keywords = ["GRZ", "GDC", "S3"]
 [dependency-groups]
 dev = ["tox", "tox-uv"]
 
-[tool.uv.sources]
-grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
+
 
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"

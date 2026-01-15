@@ -22,8 +22,7 @@ dependencies = [
     "psycopg[binary] ~=3.2"
 ]
 
-[tool.uv.sources]
-grz-pydantic-models = { path = "../grz-pydantic-models", editable = true}
+
 
 [dependency-groups]
 dev = ["tox", "tox-uv"]

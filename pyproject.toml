@@ -4,12 +4,21 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
 
+[tool.uv.workspace]
+members = [
+    "packages/grz-common",
+    "packages/grz-cli",
+    "packages/grzctl",
+    "packages/grz-db",
+    "packages/grz-pydantic-models",
+]
+
 [tool.uv.sources]
-grz-common = { path = "packages/grz-common", editable = true }
-grz-cli = { path = "packages/grz-cli", editable = true }
-grzctl = { path = "packages/grzctl", editable = true }
-grz-db = { path = "packages/grz-db", editable = true }
-grz-pydantic-models = { path = "packages/grz-pydantic-models", editable = true }
+grz-common = { workspace = true }
+grz-cli = { workspace = true }
+grzctl = { workspace = true }
+grz-db = { workspace = true }
+grz-pydantic-models = { workspace = true }
 
 [project.optional-dependencies]
 test = [
@@ -31,9 +40,9 @@ test = [
 
 [dependency-groups]
 dev = [
-  "textual-dev",
-  "tox",
-  "tox-uv"
+    "textual-dev",
+    "tox",
+    "tox-uv"
 ]
 test = [
     "pytest",
