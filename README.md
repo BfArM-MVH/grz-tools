@@ -18,6 +18,9 @@ It provides functionality for:
 
 For detailed installation and usage instructions, please refer to the [grz-cli README](packages/grz-cli/README.md).
 
+## Development setup
+See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on setting up a development environment.
+
 ## Legacy Information
 
 Previous grz-cli repository content is still available in the `archive/pre-monorepo` branch.
