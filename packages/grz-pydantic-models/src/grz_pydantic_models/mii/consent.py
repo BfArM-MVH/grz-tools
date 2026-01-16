@@ -33,7 +33,7 @@ class Period(StrictBaseModel):
     def datetime_to_date(cls, v):
         if isinstance(v, datetime):
             return v.date()
-        return 
+        return v
 
 class Policy(StrictIgnoringBaseModel):
     uri: str
