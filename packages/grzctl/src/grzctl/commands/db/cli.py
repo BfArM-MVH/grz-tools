@@ -20,9 +20,8 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from grz_common.cli import FILE_R_E, config_file, config_files_from_ctx, output_json
+from grz_common.cli import FILE_R_E, config_file, output_json, read_config_from_ctx
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
-from grz_common.utils.config import read_and_merge_config_files
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     DatabaseConfigurationError,
@@ -78,8 +77,7 @@ def db(ctx: click.Context, config_file: list[Path]):
     # set up context object
     ctx.ensure_object(dict)
 
-    config_files = config_files_from_ctx(ctx)
-    config = DbConfig.model_validate(read_and_merge_config_files(config_files))
+    config = DbConfig.model_validate(read_config_from_ctx(ctx))
     db_config = config.db
     if not db_config:
         raise ValueError("DB config not found")
@@ -953,11 +951,10 @@ def sync_from_inbox(ctx: click.Context):
     """
     Synchronize the database with submissions found in the inbox.
     """
-    config_files = config_files_from_ctx(ctx)
     try:
-        list_config = ListConfig.model_validate(read_and_merge_config_files(config_files))
+        list_config = ListConfig.model_validate(read_config_from_ctx(ctx))
     except Exception:
-        console_err.print(f"[red]Error loading S3 configuration from {config_files}: {traceback.format_exc()}[/red]")
+        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
         sys.exit(1)
 
     db_url = ctx.obj["db_url"]

@@ -9,7 +9,7 @@ from grz_common.workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
-from grz_common.cli import config_file, config_files_from_ctx, submission_dir, threads
+from grz_common.cli import config_file, read_config_from_ctx, submission_dir, threads
 
 from ..models.config import UploadConfig
 
@@ -28,8 +28,7 @@ def upload(
     """
     Upload a submission to a GRZ/GDC.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = UploadConfig.model_validate(read_and_merge_config_files(config_files))
+    config = UploadConfig.model_validate(read_config_from_ctx(ctx))
 
     log.info("Starting upload...")
 

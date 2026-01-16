@@ -4,9 +4,12 @@ Common click options for the CLI commands.
 
 from os import sched_getaffinity
 from pathlib import Path
+from typing import Any
 
 import click
 import platformdirs
+
+from ..utils.config import read_and_merge_config_files
 
 # Aliases for path types for click options
 # Naming convention: {DIR,FILE}_{Read,Write}_{Exists,Create}
@@ -86,6 +89,17 @@ def config_files_from_ctx(ctx: click.Context) -> list[Path]:
         retval.insert(0, default_config_path)
 
     return retval
+
+
+def read_config_from_ctx(ctx: click.Context) -> dict[str, Any]:
+    """
+    Helper to read and merge config files from click context.
+    :param ctx: click context
+    :return: Merged config dictionary
+    """
+    config_files = config_files_from_ctx(ctx)
+    config = read_and_merge_config_files(config_files)
+    return config
 
 
 threads = click.option(

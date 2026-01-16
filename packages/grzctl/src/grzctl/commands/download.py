@@ -4,8 +4,7 @@ import logging
 from pathlib import Path
 
 import click
-from grz_common.cli import config_file, config_files_from_ctx, force, output_dir, submission_id, threads
-from grz_common.utils.config import read_and_merge_config_files
+from grz_common.cli import config_file, force, output_dir, read_config_from_ctx, submission_id, threads
 from grz_common.workers.worker import Worker
 
 from ..models.config import DownloadConfig
@@ -27,8 +26,7 @@ def download(ctx, submission_id, output_dir, config_file: list[Path], threads, f
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = DownloadConfig.model_validate(read_and_merge_config_files(config_files))
+    config = DownloadConfig.model_validate(read_config_from_ctx(ctx))
 
     log.info("Starting download...")
 

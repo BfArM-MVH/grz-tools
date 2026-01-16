@@ -6,8 +6,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import click
-from grz_common.cli import config_file, config_files_from_ctx, force, submission_dir
-from grz_common.utils.config import read_and_merge_config_files
+from grz_common.cli import config_file, force, read_config_from_ctx, submission_dir
 from grz_common.workers.worker import Worker
 
 from ..models.config import EncryptConfig
@@ -33,8 +32,7 @@ def encrypt(ctx: click.Context, submission_dir, config_file: list[Path], force, 
     Encryption is done with the recipient's public key.
     Sub-folders 'encrypted_files' and 'logs' are created within the submission directory.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = EncryptConfig.model_validate(read_and_merge_config_files(config_files))
+    config = EncryptConfig.model_validate(read_config_from_ctx(ctx))
 
     submitter_privkey_path = config.keys.submitter_private_key_path
     if submitter_privkey_path == "":

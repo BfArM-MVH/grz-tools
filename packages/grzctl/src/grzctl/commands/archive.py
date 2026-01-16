@@ -11,7 +11,7 @@ from ..models.config import ArchiveConfig
 
 log = logging.getLogger(__name__)
 
-from grz_common.cli import config_file, config_files_from_ctx, submission_dir, threads
+from grz_common.cli import config_file, read_config_from_ctx, submission_dir, threads
 
 
 @click.command()
@@ -28,8 +28,7 @@ def archive(
     """
     Archive a submission within a GRZ/GDC.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = ArchiveConfig.model_validate(read_and_merge_config_files(config_files))
+    config = ArchiveConfig.model_validate(read_config_from_ctx(ctx))
 
     log.info("Starting archival...")
 

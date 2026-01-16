@@ -12,8 +12,7 @@ from pathlib import Path
 
 import click
 import sqlalchemy as sa
-from grz_common.cli import config_file, config_files_from_ctx
-from grz_common.utils.config import read_and_merge_config_files
+from grz_common.cli import config_file, read_config_from_ctx
 from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
@@ -46,8 +45,7 @@ def report(ctx: click.Context, config_file: list[Path]):
     """
     Generate various reports related to GRZ activities.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = ReportConfig.model_validate(read_and_merge_config_files(config_files))
+    config = ReportConfig.model_validate(read_config_from_ctx(ctx))
     if not config:
         raise ValueError("DB config not found")
 

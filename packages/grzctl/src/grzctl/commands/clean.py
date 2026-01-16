@@ -5,9 +5,8 @@ import sys
 from pathlib import Path
 
 import click
-from grz_common.cli import config_file, config_files_from_ctx, submission_id
+from grz_common.cli import config_file, read_config_from_ctx, submission_id
 from grz_common.transfer import init_s3_resource
-from grz_common.utils.config import read_and_merge_config_files
 
 from ..models.config import CleanConfig
 
@@ -23,8 +22,7 @@ def clean(ctx, submission_id, config_file: list[Path], yes_i_really_mean_it: boo
     """
     Remove all files of a submission from the S3 inbox.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = CleanConfig.model_validate(read_and_merge_config_files(config_files))
+    config = CleanConfig.model_validate(read_config_from_ctx(ctx))
 
     bucket_name = config.s3.bucket
 

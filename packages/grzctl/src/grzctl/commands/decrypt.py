@@ -5,8 +5,7 @@ import sys
 from pathlib import Path
 
 import click
-from grz_common.cli import config_file, config_files_from_ctx, force, submission_dir
-from grz_common.utils.config import read_and_merge_config_files
+from grz_common.cli import config_file, force, read_config_from_ctx, submission_dir
 from grz_common.workers.worker import Worker
 
 from ..models.config import DecryptConfig
@@ -25,8 +24,7 @@ def decrypt(ctx, submission_dir, config_file: list[Path], force):
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = DecryptConfig.model_validate(read_and_merge_config_files(config_files))
+    config = DecryptConfig.model_validate(read_config_from_ctx(ctx))
 
     grz_privkey_path = config.keys.grz_private_key_path
     if not grz_privkey_path:

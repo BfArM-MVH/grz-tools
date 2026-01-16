@@ -10,8 +10,7 @@ import click
 import rich.console
 import rich.table
 import rich.text
-from grz_common.cli import config_file, config_files_from_ctx, output_json
-from grz_common.utils.config import read_and_merge_config_files
+from grz_common.cli import config_file, output_json, read_config_from_ctx
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary, query_submissions
 from grz_db.models.submission import SubmissionDb
 from pydantic_core import to_jsonable_python
@@ -127,8 +126,7 @@ def list_submissions(ctx, config_file: list[Path], output_json: bool, show_clean
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.
     """
-    config_files = config_files_from_ctx(ctx)
-    config = ListConfig.model_validate(read_and_merge_config_files(config_files))
+    config = ListConfig.model_validate(read_config_from_ctx(ctx))
 
     submissions = query_submissions(config.s3, show_cleaned)
 

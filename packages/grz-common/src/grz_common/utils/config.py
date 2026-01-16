@@ -1,3 +1,4 @@
+import logging
 from copy import deepcopy
 from pathlib import Path
 
@@ -7,6 +8,8 @@ __all__ = [
     "merge_config_dicts",
     "read_and_merge_config_files",
 ]
+
+log = logging.getLogger(__name__)
 
 
 def _merge_config_dicts_recursive(a: dict, b: dict, path) -> dict:
@@ -23,15 +26,16 @@ def _merge_config_dicts_recursive(a: dict, b: dict, path) -> dict:
                 a[key] = b_val
                 continue
 
-            # If both values are dictionaries, merge them recursively
             if isinstance(a_val, dict) and isinstance(b_val, dict):
+                # If both values are dictionaries, merge them recursively
                 _merge_config_dicts_recursive(a_val, b_val, [*path, str(key)])
-            # If the value type from ``a`` matches the value type of ``b``, ``b`` replaces the value in ``a``.
             elif type(a_val) == type(b_val):
+                # If the value type from `a` matches the value type of `b`, `b` replaces the value in `a`.
+                log.warning(f"Overriding configuration key {'.'.join([*path, str(key)])} with value: {b_val}")
                 # Use deepcopy to avoid modifying the original objects
                 a[key] = deepcopy(b_val)
-            # Conflicting values
             else:
+                # Conflicting types that cannot be merged
                 raise ValueError(
                     "Conflict at " + ".".join([*path, str(key)]) + ": " + repr(a_val) + " != " + repr(b_val)
                 )
