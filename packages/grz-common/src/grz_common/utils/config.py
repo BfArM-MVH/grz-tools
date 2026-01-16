@@ -1,4 +1,3 @@
-import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -66,7 +65,7 @@ def merge_config_dicts(a: dict, b: dict) -> dict:
 
 def read_and_merge_config_files(config_files: list[Path]) -> dict:
     """
-    Read and merge multiple configuration files in YAML or JSON format.
+    Read and merge multiple configuration files in YAML format.
 
     :param config_files:
     :return: Merged configuration dictionary.
@@ -75,12 +74,8 @@ def read_and_merge_config_files(config_files: list[Path]) -> dict:
     configuration: dict[str, object] = {}
     for curr_config_file in config_files:
         try:
-            if curr_config_file.suffix.lower() == ".json":
-                with open(curr_config_file) as fd:
-                    curr_config = json.load(fd)
-            else:
-                with open(curr_config_file) as fd:
-                    curr_config = yaml.safe_load(fd)
+            with open(curr_config_file) as fd:
+                curr_config = yaml.safe_load(fd)
 
             # merge configurations
             configuration = merge_config_dicts(configuration, curr_config)
