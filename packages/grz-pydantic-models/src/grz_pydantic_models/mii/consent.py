@@ -26,14 +26,14 @@ class Status(StrEnum):
 
 
 class Period(StrictBaseModel):
-    start: datetime
-    end: datetime
+    start: date
+    end: date
 
     @field_validator("start", "end", mode="before")
-    def date_to_datetime(cls, v):
-        if isinstance(v, date) and not isinstance(v, datetime):
-            return datetime.combine(v, datetime.min.time())
-        return v
+    def datetime_to_date(cls, v):
+        if isinstance(v, datetime):
+            return v.date()
+        return 
 
 class Policy(StrictIgnoringBaseModel):
     uri: str
