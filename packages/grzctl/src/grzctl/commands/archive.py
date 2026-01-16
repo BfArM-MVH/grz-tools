@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 import click
-from grz_common.utils.config import read_and_merge_config_files
 from grz_common.workers.worker import Worker
 
 from ..models.config import ArchiveConfig
