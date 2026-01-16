@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated
 
@@ -26,9 +26,14 @@ class Status(StrEnum):
 
 
 class Period(StrictBaseModel):
-    start: date
-    end: date
+    start: datetime
+    end: datetime
 
+    @field_validator("start", "end", mode="before")
+    def date_to_datetime(cls, v):
+        if isinstance(v, date) and not isinstance(v, datetime):
+            return datetime.combine(v, datetime.min.time())
+        return v
 
 class Policy(StrictIgnoringBaseModel):
     uri: str
