@@ -18,7 +18,6 @@ def dump_config(ctx: click.Context, config_file: list[Path]):
     """
     Dump the merged configuration as read from config files.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
     log.info(f"Configuration files to load: {json.dumps([str(p.absolute()) for p in config_files], indent=2)}")
 

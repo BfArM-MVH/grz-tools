@@ -78,9 +78,7 @@ def db(ctx: click.Context, config_file: list[Path]):
     # set up context object
     ctx.ensure_object(dict)
 
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = DbConfig.model_validate(read_and_merge_config_files(config_files))
     db_config = config.db
     if not db_config:
@@ -112,7 +110,13 @@ def db(ctx: click.Context, config_file: list[Path]):
         private_key_bytes=private_key_bytes,
         private_key_passphrase=db_config.author.private_key_passphrase,
     )
-    ctx.obj.update({"author": author, "public_keys": public_keys, "db_url": db_config.database_url})
+    ctx.obj.update(
+        {
+            "author": author,
+            "public_keys": public_keys,
+            "db_url": db_config.database_url,
+        }
+    )
 
 
 @db.group()
@@ -949,17 +953,15 @@ def sync_from_inbox(ctx: click.Context):
     """
     Synchronize the database with submissions found in the inbox.
     """
-    db_url = ctx.obj["db_url"]
-    author = ctx.obj["author"]
-
     config_files = config_files_from_ctx(ctx)
-
     try:
         list_config = ListConfig.model_validate(read_and_merge_config_files(config_files))
     except Exception:
         console_err.print(f"[red]Error loading S3 configuration from {config_files}: {traceback.format_exc()}[/red]")
         sys.exit(1)
 
+    db_url = ctx.obj["db_url"]
+    author = ctx.obj["author"]
     db_service = get_submission_db_instance(db_url, author=author)
 
     try:

@@ -23,10 +23,9 @@ def clean(ctx, submission_id, config_file: list[Path], yes_i_really_mean_it: boo
     """
     Remove all files of a submission from the S3 inbox.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = CleanConfig.model_validate(read_and_merge_config_files(config_files))
+
     bucket_name = config.s3.bucket
 
     if not submission_id:

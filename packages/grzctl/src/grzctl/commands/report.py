@@ -46,9 +46,7 @@ def report(ctx: click.Context, config_file: list[Path]):
     """
     Generate various reports related to GRZ activities.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = ReportConfig.model_validate(read_and_merge_config_files(config_files))
     if not config:
         raise ValueError("DB config not found")

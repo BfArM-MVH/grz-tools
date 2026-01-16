@@ -158,13 +158,11 @@ def from_metadata(metadata_file, failed):
 @click.pass_context
 def submit(ctx, pruefbericht_file, config_file: list[Path], token, print_token, allow_redacted_tan_g):  # noqa: PLR0913
     """Submit a Prüfbericht JSON to BfArM."""
+    config_files = config_files_from_ctx(ctx)
+    config = PruefberichtConfig.model_validate(read_and_merge_config_files(config_files))
+
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
-
-    # determine configuration files to load
-    config_files = config_files_from_ctx(ctx)
-
-    config = PruefberichtConfig.model_validate(read_and_merge_config_files(config_files))
 
     if config.pruefbericht.authorization_url is None:
         raise ValueError("pruefbericht.auth_url must be provided to submit Prüfberichte")

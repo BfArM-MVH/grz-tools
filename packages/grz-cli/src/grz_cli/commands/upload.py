@@ -28,9 +28,7 @@ def upload(
     """
     Upload a submission to a GRZ/GDC.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = UploadConfig.model_validate(read_and_merge_config_files(config_files))
 
     log.info("Starting upload...")

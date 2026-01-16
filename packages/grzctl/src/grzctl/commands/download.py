@@ -27,9 +27,7 @@ def download(ctx, submission_id, output_dir, config_file: list[Path], threads, f
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = DownloadConfig.model_validate(read_and_merge_config_files(config_files))
 
     log.info("Starting download...")

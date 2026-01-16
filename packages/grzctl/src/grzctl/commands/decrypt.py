@@ -25,9 +25,7 @@ def decrypt(ctx, submission_dir, config_file: list[Path], force):
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = DecryptConfig.model_validate(read_and_merge_config_files(config_files))
 
     grz_privkey_path = config.keys.grz_private_key_path

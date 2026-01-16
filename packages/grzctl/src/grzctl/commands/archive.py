@@ -28,9 +28,7 @@ def archive(
     """
     Archive a submission within a GRZ/GDC.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = ArchiveConfig.model_validate(read_and_merge_config_files(config_files))
 
     log.info("Starting archival...")

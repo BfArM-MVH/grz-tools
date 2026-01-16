@@ -32,9 +32,7 @@ def validate(ctx: click.Context, submission_dir, config_file: list[Path], force,
     This validates the submission by checking its checksums, as well as performing basic sanity checks on the supplied metadata.
     Must be executed before calling `encrypt` and `upload`.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = ValidateConfig.model_validate(read_and_merge_config_files(config_files))
 
     log.info("Starting validation...")

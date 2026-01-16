@@ -127,10 +127,9 @@ def list_submissions(ctx, config_file: list[Path], output_json: bool, show_clean
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = ListConfig.model_validate(read_and_merge_config_files(config_files))
+
     submissions = query_submissions(config.s3, show_cleaned)
 
     database_states: dict[str, str | None] | None = None

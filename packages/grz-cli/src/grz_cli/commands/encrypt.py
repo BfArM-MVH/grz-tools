@@ -33,9 +33,7 @@ def encrypt(ctx: click.Context, submission_dir, config_file: list[Path], force, 
     Encryption is done with the recipient's public key.
     Sub-folders 'encrypted_files' and 'logs' are created within the submission directory.
     """
-    # determine configuration files to load
     config_files = config_files_from_ctx(ctx)
-
     config = EncryptConfig.model_validate(read_and_merge_config_files(config_files))
 
     submitter_privkey_path = config.keys.submitter_private_key_path
