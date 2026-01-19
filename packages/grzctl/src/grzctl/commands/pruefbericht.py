@@ -3,10 +3,11 @@
 import datetime
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
+import grz_common.cli as grzcli
 import requests
-from grz_common.cli import DIR_R_E, config_file, read_config_from_ctx
 from grz_common.workers.submission import Submission
 from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
 from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
@@ -116,7 +117,7 @@ def generate():
 @click.argument(
     "submission_dir",
     metavar="PATH",
-    type=DIR_R_E,
+    type=grzcli.DIR_R_E,
     required=True,
 )
 @fail_or_pass
@@ -144,7 +145,7 @@ def from_metadata(metadata_file, failed):
 
 @pruefbericht.command()
 @click.option("--pruefbericht-file", type=click.Path(exists=True), required=True, help="Path to pruefbericht file")
-@config_file
+@grzcli.configuration
 @click.option(
     "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
 )
@@ -154,10 +155,16 @@ def from_metadata(metadata_file, failed):
     help="Allow submission of a Prüfbericht with a redacted TAN.",
     is_flag=True,
 )
-@click.pass_context
-def submit(ctx, pruefbericht_file, config_file: list[Path], token, print_token, allow_redacted_tan_g):  # noqa: PLR0913
+def submit(  # noqa: PLR0913
+    configuration: dict[str, Any],
+    config_file: tuple[Path],
+    pruefbericht_file,
+    token,
+    print_token,
+    allow_redacted_tan_g,
+):
     """Submit a Prüfbericht JSON to BfArM."""
-    config = PruefberichtConfig.model_validate(read_config_from_ctx(ctx))
+    config = PruefberichtConfig.model_validate(configuration)
 
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())

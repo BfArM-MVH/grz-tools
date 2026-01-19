@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 
@@ -67,7 +68,7 @@ def merge_config_dicts(a: dict, b: dict) -> dict:
     return _merge_config_dicts_recursive(a, b, path=[])
 
 
-def read_and_merge_config_files(config_files: list[Path]) -> dict:
+def read_and_merge_config_files(config_files: Sequence[Path]) -> dict:
     """
     Read and merge multiple configuration files in YAML format.
 

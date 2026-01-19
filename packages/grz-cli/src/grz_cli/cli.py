@@ -68,7 +68,7 @@ def build_cli():
     )
     @config_file
     @click.pass_context
-    def cli(ctx, config_file: list[Path], log_file: str | None = None, log_level: str = "INFO"):
+    def cli(ctx, config_file: tuple[Path], log_file: str | None = None, log_level: str = "INFO"):
         """
         Command-line interface function for setting up logging.
 

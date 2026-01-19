@@ -2,6 +2,7 @@
 Common click options for the CLI commands.
 """
 
+import functools
 from os import sched_getaffinity
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ DIR_R_E = click.Path(
     readable=True,
     writable=False,
     resolve_path=True,
+    path_type=Path,
 )
 DIR_RW_C = click.Path(
     exists=False,
@@ -28,8 +30,16 @@ DIR_RW_C = click.Path(
     readable=True,
     writable=True,
     resolve_path=True,
+    path_type=Path,
 )
-FILE_R_E = click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True)
+FILE_R_E = click.Path(
+    exists=True,
+    file_okay=True,
+    dir_okay=False,
+    readable=True,
+    resolve_path=True,
+    path_type=Path,
+)
 
 submission_dir = click.option(
     "--submission-dir",
@@ -59,7 +69,7 @@ def get_default_config_path() -> Path:
     return Path(platformdirs.user_config_dir("grz-cli")) / "config.yaml"
 
 
-def config_files_from_ctx(ctx: click.Context) -> list[Path]:
+def config_files_from_ctx(ctx: click.Context) -> tuple[Path, ...]:
     """
     Helper to get config files from click context.
 
@@ -88,7 +98,35 @@ def config_files_from_ctx(ctx: click.Context) -> list[Path]:
         # prepend default config path if it exists
         retval.insert(0, default_config_path)
 
-    return retval
+    return tuple(retval)
+
+
+def configuration(f):
+    """
+    Decorator that injects the merged configuration dict into Click commands.
+
+    The decorator exposes the --config-file option (multiple) to the wrapped
+    command and uses the click context to collect and merge config files.
+    The merged configuration is passed to the wrapped command as the
+    ``configuration`` keyword argument.
+    """
+    f = config_file(f)
+
+    @click.pass_context
+    def wrapper(ctx, *args, **kwargs):
+        # We don't need the local `config_file` variable because config_files_from_ctx reads from the context.
+        # Nevertheless, keep the parameter so Click can bind the option correctly to the wrapper's signature.
+        config_files = config_files_from_ctx(ctx)
+        merged_config = read_and_merge_config_files(config_files)
+
+        kwargs["config_file"] = config_files
+        kwargs["configuration"] = merged_config
+
+        # Invoke the wrapped command and inject the merged configuration
+        return ctx.invoke(f, *args, **kwargs)
+
+    # Preserve metadata from the original function (name, docstring, etc.)
+    return functools.update_wrapper(wrapper, f)
 
 
 def read_config_from_ctx(ctx: click.Context) -> dict[str, Any]:

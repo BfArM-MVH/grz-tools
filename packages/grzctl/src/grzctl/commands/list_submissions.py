@@ -5,12 +5,13 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
+import grz_common.cli as grzcli
 import rich.console
 import rich.table
 import rich.text
-from grz_common.cli import config_file, output_json, read_config_from_ctx
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary, query_submissions
 from grz_db.models.submission import SubmissionDb
 from pydantic_core import to_jsonable_python
@@ -117,16 +118,17 @@ def _prepare_table(
 
 
 @click.command()
-@config_file
-@output_json
+@grzcli.configuration
+@grzcli.output_json
 @click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
 @limit
-@click.pass_context
-def list_submissions(ctx, config_file: list[Path], output_json: bool, show_cleaned: bool, limit: int):
+def list_submissions(
+    configuration: dict[str, Any], config_file: tuple[Path], output_json: bool, show_cleaned: bool, limit: int
+):
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.
     """
-    config = ListConfig.model_validate(read_config_from_ctx(ctx))
+    config = ListConfig.model_validate(configuration)
 
     submissions = query_submissions(config.s3, show_cleaned)
 

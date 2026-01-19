@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 @click.command()
 @config_file
 @click.pass_context
-def dump_config(ctx: click.Context, config_file: list[Path]):
+def dump_config(ctx: click.Context, config_file: tuple[Path]):
     """
     Dump the merged configuration as read from config files.
     """

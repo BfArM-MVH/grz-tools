@@ -9,10 +9,11 @@ from collections import defaultdict
 from enum import StrEnum
 from operator import attrgetter
 from pathlib import Path
+from typing import Any
 
 import click
+import grz_common.cli as grzctl
 import sqlalchemy as sa
-from grz_common.cli import config_file, read_config_from_ctx
 from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
@@ -39,13 +40,13 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group()
-@config_file
+@grzctl.configuration
 @click.pass_context
-def report(ctx: click.Context, config_file: list[Path]):
+def report(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
     """
     Generate various reports related to GRZ activities.
     """
-    config = ReportConfig.model_validate(read_config_from_ctx(ctx))
+    config = ReportConfig.model_validate(configuration)
     if not config:
         raise ValueError("DB config not found")
 

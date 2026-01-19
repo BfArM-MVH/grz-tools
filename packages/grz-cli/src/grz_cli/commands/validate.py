@@ -2,20 +2,21 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
+import grz_common.cli as grzcli
 from grz_cli.models.config import ValidateConfig
-from grz_common.cli import config_file, force, read_config_from_ctx, submission_dir, threads
 from grz_common.workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
-@config_file
-@force
-@threads
+@grzcli.configuration
+@grzcli.submission_dir
+@grzcli.force
+@grzcli.threads
 @click.option(
     "--with-grz-check/--no-grz-check",
     "with_grz_check",
@@ -23,15 +24,21 @@ log = logging.getLogger(__name__)
     hidden=True,
     help="Whether to use grz-check to perform validation",
 )
-@click.pass_context
-def validate(ctx: click.Context, submission_dir, config_file: list[Path], force, threads, with_grz_check):  # noqa: PLR0913
+def validate(  # noqa: PLR0913
+    configuration: dict[str, Any],
+    config_file: tuple[Path],
+    submission_dir,
+    force,
+    threads,
+    with_grz_check,
+):
     """
     Validate the submission.
 
     This validates the submission by checking its checksums, as well as performing basic sanity checks on the supplied metadata.
     Must be executed before calling `encrypt` and `upload`.
     """
-    config = ValidateConfig.model_validate(read_config_from_ctx(ctx))
+    config = ValidateConfig.model_validate(configuration)
 
     log.info("Starting validation...")
 

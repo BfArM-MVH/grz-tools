@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Any
 
 import click
+import grz_common.cli as grzcli
 import rich.console
 import rich.padding
 import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from grz_common.cli import FILE_R_E, config_file, output_json, read_config_from_ctx
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
@@ -70,14 +70,14 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group(help="Database operations")
-@config_file
+@grzcli.configuration
 @click.pass_context
-def db(ctx: click.Context, config_file: list[Path]):
+def db(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
     """Database operations"""
     # set up context object
     ctx.ensure_object(dict)
 
-    config = DbConfig.model_validate(read_config_from_ctx(ctx))
+    config = DbConfig.model_validate(configuration)
     db_config = config.db
     if not db_config:
         raise ValueError("DB config not found")
@@ -167,7 +167,7 @@ def upgrade(
 
 
 @db.command("list")
-@output_json
+@grzcli.output_json
 @limit
 @click.pass_context
 def list_submissions(ctx: click.Context, output_json: bool, limit: int):
@@ -239,7 +239,7 @@ def list_submissions(ctx: click.Context, output_json: bool, limit: int):
 
 
 @db.command("list-change-requests")
-@output_json
+@grzcli.output_json
 @click.pass_context
 def list_change_requests(ctx: click.Context, output_json: bool = False):
     """Lists all submissions in the database that have a change request."""
@@ -748,7 +748,7 @@ class QCReportRow(StrictBaseModel):
 
 @submission.command()
 @click.argument("submission_id", type=str)
-@click.argument("report_csv_path", metavar="path/to/report.csv", type=FILE_R_E)
+@click.argument("report_csv_path", metavar="path/to/report.csv", type=grzcli.FILE_R_E)
 @click.option(
     "--confirm/--no-confirm",
     default=True,
@@ -946,13 +946,14 @@ def show(ctx: click.Context, submission_id: str):
 
 
 @db.command("sync-from-inbox")
+@grzcli.configuration
 @click.pass_context
-def sync_from_inbox(ctx: click.Context):
+def sync_from_inbox(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
     """
     Synchronize the database with submissions found in the inbox.
     """
     try:
-        list_config = ListConfig.model_validate(read_config_from_ctx(ctx))
+        list_config = ListConfig.model_validate(configuration)
     except Exception:
         console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
         sys.exit(1)
