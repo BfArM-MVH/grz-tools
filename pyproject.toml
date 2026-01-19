@@ -93,6 +93,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 fixable = [
+    "F",
     "UP",
     "I",
     "D",
