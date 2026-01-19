@@ -2,7 +2,13 @@
 name = "grz-tools"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
+dependencies = [
+    "grz-common",
+    "grz-cli",
+    "grzctl",
+    "grz-db",
+    "grz-pydantic-models",
+]
 
 [tool.uv.workspace]
 members = [
@@ -42,7 +48,7 @@ test = [
 dev = [
     "textual-dev",
     "tox",
-    "tox-uv"
+    "tox-uv",
 ]
 test = [
     "pytest",
