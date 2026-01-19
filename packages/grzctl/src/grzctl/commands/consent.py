@@ -31,7 +31,12 @@ def consent(submission_dir, output_json, show_details, date):
     """
     metadata = SubmissionMetadata(Path(submission_dir) / "metadata" / "metadata.json").content
 
-    date = datetime.date.today() if date is None else datetime.date.fromisoformat(date)
+    date = (
+        datetime.datetime.combine(datetime.date.today(), datetime.time.min)
+        if date is None
+        else datetime.datetime.fromisoformat(date)
+    )
+
     consents = _gather_consent_information(metadata, date)
     overall_consent = metadata.consents_to_research(date)
 
@@ -63,7 +68,7 @@ def _print_rich_table(consents: dict[str, bool]):
     console.print(table)
 
 
-def _gather_consent_information(metadata: GrzSubmissionMetadata, date: datetime.date) -> dict[str, bool]:
+def _gather_consent_information(metadata: GrzSubmissionMetadata, date: datetime.datetime) -> dict[str, bool]:
     consents = {donor.donor_pseudonym: False for donor in metadata.donors}
     for donor in metadata.donors:
         consents[donor.donor_pseudonym] = donor.consents_to_research(date)
