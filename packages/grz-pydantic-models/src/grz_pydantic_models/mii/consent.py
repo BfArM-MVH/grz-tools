@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import ConfigDict, Field, model_validator, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from ..common import StrictBaseModel
 
@@ -30,18 +30,19 @@ class Period(StrictBaseModel):
     end: datetime
 
     @field_validator("start", "end", mode="before")
-    def date_to_datetime(cls, v):
+    def date_to_datetime(cls, v):  # noqa: N805
         if isinstance(v, datetime):
             return v
         if isinstance(v, date):
             return datetime.combine(v, datetime.min.time())
         if isinstance(v, str):
             try:
-                d = date.fromisoformat(v) 
+                d = date.fromisoformat(v)
             except ValueError:
-                return v   
+                return v
             return datetime.combine(d, datetime.min.time())
         return v
+
 
 class Policy(StrictIgnoringBaseModel):
     uri: str
