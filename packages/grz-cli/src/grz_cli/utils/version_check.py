@@ -3,7 +3,7 @@ import sys
 from importlib.metadata import version
 
 from grz_common.models.s3 import S3Options
-from grz_common.transfer import VersionFile
+from grz_common.models.version import VersionFile
 from packaging import version as pkg_version
 
 logger = logging.getLogger(__name__)
