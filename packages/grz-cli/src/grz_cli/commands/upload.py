@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 
 from grz_common.cli import config_file, submission_dir, threads
-from grz_common.utils.version_check import check_version_and_exit_if_needed
+from grz_cli.utils.version_check import check_version_and_exit_if_needed
 
 from ..models.config import UploadConfig
 
