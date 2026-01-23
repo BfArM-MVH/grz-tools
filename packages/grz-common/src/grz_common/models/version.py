@@ -1,12 +1,10 @@
 import json
 import logging
-from typing import TYPE_CHECKING
 
 import botocore
 from packaging import version
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from ..models.s3 import S3Options
 from ..transfer import init_s3_client
 
 logger = logging.getLogger(__name__)
