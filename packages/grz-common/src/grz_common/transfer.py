@@ -90,5 +90,3 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     )
 
     return s3_resource
-
-

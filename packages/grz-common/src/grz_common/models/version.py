@@ -11,6 +11,7 @@ from ..transfer import init_s3_client
 
 logger = logging.getLogger(__name__)
 
+
 class VersionFile(BaseModel):
     schema_version: int = Field(1, description="Version of this schema")
     minimal_version: version.Version = Field(..., description="Minimum supported version")
@@ -44,10 +45,7 @@ class VersionFile(BaseModel):
 
         try:
             s3_client = init_s3_client(s3_options)
-            logger.debug(
-                f"Attempting to fetch version file from S3: "
-                f"s3://{s3_options.bucket}/{version_file_path}"
-            )
+            logger.debug(f"Attempting to fetch version file from S3: s3://{s3_options.bucket}/{version_file_path}")
 
             response = s3_client.get_object(
                 Bucket=s3_options.bucket,
