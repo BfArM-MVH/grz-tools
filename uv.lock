@@ -953,6 +953,7 @@ dev = [
 ]
 lint = [
     { name = "mypy" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "ruff" },
     { name = "types-boto3", extra = ["s3"] },
@@ -1006,6 +1007,7 @@ dev = [
 ]
 lint = [
     { name = "mypy" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "ruff" },
     { name = "types-boto3", extras = ["s3"], specifier = ">=1.36,<2" },
