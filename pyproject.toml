@@ -101,12 +101,11 @@ fixable = [
 ]
 # A list of rule codes to ignore.
 ignore = [
-    "E111", # Indentation is not a multiple of four
     "E114", # Indentation is not a multiple of four (comment)
     "E116", # Unexpected indentation (comment)
     "PLW", # Pylint Warning
     "RUF001", # String contains ambiguous unicode character
-    "RUF010", # Use `collections.OrderedDict`
+    "RUF010", # Use explicit string type conversion in f-strings
     "RUF012", # Mutable class attributes should be annotated with `typing.ClassVar`
     "N818", # Exception name should end with `Error`
     "B008", # Do not perform function calls in argument defaults
@@ -116,9 +115,6 @@ ignore = [
     "D400", # First line should end with a period
     "D401", # First line should be in imperative mood
     "D107", # Missing docstring in `__init__`
-    "D206", # Docstring should be indented with spaces, not tabs
-    "D300", # Use triple-quotes for docstrings
-    "UP040", # Type hint should be a generic alias
     "D100", # Missing docstring in public module
     "D101", # Missing docstring in public class
     "D102", # Missing docstring in public method
@@ -150,6 +146,10 @@ max-complexity = 10
     "SIM", # flake8-simplify
     "PLR", # Pylint Refactor
     "B011", # Do not use `assert False`
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
 ]
 # Ignore security warnings, simplification suggestions, and pylint refactoring rules in tests
 "tests/*" = [
@@ -157,6 +157,10 @@ max-complexity = 10
     "SIM", # flake8-simplify
     "PLR", # Pylint Refactor
     "B011", # Do not use `assert False`
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
 ]
 # Ignore all pydocstyle rules in `__init__.py` files
 "__init__.py" = [
