@@ -256,7 +256,7 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
     )
 
     # Filter out non-submission objects (like version.json)
-    objects = [obj for obj in objects if "/" in obj["Key"]]
+    objects = filter(lambda obj: "/" in obj["Key"], objects)
 
     objects_sorted = sorted(objects, key=itemgetter("Key"))
     submission2objects = {
