@@ -4,6 +4,7 @@ import logging
 
 import click
 from grz_cli.utils.version_check import check_version_and_exit_if_needed
+
 from .encrypt import encrypt
 from .upload import upload
 from .validate import validate

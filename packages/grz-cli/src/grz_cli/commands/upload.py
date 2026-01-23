@@ -9,8 +9,8 @@ from grz_common.workers.worker import Worker
 log = logging.getLogger(__name__)
 
 
-from grz_common.cli import config_file, submission_dir, threads
 from grz_cli.utils.version_check import check_version_and_exit_if_needed
+from grz_common.cli import config_file, submission_dir, threads
 
 from ..models.config import UploadConfig
 

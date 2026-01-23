@@ -29,14 +29,13 @@ class VersionFile(BaseModel):
     @classmethod
     def from_s3(cls, s3_options, version_file_path) -> "VersionFile":
         """
-        download and validate the version file from S3.
+        Download and validate the version file from S3.
 
         raises the following errors:
             VersionFileNotFoundError
             VersionFileAccessError
             VersionFileValidationError
         """
-
         from ..exceptions import (
             VersionFileAccessError,
             VersionFileNotFoundError,
