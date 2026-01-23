@@ -20,11 +20,8 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
     minimal_version = version_info.minimal_version
     recommended_version = version_info.recommended_version
 
-
     logger.debug(f"Current grz-cli version: {current_version}")
-    logger.debug(
-        f"Version file: minimal={minimal_version}, recommended={recommended_version}"
-    )
+    logger.debug(f"Version file: minimal={minimal_version}, recommended={recommended_version}")
 
     # case when the version file exists but contains outdated version info
     if recommended_version < current_version:
@@ -62,4 +59,3 @@ def check_version_and_exit_if_needed(s3_options: S3Options, version_file_path: s
     else:
         msg = f"grz-cli {current_version} is up to date."
         logger.info(msg)
-
