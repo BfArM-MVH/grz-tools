@@ -9,10 +9,8 @@ from grz_common.workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
-
-import grz_common.cli as grzcli
+import grz_common.cli as grzclii
 from grz_common.utils.version_check import check_version_and_exit_if_needed
-from grz_cli.utils.version_check import check_version_and_exit_if_needed
 
 from ..models.config import UploadConfig
 
