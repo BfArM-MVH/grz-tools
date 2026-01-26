@@ -14,4 +14,4 @@
 1       234567  .         T     C        80    PASS    DP=120;AF=0.10   GT:DP:GQ        0/0:60:80
 1       345678  rs789101  G     A,T      70    PASS    DP=90;AF=0.20,0.05 GT:DP:GQ      1/2:30:70
 2       456789  .         C     CT       50    PASS    DP=75;AF=0.15    GT:DP:GQ        0/1:40:50
-2       567890  .         ATC   A        60    PASS    DP=60;AF=0.30    GT:DP:GQ        1/1:35:60
+2       567890  .         ATC   T        60    PASS    DP=60;AF=0.30    GT:DP:GQ        1/1:35:60
