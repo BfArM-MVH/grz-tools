@@ -1261,13 +1261,24 @@ class GrzSubmissionMetadata(StrictBaseModel):
                         if not checksum in checksums:
                             checksums.add(checksum)
                         else:
-                            log.warning(
-                                f"Encountered duplicate file checksum '{checksum}' "
-                                f"in '{lab_datum.lab_data_name}' "
-                                f"in donor '{donor.donor_pseudonym}'. "
-                                "This is highly unlikely, "
-                                "please ensure that the submission does not contain duplicate files."
-                            )
+                            match file.file_type:
+                                case FileType.fastq | FileType.bam:
+                                    raise ValueError(
+                                        f"Encountered duplicate file checksum '{checksum}' "
+                                        f"in '{lab_datum.lab_data_name}' "
+                                        f"in donor '{donor.donor_pseudonym}'. "
+                                        "Duplicate sequencing files are not allowed."
+                                    )
+                                case FileType.vcf:
+                                    log.warning(
+                                        f"Encountered duplicate file checksum '{checksum}' "
+                                        f"in '{lab_datum.lab_data_name}' "
+                                        f"in donor '{donor.donor_pseudonym}'. "
+                                        "This is highly unlikely, "
+                                        "please ensure that the submission does not contain duplicate files."
+                                    )
+                                case FileType.bed:
+                                    pass
 
         return self
 

@@ -282,6 +282,12 @@ def test_index_rna_with_dna(version: str):
     metadata["donors"][0]["labData"][-1]["sequenceType"] = "rna"
     metadata["donors"][0]["labData"][-1]["labDataName"] = metadata["donors"][0]["labData"][-2]["labDataName"] + " RNA"
 
+    # fix file checksums to be different
+    import hashlib
+
+    for file_idx, file in enumerate(metadata["donors"][0]["labData"][-1]["sequenceData"]["files"]):
+        file["fileChecksum"] = hashlib.sha256(hex(file_idx).encode("utf8")).hexdigest()
+
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 

@@ -364,23 +364,23 @@
               {
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
                 "fileType": "fastq",
-                "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
-                "fileSizeInBytes": 165912,
+                "fileChecksum": "5d75b512e7f19d207871d3ecf7fdef59826e14f701216750d472989988481063",
+                "fileSizeInBytes": 166729,
                 "readOrder": "R1",
                 "readLength": 150
               },
               {
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
                 "fileType": "fastq",
-                "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
-                "fileSizeInBytes": 165806,
+                "fileChecksum": "788e2014df8498b3b930353068b8e9c0631603ab33e920dcddd299ccad6e3375",
+                "fileSizeInBytes": 166762,
                 "readOrder": "R2",
                 "readLength": 150
               },
               {
                 "filePath": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf",
                 "fileType": "vcf",
-                "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
+                "fileChecksum": "c38a8f823c8a436b8e42045b7fc5a8369e7a5fb53a8f8fe13059622575a5df9a",
                 "fileSizeInBytes": 1065
               }
             ]
@@ -650,23 +650,23 @@
               {
                 "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
                 "fileType": "fastq",
-                "fileChecksum": "7554a6de89e85fd82c6960028b31e22efd7bb70754dd2586c8462c2118084f39",
-                "fileSizeInBytes": 165912,
+                "fileChecksum": "065d34dd1e12062d5c3676839fe17e30c98e381c3517d11fd0e9016cd874eacc",
+                "fileSizeInBytes": 166579,
                 "readOrder": "R1",
                 "readLength": 150
               },
               {
                 "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
                 "fileType": "fastq",
-                "fileChecksum": "9970739562e5fd86a4601b674472d7607f6645a72c1509dab596fba6affe0803",
-                "fileSizeInBytes": 165806,
+                "fileChecksum": "e7ca5eb47026a7701fd43c6831c914fb6bf265450c7b255ff9077d52e3d86d92",
+                "fileSizeInBytes": 166599,
                 "readOrder": "R2",
                 "readLength": 150
               },
               {
                 "filePath": "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf",
                 "fileType": "vcf",
-                "fileChecksum": "2a0d3a06281f71ce192bf0ce8eea760e8f2fd731a2267a90614577693867b8eb",
+                "fileChecksum": "62806af70540493c73a1e8345ad38d525e67b964c2c2c3ff53572c627052ca4b",
                 "fileSizeInBytes": 1065
               }
             ]
