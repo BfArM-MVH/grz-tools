@@ -71,6 +71,7 @@ lint = [
     "types-boto3[s3] >=1.36,<2",
     "pydantic",
     "mypy",
+    "packaging",
 ]
 
 [tool.ruff]
