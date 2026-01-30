@@ -2,7 +2,6 @@
 
 import datetime
 import logging
-from pathlib import Path
 from typing import Any
 
 import click
@@ -155,13 +154,13 @@ def from_metadata(metadata_file, failed):
     help="Allow submission of a Prüfbericht with a redacted TAN.",
     is_flag=True,
 )
-def submit(  # noqa: PLR0913
+def submit(
     configuration: dict[str, Any],
-    config_file: tuple[Path],
     pruefbericht_file,
     token,
     print_token,
     allow_redacted_tan_g,
+    **kwargs,
 ):
     """Submit a Prüfbericht JSON to BfArM."""
     config = PruefberichtConfig.model_validate(configuration)

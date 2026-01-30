@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from pathlib import Path
 from typing import Any
 
 import click
@@ -18,7 +17,12 @@ log = logging.getLogger(__name__)
 @grzcli.configuration
 @grzcli.submission_id
 @click.option("--yes-i-really-mean-it", is_flag=True)
-def clean(configuration: dict[str, Any], config_file: tuple[Path], submission_id, yes_i_really_mean_it: bool):
+def clean(
+    configuration: dict[str, Any],
+    submission_id,
+    yes_i_really_mean_it: bool,
+    **kwargs,
+):
     """
     Remove all files of a submission from the S3 inbox.
     """

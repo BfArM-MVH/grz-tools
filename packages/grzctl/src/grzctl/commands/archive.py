@@ -20,9 +20,9 @@ import grz_common.cli as grzcli
 @grzcli.threads
 def archive(
     configuration: dict[str, Any],
-    config_file: tuple[Path],
     submission_dir,
     threads,
+    **kwargs,
 ):
     """
     Archive a submission within a GRZ/GDC.

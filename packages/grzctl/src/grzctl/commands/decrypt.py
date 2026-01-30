@@ -18,7 +18,13 @@ log = logging.getLogger(__name__)
 @grzcli.configuration
 @grzcli.submission_dir
 @grzcli.force
-def decrypt(configuration: dict[str, Any], config_file: tuple[Path], submission_dir, force):
+def decrypt(
+    configuration: dict[str, Any],
+    config_file: tuple[Path],
+    submission_dir,
+    force,
+    **kwargs,
+):
     """
     Decrypt a submission.
 

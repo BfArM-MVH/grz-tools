@@ -72,7 +72,11 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 @click.group(help="Database operations")
 @grzcli.configuration
 @click.pass_context
-def db(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
+def db(
+    ctx: click.Context,
+    configuration: dict[str, Any],
+    **kwargs,
+):
     """Database operations"""
     # set up context object
     ctx.ensure_object(dict)
@@ -948,7 +952,11 @@ def show(ctx: click.Context, submission_id: str):
 @db.command("sync-from-inbox")
 @grzcli.configuration
 @click.pass_context
-def sync_from_inbox(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
+def sync_from_inbox(
+    ctx: click.Context,
+    configuration: dict[str, Any],
+    **kwargs,
+):
     """
     Synchronize the database with submissions found in the inbox.
     """

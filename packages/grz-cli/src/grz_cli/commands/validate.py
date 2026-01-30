@@ -24,13 +24,13 @@ log = logging.getLogger(__name__)
     hidden=True,
     help="Whether to use grz-check to perform validation",
 )
-def validate(  # noqa: PLR0913
+def validate(
     configuration: dict[str, Any],
-    config_file: tuple[Path],
     submission_dir,
     force,
     threads,
     with_grz_check,
+    **kwargs,
 ):
     """
     Validate the submission.

@@ -4,7 +4,6 @@ import datetime
 import json
 import logging
 import sys
-from pathlib import Path
 from typing import Any
 
 import click
@@ -123,7 +122,11 @@ def _prepare_table(
 @click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
 @limit
 def list_submissions(
-    configuration: dict[str, Any], config_file: tuple[Path], output_json: bool, show_cleaned: bool, limit: int
+    configuration: dict[str, Any],
+    output_json: bool,
+    show_cleaned: bool,
+    limit: int,
+    **kwargs,
 ):
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.

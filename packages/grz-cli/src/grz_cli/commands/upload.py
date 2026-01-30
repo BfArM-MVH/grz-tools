@@ -20,9 +20,9 @@ from ..models.config import UploadConfig
 @grzcli.configuration
 def upload(
     configuration: dict[str, Any],
-    config_file: tuple[Path],
     submission_dir,
     threads,
+    **kwargs,
 ):
     """
     Upload a submission to a GRZ/GDC.

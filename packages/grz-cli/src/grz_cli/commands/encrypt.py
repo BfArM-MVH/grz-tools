@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
     default=True,
     help="Check validation logs before encrypting.",
 )
-def encrypt(configuration: dict[str, Any], config_file: tuple[Path], submission_dir, force, check_validation_logs):
+def encrypt(configuration: dict[str, Any], submission_dir, force, check_validation_logs, **kwargs):
     """
     Encrypt a submission.
 

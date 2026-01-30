@@ -19,13 +19,13 @@ log = logging.getLogger(__name__)
 @grzcli.output_dir
 @grzcli.threads
 @grzcli.force
-def download(  # noqa: PLR0913
+def download(
     configuration: dict[str, Any],
-    config_file: tuple[Path],
     submission_id,
     output_dir,
     threads,
     force,
+    **kwargs,
 ):
     """
     Download a submission from a GRZ.
