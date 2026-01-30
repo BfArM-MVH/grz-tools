@@ -13,6 +13,7 @@ from ..progress import EncryptionState, FileProgressLogger, ValidationState
 from ..validation import UserInterruptException
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
+from .upload import S3BotoUploadWorker
 
 log = logging.getLogger(__name__)
 
@@ -274,8 +275,6 @@ class Worker:
 
         self.__log.info("All files verified as successfully encrypted.")
 
-        from .upload import S3BotoUploadWorker
-
         upload_worker = S3BotoUploadWorker(
             s3_options, status_file_path=self.progress_file_upload, threads=self._threads
         )
@@ -290,8 +289,6 @@ class Worker:
         """
         Archive an encrypted submission at a GRZ.
         """
-        from .upload import S3BotoUploadWorker
-
         upload_worker = S3BotoUploadWorker(
             s3_options, status_file_path=self.progress_file_upload, threads=self._threads
         )

@@ -476,7 +476,8 @@ class Submission:
 
         :return: Generator of errors
         """
-        from ..progress import FileProgressLogger
+        # Import here to avoid circular import issues
+        from ..progress import FileProgressLogger  # noqa: PLC0415
 
         progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
         # cleanup log file and keep only files listed here
@@ -644,6 +645,9 @@ class Submission:
         :param force: Force encryption even if target files already exist
         :return: EncryptedSubmission instance
         """
+        # Import here to avoid circular import issues
+        from ..progress import FileProgressLogger  # noqa: PLC0415
+
         encrypted_files_dir = Path(encrypted_files_dir)
 
         if not Path(recipient_public_key_path).expanduser().is_file():
@@ -663,8 +667,6 @@ class Submission:
                 encrypted_files_dir,
             )
             encrypted_files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
-
-        from ..progress import FileProgressLogger
 
         progress_logger = FileProgressLogger[EncryptionState](log_file_path=progress_log_file)
 
@@ -837,6 +839,9 @@ class EncryptedSubmission:
         :param recipient_private_key_path: Path to the private key file which will be used for decryption
         :return: Submission instance
         """
+        # Import here to avoid circular import issues
+        from ..progress import FileProgressLogger  # noqa: PLC0415
+
         files_dir = Path(files_dir)
 
         if not files_dir.is_dir():
@@ -845,8 +850,6 @@ class EncryptedSubmission:
                 files_dir,
             )
             files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
-
-        from ..progress import FileProgressLogger
 
         progress_logger = FileProgressLogger[DecryptionState](log_file_path=progress_log_file)
 

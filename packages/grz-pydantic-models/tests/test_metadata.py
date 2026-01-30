@@ -2,6 +2,7 @@ import copy
 import importlib.resources
 import itertools
 import json
+import re
 from contextlib import nullcontext
 from datetime import date
 
@@ -298,7 +299,7 @@ def test_lab_datum(version: str):
         .joinpath("example_metadata", "wes_tumor_germline", f"v{version}.json")
         .read_text()
     )
-    with pytest.raises(ValueError, match="Long read libraries can't be paired-end."):
+    with pytest.raises(ValueError, match=re.escape("Long read libraries can't be paired-end.")):
         metadata.donors[0].lab_data[0].library_type = "wes_lr"
 
 

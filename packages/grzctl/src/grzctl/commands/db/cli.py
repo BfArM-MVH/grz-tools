@@ -21,6 +21,7 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
+from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
@@ -94,8 +95,6 @@ def db(
         private_key_bytes = key.encode("utf-8")
     else:
         raise ValueError("Either private_key or private_key_path must be provided.")
-
-    from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 
     log.debug("Reading known public keys...")
     KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])

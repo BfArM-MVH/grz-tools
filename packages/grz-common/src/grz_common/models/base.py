@@ -2,6 +2,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Annotated, Self
 
+import yaml
 from pydantic import AfterValidator, BaseModel, ConfigDict
 from pydantic.types import PathType
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,15 +19,11 @@ class IgnoringBaseModel(BaseModel):
 
     def to_yaml(self, fd):
         """Reads the configuration file and validates it against the schema."""
-        import yaml
-
         yaml.dump(self.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True))
 
     @classmethod
     def from_path(cls, path: str | PathLike) -> Self:
         """Reads the configuration file and validates it against the schema."""
-        import yaml
-
         with open(path, encoding="utf-8") as f:
             config = cls(**yaml.safe_load(f))
 
@@ -44,15 +41,11 @@ class IgnoringBaseSettings(BaseSettings):
 
     def to_yaml(self, fd):
         """Reads the configuration file and validates it against the schema."""
-        import yaml
-
         yaml.dump(self.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True), fd)
 
     @classmethod
     def from_path(cls, path: str | PathLike) -> Self:
         """Reads the configuration file and validates it against the schema."""
-        import yaml
-
         with open(path, encoding="utf-8") as f:
             config = cls(**yaml.safe_load(f))
 

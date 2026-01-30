@@ -150,6 +150,7 @@ max-complexity = 10
     "D101", # Missing docstring in public class
     "D102", # Missing docstring in public method
     "D103", # Missing docstring in public function
+    "PLC0415", # `import` should be at the top-level of a file
 ]
 # Ignore security warnings, simplification suggestions, and pylint refactoring rules in tests
 "tests/*" = [
@@ -161,6 +162,7 @@ max-complexity = 10
     "D101", # Missing docstring in public class
     "D102", # Missing docstring in public method
     "D103", # Missing docstring in public function
+    "PLC0415", # `import` should be at the top-level of a file
 ]
 # Ignore all pydocstyle rules in `__init__.py` files
 "__init__.py" = [
