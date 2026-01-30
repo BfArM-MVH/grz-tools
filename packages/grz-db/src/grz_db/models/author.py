@@ -1,7 +1,10 @@
 import functools
 import logging
+from functools import partial
+from getpass import getpass
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import load_ssh_private_key
 
 log = logging.getLogger(__name__)
 
@@ -15,11 +18,6 @@ class Author:
     # cache to avoid asking for passphrase multiple times if needed
     @functools.cache  # noqa: B019
     def private_key(self) -> Ed25519PrivateKey:
-        from functools import partial
-        from getpass import getpass
-
-        from cryptography.hazmat.primitives.serialization import load_ssh_private_key
-
         passphrase = self.private_key_passphrase
         if passphrase is not None:
             passphrase_callback = lambda: passphrase

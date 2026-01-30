@@ -3,6 +3,7 @@ import datetime
 import logging
 import math
 import random
+import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
@@ -140,8 +141,6 @@ class Submission(SubmissionBase, table=True):
     @field_validator("id")
     @classmethod
     def validate_id_pattern(cls, v: str) -> str:
-        import re
-
         pattern = r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$"
         if not re.match(pattern, v):
             raise ValueError(f"Submission ID '{v}' does not match the required pattern.")
@@ -563,7 +562,7 @@ class SubmissionDb:
                 # nothing to do
                 return db_donor
 
-            for field in db_donor.model_fields:
+            for field in Donor.model_fields:
                 old_value = getattr(db_donor, field)
                 new_value = getattr(updated_donor, field)
                 if old_value != new_value:
