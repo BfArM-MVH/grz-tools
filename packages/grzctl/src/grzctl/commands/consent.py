@@ -7,19 +7,19 @@ import sys
 from pathlib import Path
 
 import click
+import grz_common.cli as grzcli
 import rich.console
 import rich.table
 import rich.text
-from grz_common.cli import output_json, show_details, submission_dir
 from grz_common.workers.submission import GrzSubmissionMetadata, SubmissionMetadata
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
-@output_json
-@show_details
+@grzcli.submission_dir
+@grzcli.output_json
+@grzcli.show_details
 @click.option("--date", help="date for which to check consent validity in ISO format (default: today)")
 def consent(submission_dir, output_json, show_details, date):
     """

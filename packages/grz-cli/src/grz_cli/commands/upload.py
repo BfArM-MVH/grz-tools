@@ -2,30 +2,32 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
 from grz_common.workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
-from grz_common.cli import config_file, submission_dir, threads
+import grz_common.cli as grzcli
 
 from ..models.config import UploadConfig
 
 
 @click.command()
-@submission_dir
-@config_file
-@threads
+@grzcli.submission_dir
+@grzcli.threads
+@grzcli.configuration
 def upload(
+    configuration: dict[str, Any],
     submission_dir,
-    config_file,
     threads,
+    **kwargs,
 ):
     """
     Upload a submission to a GRZ/GDC.
     """
-    config = UploadConfig.from_path(config_file)
+    config = UploadConfig.model_validate(configuration)
 
     log.info("Starting upload...")
 

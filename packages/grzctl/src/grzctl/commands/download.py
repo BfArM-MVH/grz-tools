@@ -2,9 +2,10 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
-from grz_common.cli import config_file, force, output_dir, submission_id, threads
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 
 from ..models.config import DownloadConfig
@@ -13,19 +14,26 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_id
-@output_dir
-@config_file
-@threads
-@force
-def download(submission_id, output_dir, config_file, threads, force):
+@grzcli.configuration
+@grzcli.submission_id
+@grzcli.output_dir
+@grzcli.threads
+@grzcli.force
+def download(
+    configuration: dict[str, Any],
+    submission_id,
+    output_dir,
+    threads,
+    force,
+    **kwargs,
+):
     """
     Download a submission from a GRZ.
 
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    config = DownloadConfig.from_path(config_file)
+    config = DownloadConfig.model_validate(configuration)
 
     log.info("Starting download...")
 

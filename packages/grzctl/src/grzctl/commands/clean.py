@@ -2,9 +2,10 @@
 
 import logging
 import sys
+from typing import Any
 
 import click
-from grz_common.cli import config_file, submission_id
+import grz_common.cli as grzcli
 from grz_common.transfer import init_s3_resource
 
 from ..models.config import CleanConfig
@@ -13,14 +14,20 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_id
-@config_file
+@grzcli.configuration
+@grzcli.submission_id
 @click.option("--yes-i-really-mean-it", is_flag=True)
-def clean(submission_id, config_file, yes_i_really_mean_it: bool):
+def clean(
+    configuration: dict[str, Any],
+    submission_id,
+    yes_i_really_mean_it: bool,
+    **kwargs,
+):
     """
     Remove all files of a submission from the S3 inbox.
     """
-    config = CleanConfig.from_path(config_file)
+    config = CleanConfig.model_validate(configuration)
+
     bucket_name = config.s3.bucket
 
     if not submission_id:

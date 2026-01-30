@@ -2,18 +2,20 @@
 CLI module for handling command-line interface operations for GRZ administrators.
 """
 
-import logging
 import logging.config
 import shutil
 import subprocess
 from importlib.metadata import version
+from pathlib import Path
 from textwrap import dedent
 
 import click
+import grz_common.cli as grzcli
 from grz_cli.commands.encrypt import encrypt
 from grz_cli.commands.submit import submit
 from grz_cli.commands.upload import upload
 from grz_cli.commands.validate import validate
+from grz_common.cli.dump_config import dump_config
 from grz_common.logging import setup_cli_logging
 
 from .commands.archive import archive
@@ -71,7 +73,8 @@ def build_cli():
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
         help="Set the log level (default: INFO)",
     )
-    def cli(log_file: str | None = None, log_level: str = "INFO"):
+    @grzcli.config_file
+    def cli(config_file: tuple[Path], log_file: str | None = None, log_level: str = "INFO"):
         """
         Command-line interface function for setting up logging.
 
@@ -96,6 +99,7 @@ def build_cli():
     cli.add_command(pruefbericht)
     cli.add_command(db)
     cli.add_command(report)
+    cli.add_command(dump_config)
 
     return cli
 

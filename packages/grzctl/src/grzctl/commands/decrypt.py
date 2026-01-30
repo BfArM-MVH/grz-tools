@@ -3,9 +3,10 @@
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
-from grz_common.cli import config_file, force, submission_dir
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 
 from ..models.config import DecryptConfig
@@ -14,16 +15,22 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
-@config_file
-@force
-def decrypt(submission_dir, config_file, force):
+@grzcli.configuration
+@grzcli.submission_dir
+@grzcli.force
+def decrypt(
+    configuration: dict[str, Any],
+    config_file: tuple[Path],
+    submission_dir,
+    force,
+    **kwargs,
+):
     """
     Decrypt a submission.
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
-    config = DecryptConfig.from_path(config_file)
+    config = DecryptConfig.model_validate(configuration)
 
     grz_privkey_path = config.keys.grz_private_key_path
     if not grz_privkey_path:

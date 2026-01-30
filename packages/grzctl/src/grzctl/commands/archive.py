@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
 from grz_common.workers.worker import Worker
@@ -10,22 +11,23 @@ from ..models.config import ArchiveConfig
 
 log = logging.getLogger(__name__)
 
-from grz_common.cli import config_file, submission_dir, threads
+import grz_common.cli as grzcli
 
 
 @click.command()
-@submission_dir
-@config_file
-@threads
+@grzcli.configuration
+@grzcli.submission_dir
+@grzcli.threads
 def archive(
+    configuration: dict[str, Any],
     submission_dir,
-    config_file,
     threads,
+    **kwargs,
 ):
     """
     Archive a submission within a GRZ/GDC.
     """
-    config = ArchiveConfig.from_path(config_file)
+    config = ArchiveConfig.model_validate(configuration)
 
     log.info("Starting archival...")
 

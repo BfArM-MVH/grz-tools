@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Any
 
 import click
+import grz_common.cli as grzcli
 import rich.console
 import rich.padding
 import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from grz_common.cli import FILE_R_E, config_file, output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
@@ -70,15 +70,18 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group(help="Database operations")
-@config_file
+@grzcli.configuration
 @click.pass_context
-def db(ctx: click.Context, config_file: str):
+def db(
+    ctx: click.Context,
+    configuration: dict[str, Any],
+    **kwargs,
+):
     """Database operations"""
-    # store config file path in context so subcommands can re-read it if needed
+    # set up context object
     ctx.ensure_object(dict)
-    ctx.obj["config_file_path"] = config_file
 
-    config = DbConfig.from_path(config_file)
+    config = DbConfig.model_validate(configuration)
     db_config = config.db
     if not db_config:
         raise ValueError("DB config not found")
@@ -109,7 +112,13 @@ def db(ctx: click.Context, config_file: str):
         private_key_bytes=private_key_bytes,
         private_key_passphrase=db_config.author.private_key_passphrase,
     )
-    ctx.obj.update({"author": author, "public_keys": public_keys, "db_url": db_config.database_url})
+    ctx.obj.update(
+        {
+            "author": author,
+            "public_keys": public_keys,
+            "db_url": db_config.database_url,
+        }
+    )
 
 
 @db.group()
@@ -162,7 +171,7 @@ def upgrade(
 
 
 @db.command("list")
-@output_json
+@grzcli.output_json
 @limit
 @click.pass_context
 def list_submissions(ctx: click.Context, output_json: bool, limit: int):
@@ -234,7 +243,7 @@ def list_submissions(ctx: click.Context, output_json: bool, limit: int):
 
 
 @db.command("list-change-requests")
-@output_json
+@grzcli.output_json
 @click.pass_context
 def list_change_requests(ctx: click.Context, output_json: bool = False):
     """Lists all submissions in the database that have a change request."""
@@ -743,7 +752,7 @@ class QCReportRow(StrictBaseModel):
 
 @submission.command()
 @click.argument("submission_id", type=str)
-@click.argument("report_csv_path", metavar="path/to/report.csv", type=FILE_R_E)
+@click.argument("report_csv_path", metavar="path/to/report.csv", type=grzcli.FILE_R_E)
 @click.option(
     "--confirm/--no-confirm",
     default=True,
@@ -941,21 +950,24 @@ def show(ctx: click.Context, submission_id: str):
 
 
 @db.command("sync-from-inbox")
+@grzcli.configuration
 @click.pass_context
-def sync_from_inbox(ctx: click.Context):
+def sync_from_inbox(
+    ctx: click.Context,
+    configuration: dict[str, Any],
+    **kwargs,
+):
     """
     Synchronize the database with submissions found in the inbox.
     """
-    db_url = ctx.obj["db_url"]
-    author = ctx.obj["author"]
-    config_file_path = ctx.obj["config_file_path"]
-
     try:
-        list_config = ListConfig.from_path(config_file_path)
-    except Exception as e:
-        console_err.print(f"[red]Error loading S3 configuration from {config_file_path}: {e}[/red]")
+        list_config = ListConfig.model_validate(configuration)
+    except Exception:
+        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
         sys.exit(1)
 
+    db_url = ctx.obj["db_url"]
+    author = ctx.obj["author"]
     db_service = get_submission_db_instance(db_url, author=author)
 
     try:
@@ -967,7 +979,7 @@ def sync_from_inbox(ctx: click.Context):
 
         console_err.print("[green]Synchronization complete.[/green]")
 
-    except Exception as e:
-        console_err.print(f"[red]Error during synchronization: {e}[/red]")
+    except Exception:
+        console_err.print(f"[red]Error during synchronization: {traceback.format_exc()}[/red]")
         traceback.print_exc()
         sys.exit(1)

@@ -17,6 +17,19 @@ from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from moto import mock_aws
 
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_home(tmp_path_factory):
+    # Create a temporary directory for the session
+    temp_home = tmp_path_factory.mktemp("fake_home")
+
+    # Set the environment variable
+    os.environ["HOME"] = str(temp_home)
+    os.environ["USERPROFILE"] = str(temp_home)  # For Windows compatibility
+
+    return temp_home
+
+
 config_path = "tests/mock_files/mock_config.yaml"
 small_file_input_path = "tests/mock_files/mock_small_input_file.bed"
 metadata_path = "tests/mock_files/submissions/valid_submission/metadata/metadata.json"

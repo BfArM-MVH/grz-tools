@@ -4,9 +4,10 @@ import logging
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Any
 
 import click
-from grz_common.cli import config_file, force, submission_dir
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 
 from ..models.config import EncryptConfig
@@ -15,23 +16,23 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
-@config_file
-@force
+@grzcli.configuration
+@grzcli.submission_dir
+@grzcli.force
 @click.option(
     "--check-validation-logs/--no-check-validation-logs",
     "check_validation_logs",
     default=True,
     help="Check validation logs before encrypting.",
 )
-def encrypt(submission_dir, config_file, force, check_validation_logs):
+def encrypt(configuration: dict[str, Any], submission_dir, force, check_validation_logs, **kwargs):
     """
     Encrypt a submission.
 
     Encryption is done with the recipient's public key.
     Sub-folders 'encrypted_files' and 'logs' are created within the submission directory.
     """
-    config = EncryptConfig.from_path(config_file)
+    config = EncryptConfig.model_validate(configuration)
 
     submitter_privkey_path = config.keys.submitter_private_key_path
     if submitter_privkey_path == "":
