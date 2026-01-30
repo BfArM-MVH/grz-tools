@@ -8,17 +8,21 @@ Please also refer to the individual package READMEs for any package-specific dev
 ## Development setup
 
 - This monorepo uses [uv](https://docs.astral.sh/uv/) to manage Python virtual environments for development.
-- The `grz-check` package additionally requires the [Rust toolchain](https://www.rust-lang.org/tools/install) to be installed.
-- The `grz-db` package additionally requires the [PostgreSQL](https://www.postgresql.org/download/) database server to be installed.
+- The `grz-check` package additionally requires the [Rust toolchain](https://www.rust-lang.org/tools/install) to be
+  installed.
+- The `grz-db` package additionally requires the [PostgreSQL](https://www.postgresql.org/download/) database server to
+  be installed.
 
 The simplest way to set up a development environment is to setup a conda environment with these dependencies:
 You can use either `conda`, `mamba` or `micromamba` for this, e.g.:
+
 ```bash
 mamba env create -n grz-tools -f environment-dev.yaml
 mamba activate grz-tools
 ```
 
 Next, install the virtual environment using `uv`:
+
 ```bash
 uv sync --all-packages --all-groups --all-extras
 ```
@@ -43,6 +47,7 @@ Some packages have their own unit tests.
 Run `uv run tox` while inside a specific package directory to run that package's unit tests.
 
 ## Code formatting and linting
+
 This project uses ruff for code formatting and linting.
 
 To check code formatting and linting, run the following from the repository root:
@@ -64,6 +69,7 @@ uv run ruff format
 ```
 
 ## Static type checking
+
 This project uses mypy for static type checking.
 To run type checking, run the following from the repository root:
 
@@ -71,12 +77,27 @@ To run type checking, run the following from the repository root:
 uv run mypy
 ```
 
+## Updating dependencies
+
+Dependencies are specified in each package's `pyproject.toml` file.
+After changing dependencies, use `uv sync` to update the virtual environment for a specific package.
+
+`uv` will only update the environment if the dependencies cannot be satisfied with the existing packages in the
+environment (see also `uv.lock` file).
+To update dependencies to their latest versions, use the `--upgrade` flag:
+
+```bash
+uv sync --all-packages --all-groups --all-extras --upgrade
+```
+
 ## Debugging Textual
 
 Start the remote Textual debugging console on the machine you will use to debug the Textual app.
 
 ```
+
 uv run textual console
+
 ```
 
 Use the `TEXTUAL=devtools` environment variable to instruct Textual to connect to the remote debug console.
