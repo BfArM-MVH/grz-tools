@@ -44,7 +44,6 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
-        "GRZ_IDENTIFIERS__LE": "999999999",
     }
 
     runner = CliRunner(env=env)
@@ -68,7 +67,6 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
-        "GRZ_IDENTIFIERS__LE": "999999999",
     }
 
     runner = CliRunner(env=env)
@@ -423,7 +421,6 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
-        "GRZ_IDENTIFIERS__LE": "999999999",
     }
 
     runner = CliRunner(env=env)
