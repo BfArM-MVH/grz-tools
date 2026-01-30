@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, time
 from enum import StrEnum
 from functools import cache
 from importlib.resources import files
@@ -340,18 +340,21 @@ class ResearchConsent(StrictBaseModel):
 
         return self
 
-    def consent_by_code(self, date: date) -> dict[str, bool]:
+    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
+        if isinstance(dt, date) and not isinstance(dt, datetime):
+            dt = datetime.combine(dt, time.min)
+
         code2consent: dict[str, bool] = {}
         if isinstance(self.scope, Consent) and (self.scope.provision is not None):
-            provisions = self.scope.provision.provision
-            for provision in provisions:
-                if provision.period.start <= date <= provision.period.end:
+            for provision in self.scope.provision.provision:
+                start = provision.period.start
+                end = provision.period.end
+                if start <= dt <= end:
                     for codeable_concept in provision.code:
                         for coding in codeable_concept.coding:
                             if provision.type == ProvisionType.PERMIT:
-                                code2consent[coding.code] = code2consent.get(coding.code, True)  # propagate prior deny
+                                code2consent[coding.code] = code2consent.get(coding.code, True)
                             else:
-                                # explicit deny overrides any prior/later permits for code
                                 code2consent[coding.code] = False
         return code2consent
 
