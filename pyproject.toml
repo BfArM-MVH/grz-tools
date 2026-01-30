@@ -2,14 +2,29 @@
 name = "grz-tools"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["grz-common", "grz-cli", "grzctl", "grz-db", "grz-pydantic-models"]
+dependencies = [
+    "grz-common",
+    "grz-cli",
+    "grzctl",
+    "grz-db",
+    "grz-pydantic-models",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/grz-common",
+    "packages/grz-cli",
+    "packages/grzctl",
+    "packages/grz-db",
+    "packages/grz-pydantic-models",
+]
 
 [tool.uv.sources]
-grz-common = { path = "packages/grz-common", editable = true }
-grz-cli = { path = "packages/grz-cli", editable = true }
-grzctl = { path = "packages/grzctl", editable = true }
-grz-db = { path = "packages/grz-db", editable = true }
-grz-pydantic-models = { path = "packages/grz-pydantic-models", editable = true }
+grz-common = { workspace = true }
+grz-cli = { workspace = true }
+grzctl = { workspace = true }
+grz-db = { workspace = true }
+grz-pydantic-models = { workspace = true }
 
 [project.optional-dependencies]
 test = [
@@ -31,9 +46,9 @@ test = [
 
 [dependency-groups]
 dev = [
-  "textual-dev",
-  "tox",
-  "tox-uv"
+    "textual-dev",
+    "tox",
+    "tox-uv",
 ]
 test = [
     "pytest",
@@ -77,69 +92,81 @@ src = [
 target-version = "py312"
 
 [tool.ruff.lint]
+# A list of rule codes that are fixable.
 fixable = [
-    "UP",
-    "I",
-    "D",
+    "F", # Pyflakes
+    "UP", # pyupgrade
+    "I", # isort
+    "D", # pydocstyle
 ]
+# A list of rule codes to ignore.
 ignore = [
-    "E111",
-    "E114",
-    "E116",
-    "PLW",
-    "RUF001",
-    "RUF010",
-    "RUF012",
-    "N818",
-    "B008",
-    "PLR2004",
-    "D200",
-    "D205",
-    "D400",
-    "D401",
-    "D107",
-    "D206",
-    "D300",
-    "UP040",
-    "D100",
-    "D101",
-    "D102",
-    "D103",
-    "B028"
+    "E114", # Indentation is not a multiple of four (comment)
+    "E116", # Unexpected indentation (comment)
+    "PLW", # Pylint Warning
+    "RUF001", # String contains ambiguous unicode character
+    "RUF010", # Use explicit string type conversion in f-strings
+    "RUF012", # Mutable class attributes should be annotated with `typing.ClassVar`
+    "N818", # Exception name should end with `Error`
+    "B008", # Do not perform function calls in argument defaults
+    "PLR2004", # Magic value used in comparison
+    "D200", # One-line docstring should fit on one line with quotes
+    "D205", # 1 blank line required between summary line and description
+    "D400", # First line should end with a period
+    "D401", # First line should be in imperative mood
+    "D107", # Missing docstring in `__init__`
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
+    "B028"    # No explicit `stacklevel` keyword argument found
 ]
+# A list of rule codes to enable.
 select = [
-    "C90",
-    "F",
-    "I",
-    "S",
-    "B",
-    "N",
-    "UP",
-    "PL",
-    "RUF",
-    "SIM",
-    "D",
+    "C90", # McCabe complexity
+    "F", # Pyflakes
+    "I", # isort
+    "S", # flake8-bandit
+    "B", # flake8-bugbear
+    "N", # pep8-naming
+    "UP", # pyupgrade
+    "PL", # Pylint
+    "RUF", # Ruff-specific rules
+    "SIM", # flake8-simplify
+    "D", # pydocstyle
 ]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
+# Ignore security warnings, simplification suggestions, and pylint refactoring rules in tests
 "packages/*/tests/*" = [
-    "S",
-    "SIM",
-    "PLR",
-    "B011",
+    "S", # flake8-bandit
+    "SIM", # flake8-simplify
+    "PLR", # Pylint Refactor
+    "B011", # Do not use `assert False`
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
 ]
+# Ignore security warnings, simplification suggestions, and pylint refactoring rules in tests
 "tests/*" = [
-    "S",
-    "SIM",
-    "PLR",
-    "B011",
+    "S", # flake8-bandit
+    "SIM", # flake8-simplify
+    "PLR", # Pylint Refactor
+    "B011", # Do not use `assert False`
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
 ]
+# Ignore all pydocstyle rules in `__init__.py` files
 "__init__.py" = [
     "D",
 ]
+# Ignore the rule requiring `cls` as the first argument for class methods in generated model files
 "packages/grz-cli/src/grz_cli/models/**.py" = [
     "N805"
 ]

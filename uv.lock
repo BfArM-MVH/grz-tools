@@ -1,9 +1,15 @@
 version = 1
 revision = 3
-requires-python = ">=3.12"
-resolution-markers = [
-    "python_full_version >= '3.13'",
-    "python_full_version < '3.13'",
+requires-python = ">=3.12, <4.0"
+
+[manifest]
+members = [
+    "grz-cli",
+    "grz-common",
+    "grz-db",
+    "grz-pydantic-models",
+    "grz-tools",
+    "grzctl",
 ]
 
 [[package]]
@@ -191,6 +197,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cb/2f/4547f4b3cc7b63ec1266edaf923a675f3eae2057299aba8ecfe46f013c1a/boto3-1.38.34.tar.gz", hash = "sha256:25e76b9fec8db8e21adaf84df0de5c58fa779be121bc327e07e920c7c0870394", size = 111793, upload-time = "2025-06-10T19:26:47.176Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/84/9b/5fe964a2e11f5b884d40fd5d90421faef04521f7866f6e473e3e28df583b/boto3-1.38.34-py3-none-any.whl", hash = "sha256:7d9409be63a11c1684427a9b06d6820ec72785cb275b56affe437f3709a80eb3", size = 139938, upload-time = "2025-06-10T19:26:43.781Z" },
+]
+
+[[package]]
+name = "boto3-stubs"
+version = "1.38.46"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "botocore-stubs" },
+    { name = "types-s3transfer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0e/c6/b042b91c40e6e70760d6b63fe391e198bd939b7630e1c5b809b635a601ae/boto3_stubs-1.38.46.tar.gz", hash = "sha256:526789fc1f4a6f89f372424dc9a4109296f6bd18afab1abf5d281a94f5cfb770", size = 99865, upload-time = "2025-06-27T20:34:10.576Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/1d/2bc653af4a19170024bb54802fc68c781af64a3aef6d10ac072717593f7e/boto3_stubs-1.38.46-py3-none-any.whl", hash = "sha256:e60f1bee8fed90213725de68bdcfc1bf8765030596962656e06c131bb779972d", size = 69141, upload-time = "2025-06-27T20:34:05.211Z" },
 ]
 
 [[package]]
@@ -565,6 +584,12 @@ dependencies = [
     { name = "tqdm" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "tox" },
+    { name = "tox-uv" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
@@ -575,7 +600,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
     { name = "platformdirs", specifier = ">=4.3.6,<5" },
     { name = "pydantic", specifier = ">=2.12,<3" },
-    { name = "pydantic-settings", specifier = ">=2.11.0,<3" },
+    { name = "pydantic-settings", specifier = ">=2.11,<3" },
     { name = "pysam", specifier = "==0.23.*" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "requests", specifier = ">=2.32.3,<3" },
@@ -608,6 +633,13 @@ dependencies = [
     { name = "tqdm" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "boto3-stubs" },
+    { name = "tox" },
+    { name = "tox-uv" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
@@ -627,6 +659,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "boto3-stubs" },
     { name = "tox" },
     { name = "tox-uv" },
 ]
@@ -640,6 +673,12 @@ dependencies = [
     { name = "grz-pydantic-models" },
     { name = "psycopg", extra = ["binary"] },
     { name = "sqlmodel" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "tox" },
+    { name = "tox-uv" },
 ]
 
 [package.metadata]
@@ -662,6 +701,18 @@ name = "grz-pydantic-models"
 source = { editable = "packages/grz-pydantic-models" }
 dependencies = [
     { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "tox" },
+    { name = "tox-uv" },
+]
+test = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-sugar" },
 ]
 
 [package.metadata]
@@ -815,6 +866,25 @@ dependencies = [
     { name = "tqdm" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "tox" },
+    { name = "tox-uv" },
+]
+test = [
+    { name = "grz-cli" },
+    { name = "grz-common" },
+    { name = "grzctl" },
+    { name = "moto", extra = ["s3"] },
+    { name = "numpy" },
+    { name = "psycopg" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-postgresql" },
+    { name = "pytest-sugar" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
@@ -845,7 +915,7 @@ dev = [
 test = [
     { name = "grz-cli", editable = "packages/grz-cli" },
     { name = "grz-common", editable = "packages/grz-common" },
-    { name = "grzctl" },
+    { name = "grzctl", editable = "packages/grzctl" },
     { name = "moto", extras = ["s3"] },
     { name = "numpy" },
     { name = "psycopg" },
