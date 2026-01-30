@@ -562,7 +562,7 @@ class SubmissionDb:
                 # nothing to do
                 return db_donor
 
-            for field in db_donor.model_fields:
+            for field in Donor.model_fields:
                 old_value = getattr(db_donor, field)
                 new_value = getattr(updated_donor, field)
                 if old_value != new_value:
