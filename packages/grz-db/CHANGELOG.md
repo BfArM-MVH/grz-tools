@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.2.0...grz-db-v1.2.1) (2026-01-30)
+
+
+### Bug Fixes
+
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.1.0...grz-db-v1.2.0) (2025-12-04)
 
 
