@@ -31,6 +31,6 @@ class Thresholds(StrictBaseModel):
     """Coverage and quality thresholds for a sequencing configuration."""
 
     mean_depth_of_coverage: Annotated[float, Field(strict=True, ge=0.0)]
-    mean_read_length: Annotated[int, Field(strict=True)] = -1
+    mean_read_length: Annotated[int, Field(strict=True, ge=-1)] = -1
     percent_bases_above_quality_threshold: PercentBasesAboveQualityThreshold
     targeted_regions_above_min_coverage: TargetedRegionsAboveMinCoverage
