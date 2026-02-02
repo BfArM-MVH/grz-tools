@@ -39,7 +39,7 @@ class DbContext:
         self.db: SubmissionDb | None = None
 
     def __enter__(self):
-        """Initializes DB connection and sets the initial state."""
+        """Initializes DB connection, checks prerequisites, and sets the initial state."""
         if not self.enabled:
             return self
 
@@ -48,6 +48,8 @@ class DbContext:
             self.db = get_submission_db_instance(db_config.db_url, author=db_config.author)
 
             if self.db:
+                self._check_prerequisites()
+
                 log.debug(f"Updating submission {self.submission_id} state to {self.start_state.name}")
                 self.db.update_submission_state(self.submission_id, self.start_state)
 
@@ -84,3 +86,43 @@ class DbContext:
                 log.error(f"Failed to write success state to DB: {db_exc}")
 
         return True
+
+    def _check_prerequisites(self):
+        """
+        Checks if the state transition is valid.
+        """
+        if not self.db:
+            return
+
+        # determine expected prior state
+        members = list(SubmissionStateEnum)
+        start_index = members.index(self.start_state)
+        if start_index == 0:
+            # first state in the enum, no prior state expected
+            return
+
+        expected_prior_state = members[start_index - 1]
+        expected_prior_state = str(expected_prior_state).casefold()
+
+        submission = self.db.get_submission(self.submission_id)
+        if not submission:
+            return
+
+        latest_state_log = submission.get_latest_state()
+        current_state = latest_state_log.state if latest_state_log else None
+        current_state = str(current_state).casefold() if current_state else None
+
+        if current_state != expected_prior_state:
+            log.warning(
+                f"Submission {self.submission_id} is currently in state '{current_state}'. "
+                f"Expected '{expected_prior_state}' before updating to '{self.start_state.name}'."
+            )
+
+        history = submission.states
+        found_in_history = any(str(entry.state).casefold() == expected_prior_state for entry in history)
+
+        if not found_in_history:
+            log.warning(
+                f"Submission {self.submission_id} is being updated to '{self.start_state.name}' "
+                f"but state history does not contain '{expected_prior_state}'."
+            )
