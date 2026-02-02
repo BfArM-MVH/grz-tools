@@ -8,6 +8,10 @@ use std::fs;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+// Gzip magic bytes
+const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
+
 #[derive(Debug, Default)]
 pub struct CheckOutcome {
     pub stats: Option<Stats>,
@@ -16,6 +20,41 @@ pub struct CheckOutcome {
 }
 
 type ReaderAndHasher = (Box<dyn Read>, Arc<Mutex<Sha256>>);
+
+/// Check if a file has gzip magic bytes.
+/// Returns an error message if the file has a .gz extension but doesn't have gzip magic bytes.
+fn check_gzip_magic(path: &Path) -> Option<String> {
+    // Only check files with .gz extension
+    if !path.extension().map_or(false, |ext| ext == "gz") {
+        return None;
+    }
+
+    // Try to read the first 2 bytes
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => return Some(format!("Failed to open file for magic bytes check: {}", e)),
+    };
+
+    let mut magic_bytes = [0u8; 2];
+    match file.read_exact(&mut magic_bytes) {
+        Ok(_) => {
+            if magic_bytes != GZIP_MAGIC {
+                return Some(format!(
+                    "File has .gz extension but does not have gzip magic bytes (expected 0x1f 0x8b, found 0x{:02x} 0x{:02x})",
+                    magic_bytes[0], magic_bytes[1]
+                ));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+            return Some("File has .gz extension but is too small to contain gzip header".to_string());
+        }
+        Err(e) => {
+            return Some(format!("Failed to read magic bytes: {}", e));
+        }
+    }
+
+    None
+}
 
 pub fn setup_file_reader(
     path: &Path,
@@ -27,6 +66,11 @@ pub fn setup_file_reader(
         "~ CHECK {}",
         path.file_name().unwrap_or_default().to_string_lossy()
     ));
+
+    // Check gzip magic bytes if file has .gz extension
+    if let Some(error_msg) = check_gzip_magic(path) {
+        anyhow::bail!(error_msg);
+    }
 
     let file = fs::File::open(path)
         .with_context(|| format!("Failed to open file for reading: {}", path.display()))?;

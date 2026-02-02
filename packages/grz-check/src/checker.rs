@@ -1147,4 +1147,141 @@ mod tests {
         }
         Ok(())
     }
+
+    #[test]
+    fn test_invalid_gzip_magic_bytes() -> Result<()> {
+        let dir = tempdir()?;
+        
+        // Create a file with .gz extension but invalid magic bytes
+        let fake_gz_path = dir.path().join("fake.fastq.gz");
+        fs::write(&fake_gz_path, b"This is not a gzip file")?;
+
+        let output = dir.path().join("report.jsonl");
+        let fake_gz_size = fs::metadata(&fake_gz_path)?.len();
+        
+        let jobs = vec![Job::SingleFastq(SingleFastqJob {
+            path: fake_gz_path.clone(),
+            length_check: ReadLengthCheck::Skip,
+            size: fake_gz_size,
+        })];
+
+        // This should fail due to invalid gzip magic bytes
+        // Use continue_on_error = true to ensure the report is written
+        run_check(jobs, fake_gz_size, &output, true, Some(false))?;
+
+        let records = read_jsonl_report(&output)?;
+        assert_eq!(records.len(), 1);
+        
+        if let TestReport::Fastq(data) = &records[0] {
+            assert_eq!(data.status, "ERROR");
+            assert!(!data.errors.is_empty());
+            assert!(
+                data.errors.iter().any(|e| e.contains("gzip magic bytes")),
+                "Expected error about gzip magic bytes, got: {:?}",
+                data.errors
+            );
+        } else {
+            panic!("Expected a Fastq report");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_valid_gzip_magic_bytes() -> Result<()> {
+        let dir = tempdir()?;
+        
+        // Create a properly gzipped file
+        let valid_gz_path = dir.path().join("valid.fastq.gz");
+        create_gzipped_fastq(&valid_gz_path, "@SEQ1\nACGT\n+\nFFFF\n")?;
+
+        let output = dir.path().join("report.jsonl");
+        let valid_gz_size = fs::metadata(&valid_gz_path)?.len();
+        
+        let jobs = vec![Job::SingleFastq(SingleFastqJob {
+            path: valid_gz_path.clone(),
+            length_check: ReadLengthCheck::Skip,
+            size: valid_gz_size,
+        })];
+
+        run_check(jobs, valid_gz_size, &output, false, Some(false))?;
+
+        let records = read_jsonl_report(&output)?;
+        assert_eq!(records.len(), 1);
+        
+        if let TestReport::Fastq(data) = &records[0] {
+            assert_eq!(data.status, "OK");
+            assert!(data.errors.is_empty());
+        } else {
+            panic!("Expected a Fastq report");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_gzip_magic_bytes_empty_file() -> Result<()> {
+        let dir = tempdir()?;
+        
+        // Create an empty file with .gz extension
+        let empty_gz_path = dir.path().join("empty.fastq.gz");
+        fs::write(&empty_gz_path, b"")?;
+
+        let output = dir.path().join("report.jsonl");
+        let empty_gz_size = fs::metadata(&empty_gz_path)?.len();
+        
+        let jobs = vec![Job::SingleFastq(SingleFastqJob {
+            path: empty_gz_path.clone(),
+            length_check: ReadLengthCheck::Skip,
+            size: empty_gz_size,
+        })];
+
+        // Use continue_on_error = true to ensure the report is written
+        run_check(jobs, empty_gz_size, &output, true, Some(false))?;
+
+        let records = read_jsonl_report(&output)?;
+        assert_eq!(records.len(), 1);
+        
+        if let TestReport::Fastq(data) = &records[0] {
+            assert_eq!(data.status, "ERROR");
+            assert!(!data.errors.is_empty());
+            assert!(
+                data.errors.iter().any(|e| e.contains("too small to contain gzip header")),
+                "Expected error about file being too small, got: {:?}",
+                data.errors
+            );
+        } else {
+            panic!("Expected a Fastq report");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_non_gz_file_not_checked() -> Result<()> {
+        let dir = tempdir()?;
+        
+        // Create a file without .gz extension - should not check magic bytes
+        let txt_path = dir.path().join("file.txt");
+        fs::write(&txt_path, b"This is a text file")?;
+
+        let output = dir.path().join("report.jsonl");
+        let txt_size = fs::metadata(&txt_path)?.len();
+        
+        let jobs = vec![Job::Raw(RawJob {
+            path: txt_path.clone(),
+            size: txt_size,
+        })];
+
+        // This should succeed since we only check .gz files
+        run_check(jobs, txt_size, &output, false, Some(false))?;
+
+        let records = read_jsonl_report(&output)?;
+        assert_eq!(records.len(), 1);
+        
+        if let TestReport::Raw(data) = &records[0] {
+            assert_eq!(data.status, "OK");
+            assert!(data.errors.is_empty());
+        } else {
+            panic!("Expected a Raw report");
+        }
+        Ok(())
+    }
 }
