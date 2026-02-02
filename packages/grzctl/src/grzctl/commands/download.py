@@ -7,7 +7,9 @@ from typing import Any
 import click
 import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
+from grz_db.models.submission import SubmissionStateEnum
 
+from ..dbcontext import DbContext
 from ..models.config import DownloadConfig
 
 log = logging.getLogger(__name__)
@@ -19,12 +21,14 @@ log = logging.getLogger(__name__)
 @grzcli.output_dir
 @grzcli.threads
 @grzcli.force
+@grzcli.update_db
 def download(
     configuration: dict[str, Any],
     submission_id,
     output_dir,
     threads,
     force,
+    update_db,
     **kwargs,
 ):
     """
@@ -49,6 +53,14 @@ def download(
         encrypted_files_dir=submission_dir_path / "encrypted_files",
         threads=threads,
     )
-    worker_inst.download(config.s3, submission_id, force=force)
+
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.DOWNLOADING,
+        end_state=SubmissionStateEnum.DOWNLOADED,
+        enabled=update_db,
+    ):
+        worker_inst.download(config.s3, submission_id, force=force)
 
     log.info("Download finished!")
