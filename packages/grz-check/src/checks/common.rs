@@ -23,6 +23,10 @@ type ReaderAndHasher = (Box<dyn Read>, Arc<Mutex<Sha256>>);
 
 /// Check if a file has gzip magic bytes.
 /// Returns an error message if the file has a .gz extension but doesn't have gzip magic bytes.
+/// 
+/// Note: This function opens the file separately from the main processing to perform a fast
+/// early validation. The overhead of opening the file twice is negligible compared to the
+/// processing that follows, and this approach keeps the validation logic simple and separate.
 fn check_gzip_magic(path: &Path) -> Option<String> {
     // Only check files with .gz extension
     if !path.extension().map_or(false, |ext| ext == "gz") {
