@@ -29,7 +29,7 @@ from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
-from ..validation import UserInterruptException, run_grz_check
+from ..validation import UserInterruptException, check_gzip_magic_bytes, run_grz_check
 from ..validation.bam import validate_bam
 from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
@@ -412,6 +412,12 @@ class Submission:
         if not local_file_path.is_file():
             yield f"{str(metadata.file_path)} is not a file!"
             # Return here as following tests cannot work
+            return
+
+        # Check gzip magic bytes for .gz files
+        if gzip_error := check_gzip_magic_bytes(local_file_path):
+            yield f"{str(metadata.file_path)}: {gzip_error}"
+            # Return here as decompression will fail anyway
             return
 
         # Check if the checksum is correct
