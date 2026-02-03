@@ -115,7 +115,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
                 select(  # type: ignore[type-var]
                     Submission.submitter_id, Submission.submission_date, Submission.detailed_qc_passed
                 )
-                .where(Submission.submission_type != SubmissionType.test)
+                .where(Submission.submission_type == SubmissionType.initial)
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
             )
             submission_qc_states = session.exec(statement).all()
