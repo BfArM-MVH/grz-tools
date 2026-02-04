@@ -72,6 +72,7 @@ def upgrade() -> None:
     dialect_name = context.bind.dialect.name
 
     # see https://stackoverflow.com/questions/1771543/adding-a-new-value-to-an-existing-enum-type
+    # TODO: also check https://bakkenbaeck.com/tech/enums-views-alembic-migrations
     if dialect_name == "postgresql":
         op.execute("COMMIT")
         op.execute(f"ALTER TYPE {ENUM_NAME} ADD VALUE 'REPORTING' BEFORE 'REPORTED'")
