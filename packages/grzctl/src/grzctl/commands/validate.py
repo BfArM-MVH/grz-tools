@@ -65,7 +65,7 @@ def validate(
         end_state=SubmissionStateEnum.VALIDATED,
         enabled=update_db,
     ):
-        validate_module.validate.callback(
+        validate_module.validate.callback(  # type: ignore[misc]
             configuration=configuration,
             submission_dir=submission_dir,
             force=force,

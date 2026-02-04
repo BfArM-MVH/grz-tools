@@ -61,7 +61,7 @@ def encrypt(
         end_state=SubmissionStateEnum.ENCRYPTED,
         enabled=update_db,
     ):
-        encrypt_module.encrypt.callback(
+        encrypt_module.encrypt.callback(  # type: ignore[misc]
             configuration=configuration,
             submission_dir=submission_dir,
             force=force,
