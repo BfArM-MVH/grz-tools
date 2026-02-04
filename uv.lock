@@ -4,6 +4,7 @@ requires-python = ">=3.12, <4.0"
 
 [manifest]
 members = [
+    "grz-check",
     "grz-cli",
     "grz-common",
     "grz-db",
@@ -746,12 +747,18 @@ wheels = [
 ]
 
 [[package]]
+name = "grz-check"
+version = "0.2.1"
+source = { editable = "packages/grz-check" }
+
+[[package]]
 name = "grz-cli"
 source = { editable = "packages/grz-cli" }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
     { name = "crypt4gh" },
+    { name = "grz-check" },
     { name = "grz-common" },
     { name = "grz-pydantic-models" },
     { name = "jsonschema" },
@@ -776,6 +783,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
     { name = "click", specifier = ">=8.2,<9" },
     { name = "crypt4gh", specifier = ">=1.7,<2" },
+    { name = "grz-check", editable = "packages/grz-check" },
     { name = "grz-common", editable = "packages/grz-common" },
     { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
@@ -802,6 +810,7 @@ dependencies = [
     { name = "boto3" },
     { name = "click" },
     { name = "crypt4gh" },
+    { name = "grz-check" },
     { name = "grz-pydantic-models" },
     { name = "jsonschema" },
     { name = "platformdirs" },
@@ -832,6 +841,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
     { name = "click", specifier = ">=8.2,<9" },
     { name = "crypt4gh", specifier = ">=1.7,<2" },
+    { name = "grz-check", editable = "packages/grz-check" },
     { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
     { name = "isal", marker = "extra == 'fast'", specifier = ">=1.8.0" },
     { name = "jsonschema", specifier = ">=4.23.0,<5" },
