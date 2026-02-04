@@ -158,7 +158,7 @@ def from_metadata(metadata_file, failed):
     is_flag=True,
 )
 @grzcli.update_db
-def submit(
+def submit(  # noqa: PLR0913
     configuration: dict[str, Any],
     pruefbericht_file,
     submission_id,
@@ -209,7 +209,7 @@ def submit(
         click.echo(token)
 
 
-def _try_submit(
+def _try_submit(  # noqa: PLR0913
     pruefbericht: Pruefbericht, api_base_url: str, auth_url: str, client_id: str, client_secret: str, token: str
 ) -> tuple[Any, Any]:
     if token:

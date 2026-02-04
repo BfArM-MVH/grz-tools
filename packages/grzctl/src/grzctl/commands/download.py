@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db
-def download(
+def download(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_id,
     output_dir,

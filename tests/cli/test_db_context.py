@@ -152,7 +152,7 @@ def get_state_history(engine, submission_id) -> list[SubmissionStateEnum]:
         },
     ],
 )
-def test_db_wrappers(
+def test_db_wrappers(  # noqa: C901
     command_spec,
     db_engine,
     full_config_path,
@@ -261,7 +261,7 @@ def test_pruefbericht_wrapper(db_engine, full_config_path, test_metadata, tmp_pa
         pb_path = tmp_path / "pruefbericht.json"
         pb_path.write_text("{}")
 
-        with patch("grzctl.commands.pruefbericht.Pruefbericht") as MockPbModel:
+        with patch("grzctl.commands.pruefbericht.Pruefbericht") as MockPbModel:  # noqa: N806
             mock_pb = MockPbModel.model_validate_json.return_value
             mock_pb.submitted_case.tan = parsed_metadata.submission.tan_g
 

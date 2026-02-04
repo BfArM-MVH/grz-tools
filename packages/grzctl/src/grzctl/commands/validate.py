@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
     help="Whether to use grz-check to perform validation",
 )
 @grzcli.update_db
-def validate(
+def validate(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_dir,
     force,
