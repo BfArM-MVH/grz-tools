@@ -68,6 +68,7 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     ENCRYPTED = "Encrypted"
     ARCHIVING = "Archiving"
     ARCHIVED = "Archived"
+    REPORTING = "Reporting"
     REPORTED = "Reported"
     QCING = "QCing"
     QCED = "QCed"
