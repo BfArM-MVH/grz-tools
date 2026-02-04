@@ -11,10 +11,8 @@ from textwrap import dedent
 
 import click
 import grz_common.cli as grzcli
-from grz_cli.commands.encrypt import encrypt
 from grz_cli.commands.submit import submit
 from grz_cli.commands.upload import upload
-from grz_cli.commands.validate import validate
 from grz_common.cli.dump_config import dump_config
 from grz_common.logging import setup_cli_logging
 
@@ -24,9 +22,11 @@ from .commands.consent import consent
 from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
+from .commands.encrypt import encrypt
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
+from .commands.validate import validate
 
 log = logging.getLogger(__name__)
 
