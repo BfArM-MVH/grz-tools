@@ -1,6 +1,9 @@
 import logging
+import traceback
+from pathlib import Path
 from typing import Any
 
+from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
 
@@ -45,7 +48,20 @@ class DbContext:
 
         try:
             db_config = DbConfig.model_validate(self.configuration).db
-            self.db = get_submission_db_instance(db_config.db_url, author=db_config.author)
+
+            author = None
+            if db_config.author:
+                key_path = Path(db_config.author.private_key_path)
+                if not key_path.exists():
+                    raise FileNotFoundError(f"Author private key not found at: {key_path}")
+
+                author = Author(
+                    name=db_config.author.name,
+                    private_key_bytes=key_path.read_bytes(),
+                    private_key_passphrase=db_config.author.private_key_passphrase,
+                )
+
+            self.db = get_submission_db_instance(db_config.database_url, author=author)
 
             if self.db:
                 self._check_prerequisites()
@@ -58,6 +74,7 @@ class DbContext:
             self.db = None
         except Exception as e:
             log.error(f"Failed to connect to DB: {e}. State updates skipped.")
+            log.error(traceback.format_exc())
             self.db = None
 
         return self
