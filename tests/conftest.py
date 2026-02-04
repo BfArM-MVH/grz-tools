@@ -295,6 +295,8 @@ def pruefbericht_config_content():
     return {
         "pruefbericht": {
             "authorization_url": "https://bfarm.localhost/token",
+            "client_id": "pytest",
+            "client_secret": "pysecret",
         }
     }
 
