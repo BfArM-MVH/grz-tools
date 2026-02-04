@@ -27,7 +27,8 @@ def consent(submission_dir, output_json, show_details, date):
 
     Returns 'true' if consented, 'false' if not.
     A submission is considered consented if all donors have consented for research, that is
-    the FHIR MII IG Consent profiles all have a "permit" provision for code 2.16.840.1.113883.3.1937.777.24.5.3.8
+    the FHIR MII IG Consent profiles all have a "permit" provision for code 2.16.840.1.113883.3.1937.777.24.5.3.1
+    or 2.16.840.1.113883.3.1937.777.24.5.3.8
     """
     metadata = SubmissionMetadata(Path(submission_dir) / "metadata" / "metadata.json").content
 
