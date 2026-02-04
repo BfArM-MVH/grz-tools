@@ -18,11 +18,13 @@ def full_config_path(
     db_config_content,
     s3_config_content,
     keys_config_content,
+    pruefbericht_config_content,
 ):
     config_data = {}
     config_data.update(db_config_content)
     config_data.update(s3_config_content)
     config_data.update(keys_config_content)
+    config_data.update(pruefbericht_config_content)
 
     if "author" in config_data.get("db", {}):
         config_data["db"]["author"]["private_key_passphrase"] = "test"
