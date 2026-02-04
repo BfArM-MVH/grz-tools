@@ -1,0 +1,31 @@
+[project]
+name = "grz-check"
+description = "grz-check validates sequencing files (FASTQ, BAM) for GRZ submissions."
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.12"
+version = "0.2.1"
+authors = [
+    { name = "Eckart Bindewald", email = "eckart.bindewald@uni-tuebingen.de" },
+]
+keywords = ["GRZ", "FASTQ", "BAM", "validation"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/BfArM-MVH/grz-tools/tree/main/packages/grz-check"
+Repository = "https://github.com/BfArM-MVH/grz-tools"
+Issues = "https://github.com/BfArM-MVH/grz-tools/issues"
+
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "Cargo.toml"
+bin = ["grz-check"]
