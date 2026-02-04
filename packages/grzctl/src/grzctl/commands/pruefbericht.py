@@ -8,11 +8,13 @@ import click
 import grz_common.cli as grzcli
 import requests
 from grz_common.workers.submission import Submission
+from grz_db.models.submission import SubmissionStateEnum
 from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
 from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
 from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissionMetadata
 from pydantic_core import to_jsonable_python
 
+from ..dbcontext import DbContext
 from ..models.config import PruefberichtConfig
 
 log = logging.getLogger(__name__)
@@ -144,6 +146,7 @@ def from_metadata(metadata_file, failed):
 
 @pruefbericht.command()
 @click.option("--pruefbericht-file", type=click.Path(exists=True), required=True, help="Path to pruefbericht file")
+@grzcli.submission_id
 @grzcli.configuration
 @click.option(
     "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
@@ -154,12 +157,15 @@ def from_metadata(metadata_file, failed):
     help="Allow submission of a Prüfbericht with a redacted TAN.",
     is_flag=True,
 )
+@grzcli.update_db
 def submit(
     configuration: dict[str, Any],
     pruefbericht_file,
+    submission_id,
     token,
     print_token,
     allow_redacted_tan_g,
+    update_db,
     **kwargs,
 ):
     """Submit a Prüfbericht JSON to BfArM."""
@@ -178,6 +184,23 @@ def submit(
     if pruefbericht.submitted_case.tan == REDACTED_TAN and not allow_redacted_tan_g:
         raise ValueError("Refusing to submit a Prüfbericht with a redacted TAN")
 
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.REPORTING,
+        end_state=SubmissionStateEnum.REPORTED,
+        enabled=update_db,
+    ):
+        expiry, token = _try_submit(config, pruefbericht, token)
+
+    log.info("Prüfbericht submitted successfully.")
+
+    if expiry and print_token:
+        log.info(f"New token expires at {expiry.isoformat()}")
+        click.echo(token)
+
+
+def _try_submit(config: PruefberichtConfig, pruefbericht: Pruefbericht, token) -> tuple[Any, Any]:
     if token:
         # replace newlines in token if accidentally present from pasting
         token = token.replace("\n", "")
@@ -204,9 +227,4 @@ def submit(
         else:
             log.error("Encountered an irrecoverable error while submitting the Prüfbericht!")
             raise error
-
-    log.info("Prüfbericht submitted successfully.")
-
-    if expiry and print_token:
-        log.info(f"New token expires at {expiry.isoformat()}")
-        click.echo(token)
+    return expiry, token
