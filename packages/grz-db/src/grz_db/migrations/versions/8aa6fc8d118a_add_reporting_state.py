@@ -69,7 +69,7 @@ NEW_STATES = [
 
 def upgrade() -> None:
     context = op.get_context()
-    dialect_name = context.bind.dialect.name
+    dialect_name = context.bind.dialect.name if context.bind else "sqlite"
 
     # see https://stackoverflow.com/questions/1771543/adding-a-new-value-to-an-existing-enum-type
     # TODO: also check https://bakkenbaeck.com/tech/enums-views-alembic-migrations
