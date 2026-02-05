@@ -363,9 +363,7 @@ def test_submission_show_json(blank_database_config_path: Path):
     assert result_populate.exit_code == 0, result_populate.stderr
 
     # show submission as JSON
-    result_show_json = runner.invoke(
-        cli, [*args_common, "submission", "show", "--json", metadata.submission_id]
-    )
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
     assert result_show_json.exit_code == 0, result_show_json.stderr
 
     parsed = json.loads(result_show_json.stdout)
