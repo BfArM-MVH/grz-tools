@@ -7,7 +7,9 @@ from typing import Any
 import click
 import grz_common.cli as grzcli
 from grz_common.transfer import init_s3_resource
+from grz_db.models.submission import SubmissionStateEnum
 
+from ..dbcontext import DbContext
 from ..models.config import CleanConfig
 
 log = logging.getLogger(__name__)
@@ -17,10 +19,12 @@ log = logging.getLogger(__name__)
 @grzcli.configuration
 @grzcli.submission_id
 @click.option("--yes-i-really-mean-it", is_flag=True)
+@grzcli.update_db
 def clean(
     configuration: dict[str, Any],
     submission_id,
     yes_i_really_mean_it: bool,
+    update_db: bool,
     **kwargs,
 ):
     """
@@ -38,34 +42,45 @@ def clean(
         default=False,
         show_default=True,
     ):
-        prefix = submission_id
-        prefix = prefix + "/" if not prefix.endswith("/") else prefix
+        with DbContext(
+            configuration=configuration,
+            submission_id=submission_id,
+            start_state=SubmissionStateEnum.CLEANING,
+            end_state=SubmissionStateEnum.CLEANED,
+            enabled=update_db,
+        ):
+            _clean_submission_from_bucket(bucket_name, config, submission_id)
 
-        resource = init_s3_resource(config.s3)
-        bucket = resource.Bucket(bucket_name)
-        log.info(f"Cleaning '{prefix}' from '{bucket_name}' …")
-        # add a marker at start of cleaning to
-        #  1.) ensure user can upload the "cleaned" marker at the end _before_ we start deleting things
-        #  2.) detect incomplete cleans if needed
-        bucket.put_object(Body=b"", Key=f"{submission_id}/cleaning")
 
-        # keep metadata.json to prevent future re-uploads
-        keys_to_keep = {f"{submission_id}/metadata/metadata.json", f"{submission_id}/cleaning"}
-        num_deleted = 0
-        for obj in bucket.objects.filter(Prefix=prefix):
-            if obj.key not in keys_to_keep:
-                _ = obj.delete()
-                num_deleted += 1
-        if not num_deleted:
-            sys.exit(f"No objects with prefix '{prefix}' in bucket '{bucket_name}' found for deletion.")
+def _clean_submission_from_bucket(bucket_name: str, config: CleanConfig, submission_id):
+    prefix = submission_id
+    prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
-        log.info(f"Successfully deleted {num_deleted} objects.")
+    resource = init_s3_resource(config.s3)
+    bucket = resource.Bucket(bucket_name)
+    log.info(f"Cleaning '{prefix}' from '{bucket_name}' …")
+    # add a marker at start of cleaning to
+    #  1.) ensure user can upload the "cleaned" marker at the end _before_ we start deleting things
+    #  2.) detect incomplete cleans if needed
+    bucket.put_object(Body=b"", Key=f"{submission_id}/cleaning")
 
-        # redact metadata.json since it contains tanG + localCaseId
-        bucket.put_object(Body=b"", Key=f"{submission_id}/metadata/metadata.json")
+    # keep metadata.json to prevent future re-uploads
+    keys_to_keep = {f"{submission_id}/metadata/metadata.json", f"{submission_id}/cleaning"}
+    num_deleted = 0
+    for obj in bucket.objects.filter(Prefix=prefix):
+        if obj.key not in keys_to_keep:
+            _ = obj.delete()
+            num_deleted += 1
+    if not num_deleted:
+        sys.exit(f"No objects with prefix '{prefix}' in bucket '{bucket_name}' found for deletion.")
 
-        # mark that we've cleaned this submission
-        bucket.put_object(Body=b"", Key=f"{submission_id}/cleaned")
-        bucket.Object(f"{submission_id}/cleaning").delete()
+    log.info(f"Successfully deleted {num_deleted} objects.")
 
-        log.info(f"Cleaned '{prefix}' from '{bucket_name}'.")
+    # redact metadata.json since it contains tanG + localCaseId
+    bucket.put_object(Body=b"", Key=f"{submission_id}/metadata/metadata.json")
+
+    # mark that we've cleaned this submission
+    bucket.put_object(Body=b"", Key=f"{submission_id}/cleaned")
+    bucket.Object(f"{submission_id}/cleaning").delete()
+
+    log.info(f"Cleaned '{prefix}' from '{bucket_name}'.")

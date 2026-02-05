@@ -8,11 +8,13 @@ import click
 import grz_common.cli as grzcli
 import requests
 from grz_common.workers.submission import Submission
+from grz_db.models.submission import SubmissionStateEnum
 from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
 from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
 from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissionMetadata
 from pydantic_core import to_jsonable_python
 
+from ..dbcontext import DbContext
 from ..models.config import PruefberichtConfig
 
 log = logging.getLogger(__name__)
@@ -144,6 +146,7 @@ def from_metadata(metadata_file, failed):
 
 @pruefbericht.command()
 @click.option("--pruefbericht-file", type=click.Path(exists=True), required=True, help="Path to pruefbericht file")
+@grzcli.submission_id
 @grzcli.configuration
 @click.option(
     "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
@@ -154,12 +157,15 @@ def from_metadata(metadata_file, failed):
     help="Allow submission of a Prüfbericht with a redacted TAN.",
     is_flag=True,
 )
-def submit(
+@grzcli.update_db
+def submit(  # noqa: PLR0913
     configuration: dict[str, Any],
     pruefbericht_file,
+    submission_id,
     token,
     print_token,
     allow_redacted_tan_g,
+    update_db,
     **kwargs,
 ):
     """Submit a Prüfbericht JSON to BfArM."""
@@ -168,45 +174,68 @@ def submit(
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
 
-    if config.pruefbericht.authorization_url is None:
+    if (auth_url := config.pruefbericht.authorization_url) is None:
         raise ValueError("pruefbericht.auth_url must be provided to submit Prüfberichte")
-    if config.pruefbericht.client_id is None:
+    if (client_id := config.pruefbericht.client_id) is None:
         raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
-    if config.pruefbericht.client_secret is None:
+    if (client_secret := config.pruefbericht.client_secret) is None:
         raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
+    if (api_base_url := config.pruefbericht.api_base_url) is None:
+        raise ValueError("pruefbericht.api_base_url must be provided to submit Prüfberichte")
 
     if pruefbericht.submitted_case.tan == REDACTED_TAN and not allow_redacted_tan_g:
         raise ValueError("Refusing to submit a Prüfbericht with a redacted TAN")
 
-    if token:
-        # replace newlines in token if accidentally present from pasting
-        token = token.replace("\n", "")
-        expiry = None
-    else:
-        token, expiry = _get_new_token(
-            auth_url=str(config.pruefbericht.authorization_url),
-            client_id=config.pruefbericht.client_id,
-            client_secret=config.pruefbericht.client_secret,
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.REPORTING,
+        end_state=SubmissionStateEnum.REPORTED,
+        enabled=update_db,
+    ):
+        expiry, token = _try_submit(
+            pruefbericht=pruefbericht,
+            api_base_url=str(api_base_url),
+            auth_url=str(auth_url),
+            client_id=client_id,
+            client_secret=client_secret,
+            token=token,
         )
-
-    try:
-        _submit_pruefbericht(base_url=str(config.pruefbericht.api_base_url), token=token, pruefbericht=pruefbericht)
-    except requests.HTTPError as error:
-        if error.response.status_code == requests.codes.unauthorized:
-            # get a new token and try again
-            log.warning("Provided token has expired. Attempting to refresh.")
-            token, expiry = _get_new_token(
-                auth_url=str(config.pruefbericht.authorization_url),
-                client_id=config.pruefbericht.client_id,
-                client_secret=config.pruefbericht.client_secret,
-            )
-            _submit_pruefbericht(base_url=str(config.pruefbericht.api_base_url), token=token, pruefbericht=pruefbericht)
-        else:
-            log.error("Encountered an irrecoverable error while submitting the Prüfbericht!")
-            raise error
 
     log.info("Prüfbericht submitted successfully.")
 
     if expiry and print_token:
         log.info(f"New token expires at {expiry.isoformat()}")
         click.echo(token)
+
+
+def _try_submit(  # noqa: PLR0913
+    pruefbericht: Pruefbericht, api_base_url: str, auth_url: str, client_id: str, client_secret: str, token: str
+) -> tuple[Any, Any]:
+    if token:
+        # replace newlines in token if accidentally present from pasting
+        token = token.replace("\n", "")
+        expiry = None
+    else:
+        token, expiry = _get_new_token(
+            auth_url=auth_url,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+
+    try:
+        _submit_pruefbericht(base_url=api_base_url, token=token, pruefbericht=pruefbericht)
+    except requests.HTTPError as error:
+        if error.response.status_code == requests.codes.unauthorized:
+            # get a new token and try again
+            log.warning("Provided token has expired. Attempting to refresh.")
+            token, expiry = _get_new_token(
+                auth_url=auth_url,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+            _submit_pruefbericht(base_url=api_base_url, token=token, pruefbericht=pruefbericht)
+        else:
+            log.error("Encountered an irrecoverable error while submitting the Prüfbericht!")
+            raise error
+    return expiry, token
