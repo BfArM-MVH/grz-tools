@@ -22,9 +22,9 @@ import rich.table
 import rich.text
 import textual.logging
 from cryptography.hazmat.primitives.serialization import load_ssh_public_key
+from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
-from grz_common.cli import output_json
 from grz_db.errors import (
     DatabaseConfigurationError,
     DuplicateSubmissionError,
