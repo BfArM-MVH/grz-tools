@@ -1326,6 +1326,19 @@ class GrzSubmissionMetadata(StrictBaseModel):
         key = (genomic_study_subtype, lab_datum.library_type, lab_datum.sequence_subtype, is_oncomine_panel)
 
         thresholds = threshold_definitions.get(key)
+
+        if donor.relation == Relation.index_:
+            # We do not enforce any thresholds for the index patientbut return zeroed thresholds
+            # => Return all-zero thresholds
+            thresholds = thresholds.model_copy(deep=True)
+            thresholds.percent_bases_above_quality_threshold = thresholds_model.PercentBasesAboveQualityThreshold(
+                qualityThreshold=thresholds.percent_bases_above_quality_threshold.quality_threshold,
+                percentBasesAbove=0,
+            )
+            thresholds.targeted_regions_above_min_coverage = 0
+            thresholds.mean_depth_of_coverage = 0
+            # thresholds.mean_read_length = 0
+
         if thresholds is None:
             allowed_combinations_list = sorted(list(threshold_definitions.keys()))
             allowed_combinations = "\n".join([f"  - {combination}" for combination in allowed_combinations_list])
