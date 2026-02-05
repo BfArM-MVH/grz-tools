@@ -924,6 +924,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 )
 
         json.dump(submission_dict, sys.stdout)
+        sys.stdout.write("\n")
         return
 
     attribute_table = rich.table.Table(box=None)
