@@ -334,3 +334,45 @@ def test_list_sort(blank_database_config_path: Path):
     result_list_parsed = json.loads(result_list.stdout)
     for i, submission in enumerate(expected_ordering):
         assert submission["id"] == result_list_parsed[i]["id"]
+
+
+def test_submission_show_json(blank_database_config_path: Path):
+    """
+    `grzctl db submission show --json` should return machine-readable JSON
+    with submission metadata and state history.
+    """
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    metadata = GrzSubmissionMetadata.model_validate_json(
+        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    )
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    # add submission
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission
+    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
+        result_populate = runner.invoke(
+            cli,
+            [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"],
+        )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # show submission as JSON
+    result_show_json = runner.invoke(
+        cli, [*args_common, "submission", "show", "--json", metadata.submission_id]
+    )
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+
+    parsed = json.loads(result_show_json.stdout)
+
+    # basic structure checks
+    assert isinstance(parsed, dict)
+    assert parsed["id"] == metadata.submission_id
+    assert parsed["pseudonym"] == metadata.submission.local_case_id
+    assert "states" in parsed
+    assert isinstance(parsed["states"], list)
