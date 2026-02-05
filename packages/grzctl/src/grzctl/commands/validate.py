@@ -44,19 +44,15 @@ def validate(  # noqa: PLR0913
 
     submission_id = ""
     if update_db:
-        try:
-            worker_inst = Worker(
-                metadata_dir=submission_dir / "metadata",
-                files_dir=submission_dir / "files",
-                log_dir=submission_dir / "logs",
-                encrypted_files_dir=submission_dir / "encrypted_files",
-                threads=threads,
-            )
-            submission = worker_inst.parse_submission()
-            submission_id = submission.metadata.content.submission_id
-        except Exception:
-            log.warning("Could not determine submission ID; database will not be updated.")
-            update_db = False
+        worker_inst = Worker(
+            metadata_dir=submission_dir / "metadata",
+            files_dir=submission_dir / "files",
+            log_dir=submission_dir / "logs",
+            encrypted_files_dir=submission_dir / "encrypted_files",
+            threads=threads,
+        )
+        submission = worker_inst.parse_submission()
+        submission_id = submission.metadata.content.submission_id
 
     with DbContext(
         configuration=configuration,
