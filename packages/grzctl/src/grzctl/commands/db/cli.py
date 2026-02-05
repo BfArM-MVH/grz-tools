@@ -24,6 +24,7 @@ import textual.logging
 from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
+from grz_common.cli import output_json
 from grz_db.errors import (
     DatabaseConfigurationError,
     DuplicateSubmissionError,
@@ -874,7 +875,7 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
 
 @submission.command("show")
 @click.argument("submission_id", type=str)
-@click.option("--json", "--output-json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@output_json
 @click.pass_context
 def show(ctx: click.Context, submission_id: str, output_json: bool):
     """
