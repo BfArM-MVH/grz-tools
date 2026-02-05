@@ -874,8 +874,9 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
 
 @submission.command("show")
 @click.argument("submission_id", type=str)
+@click.option("--json", "--output-json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
-def show(ctx: click.Context, submission_id: str):
+def show(ctx: click.Context, submission_id: str, output_json: bool):
     """
     Show details of a submission.
     """
@@ -885,6 +886,45 @@ def show(ctx: click.Context, submission_id: str):
     if not submission:
         console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
+
+    if output_json:
+        submission_dict: dict[str, Any] = {
+            "id": submission.id,
+            "tan_g": submission.tan_g,
+            "pseudonym": submission.pseudonym,
+            "submission_date": submission.submission_date.isoformat() if submission.submission_date else None,
+            "submission_type": submission.submission_type,
+            "submitter_id": submission.submitter_id,
+            "data_node_id": submission.data_node_id,
+            "disease_type": submission.disease_type,
+            "genomic_study_type": submission.genomic_study_type,
+            "genomic_study_subtype": submission.genomic_study_subtype,
+            "basic_qc_passed": submission.basic_qc_passed,
+            "consented": submission.consented,
+            "detailed_qc_passed": submission.detailed_qc_passed,
+            "states": [],
+        }
+
+        if submission.states:
+            sorted_states = sorted(submission.states, key=lambda s: s.timestamp)
+            for state_log in sorted_states:
+                signature_status, verifying_key_comment = _verify_signature(
+                    ctx.obj["public_keys"], state_log.author_name, state_log
+                )
+                submission_dict["states"].append(
+                    {
+                        "id": state_log.id,
+                        "timestamp": state_log.timestamp.isoformat(),
+                        "state": state_log.state.value,
+                        "data": state_log.data,
+                        "data_steward": state_log.author_name,
+                        "data_steward_signature": signature_status,
+                        "signature_key_comment": verifying_key_comment,
+                    }
+                )
+
+        json.dump(submission_dict, sys.stdout)
+        return
 
     attribute_table = rich.table.Table(box=None)
     attribute_table.add_column("Attribute", justify="right")
