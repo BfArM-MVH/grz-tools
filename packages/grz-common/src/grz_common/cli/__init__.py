@@ -3,7 +3,7 @@ Common click options for the CLI commands.
 """
 
 import functools
-from os import sched_getaffinity
+import os
 from pathlib import Path
 from typing import Any
 
@@ -140,9 +140,16 @@ def read_config_from_ctx(ctx: click.Context) -> dict[str, Any]:
     return config
 
 
+def _get_affinity_size(pid: int) -> int:
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(pid))
+    cpu_count = os.cpu_count() or 1
+    return cpu_count
+
+
 threads = click.option(
     "--threads",
-    default=min(len(sched_getaffinity(0)), 4),
+    default=min(_get_affinity_size(0), 4),
     type=int,
     show_default=True,
     help="Number of threads to use for parallel operations",

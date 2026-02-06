@@ -26,6 +26,7 @@ dependencies = [
     "pysam ==0.23.*",
     "rich ==13.*",
     "requests >=2.32.3,<3",
+    "grz-check >=0.2.1,<1",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
