@@ -4,7 +4,7 @@ import io
 import os
 
 from grz_common.pipeline.base import PipelineContext
-from grz_common.pipeline.crypto import (
+from grz_common.pipeline.crypt4gh import (
     SEGMENT_SIZE,
     Crypt4GHDecryptor,
     Crypt4GHEncryptor,

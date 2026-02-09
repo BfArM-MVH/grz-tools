@@ -11,7 +11,7 @@ from .base import (
 )
 from .compressors import GzipDecompressor
 from .constants import MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MAX_PARTS, MULTIPART_MIN_PART_SIZE
-from .crypto import Crypt4GHDecryptor, Crypt4GHEncryptor
+from .crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .operations import (
     DecryptOperation,
     DownloadOperation,
