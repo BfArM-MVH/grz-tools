@@ -59,7 +59,12 @@ log = logging.getLogger(__name__)
     default=4,
     help="Maximum concurrent part uploads per file for S3 multipart uploads.",
 )
-def process(  # noqa: PLR0913, C901
+@click.option(
+    "--inbox-bucket",
+    default=None,
+    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
+)
+def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
     configuration: dict[str, Any],
     submission_id: str,
     output_dir: str,
@@ -70,6 +75,7 @@ def process(  # noqa: PLR0913, C901
     save_pruefbericht: str | None,
     redact_logs: bool,
     concurrent_uploads: int,
+    inbox_bucket: str | None = None,
     **kwargs,
 ):
     """
@@ -100,6 +106,32 @@ def process(  # noqa: PLR0913, C901
             --output-dir incoming/123456789_1970-01-01_00000000
     """
     config = ProcessConfig.model_validate(configuration)
+
+    # Select correct S3 inbox options
+    s3_options = config.s3
+    if config.s3.inboxes:
+        le_id = submission_id.split("_")[0]
+        if le_id in config.s3.inboxes:
+            submitter_inboxes = config.s3.inboxes[le_id]
+            if inbox_bucket:
+                if inbox_bucket in submitter_inboxes:
+                    s3_options = config.s3.model_copy(update={"bucket": inbox_bucket})
+                else:
+                    raise click.ClickException(f"Inbox bucket '{inbox_bucket}' not found for submitter '{le_id}'")
+            elif len(submitter_inboxes) == 1:
+                # automatically use the only available bucket
+                bucket_name = next(iter(submitter_inboxes))
+                s3_options = config.s3.model_copy(update={"bucket": bucket_name})
+            else:
+                inbox_names = ", ".join(submitter_inboxes.keys())
+                raise click.ClickException(
+                    f"Multiple inboxes found for submitter '{le_id}' ({inbox_names}), please specify --inbox-bucket"
+                )
+        elif not config.s3.bucket:
+            raise click.ClickException(f"No inboxes found for submitter '{le_id}' and no default bucket configured.")
+
+    if not s3_options.bucket:
+        raise click.ClickException("S3 bucket is required. Specify it in config or via --inbox-bucket.")
 
     # validate required configuration
     if not config.keys.grz_private_key_path:
@@ -135,7 +167,7 @@ def process(  # noqa: PLR0913, C901
     # first, download metadata to understand the submission structure
     log.info("Downloading metadata...")
     download_worker = S3BotoDownloadWorker(
-        config.s3, status_file_path=log_dir / "progress_download.cjson", threads=threads
+        s3_options, status_file_path=log_dir / "progress_download.cjson", threads=threads
     )
     download_worker.download_metadata(submission_id, metadata_dir, metadata_file_name="metadata.json")
 
@@ -152,14 +184,15 @@ def process(  # noqa: PLR0913, C901
     log.info(f"Target archive: {'consented' if is_consented else 'non-consented'}")
 
     # register submission in db if not yet registered
-    db_service = get_submission_db_instance(config.db.database_url)
-    try:
-        if not db_service.get_submission(submission_id):
-            _db_submission = db_service.add_submission(submission_id)
-    except (DuplicateSubmissionError, DuplicateTanGError) as e:
-        raise click.Abort() from e
-    except Exception as e:
-        raise click.ClickException(f"Failed to add submission: {e}") from e
+    if update_db and config.db:
+        db_service = get_submission_db_instance(config.db.database_url)
+        try:
+            if not db_service.get_submission(submission_id):
+                _db_submission = db_service.add_submission(submission_id)
+        except (DuplicateSubmissionError, DuplicateTanGError) as e:
+            raise click.Abort() from e
+        except Exception as e:
+            raise click.ClickException(f"Failed to add submission: {e}") from e
 
     # prepare redaction patterns for log files
     redact_patterns: list[tuple[str, str]] | None = (
@@ -167,7 +200,7 @@ def process(  # noqa: PLR0913, C901
     )
 
     pipeline_config = StreamingPipelineConfig(
-        source_s3=config.s3,
+        source_s3=s3_options,
         consented_archive_s3=config.consented_archive_s3,
         non_consented_archive_s3=config.non_consented_archive_s3,
         grz_private_key_path=config.keys.grz_private_key_path,
@@ -268,14 +301,7 @@ def _handle_pruefbericht(  # noqa: PLR0913
 
     # submit Prüfbericht if requested
     if submit_pruefbericht:
-        if not config.pruefbericht:
-            log.error(
-                "Prüfbericht submission requested but no pruefbericht configuration found. "
-                "Add pruefbericht section to your config file."
-            )
-            sys.exit(1)
-
-        # at this point pruefbericht_config is guaranteed to be not None
+        # pruefbericht_config is guaranteed to exist as it's mandatory in ProcessConfig
         pruefbericht_config: PruefberichtModel = config.pruefbericht
 
         # these checks are safe because we validated all values above
