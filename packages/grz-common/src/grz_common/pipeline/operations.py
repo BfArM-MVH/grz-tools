@@ -27,7 +27,7 @@ import crypt4gh.keys
 from ..utils.crypt import Crypt4GH
 from .base import PipelineContext
 from .compressors import GzipDecompressor
-from .crypto import Crypt4GHDecryptor, Crypt4GHEncryptor
+from .crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .s3 import S3Downloader, S3MultipartUploader
 from .validators import BamValidator, FastqValidator, RawChecksumValidator
 
