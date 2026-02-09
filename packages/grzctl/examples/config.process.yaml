@@ -1,0 +1,35 @@
+s3:
+  endpoint_url: https://inbox.s3.example.com
+  bucket: grz-inbox
+  access_key: ${GRZ_S3__ACCESS_KEY}
+  secret: ${GRZ_S3__SECRET}
+
+keys:
+  grz_private_key_path: /path/to/grz-inbox.sec
+  consented_archive_public_key_path: /path/to/archive-consented.pub
+  non_consented_archive_public_key_path: /path/to/archive-nonconsented.pub
+
+consented_archive_s3:
+  endpoint_url: https://archive.s3.example.com
+  bucket: grz-archive-consented
+  access_key: ${GRZ_S3__ACCESS_KEY}
+  secret: ${GRZ_S3__SECRET}
+
+non_consented_archive_s3:
+  endpoint_url: https://archive.s3.example.com
+  bucket: grz-archive-nonconsented
+  access_key: ${GRZ_S3__ACCESS_KEY}
+  secret: ${GRZ_S3__SECRET}
+
+pruefbericht:
+  authorization_url: ${GRZ_PRUEFBERICHT__AUTHORIZATION_URL}
+  client_id: ${GRZ_PRUEFBERICHT__CLIENT_ID}
+  client_secret: ${GRZ_PRUEFBERICHT__CLIENT_SECRET}
+  api_base_url: ${GRZ_PRUEFBERICHT__API_BASE_URL}
+
+db:
+  database_url: sqlite:///path/to/submission.db.sqlite
+  author:
+    name: steward-name
+    private_key_path: /path/to/steward-name.ssh
+    private_key_passphrase: ${GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE}
