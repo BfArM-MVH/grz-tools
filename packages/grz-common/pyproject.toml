@@ -34,6 +34,10 @@ classifiers = [
 requires-python = ">=3.12"
 keywords = ["GRZ", "GDC", "S3"]
 
+[project.optional-dependencies]
+# Intel ISA-L for 2-4x faster gzip operations
+fast = ["isal>=1.8.0"]
+
 [dependency-groups]
 dev = [
     "tox",
