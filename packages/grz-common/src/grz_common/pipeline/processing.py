@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 
 from .base import PipelineContext, StreamStage
 from .compressors import GzipDecompressor
-from .crypto import Crypt4GHDecryptor, Crypt4GHEncryptor
+from .crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .s3 import S3Downloader, S3MultipartUploader
 from .utils import abort_all_stages, drain_queue, finalize_stages_in_order, safe_join_thread
 from .validators import BamValidator, FastqValidator, RawChecksumValidator
