@@ -1,4 +1,4 @@
-"""Module for downloading encrypted submissions to local storage"""
+"""Module for downloading encrypted submissions to local storage."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import datetime
 import enum
 import itertools
 import logging
-import math
 import re
 from collections import OrderedDict
 from operator import attrgetter, itemgetter
@@ -15,26 +14,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import botocore.handlers
-from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import BaseModel
-from tqdm.auto import tqdm
 
-from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
-
-MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
-MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
-MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
     from .submission import EncryptedSubmission
 
 log = logging.getLogger(__name__)
 
-# see discussion: https://github.com/boto/boto3/discussions/4251 to accept bucket names with ":" in the name
+# accept bucket names with ":" in the name
+# see: https://github.com/boto/boto3/discussions/4251
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")
 
 
@@ -125,37 +118,22 @@ class S3BotoDownloadWorker:
 
     def _download_with_progress(self, local_file_path: str, s3_object_id: str):
         """
-        Download a single file from S3 to local storage.
+        Download a single file from S3 to local storage using streaming pipeline.
 
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
         """
-        s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
-        filesize = s3_object_meta["ContentLength"]
+        from ..pipeline.operations import DownloadOperation  # noqa: PLC0415
 
-        chunksize = (
-            math.ceil(filesize / MULTIPART_MAX_CHUNKS)
-            if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
-            else MULTIPART_CHUNKSIZE
+        download_op = DownloadOperation(
+            self._s3_client,
+            self._s3_options.bucket,
         )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunks"
+        download_op.to_file(
+            s3_object_id,
+            Path(local_file_path),
+            show_progress=True,
         )
-
-        config = TransferConfig(
-            multipart_threshold=MULTIPART_THRESHOLD,
-            multipart_chunksize=chunksize,
-            max_concurrency=self._threads,
-        )
-
-        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        with tqdm(total=filesize, postfix=f"{s3_object_id}", **TQDM_DEFAULTS) as progress_bar:  # type: ignore[call-overload]
-            transfer.download_file(
-                self._s3_options.bucket,
-                s3_object_id,
-                local_file_path,
-                callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-            )
 
     def download_file(
         self,
