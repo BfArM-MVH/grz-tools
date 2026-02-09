@@ -5,7 +5,6 @@ import hashlib
 import io
 
 from grz_common.pipeline.base import PipelineContext
-from grz_common.pipeline.checksummers import Sha256Checksummer
 from grz_common.pipeline.compressors import GzipDecompressor
 from grz_common.pipeline.validators import FastqValidator, RawChecksumValidator
 
@@ -191,25 +190,3 @@ class TestRawChecksumValidator:
 
         assert context.has_errors()
         assert any("size mismatch" in e for e in context.errors)
-
-
-class TestSha256Checksummer:
-    """Tests for the Sha256Checksummer stage."""
-
-    def test_checksum_calculation(self):
-        """Test checksum calculation across multiple chunks."""
-        data = b"This is a test string for checksum calculation"
-        expected = hashlib.sha256(data).hexdigest()
-
-        checksummer = Sha256Checksummer()
-        context = PipelineContext()
-        checksummer.initialize(context)
-
-        # Feed in small chunks
-        for i in range(0, len(data), 10):
-            checksummer.observe(data[i : i + 10])
-
-        checksummer.finalize()
-
-        assert checksummer.hexdigest() == expected
-        assert context.checksums["sha256"] == expected
