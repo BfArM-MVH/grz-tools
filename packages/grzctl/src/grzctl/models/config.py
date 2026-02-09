@@ -26,6 +26,22 @@ class CleanConfig(S3ConfigModel):
     pass
 
 
+class InboxConfig(IgnoringBaseModel):
+    """Configuration for a specific inbox."""
+
+    pass
+
+
+class ProcessS3Options(S3Options):
+    """S3 options for the process command, supporting multiple inboxes."""
+
+    bucket: str | None = None  # type: ignore[assignment]
+    """Default bucket name. Required if inboxes is not used or no matching inbox is found."""
+
+    inboxes: dict[str, dict[str, InboxConfig]] | None = None
+    """Mapping of submitter IDs to a mapping of bucket names to inbox configurations."""
+
+
 class ProcessKeyConfigModel(IgnoringBaseSettings):
     """Key configuration for the process command."""
 
@@ -39,8 +55,10 @@ class ProcessKeyConfigModel(IgnoringBaseSettings):
     """Path to the public key for re-encryption of non-consented submissions."""
 
 
-class ProcessConfig(S3ConfigModel):
+class ProcessConfig(IgnoringBaseSettings):
     """Configuration for the streaming pipeline process command."""
+
+    s3: ProcessS3Options
 
     keys: ProcessKeyConfigModel
     """Key configuration for decryption and re-encryption."""
@@ -53,11 +71,11 @@ class ProcessConfig(S3ConfigModel):
 
     # Prüfbericht configuration
     pruefbericht: PruefberichtModel
-    """Configuration for Prüfbericht submission (optional)."""
+    """Configuration for Prüfbericht submission."""
 
     # Database configuration
     db: DbModel
-    """Database configuration for submission tracking (optional)."""
+    """Database configuration for submission tracking."""
 
 
 class PruefberichtConfig(IgnoringBaseSettings):
