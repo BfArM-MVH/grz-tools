@@ -266,6 +266,136 @@ class TestGrzctlProcess:
         log_files = list((working_dir_path / "logs").glob("*.cjson"))
         assert len(log_files) > 0, "No progress log files created"
 
+    def test_process_submission_multi_inbox(
+        self,
+        aws_credentials_for_process,
+        temp_data_dir_path,
+        crypt4gh_grz_private_key_file_path,
+        crypt4gh_grz_public_key_file_path,
+        db_alice_private_key_file_path,
+        db_known_keys_file_path,
+        working_dir_path,
+        tmp_path,
+    ):
+        """
+        Test multi-inbox selection logic.
+        """
+        conn = boto3.client("s3")
+        conn.create_bucket(Bucket="inbox-a")
+        conn.create_bucket(Bucket="inbox-b")
+        conn.create_bucket(Bucket="consented-archive")
+        conn.create_bucket(Bucket="non-consented-archive")
+
+        s3_resource = boto3.resource("s3")
+        _inbox_a = s3_resource.Bucket("inbox-a")
+        inbox_b = s3_resource.Bucket("inbox-b")
+
+        submission_id = "260914050_2024-07-15_c64603a7"
+        le_id = "260914050"
+
+        # Upload submission to inbox-b
+        upload_submission_to_inbox(inbox_b, submission_id)
+
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        db_file = db_dir / "test.db"
+
+        # Create config with multiple inboxes
+        config_content = {
+            "s3": {
+                "endpoint_url": "https://s3.amazonaws.com",
+                "access_key": "testing",
+                "secret": "testing",
+                "inboxes": {
+                    le_id: {
+                        "inbox-a": {},
+                        "inbox-b": {},
+                    }
+                },
+            },
+            "consented_archive_s3": {
+                "endpoint_url": "https://s3.amazonaws.com",
+                "bucket": "consented-archive",
+                "access_key": "testing",
+                "secret": "testing",
+            },
+            "non_consented_archive_s3": {
+                "endpoint_url": "https://s3.amazonaws.com",
+                "bucket": "non-consented-archive",
+                "access_key": "testing",
+                "secret": "testing",
+            },
+            "keys": {
+                "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
+                "consented_archive_public_key_path": str(crypt4gh_grz_public_key_file_path),
+                "non_consented_archive_public_key_path": str(crypt4gh_grz_public_key_file_path),
+            },
+            "pruefbericht": {
+                "authorization_url": "https://bfarm.localhost/token",
+                "api_base_url": "https://bfarm.localhost/api/",
+                "client_id": "pytest",
+                "client_secret": "pysecret",
+            },
+            "db": {
+                "database_url": f"sqlite:///{str(db_file)}",
+                "author": {
+                    "name": "Alice",
+                    "private_key_path": str(db_alice_private_key_file_path),
+                },
+                "known_public_keys": str(db_known_keys_file_path),
+            },
+        }
+
+        config_file = temp_data_dir_path / "config.multi.yaml"
+        import yaml
+
+        with open(config_file, "w") as fd:
+            yaml.dump(config_content, fd)
+
+        # Run grzctl process with --inbox-bucket inbox-b
+        args = [
+            "process",
+            "--config-file",
+            str(config_file),
+            "--submission-id",
+            submission_id,
+            "--output-dir",
+            str(working_dir_path),
+            "--inbox-bucket",
+            "inbox-b",
+            "--no-validate",
+            "--no-submit-pruefbericht",
+            "--no-update-db",
+        ]
+
+        runner = click.testing.CliRunner()
+        cli = grzctl.cli.build_cli()
+        result = runner.invoke(cli, args, catch_exceptions=False)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # Verify it worked (files should be in consented archive)
+        consented_bucket = s3_resource.Bucket("consented-archive")
+        consented_keys = {o.key for o in consented_bucket.objects.all()}
+        assert any("metadata/metadata.json" in key for key in consented_keys)
+
+        # Test failure if --inbox-bucket is missing when multiple are available
+        args_no_bucket = [
+            "process",
+            "--config-file",
+            str(config_file),
+            "--submission-id",
+            submission_id,
+            "--output-dir",
+            str(working_dir_path / "fail"),
+            "--no-validate",
+            "--no-submit-pruefbericht",
+            "--no-update-db",
+        ]
+        result = runner.invoke(cli, args_no_bucket, catch_exceptions=False)
+        assert result.exit_code != 0
+        assert "Multiple inboxes found" in result.output
+
 
 class TestProcessVsManualWorkflow:
     """
@@ -358,7 +488,7 @@ class TestProcessVsManualWorkflow:
 
         # === Run manual workflow ===
         self._setup_manual_submission_dir(working_dir_manual)
-        self._run_manual_decrypt(working_dir_manual, temp_keys_config_file_path)
+        self._run_manual_decrypt(working_dir_manual, str(temp_keys_config_file_path))
 
         # === Compare decrypted content checksums ===
         # Get checksums from files decrypted by grzctl process
