@@ -1,29 +1,20 @@
-"""Utilities for handling crypt4gh keys, encryption and decryption"""
+"""Utilities for handling crypt4gh keys, encryption and decryption."""
 
-import io
 import logging
 import os
-import typing
 from functools import partial
 from getpass import getpass
 from os import PathLike
-from os.path import getsize
 from pathlib import Path
 
-import crypt4gh.header
 import crypt4gh.keys
-import crypt4gh.lib
 from nacl.public import PrivateKey
-from tqdm.auto import tqdm
-
-from ..constants import TQDM_DEFAULTS
-from .io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
 
 
 class Crypt4GH:
-    """Crypt4GH encryption/decryption utility class"""
+    """Crypt4GH encryption/decryption utility class."""
 
     Key = tuple[int, bytes, bytes]
 
@@ -37,11 +28,10 @@ class Crypt4GH:
         sender_private_key: str | PathLike | None = None,
     ) -> tuple[Key]:
         """
-        Prepare the key format that Crypt4GH needs. While it can contain multiple
-         keys for multiple recipients, in our use case there is only a single recipient.
+        Prepare the key format that Crypt4GH needs.
 
-        :param recipient_key_file_path: path to the public key file of the recipient
-        :param sender_private_key: path to the private key file of the sender.
+        :param recipient_key_file_path: Path to the public key file of the recipient
+        :param sender_private_key: Path to the private key file of the sender.
             If None, will be generated randomly.
         """
         if sender_private_key is not None:
@@ -56,43 +46,33 @@ class Crypt4GH:
         input_path: str | PathLike,
         output_path: str | PathLike,
         public_keys: tuple[Key],
+        show_progress: bool = True,
     ):
         """
-        Encrypt the file, properly handling the Crypt4GH header.
+        Encrypt a file using Crypt4GH.
 
-        :param public_keys:
-        :param output_path:
-        :param input_path:
-        :return: tuple with md5 values for original file, encrypted file
+        :param input_path: Path to the input file
+        :param output_path: Path to the output encrypted file
+        :param public_keys: Prepared Crypt4GH keys for encryption
+        :param show_progress: Whether to show progress bar
         """
-        # TODO: Progress bar?
-        # TODO: store header in separate file?
-        input_path = Path(input_path)
-        output_path = Path(output_path)
+        from ..pipeline.operations import EncryptOperation  # noqa: PLC0415
 
-        total_size = getsize(input_path)
-        with (
-            open(input_path, "rb") as in_fd,
-            open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="ENCRYPT ", postfix=f"{input_path.name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
-        ):
-            crypt4gh.lib.encrypt(
-                keys=public_keys,
-                infile=pbar_in_fd,
-                outfile=out_fd,
-            )
+        # extract public key and signing key from prepared keys tuple
+        _, signing_key, public_key = public_keys[0]
+
+        encrypt_op = EncryptOperation(public_key, signing_key)
+        encrypt_op.file_to_file(Path(input_path), Path(output_path), show_progress=show_progress)
 
     @staticmethod
-    def retrieve_private_key(seckey_path) -> bytes:
+    def retrieve_private_key(seckey_path: str | PathLike) -> bytes:
         """
         Read Crypt4GH private key from specified path.
-        :param seckey_path: path to the private key
-        :return:
+
+        :param seckey_path: Path to the private key
+        :returns: Private key bytes
         """
-        seckeypath = os.path.expanduser(seckey_path)
+        seckeypath = os.path.expanduser(str(seckey_path))
         if not os.path.exists(seckeypath):
             raise ValueError("Secret key not found")
 
@@ -105,25 +85,21 @@ class Crypt4GH:
         return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
 
     @staticmethod
-    def decrypt_file(input_path: Path, output_path: Path, private_key: bytes):
+    def decrypt_file(
+        input_path: Path,
+        output_path: Path,
+        private_key: bytes,
+        show_progress: bool = True,
+    ):
         """
-        Decrypt a file using the provided private key
+        Decrypt a file using the provided private key.
+
         :param input_path: Path to the encrypted file
         :param output_path: Path to the decrypted file
-        :param private_key: The private key
+        :param private_key: The private key bytes
+        :param show_progress: Whether to show progress bar
         """
-        total_size = getsize(input_path)
-        file_name = input_path.name
-        with (
-            open(input_path, "rb") as in_fd,
-            open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="DECRYPT ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
-        ):
-            crypt4gh.lib.decrypt(
-                keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
-                infile=pbar_in_fd,
-                outfile=out_fd,
-            )
+        from ..pipeline.operations import DecryptOperation  # noqa: PLC0415
+
+        decrypt_op = DecryptOperation(private_key)
+        decrypt_op.file_to_file(input_path, output_path, show_progress=show_progress)
