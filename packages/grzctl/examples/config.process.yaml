@@ -1,8 +1,14 @@
 s3:
   endpoint_url: https://inbox.s3.example.com
-  bucket: grz-inbox
+  # bucket: grz-inbox  # optional default bucket
   access_key: ${GRZ_S3__ACCESS_KEY}
   secret: ${GRZ_S3__SECRET}
+  inboxes:
+    "123456789":
+      grz-inbox: {}
+      another-bucket: {}
+    "987654321":
+      some-other-bucket: {}
 
 keys:
   grz_private_key_path: /path/to/grz-inbox.sec
