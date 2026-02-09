@@ -9,7 +9,6 @@ from .base import (
     StreamStage,
     StreamTransformer,
 )
-from .checksummers import Sha256Checksummer
 from .compressors import GzipDecompressor
 from .constants import MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MAX_PARTS, MULTIPART_MIN_PART_SIZE
 from .crypto import Crypt4GHDecryptor, Crypt4GHEncryptor
@@ -46,7 +45,6 @@ __all__ = [  # noqa: RUF022
     "S3Downloader",
     "S3KeyBuilder",
     "S3MultipartUploader",
-    "Sha256Checksummer",
     "SignalManager",
     "StreamObserver",
     "StreamSink",
