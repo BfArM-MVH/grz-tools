@@ -12,6 +12,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::fs;
 use std::io::{BufWriter, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -31,7 +32,7 @@ impl Stats {
 
 #[derive(Debug, Serialize, Clone)]
 pub struct FileReport {
-    pub path: PathBuf,
+    pub name: String,
     pub stats: Option<Stats>,
     pub sha256: Option<String>,
     pub errors: Vec<String>,
@@ -40,13 +41,13 @@ pub struct FileReport {
 
 impl FileReport {
     pub fn new(
-        path: &Path,
+        name: &str,
         stats: Option<Stats>,
         errors: Vec<String>,
         warnings: Vec<String>,
     ) -> Self {
         Self {
-            path: path.to_path_buf(),
+            name: name.to_string(),
             stats,
             sha256: None,
             errors,
@@ -54,9 +55,9 @@ impl FileReport {
         }
     }
 
-    pub fn new_with_error(path: &Path, error: String) -> Self {
+    pub fn new_with_error(name: &str, error: String) -> Self {
         Self {
-            path: path.to_path_buf(),
+            name: name.to_string(),
             stats: None,
             sha256: None,
             errors: vec![error],
@@ -112,12 +113,12 @@ impl CheckResult {
             CheckResult::Raw(r) => !r.is_ok(),
         }
     }
-    fn primary_path(&self) -> &Path {
+    fn primary_name(&self) -> &str {
         match self {
-            CheckResult::PairedFastq(r) => &r.fq1_report.path,
-            CheckResult::SingleFastq(r) => &r.path,
-            CheckResult::Bam(r) => &r.path,
-            CheckResult::Raw(r) => &r.path,
+            CheckResult::PairedFastq(r) => &r.fq1_report.name,
+            CheckResult::SingleFastq(r) => &r.name,
+            CheckResult::Bam(r) => &r.name,
+            CheckResult::Raw(r) => &r.name,
         }
     }
 }
@@ -143,6 +144,35 @@ impl fmt::Display for EarlyExitError {
 
 impl StdError for EarlyExitError {}
 
+pub struct DataSource {
+    pub name: String,
+    pub source: Box<dyn std::io::Read + Send>,
+    pub size: Option<u64>,
+}
+
+impl fmt::Debug for DataSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DataSource")
+            .field("name", &self.name)
+            .field("size", &self.size)
+            .finish()
+    }
+}
+
+impl DataSource {
+    pub(crate) fn from_path(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let path_ref = path.as_ref();
+        let file = fs::File::open(path_ref)
+            .with_context(|| format!("Failed to open file: {}", path_ref.display()))?;
+        let size = file.metadata().map(|m| m.size()).ok();
+        Ok(Self {
+            name: filename(path_ref),
+            source: Box::new(file),
+            size,
+        })
+    }
+}
+
 fn filename(path: impl AsRef<Path>) -> String {
     path.as_ref()
         .file_name()
@@ -157,28 +187,30 @@ fn process_job(
 ) -> CheckResult {
     match job {
         Job::SingleFastq(job) => {
-            let pb = m.add(ProgressBar::new(job.size));
-            pb.set_style(style.clone());
+            let pb = add_progress_bar(m, style, &job.input);
             pb.set_prefix("FASTQ");
-            let report = fastq::check_single_fastq(&job.path, job.length_check, &pb, main_pb);
+            let name = &job.input.name.to_string();
+            let report = fastq::check_single_fastq(job.input, job.length_check, &pb, main_pb);
             if report.is_ok() {
-                pb.finish_with_message(format!("✓ OK    {}", filename(&job.path)));
+                pb.finish_with_message(format!("✓ OK    {}", name));
             } else {
-                pb.abandon_with_message(format!("✗ ERROR {}", filename(&job.path)));
+                pb.abandon_with_message(format!("✗ ERROR {}", name));
             }
             CheckResult::SingleFastq(report)
         }
         Job::PairedFastq(job) => {
-            let fq1_pb = m.add(ProgressBar::new(job.fq1_size));
+            let fq1_pb = add_progress_bar(m, style, &job.input1);
             fq1_pb.set_style(style.clone());
             fq1_pb.set_prefix("FASTQ R1");
+            let name1 = &job.input1.name;
 
-            let fq2_pb = m.add(ProgressBar::new(job.fq2_size));
+            let fq2_pb = add_progress_bar(m, style, &job.input2);
             fq2_pb.set_style(style.clone());
             fq2_pb.set_prefix("FASTQ R2");
+            let name2 = &job.input2.name;
 
-            let fq1_setup = common::setup_file_reader(&job.fq1_path, &fq1_pb, main_pb, true);
-            let fq2_setup = common::setup_file_reader(&job.fq2_path, &fq2_pb, main_pb, true);
+            let fq1_setup = common::setup_reader(job.input1.source, name1, &fq1_pb, main_pb, true);
+            let fq2_setup = common::setup_reader(job.input2.source, name2, &fq2_pb, main_pb, true);
 
             let report = match (fq1_setup, fq2_setup) {
                 (Ok((reader1, hasher1)), Ok((reader2, hasher2))) => {
@@ -196,13 +228,13 @@ fn process_job(
                                 };
                                 return CheckResult::PairedFastq(PairReport {
                                     fq1_report: FileReport::new(
-                                        &job.fq1_path,
+                                        name1,
                                         None,
                                         outcome1.errors,
                                         outcome1.warnings,
                                     ),
                                     fq2_report: FileReport::new(
-                                        &job.fq2_path,
+                                        name2,
                                         None,
                                         outcome2.errors,
                                         outcome2.warnings,
@@ -222,14 +254,14 @@ fn process_job(
                     let cs2 = finalize(hasher2);
 
                     let fq1_report = FileReport::new(
-                        &job.fq1_path,
+                        name1,
                         fq1_outcome.stats,
                         fq1_outcome.errors,
                         fq1_outcome.warnings,
                     )
                     .with_sha256(cs1);
                     let fq2_report = FileReport::new(
-                        &job.fq2_path,
+                        name2,
                         fq2_outcome.stats,
                         fq2_outcome.errors,
                         fq2_outcome.warnings,
@@ -243,14 +275,11 @@ fn process_job(
                     }
                 }
                 (Err(e1), Ok((_r2, _h2))) => {
-                    let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
+                    let fq1_report = FileReport::new_with_error(name1, e1.to_string());
                     let fq2_report = FileReport::new(
-                        &job.fq2_path,
+                        name2,
                         None,
-                        vec![format!(
-                            "R1 ({:?}) failed to parse; check aborted.",
-                            &job.fq1_path
-                        )],
+                        vec![format!("R1 ({:?}) failed to parse; check aborted.", name1)],
                         vec![],
                     );
                     PairReport {
@@ -261,15 +290,12 @@ fn process_job(
                 }
                 (Ok((_r1, _h1)), Err(e2)) => {
                     let fq1_report = FileReport::new(
-                        &job.fq1_path,
+                        name1,
                         None,
-                        vec![format!(
-                            "R2 ({:?}) failed to parse; check aborted.",
-                            &job.fq2_path
-                        )],
+                        vec![format!("R2 ({:?}) failed to parse; check aborted.", name2)],
                         vec![],
                     );
-                    let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
+                    let fq2_report = FileReport::new_with_error(name2, e2.to_string());
                     PairReport {
                         fq1_report,
                         fq2_report,
@@ -277,8 +303,8 @@ fn process_job(
                     }
                 }
                 (Err(e1), Err(e2)) => {
-                    let fq1_report = FileReport::new_with_error(&job.fq1_path, e1.to_string());
-                    let fq2_report = FileReport::new_with_error(&job.fq2_path, e2.to_string());
+                    let fq1_report = FileReport::new_with_error(name1, e1.to_string());
+                    let fq2_report = FileReport::new_with_error(name2, e2.to_string());
                     PairReport {
                         fq1_report,
                         fq2_report,
@@ -287,39 +313,54 @@ fn process_job(
                 }
             };
 
-            let fq1_filename = filename(&job.fq1_path);
-            let fq2_filename = filename(&job.fq2_path);
-            finish_pb(fq1_pb, fq1_filename, &report.fq1_report);
-            finish_pb(fq2_pb, fq2_filename, &report.fq1_report);
+            finish_pb(fq1_pb, name1, &report.fq1_report);
+            finish_pb(fq2_pb, name2, &report.fq1_report);
 
             CheckResult::PairedFastq(report)
         }
         Job::Bam(job) => {
-            let pb = m.add(ProgressBar::new(job.size));
-            pb.set_style(style.clone());
+            let pb = add_progress_bar(m, style, &job.input);
             pb.set_prefix("BAM");
-            let filename = filename(&job.path);
-            let report = bam::check_bam(&job.path, &pb, main_pb);
-            finish_pb(pb, filename, &report);
+            let name = &job.input.name.to_string();
+            let report = bam::check_bam(job.input, &pb, main_pb);
+            finish_pb(pb, name, &report);
             CheckResult::Bam(report)
         }
         Job::Raw(job) => {
-            let pb = m.add(ProgressBar::new(job.size));
+            let pb = add_progress_bar(m, style, &job.input);
             pb.set_style(style.clone());
             pb.set_prefix("OTHER");
-            let report = raw::check_raw(&job.path, &pb, main_pb);
-            let filename = filename(&job.path);
-            finish_pb(pb, filename, &report);
+            let name = &job.input.name.to_string();
+            let report = raw::check_raw(job.input, &pb, main_pb);
+            finish_pb(pb, name, &report);
             CheckResult::Raw(report)
         }
     }
 }
 
-fn finish_pb(pb: ProgressBar, filename: String, report: &FileReport) {
-    if report.is_ok() {
-        pb.finish_with_message(format!("✓ OK    {filename}"));
+fn add_progress_bar(
+    m: &mut MultiProgress,
+    style: &mut ProgressStyle,
+    input: &DataSource,
+) -> ProgressBar {
+    let pb = if let Some(size) = input.size {
+        let pb = m.add(ProgressBar::new(size));
+        pb.set_style(style.clone());
+        pb
     } else {
-        pb.abandon_with_message(format!("✗ ERROR {filename}"));
+        let pb = m.add(ProgressBar::new_spinner());
+        let spinner_style = ProgressStyle::default_spinner();
+        pb.set_style(spinner_style);
+        pb
+    };
+    pb
+}
+
+fn finish_pb(pb: ProgressBar, name: &str, report: &FileReport) {
+    if report.is_ok() {
+        pb.finish_with_message(format!("✓ OK    {name}"));
+    } else {
+        pb.abandon_with_message(format!("✗ ERROR {name}"));
     }
 }
 
@@ -359,7 +400,7 @@ fn process_jobs(
                 if let Err(e) = write_jsonl_report_entry(&report, &mut *writer_guard) {
                     eprintln!(
                         "Failed to write report line for {:?}: {}",
-                        report.primary_path(),
+                        report.primary_name(),
                         e
                     );
                 }
@@ -391,7 +432,7 @@ fn process_jobs(
                 if let Err(e) = write_jsonl_report_entry(&report, &mut *writer_guard) {
                     eprintln!(
                         "Failed to write report line for {:?}: {}",
-                        report.primary_path(),
+                        report.primary_name(),
                         e
                     );
                 }
@@ -500,12 +541,12 @@ pub fn run_check(
             StopReason::Error(failed_report) => {
                 main_pb.abandon_with_message(format!(
                     "✗ Error in {}. See report: {}",
-                    failed_report.primary_path().display(),
+                    failed_report.primary_name(),
                     output.display()
                 ));
                 anyhow::bail!(
                     "A validation error occurred in {}. Aborting.\n{:?}",
-                    failed_report.primary_path().display(),
+                    failed_report.primary_name(),
                     &failed_report
                 );
             }
@@ -522,7 +563,7 @@ pub fn run_check(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct FastqReport<'a> {
-    path: &'a Path,
+    name: &'a str,
     status: &'a str,
     num_records: Option<u64>,
     mean_read_length: Option<f64>,
@@ -534,7 +575,7 @@ struct FastqReport<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct BamReport<'a> {
-    path: &'a Path,
+    name: &'a str,
     status: &'a str,
     num_records: Option<u64>,
     checksum: Option<&'a String>,
@@ -545,7 +586,7 @@ struct BamReport<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct RawReport<'a> {
-    path: &'a Path,
+    name: &'a str,
     status: &'a str,
     checksum: Option<&'a String>,
     errors: &'a [String],
@@ -581,7 +622,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
                 };
 
                 let report = JsonReport::Fastq(FastqReport {
-                    path: &file_report.path,
+                    name: &file_report.name,
                     status,
                     num_records: file_report.stats.map(|s| s.num_records),
                     mean_read_length: file_report.stats.and_then(|s| s.mean_read_length()),
@@ -595,7 +636,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
         }
         CheckResult::SingleFastq(report) => {
             let json_report = JsonReport::Fastq(FastqReport {
-                path: &report.path,
+                name: &report.name,
                 status: if report.is_ok() { "OK" } else { "ERROR" },
                 num_records: report.stats.map(|s| s.num_records),
                 mean_read_length: report.stats.and_then(|s| s.mean_read_length()),
@@ -608,7 +649,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
         }
         CheckResult::Bam(report) => {
             let json_report = JsonReport::Bam(BamReport {
-                path: &report.path,
+                name: &report.name,
                 status: if report.is_ok() { "OK" } else { "ERROR" },
                 num_records: report.stats.map(|s| s.num_records),
                 checksum: report.sha256.as_ref(),
@@ -620,7 +661,7 @@ fn write_jsonl_report_entry<W: Write>(result: &CheckResult, writer: &mut W) -> a
         }
         CheckResult::Raw(report) => {
             let json_report = JsonReport::Raw(RawReport {
-                path: &report.path,
+                name: &report.name,
                 status: if report.is_ok() { "OK" } else { "ERROR" },
                 checksum: report.sha256.as_ref(),
                 errors: &report.errors,
@@ -717,7 +758,7 @@ mod tests {
     #[derive(Deserialize, Debug, Clone)]
     #[serde(rename_all = "snake_case")]
     struct TestFastqReportData {
-        path: PathBuf,
+        name: String,
         status: String,
         num_records: Option<u64>,
         mean_read_length: Option<f64>,
@@ -730,7 +771,7 @@ mod tests {
     #[derive(Deserialize, Debug, Clone)]
     #[serde(rename_all = "snake_case")]
     struct TestBamReportData {
-        path: PathBuf,
+        name: String,
         status: String,
         num_records: Option<u64>,
         checksum: Option<String>,
@@ -742,7 +783,7 @@ mod tests {
     #[derive(Deserialize, Debug, Clone)]
     #[serde(rename_all = "snake_case")]
     struct TestRawReportData {
-        path: PathBuf,
+        name: String,
         status: String,
         checksum: Option<String>,
         errors: Vec<String>,
@@ -781,31 +822,29 @@ mod tests {
         let total_bytes = fq1_size + fq2_size;
 
         let jobs = vec![Job::PairedFastq(PairedFastqJob {
-            fq1_path,
-            fq2_path,
+            input1: DataSource::from_path(&fq1_path)?,
+            input2: DataSource::from_path(&fq2_path)?,
             length_check: ReadLengthCheck::Fixed(3),
-            fq1_size,
-            fq2_size,
         })];
 
         run_check(jobs, total_bytes, &output, false, Some(false))?;
 
         let mut records = read_jsonl_report(&output)?;
         records.sort_by(|a, b| match (a, b) {
-            (TestReport::Fastq(d1), TestReport::Fastq(d2)) => d1.path.cmp(&d2.path),
+            (TestReport::Fastq(d1), TestReport::Fastq(d2)) => d1.name.cmp(&d2.name),
             _ => panic!("Unexpected report types"),
         });
 
         assert_eq!(records.len(), 2);
         if let TestReport::Fastq(data) = &records[0] {
-            assert!(data.path.ends_with("ok_r1.fastq.gz"));
+            assert!(data.name.ends_with("ok_r1.fastq.gz"));
             assert_eq!(data.status, "OK");
         } else {
             panic!("Expected a Fastq report for R1");
         }
 
         if let TestReport::Fastq(data) = &records[1] {
-            assert!(data.path.ends_with("ok_r2_len5.fastq.gz"));
+            assert!(data.name.ends_with("ok_r2_len5.fastq.gz"));
             assert_eq!(data.status, "OK");
         } else {
             panic!("Expected a Fastq report for R2");
@@ -827,11 +866,9 @@ mod tests {
         let p1f2_size = fs::metadata(&p1f2_path)?.len();
         total_bytes += p1f1_size + p1f2_size;
         jobs.push(Job::PairedFastq(PairedFastqJob {
-            fq1_path: p1f1_path,
-            fq2_path: p1f2_path,
+            input1: DataSource::from_path(p1f1_path)?,
+            input2: DataSource::from_path(p1f2_path)?,
             length_check: ReadLengthCheck::Fixed(4),
-            fq1_size: p1f1_size,
-            fq2_size: p1f2_size,
         }));
 
         let p2f1_path = fixture.dir.join("ok_r1.fastq.gz");
@@ -840,20 +877,17 @@ mod tests {
         let p2f2_size = fs::metadata(&p2f2_path)?.len();
         total_bytes += p2f1_size + p2f2_size;
         jobs.push(Job::PairedFastq(PairedFastqJob {
-            fq1_path: p2f1_path,
-            fq2_path: p2f2_path,
+            input1: DataSource::from_path(p2f1_path)?,
+            input2: DataSource::from_path(p2f2_path)?,
             length_check: ReadLengthCheck::Fixed(3),
-            fq1_size: p2f1_size,
-            fq2_size: p2f2_size,
         }));
 
         let s1_path = fixture.dir.join("badlen.fastq.gz");
         let s1_size = fs::metadata(&s1_path)?.len();
         total_bytes += s1_size;
         jobs.push(Job::SingleFastq(SingleFastqJob {
-            path: s1_path,
+            input: DataSource::from_path(s1_path)?,
             length_check: ReadLengthCheck::Fixed(4),
-            size: s1_size,
         }));
 
         run_check(jobs, total_bytes, &output, true, Some(false))?;
@@ -864,7 +898,7 @@ mod tests {
         let find_report = |recs: &[TestReport], suffix: &str| -> TestReport {
             recs.iter()
                 .find(|r| match r {
-                    TestReport::Fastq(d) => d.path.ends_with(suffix),
+                    TestReport::Fastq(d) => d.name.ends_with(suffix),
                     _ => false,
                 })
                 .unwrap_or_else(|| panic!("Report for file ending in '{suffix}' not found"))
@@ -928,8 +962,7 @@ mod tests {
         let output = dir.path().join("report.jsonl");
         let bam_size = fs::metadata(&bam_path)?.len();
         let jobs = vec![Job::Bam(BamCheckJob {
-            path: bam_path,
-            size: bam_size,
+            input: DataSource::from_path(bam_path)?,
         })];
 
         run_check(jobs, bam_size, &output, true, Some(false))?;
@@ -966,8 +999,7 @@ mod tests {
 
         let file_size = fs::metadata(&file_path)?.len();
         let jobs = vec![Job::Raw(RawJob {
-            path: file_path,
-            size: file_size,
+            input: DataSource::from_path(file_path)?,
         })];
 
         run_check(jobs, file_size, &output, true, Some(false))?;
@@ -1013,8 +1045,7 @@ mod tests {
         let output = dir.path().join("report.jsonl");
         let bam_size = fs::metadata(&bam_path)?.len();
         let jobs = vec![Job::Bam(BamCheckJob {
-            path: bam_path,
-            size: bam_size,
+            input: DataSource::from_path(bam_path)?,
         })];
         run_check(jobs, bam_size, &output, true, Some(false))?;
 
@@ -1071,8 +1102,7 @@ mod tests {
         let output = dir.path().join("report.jsonl");
         let bam_size = fs::metadata(&bam_path)?.len();
         let jobs = vec![Job::Bam(BamCheckJob {
-            path: bam_path,
-            size: bam_size,
+            input: DataSource::from_path(bam_path)?,
         })];
         run_check(jobs, bam_size, &output, true, Some(false))?;
 
@@ -1129,8 +1159,7 @@ mod tests {
         let output = dir.path().join("report.jsonl");
         let bam_size = fs::metadata(&bam_path)?.len();
         let jobs = vec![Job::Bam(BamCheckJob {
-            path: bam_path,
-            size: bam_size,
+            input: DataSource::from_path(bam_path)?,
         })];
         run_check(jobs, bam_size, &output, true, Some(false))?;
 

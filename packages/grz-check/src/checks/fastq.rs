@@ -1,11 +1,10 @@
-use crate::checker::{FileReport, Stats};
-use crate::checks::common::{CheckOutcome, check_file};
+use crate::checker::{DataSource, FileReport, Stats};
+use crate::checks::common::{CheckOutcome, check_data};
 use indicatif::ProgressBar;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use noodles::fastq;
 use std::io::{BufReader, Read};
-use std::path::{Path, PathBuf};
 
 #[derive(Debug, Copy, Clone)]
 pub enum ReadLengthCheck {
@@ -15,18 +14,15 @@ pub enum ReadLengthCheck {
 
 #[derive(Debug)]
 pub struct SingleFastqJob {
-    pub path: PathBuf,
+    pub input: DataSource,
     pub length_check: ReadLengthCheck,
-    pub size: u64,
 }
 
 #[derive(Debug)]
 pub struct PairedFastqJob {
-    pub fq1_path: PathBuf,
-    pub fq2_path: PathBuf,
+    pub input1: DataSource,
+    pub input2: DataSource,
     pub length_check: ReadLengthCheck,
-    pub fq1_size: u64,
-    pub fq2_size: u64,
 }
 
 struct FastqCheckProcessor {
@@ -114,12 +110,12 @@ impl FastqCheckProcessor {
 }
 
 pub fn check_single_fastq(
-    path: &Path,
+    input: DataSource,
     length_check: ReadLengthCheck,
     file_pb: &ProgressBar,
     global_pb: &ProgressBar,
 ) -> FileReport {
-    check_file(path, file_pb, global_pb, true, |reader| {
+    check_data(input, file_pb, global_pb, true, |reader| {
         let mut fastq_reader = fastq::io::Reader::new(BufReader::new(reader));
         let mut processor = FastqCheckProcessor::new(length_check);
 
