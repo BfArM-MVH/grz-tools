@@ -537,12 +537,10 @@ class ValidateOperation:
                 final = decompressor.flush()
                 if final:
                     validator.observe(final)
-                decompressor.finalize()
-
-            validator.finalize()
         finally:
             if decompressor:
                 decompressor.finalize()
+            validator.finalize()
 
         return not context.has_errors(), context.errors
 
