@@ -457,14 +457,14 @@ class ValidateOperation:
         input_stream: Iterator[bytes],
         is_gzipped: bool = False,
         mean_read_length_threshold: int = 0,
-    ) -> tuple[bool, list[str]]:
+    ) -> tuple[bool, list[str], dict[str, Any]]:
         """
         Validate FASTQ format from a data stream.
 
         :param input_stream: Iterator of data chunks (compressed or not)
         :param is_gzipped: Whether the data is gzip compressed
         :param mean_read_length_threshold: Minimum mean read length
-        :returns: Tuple of (passed, errors)
+        :returns: Tuple of (passed, errors, stats_dict)
         """
         context = PipelineContext()
         decompressor = GzipDecompressor() if is_gzipped else None
@@ -492,21 +492,21 @@ class ValidateOperation:
                 decompressor.finalize()
             validator.finalize()
 
-        return not context.has_errors(), context.errors
+        return not context.has_errors(), context.errors, validator.get_result()
 
     def validate_fastq_file(
         self,
         file_path: Path,
         mean_read_length_threshold: int = 0,
         show_progress: bool = False,
-    ) -> tuple[bool, list[str]]:
+    ) -> tuple[bool, list[str], dict[str, Any]]:
         """
         Validate FASTQ format from a file.
 
         :param file_path: Path to the FASTQ file
         :param mean_read_length_threshold: Minimum mean read length
         :param show_progress: Whether to show progress bar
-        :returns: Tuple of (passed, errors)
+        :returns: Tuple of (passed, errors, stats_dict)
         """
         is_gzipped = str(file_path).endswith(".gz")
         with _monitored_file_reader(file_path, "VALIDATE", show_progress, self._chunk_size) as stream:
