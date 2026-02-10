@@ -1127,7 +1127,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         # redact sensitive fields
         metadata_dict["submission"]["tanG"] = REDACTED_TAN
-        metadata_dict["submission"]["localCaseId"] = "REDACTED_LOCAL_CASE_ID"
+        metadata_dict["submission"]["localCaseId"] = ""
 
         # redact index donor pseudonym
         for donor in metadata_dict.get("donors", []):
