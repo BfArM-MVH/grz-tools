@@ -13,7 +13,6 @@ from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import crypt4gh.keys
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from tqdm.auto import tqdm
 
@@ -120,10 +119,10 @@ class StreamingPipelineWorker:
         self._private_key = Crypt4GH.retrieve_private_key(config.grz_private_key_path)
 
         # prepare encryption keys for both archives
-        self._consented_public_keys = Crypt4GH.prepare_c4gh_keys(
+        self._consented_keys = Crypt4GH.prepare_c4gh_keys(
             config.consented_archive_public_key_path, config.grz_private_key_path
         )
-        self._non_consented_public_keys = Crypt4GH.prepare_c4gh_keys(
+        self._non_consented_keys = Crypt4GH.prepare_c4gh_keys(
             config.non_consented_archive_public_key_path, config.grz_private_key_path
         )
 
@@ -131,7 +130,7 @@ class StreamingPipelineWorker:
         self._uploaded_keys: list[str] = []
         self._target_s3_client: Any = None  # will be set based on consent
         self._target_s3_options: S3Options | None = None  # will be set based on consent
-        self._public_keys: tuple[tuple[int, bytes, bytes]] | None = None  # will be set based on consent
+        self._archive_keys: tuple[tuple[int, bytes, bytes]] | None = None  # will be set based on consent
 
         # interrupt handling
         self._interrupted = threading.Event()
@@ -187,12 +186,12 @@ class StreamingPipelineWorker:
         if is_consented:
             self._target_s3_client = self._consented_s3_client
             self._target_s3_options = self._config.consented_archive_s3
-            self._public_keys = self._consented_public_keys
+            self._archive_keys = self._consented_keys
             self.__log.info("Using consented archive destination")
         else:
             self._target_s3_client = self._non_consented_s3_client
             self._target_s3_options = self._config.non_consented_archive_s3
-            self._public_keys = self._non_consented_public_keys
+            self._archive_keys = self._non_consented_keys
             self.__log.info("Using non-consented archive destination")
 
         return is_consented
@@ -441,7 +440,7 @@ class StreamingPipelineWorker:
         """Get the target S3 key for a file."""
         return S3KeyBuilder.target_key(submission_id, file_metadata)
 
-    def _process_file_streaming(  # noqa: PLR0913
+    def _process_file_streaming(  # noqa: PLR0913, C901
         self,
         local_file_path: Path,
         file_metadata: SubmissionFileMetadata,
@@ -490,11 +489,12 @@ class StreamingPipelineWorker:
 
         try:
             # get the encryption public key
-            encryption_public_key = crypt4gh.keys.get_public_key(
-                str(self._config.consented_archive_public_key_path)
-                if self._target_s3_options == self._config.consented_archive_s3
-                else str(self._config.non_consented_archive_public_key_path)
-            )
+            if not self._archive_keys:
+                raise ValueError(
+                    "No encryption public key provided, did you forget to run `self._select_archive_for_submission()`?"
+                )
+            else:
+                encryption_public_key = self._archive_keys[0][2]
 
             # create the modular pipeline
             # note: files complete once started; interrupt is checked between files
