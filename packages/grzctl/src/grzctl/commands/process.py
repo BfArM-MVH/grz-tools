@@ -2,7 +2,6 @@
 
 import json
 import logging
-import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -132,20 +131,6 @@ def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
 
     if not s3_options.bucket:
         raise click.ClickException("S3 bucket is required. Specify it in config or via --inbox-bucket.")
-
-    # validate required configuration
-    if not config.keys.grz_private_key_path:
-        log.error("GRZ private key path is required for processing.")
-        sys.exit(1)
-
-    if config.consented_archive_s3 is None:
-        raise ValueError("consented_archive_s3 is required but not configured")
-    if config.non_consented_archive_s3 is None:
-        raise ValueError("non_consented_archive_s3 is required but not configured")
-    if config.keys.consented_archive_public_key_path is None:
-        raise ValueError("consented_archive_public_key_path is required but not configured")
-    if config.keys.non_consented_archive_public_key_path is None:
-        raise ValueError("non_consented_archive_public_key_path is required but not configured")
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
     log.info(f"Validation: {'enabled' if validate else 'disabled'}")

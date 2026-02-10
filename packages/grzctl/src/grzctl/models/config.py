@@ -45,13 +45,13 @@ class ProcessS3Options(S3Options):
 class ProcessKeyConfigModel(IgnoringBaseSettings):
     """Key configuration for the process command."""
 
-    grz_private_key_path: str
+    grz_private_key_path: Annotated[str, Field(min_length=1)]
     """Path to the GRZ private key for decryption."""
 
-    consented_archive_public_key_path: str
+    consented_archive_public_key_path: Annotated[str, Field(min_length=1)]
     """Path to the public key for re-encryption of consented submissions."""
 
-    non_consented_archive_public_key_path: str
+    non_consented_archive_public_key_path: Annotated[str, Field(min_length=1)]
     """Path to the public key for re-encryption of non-consented submissions."""
 
 
