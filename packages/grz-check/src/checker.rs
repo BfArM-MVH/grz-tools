@@ -13,7 +13,7 @@ use std::fmt;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -692,6 +692,7 @@ mod tests {
     use noodles::sam::{Header, header::record::value::Map};
     use serde::Deserialize;
     use std::io::{BufRead, BufReader, Write};
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     fn create_gzipped_fastq(path: &Path, content: &str) -> Result<()> {
