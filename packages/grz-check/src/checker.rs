@@ -343,7 +343,7 @@ fn add_progress_bar(
     style: &mut ProgressStyle,
     input: &DataSource,
 ) -> ProgressBar {
-    let pb = if let Some(size) = input.size {
+    if let Some(size) = input.size {
         let pb = m.add(ProgressBar::new(size));
         pb.set_style(style.clone());
         pb
@@ -352,8 +352,7 @@ fn add_progress_bar(
         let spinner_style = ProgressStyle::default_spinner();
         pb.set_style(spinner_style);
         pb
-    };
-    pb
+    }
 }
 
 fn finish_pb(pb: ProgressBar, name: &str, report: &FileReport) {
