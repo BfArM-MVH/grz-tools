@@ -175,7 +175,7 @@ impl DataSource {
 
 fn filename(path: impl AsRef<Path>) -> String {
     path.as_ref()
-        .file_name()
+        .canonicalize()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string()
