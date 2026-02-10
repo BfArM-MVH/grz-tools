@@ -10,18 +10,32 @@ repository = "https://github.com/BfArM-MVH/grz-tools"
 readme = "README.md"
 categories = ["command-line-utilities"]
 
+[lib]
+name = "grz_check"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "grz-check"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.98"
-clap = { version = "4.5.40", features = ["derive"] }
+clap = { version = "4.5.40", features = ["derive"], optional = true }
 noodles = { version = "0.100.0", features = ["sam", "bam", "fastq", "bgzf"] }
 niffler = "3.0.0"
-rayon = "1.10.0"
+rayon = { version = "1.10.0", optional = true }
 indicatif = { version = "0.18.0", features = ["rayon", "improved_unicode"] }
 serde = { version = "1.0.219", features = ["derive"] }
 sha2 = "0.10.9"
 serde_json = "1.0.140"
 itertools = "0.14.0"
-ctrlc = "3.4.7"
+ctrlc = { version = "3.4.7", optional = true }
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+
+[features]
+default = ["cli"]
+cli = ["clap", "rayon", "ctrlc"]
+python = ["pyo3"]
 
 [dev-dependencies]
 tempfile = "3.20"
