@@ -27,12 +27,12 @@ from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import ValidationError
 
 from ..models.identifiers import IdentifiersModel
+from ..pipeline.base import PipelineContext
+from ..pipeline.operations import ValidateOperation
+from ..pipeline.validators import RawChecksumValidator
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
-from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
 from ..validation import UserInterruptException, run_grz_check
-from ..validation.bam import validate_bam
-from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +57,20 @@ class SubmissionMetadata:
         """
         self.file_path = metadata_file
         self.content = self._read_metadata(self.file_path)
-        self._checksum = calculate_sha256(self.file_path, progress=False)
+        self._checksum = self._calculate_metadata_checksum(self.file_path)
 
         self._files: dict | None = None
+
+    def _calculate_metadata_checksum(self, file_path: Path) -> str:
+        """Calculate SHA256 checksum of the metadata file."""
+        validator = RawChecksumValidator()
+        context = PipelineContext()
+        validator.initialize(context)
+        with open(file_path, "rb") as f:
+            while chunk := f.read(64 * 1024):
+                validator.observe(chunk)
+        validator.finalize()
+        return validator.calculated_checksum
 
     @classmethod
     def _read_metadata(cls, file_path: Path) -> GrzSubmissionMetadata:
@@ -258,6 +269,7 @@ class Submission:
         self.files_dir = Path(files_dir)
 
         self.metadata = SubmissionMetadata(self.metadata_dir / "metadata.json")
+        self._validator_op = ValidateOperation()
 
     @property
     def files(self) -> dict[Path, SubmissionFileMetadata]:
@@ -461,8 +473,7 @@ class Submission:
             except Exception as e:
                 self.__log.error(f"Error processing grz-check report entry: {line.strip()}. Error: {e}")
 
-    @staticmethod
-    def _validate_file_data_fallback(metadata: SubmissionFileMetadata, local_file_path: Path) -> Generator[str]:
+    def _validate_file_data_fallback(self, metadata: SubmissionFileMetadata, local_file_path: Path) -> Generator[str]:
         """
         Validates whether the provided file matches this metadata.
         (Fallback method)
@@ -486,26 +497,24 @@ class Submission:
             # Return here as following tests cannot work
             return
 
-        # Check if the checksum is correct
-        if metadata.checksum_type == "sha256":
-            calculated_checksum = calculate_sha256(local_file_path)
-            if metadata.file_checksum != calculated_checksum:
-                yield (
-                    f"{str(metadata.file_path)}: Checksum mismatch! "
-                    f"Expected: '{metadata.file_checksum}', calculated: '{calculated_checksum}'."
-                )
-        else:
+        if metadata.checksum_type != "sha256":
             yield (
                 f"{str(metadata.file_path)}: Unsupported checksum type: {metadata.checksum_type}. "
                 f"Supported types: {[e.value for e in ChecksumType]}"
             )
+            return
 
-        # Check file size
-        if metadata.file_size_in_bytes != local_file_path.stat().st_size:
-            yield (
-                f"{str(metadata.file_path)}: File size mismatch! "
-                f"Expected: '{metadata.file_size_in_bytes}', observed: '{local_file_path.stat().st_size}'."
+        # Delegate to ValidateOperation
+        try:
+            _valid, errors = self._validator_op.validate_checksum_file(
+                local_file_path,
+                expected_checksum=metadata.file_checksum,
+                expected_size=metadata.file_size_in_bytes,
+                show_progress=False,
             )
+            yield from errors
+        except Exception as e:
+            yield f"{str(metadata.file_path)}: Validation failed: {e}"
 
     def _validate_checksums_fallback(self, progress_log_file: str | PathLike) -> Generator[str]:
         """
@@ -573,8 +582,11 @@ class Submission:
         def validate_file(local_file_path, _file_metadata) -> ValidationState:
             self.__log.debug("Validating '%s'...", str(local_file_path))
 
-            # validate the file
-            errors = list(validate_bam(local_file_path))
+            # validate the file using ValidateOperation
+            _valid, errors = self._validator_op.validate_bam_file(
+                local_file_path,
+                show_progress=False,
+            )
             validation_passed = len(errors) == 0
 
             # return log state
@@ -601,10 +613,12 @@ class Submission:
         ) -> ValidationState:
             self.__log.debug("Validating '%s'...", str(local_file_path))
 
-            # validate the file
+            # validate the file using ValidateOperation
             mean_read_length_threshold = thresholds.mean_read_length
-            errors = list(
-                validate_single_end_reads(local_file_path, mean_read_length_threshold=mean_read_length_threshold)
+            _valid, errors, _stats = self._validator_op.validate_fastq_file(
+                local_file_path,
+                mean_read_length_threshold=mean_read_length_threshold,
+                show_progress=False,
             )
             validation_passed = len(errors) == 0
 
@@ -635,17 +649,29 @@ class Submission:
                 logged_state_r2 = progress_logger.get_state(local_fastq_r2_path, fastq_r2)
 
                 if logged_state_r1 is None or logged_state_r2 is None or logged_state_r1 != logged_state_r2:
-                    # calculate state
-                    errors = list(
-                        validate_paired_end_reads(
-                            local_fastq_r1_path,  # fastq R1
-                            local_fastq_r2_path,  # fastq R2
-                            mean_read_length_threshold=thresholds.mean_read_length,
-                        )
+                    # calculate state manually to access line counts
+                    _valid_r1, errors_r1, stats_r1 = self._validator_op.validate_fastq_file(
+                        local_fastq_r1_path,
+                        mean_read_length_threshold=thresholds.mean_read_length,
+                        show_progress=False,
                     )
-                    validation_passed = len(errors) == 0
+                    _valid_r2, errors_r2, stats_r2 = self._validator_op.validate_fastq_file(
+                        local_fastq_r2_path,
+                        mean_read_length_threshold=thresholds.mean_read_length,
+                        show_progress=False,
+                    )
+                    all_errors = errors_r1 + errors_r2
+                    line_count_r1 = stats_r1.get("line_count", 0)
+                    line_count_r2 = stats_r2.get("line_count", 0)
 
-                    state = ValidationState(errors=errors, validation_passed=validation_passed)
+                    if line_count_r1 != line_count_r2:
+                        all_errors.append(
+                            f"Paired-end files have different read counts: '{local_fastq_r1_path}' ({line_count_r1}) and '{local_fastq_r2_path}' ({line_count_r2})!"
+                        )
+
+                    validation_passed = len(all_errors) == 0
+
+                    state = ValidationState(errors=all_errors, validation_passed=validation_passed)
                     # update state for both files
                     progress_logger.set_state(  # fastq R1
                         local_fastq_r1_path, fastq_r1, state
