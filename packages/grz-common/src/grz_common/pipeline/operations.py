@@ -225,19 +225,19 @@ class DecryptOperation:
         file_size = input_path.stat().st_size
 
         bytes_written = 0
-        bytes_read = 0
         with (
             output_path.open("wb") as out,
             _progress_bar(file_size, "DECRYPT ", input_path.name, show_progress) as update,
         ):
-            for chunk in self._stream(self._read_file_chunks(input_path), ctx):
+
+            def monitored_reader():
+                for chunk in self._read_file_chunks(input_path):
+                    update(len(chunk))
+                    yield chunk
+
+            for chunk in self._stream(monitored_reader(), ctx):
                 out.write(chunk)
                 bytes_written += len(chunk)
-                # estimate read progress from write progress
-                new_read = min(int(bytes_written / max(bytes_written, 1) * file_size), file_size)
-                update(new_read - bytes_read)
-                bytes_read = new_read
-            update(file_size - bytes_read)
 
         return bytes_written
 
