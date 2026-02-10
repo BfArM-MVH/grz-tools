@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use std::io::{Read, Result as IoResult};
+use std::io::{BufReader, Read, Result as IoResult};
 use std::path::PathBuf;
 
 use crate::checker::FileReport;
@@ -19,12 +19,12 @@ impl PyFileRead {
 
 impl Read for PyFileRead {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        Python::with_gil(|py| -> PyResult<usize> {
+        Python::with_gil(|py| {
             let bytes = self.obj.call_method1(py, "read", (buf.len(),))?;
             let bytes: &[u8] = bytes.extract(py)?;
             buf[..bytes.len()].copy_from_slice(bytes);
             Ok(bytes.len())
-        }).map_err(|e: PyErr| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
     }
 }
 
@@ -122,8 +122,11 @@ fn validate_fastq_paired(
     let length_check = parse_read_length_check(min_mean_read_length);
 
     let (outcome1, outcome2, _pair_errors) = py.allow_threads(|| {
-        let reader1 = PyFileRead::new(r1);
-        let reader2 = PyFileRead::new(r2);
+        let py_reader1 = PyFileRead::new(r1);
+        let py_reader2 = PyFileRead::new(r2);
+        // Use 32KB buffer to reduce GIL crossings
+        let reader1 = BufReader::with_capacity(32 * 1024, py_reader1);
+        let reader2 = BufReader::with_capacity(32 * 1024, py_reader2);
         process_paired_readers(reader1, reader2, length_check)
     }).map_err(|e: String| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
