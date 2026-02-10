@@ -277,7 +277,7 @@ class S3BotoUploadWorker(UploadWorker):
                 self.__log.error("Upload failed for '%s'", str(file_path))
                 raise e
 
-        with tempfile.NamedTemporaryFile() as redacted_metadata_tmpfile:
+        with tempfile.NamedTemporaryFile(mode="w") as redacted_metadata_tmpfile:
             # read original metadata
             with open(metadata_file_path) as fd:
                 metadata = json.load(fd)
