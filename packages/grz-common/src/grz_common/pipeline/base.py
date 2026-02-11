@@ -21,7 +21,7 @@ class PipelineError(Exception):
 class StreamWrapper(io.BufferedIOBase):
     """
     Base class that simply wraps another stream.
-    Handles the basic delegation of close/flush/etc.
+    Delegates close/flush/context to the source.
     """
 
     def __init__(self, source: io.BufferedIOBase):
@@ -39,10 +39,7 @@ class StreamWrapper(io.BufferedIOBase):
 
 class TransformStream(StreamWrapper, metaclass=ABCMeta):
     """
-    For streams that modify data.
-    Uses a '_fill_buffer' pattern instead of a simple 'transform'
-    to handle complex cases like block ciphers or headers where
-    input_size != output_size.
+    Base class for streams that MODIFY data (Encryption, Decryption).
     """
 
     def __init__(self, source: io.BufferedIOBase):
@@ -82,11 +79,12 @@ class TransformStream(StreamWrapper, metaclass=ABCMeta):
 
 class ObserverStream(StreamWrapper, metaclass=ABCMeta):
     """
-    For streams that inspect data.
+    Base class for streams that INSPECT data (Validation, Hashing).
+    Pass-through: Does NOT modify data.
     """
 
     @abstractmethod
-    def observe(self, chunk: bytes):
+    def observe(self, chunk: bytes) -> None:
         raise NotImplementedError
 
     def read(self, size: int = -1) -> bytes:

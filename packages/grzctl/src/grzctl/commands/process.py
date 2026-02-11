@@ -169,7 +169,7 @@ def process(
         enabled=update_db,
     ):
         # Run the streaming pipeline
-        processor.run(submission_metadata)
+        processor.run(submission_metadata, threads=threads)
 
     # TODO
     encrypted_submission = EncryptedSubmission(
