@@ -368,14 +368,12 @@ class ValidatorObserver(ObserverStream):
         if self._fastq_line_buffer:
             chunk = self._fastq_line_buffer + chunk
             self._fastq_line_buffer = b""
-        pos = 0
-        while True:
-            newline = chunk.find(b"\n", pos)
-            if newline == -1:
-                self._fastq_line_buffer = chunk[pos:]
-                break
-            self._fastq_line_count += 1
-            pos = newline + 1
+        self._fastq_line_count += chunk.count(b"\n")
+        r_idx = chunk.rfind(b"\n")
+        if r_idx != -1:
+            self._fastq_line_buffer = chunk[r_idx + 1 :]
+        else:
+            self._fastq_line_buffer = chunk
 
     @property
     def metrics(self) -> dict[str, Any]:
