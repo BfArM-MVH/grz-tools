@@ -130,6 +130,8 @@ def process(
         keys=keys,
         redact_patterns=redact_patterns,
         status_file_path=status_file_path,
+        threads=threads,
+        max_concurrent_uploads=concurrent_uploads,
     )
 
     with DbContext(
@@ -139,7 +141,7 @@ def process(
         end_state=SubmissionStateEnum.PROCESSED,
         enabled=update_db,
     ):
-        processor.run(submission_metadata, threads=threads, max_concurrent_uploads=concurrent_uploads)
+        processor.run(submission_metadata)
 
     # TODO
     encrypted_submission = EncryptedSubmission(
