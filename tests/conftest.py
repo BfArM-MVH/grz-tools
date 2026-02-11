@@ -2,7 +2,7 @@
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date
 from importlib.metadata import version
 from os import PathLike
 from pathlib import Path
