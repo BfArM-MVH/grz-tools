@@ -45,7 +45,7 @@ class SubmissionProcessor:
         redact_patterns: list[tuple[str, str]] | None = None,
         max_concurrent_uploads: int = 1,
         threads: int = 1,
-        enable_metrics: bool = True,
+        enable_metrics: bool = False,
     ):
         self.config = configuration
         self.source_s3_options = source_s3_options
