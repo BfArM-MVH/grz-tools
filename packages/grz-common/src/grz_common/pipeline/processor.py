@@ -50,7 +50,7 @@ class SubmissionProcessor:
             self._target_s3_map[key] = init_s3_client(options)
         return self._target_s3_map[key]
 
-    def run(self, submission_metadata: SubmissionMetadata):
+    def run(self, submission_metadata: SubmissionMetadata, threads: int = 1):
         """
         Run the pipeline.
         """
@@ -67,13 +67,13 @@ class SubmissionProcessor:
         files_map = submission_metadata.files
         total_bytes = sum(f.file_size_in_bytes for f in files_map.values())
 
-        partner_map = self._build_partner_map(submission_metadata.content)
+        partner_map = {} #self._build_partner_map(submission_metadata.content)
 
         log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
 
         with (
-            tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Processing", **TQDM_DEFAULTS) as pbar_global,
-            ThreadPoolExecutor(max_workers=self.config.threads) as pool,
+            tqdm(total=total_bytes, desc="Processing", **TQDM_DEFAULTS) as pbar_global,
+            ThreadPoolExecutor(max_workers=threads) as pool,
         ):
             futures = []
             for _rel_path, file_meta in files_map.items():
