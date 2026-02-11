@@ -1,38 +1,64 @@
 import json
 import logging
+from datetime import date, datetime
+from typing import Self
 
 import botocore
-from packaging import version
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from packaging.version import Version
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..transfer import init_s3_client
+from .s3 import S3Options
 
 logger = logging.getLogger(__name__)
 
 
 class VersionFile(BaseModel):
+    """Version policy definition retrieved from S3."""
+
     schema_version: int = Field(1, description="Version of this schema")
-    minimal_version: version.Version = Field(..., description="Minimum supported version")
-    recommended_version: version.Version = Field(..., description="Recommended version")
+
+    minimal_version: Version = Field(..., description="Minimum supported version")
+    recommended_version: Version = Field(..., description="Recommended version")
+    max_version: Version = Field(..., description="Highest version tested")
+    enforced_from: date = Field(..., description="Date after which minimal_version becomes compulsory")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @field_validator("minimal_version", "recommended_version", mode="before")
+    @field_validator("minimal_version", "recommended_version", "max_version", mode="before")
     @classmethod
     def parse_version(cls, v):
-        if isinstance(v, str):
-            return version.Version(v)
-        return v
+        if isinstance(v, Version):
+            return v
+        return Version(str(v))
+
+    @field_validator("enforced_from", mode="before")
+    @classmethod
+    def parse_date(cls, v):
+        if isinstance(v, date):
+            return v
+        return datetime.fromisoformat(str(v)).date()
+
+    @model_validator(mode="after")
+    def check_version_order(self):
+        if self.recommended_version < self.minimal_version:
+            raise ValueError("recommended_version must be >= minimal_version")
+
+        if self.max_version < self.recommended_version:
+            raise ValueError("max_version must be >= recommended_version")
+
+        return self
 
     @classmethod
-    def from_s3(cls, s3_options, version_file_path) -> "VersionFile":
-        """
-        Download and validate the version file from S3.
+    def from_s3(cls, s3_options: S3Options, version_file_key: str) -> Self:
+        """Download and validate the version file from S3.
 
-        raises the following errors:
-            VersionFileNotFoundError
-            VersionFileAccessError
-            VersionFileValidationError
+        :param s3_options: Configuration options used to access S3.
+        :param version_file_key: Object key of the version file in S3.
+        :returns: The validated version file.
+        :raises VersionFileNotFoundError: If the version file does not exist in S3.
+        :raises VersionFileAccessError: If the version file cannot be accessed.
+        :raises VersionFileValidationError: If the version file contents are invalid.
         """
         from ..exceptions import (
             VersionFileAccessError,
@@ -42,38 +68,33 @@ class VersionFile(BaseModel):
 
         try:
             s3_client = init_s3_client(s3_options)
-            logger.debug(f"Attempting to fetch version file from S3: s3://{s3_options.bucket}/{version_file_path}")
+            logger.debug(f"Fetching version file: s3://{s3_options.bucket}/{version_file_key}")
 
             response = s3_client.get_object(
                 Bucket=s3_options.bucket,
-                Key=version_file_path,
+                Key=version_file_key,
             )
-            version_content = response["Body"].read().decode("utf-8").strip()
-            version_data = json.loads(version_content)
 
-            version_file = cls(**version_data)
-            logger.info("Successfully retrieved and parsed version file from S3.")
+            content = response["Body"].read().decode("utf-8").strip()
+            data = json.loads(content)
+
+            version_file = cls(**data)
+            logger.info("Version file retrieved and validated successfully.")
             return version_file
 
         except botocore.exceptions.ClientError as e:
             error_code = e.response.get("Error", {}).get("Code")
+
             if error_code == "NoSuchKey":
-                msg = (
-                    f"Version file not found at "
-                    f"s3://{s3_options.bucket}/{version_file_path}. "
-                    "Please contact GRZ to resolve this."
-                )
+                msg = f"Version file not found at s3://{s3_options.bucket}/{version_file_key}."
                 logger.critical(msg)
                 raise VersionFileNotFoundError(msg) from e
 
-            msg = (
-                f"Unable to access s3://{s3_options.bucket}/{version_file_path} "
-                f"(Error code: {error_code}). Possible permission or policy issue."
-            )
+            msg = f"Unable to access s3://{s3_options.bucket}/{version_file_key} (Error code: {error_code})."
             logger.error(msg, exc_info=e)
             raise VersionFileAccessError(msg) from e
 
-        except (ValidationError, json.JSONDecodeError, KeyError) as e:
+        except (ValidationError, json.JSONDecodeError, ValueError) as e:
             msg = f"Invalid version file format or content: {e}"
             logger.error(msg, exc_info=e)
             raise VersionFileValidationError(msg) from e

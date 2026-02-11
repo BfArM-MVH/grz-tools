@@ -9,11 +9,11 @@ import logging
 import math
 import re
 from collections import OrderedDict
+from collections.abc import Iterable
 from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Iterable
 
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
