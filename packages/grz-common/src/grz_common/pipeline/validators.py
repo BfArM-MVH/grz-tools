@@ -20,8 +20,6 @@ class ValidatorObserver(ObserverStream):
         self.file_type = file_type
         self.expected_checksum = expected_checksum
         self._hasher = hashlib.sha256()
-
-        # Shadow Pipeline
         self._decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
         self._fastq_line_buffer: bytes = b""
         self._fastq_line_count: int = 0
@@ -34,21 +32,20 @@ class ValidatorObserver(ObserverStream):
 
     def observe(self, chunk: bytes) -> None:
         self._hasher.update(chunk)
-
         if self.file_type == FileType.fastq:
-            decompressed = self._decompressor.decompress(chunk)
-            if decompressed:
-                self._validate_fastq_chunk(decompressed)
-
-        elif self.file_type == FileType.bam:
-            if self._bam_temp:
-                self._bam_temp.write(chunk)
+            try:
+                decompressed = self._decompressor.decompress(chunk)
+                if decompressed:
+                    self._validate_fastq_chunk(decompressed)
+            except zlib.error as e:
+                raise ValueError(f"GZIP decompression failed: {e}") from e
+        elif self.file_type == FileType.bam and self._bam_temp:
+            self._bam_temp.write(chunk)
 
     def _validate_fastq_chunk(self, chunk: bytes) -> None:
         if self._fastq_line_buffer:
             chunk = self._fastq_line_buffer + chunk
             self._fastq_line_buffer = b""
-
         pos = 0
         while True:
             newline = chunk.find(b"\n", pos)
@@ -60,9 +57,7 @@ class ValidatorObserver(ObserverStream):
 
     @property
     def metrics(self) -> dict[str, Any]:
-        stats: dict[str, Any] = {
-            "checksum_sha256": self._hasher.hexdigest(),
-        }
+        stats: dict[str, Any] = {"checksum_sha256": self._hasher.hexdigest()}
         if self.file_type == FileType.fastq:
             stats["read_count"] = self._fastq_line_count // 4
         return stats
@@ -77,7 +72,6 @@ class ValidatorObserver(ObserverStream):
             calculated = self._hasher.hexdigest()
             if self.expected_checksum and calculated != self.expected_checksum:
                 raise ValueError(f"Checksum Mismatch! Exp: {self.expected_checksum}, Got: {calculated}")
-
             super().close()
 
     def _finalize_fastq(self) -> None:
@@ -86,18 +80,14 @@ class ValidatorObserver(ObserverStream):
             self._validate_fastq_chunk(final)
         if self._fastq_line_buffer:
             self._fastq_line_count += 1
-
         if self._fastq_line_count % 4 != 0:
-            raise ValueError(f"Invalid FASTQ: {self._fastq_line_count} lines (not divisible by 4)")
-
-        log.info(f"FASTQ Validated: {self._fastq_line_count // 4} reads")
+            raise ValueError(f"Invalid FASTQ: {self._fastq_line_count} lines")
 
     def _finalize_bam(self) -> None:
         if self._bam_temp and self._bam_path:
             self._bam_temp.close()
             try:
                 pysam.AlignmentFile(self._bam_path, "rb", check_sq=False)
-                log.info("BAM Structure Valid")
             except Exception as e:
                 raise ValueError(f"BAM Corrupt: {e}") from e
             finally:

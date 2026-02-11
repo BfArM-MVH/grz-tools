@@ -31,8 +31,12 @@ class Crypt4GHDecryptor(TransformStream):
         if not self._header_parsed:
             chunk = self.source.read(io.DEFAULT_BUFFER_SIZE)
             if not chunk:
+                # EOF reached before header was parsed -> Empty or corrupt file
+                if len(self._header_buffer) > 0:
+                    raise OSError("Unexpected EOF while reading Crypt4GH header")
                 self._eof = True
                 return
+
             self._header_buffer.extend(chunk)
             self._try_parse_header()
             return
@@ -53,33 +57,47 @@ class Crypt4GHDecryptor(TransformStream):
             self._output_buffer.extend(self._decrypt_segment(segment))
 
     def _try_parse_header(self) -> None:
+        # Need at least 16 bytes for magic+ver+count
         if len(self._header_buffer) < 16:
             return
+
         try:
             with io.BytesIO(self._header_buffer) as f:
-                if f.read(8) != CRYPT4GH_MAGIC:
-                    return
+                # 1. Strict Magic Check
+                magic = f.read(8)
+                if magic != CRYPT4GH_MAGIC:
+                    raise ValueError(f"Invalid Crypt4GH magic bytes: {magic!r}")
+
                 _ = int.from_bytes(f.read(INT_WIDTH), "little")
                 packet_count = int.from_bytes(f.read(INT_WIDTH), "little")
+
                 for _ in range(packet_count):
                     if f.tell() + INT_WIDTH > len(self._header_buffer):
                         return
                     pkt_len = int.from_bytes(f.read(INT_WIDTH), "little")
+
                     if f.tell() + pkt_len - INT_WIDTH > len(self._header_buffer):
                         return
                     f.seek(pkt_len - INT_WIDTH, os.SEEK_CUR)
+
                 self._header_length = f.tell()
 
             header_bytes = self._header_buffer[: self._header_length]
             keys = [(0, self._private_key, None)]
+
+            # This raises exception if keys don't match or header is bad
             session_keys, _ = crypt4gh.header.deconstruct(io.BytesIO(header_bytes), keys, sender_pubkey=None)
+
             self._session_key = session_keys[0]
             self._header_parsed = True
+
+            # Move remainder to residue
             self._cipher_residue.extend(self._header_buffer[self._header_length :])
             self._header_buffer = None
+
         except Exception as e:
-            if "Unsupported" in str(e):
-                raise OSError(e)
+            # Propagate actual errors (like bad keys) immediately
+            raise OSError(f"Crypt4GH Header Error: {e}") from e
 
     def _decrypt_segment(self, segment: bytes) -> bytes:
         nonce = segment[:NONCE_LENGTH]
