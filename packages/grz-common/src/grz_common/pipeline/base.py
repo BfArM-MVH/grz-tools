@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import logging
-from abc import abstractmethod
-from collections.abc import Iterator
-from dataclasses import dataclass, field
-from typing import Any
+from abc import ABCMeta, abstractmethod
 
 log = logging.getLogger(__name__)
 
@@ -20,219 +18,79 @@ class PipelineError(Exception):
         super().__init__(f"[{stage}] {message}" if stage else message)
 
 
-@dataclass
-class PipelineContext:
+class StreamWrapper(io.BufferedIOBase):
     """
-    Shared context passed through the pipeline.
-
-    Allows stages to share state and collect results.
+    Base class that simply wraps another stream.
+    Handles the basic delegation of close/flush/etc.
     """
 
-    # Accumulated errors from all stages
-    errors: list[str] = field(default_factory=list)
+    def __init__(self, source: io.BufferedIOBase):
+        self.source = source
 
-    # Metrics and counters
-    bytes_read: int = 0
-    bytes_written: int = 0
-    bytes_decrypted: int = 0
+    def readable(self) -> bool:
+        return True
 
-    # Checksums (populated by checksummer stages)
-    checksums: dict[str, str] = field(default_factory=dict)
-
-    # Validation state
-    validation_passed: bool = True
-
-    # Arbitrary stage-specific data
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def add_error(self, error: str) -> None:
-        """Add an error to the context."""
-        self.errors.append(error)
-        self.validation_passed = False
-
-    def has_errors(self) -> bool:
-        """Check if any errors have been recorded."""
-        return len(self.errors) > 0
+    def close(self):
+        # We assume ownership of the source stream and close it too.
+        if not self.closed:
+            self.source.close()
+            super().close()
 
 
-class StreamStage:
+class TransformStream(StreamWrapper, metaclass=ABCMeta):
     """
-    Base class for all pipeline stages.
-
-    Each stage has:
-    - A name for identification and logging
-    - Access to the shared pipeline context
-    - Lifecycle methods (initialize, finalize)
-
-    Supports context manager protocol for automatic cleanup.
+    For streams that modify data.
+    Uses a '_fill_buffer' pattern instead of a simple 'transform'
+    to handle complex cases like block ciphers or headers where
+    input_size != output_size.
     """
 
-    def __init__(self, name: str | None = None):
-        self._name = name or self.__class__.__name__
-        self._context: PipelineContext | None = None
-        self._log = log.getChild(self._name)
-        self._initialized = False
-
-    @property
-    def name(self) -> str:
-        """Return the stage name."""
-        return self._name
-
-    @property
-    def context(self) -> PipelineContext:
-        """Return the pipeline context."""
-        if self._context is None:
-            raise RuntimeError(f"Stage {self._name} not initialized with context")
-        return self._context
-
-    def initialize(self, context: PipelineContext) -> None:
-        """
-        Initialize the stage with a pipeline context.
-
-        Override to perform setup operations.
-        """
-        self._context = context
-        self._initialized = True
-
-    def finalize(self) -> None:
-        """
-        Finalize the stage.
-
-        Override to perform cleanup and collect final results.
-        Called after all data has been processed.
-        """
-        pass
-
-    def abort(self) -> None:
-        """
-        Abort the stage due to an error.
-
-        Override to perform cleanup on failure.
-        """
-        pass
-
-    def __enter__(self) -> StreamStage:
-        """Enter context manager."""
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit context manager, aborting on error or finalizing on success."""
-        if exc_type is not None:
-            self.abort()
-        elif self._initialized:
-            self.finalize()
-
-
-class StreamSource(StreamStage):
-    """
-    A source that produces data for the pipeline.
-
-    Examples: S3 downloader, file reader
-    """
+    def __init__(self, source: io.BufferedIOBase):
+        super().__init__(source)
+        self._output_buffer = bytearray()
+        self._eof = False
 
     @abstractmethod
+    def _fill_buffer(self) -> None:
+        """
+        Implementation specific logic to read from source, transform data,
+        and append to self._output_buffer.
+        Must set self._eof = True when source is exhausted.
+        """
+        raise NotImplementedError
+
     def read(self, size: int = -1) -> bytes:
-        """
-        Read data from the source.
+        if size == -1:
+            return self.readall()
 
-        :param size: Number of bytes to read (-1 for all available)
-        :returns: Bytes read, empty bytes when exhausted
-        """
-        pass
+        # 1. Serve from buffer if possible
+        if len(self._output_buffer) >= size:
+            ret = self._output_buffer[:size]
+            self._output_buffer = self._output_buffer[size:]
+            return bytes(ret)
 
-    def __iter__(self) -> Iterator[bytes]:
-        """Iterate over chunks from the source."""
-        while chunk := self.read(65536):  # Default chunk size
-            yield chunk
+        # 2. Fill buffer until we have enough data or hit EOF
+        while len(self._output_buffer) < size and not self._eof:
+            self._fill_buffer()
 
-    def iter_chunks(self, chunk_size: int = 65536) -> Iterator[bytes]:
-        """Iterate over chunks of specified size."""
-        while chunk := self.read(chunk_size):
-            yield chunk
-
-    @property
-    def content_length(self) -> int | None:
-        """Return content length if known, None otherwise."""
-        return None
+        # 3. Return what we have (short reads allowed in io)
+        limit = min(len(self._output_buffer), size)
+        ret = self._output_buffer[:limit]
+        self._output_buffer = self._output_buffer[limit:]
+        return bytes(ret)
 
 
-class StreamTransformer(StreamStage):
+class ObserverStream(StreamWrapper, metaclass=ABCMeta):
     """
-    A stage that transforms data passing through.
-
-    Examples: Decryptor, Decompressor, Encryptor
-
-    Transformers may buffer data internally and produce output
-    asynchronously (e.g., encryption produces output in segment-sized chunks).
+    For streams that inspect data.
     """
 
     @abstractmethod
-    def process(self, data: bytes) -> bytes:
-        """
-        Process a chunk of input data.
+    def observe(self, chunk: bytes):
+        raise NotImplementedError
 
-        :param data: Input bytes to transform
-        :returns: Transformed output bytes (may be empty if buffering)
-        """
-        pass
-
-    def flush(self) -> bytes:
-        """
-        Flush any buffered data.
-
-        Called during finalization to ensure all data is processed.
-
-        :returns: Any remaining output data
-        """
-        return b""
-
-
-class StreamObserver(StreamStage):
-    """
-    A stage that observes data without modification.
-
-    Examples: Checksummer, Line counter, Validator
-
-    Observers receive data and update their internal state,
-    but always return the data unchanged.
-    """
-
-    @abstractmethod
-    def observe(self, data: bytes) -> None:
-        """
-        Observe a chunk of data.
-
-        :param data: Bytes to observe (will not be modified)
-        """
-        pass
-
-    def get_result(self) -> Any:
-        """
-        Get the observation result.
-
-        Override to return accumulated results (e.g., checksum, count).
-        """
-        return None
-
-
-class StreamSink(StreamStage):
-    """
-    A sink that consumes data from the pipeline.
-
-    Examples: S3 uploader, file writer
-    """
-
-    @abstractmethod
-    def write(self, data: bytes) -> int:
-        """
-        Write data to the sink.
-
-        :param data: Bytes to write
-        :returns: Number of bytes written
-        """
-        pass
-
-    @property
-    def bytes_written(self) -> int:
-        """Return total bytes written."""
-        return 0
+    def read(self, size: int = -1) -> bytes:
+        chunk = self.source.read(size)
+        if chunk:
+            self.observe(chunk)
+        return chunk
