@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -27,9 +28,6 @@ from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import ValidationError
 
 from ..models.identifiers import IdentifiersModel
-from ..pipeline.base import PipelineContext
-from ..pipeline.operations import ValidateOperation
-from ..pipeline.validators import RawChecksumValidator
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.crypt import Crypt4GH
 from ..validation import UserInterruptException, run_grz_check
@@ -63,14 +61,7 @@ class SubmissionMetadata:
 
     def _calculate_metadata_checksum(self, file_path: Path) -> str:
         """Calculate SHA256 checksum of the metadata file."""
-        validator = RawChecksumValidator()
-        context = PipelineContext()
-        validator.initialize(context)
-        with open(file_path, "rb") as f:
-            while chunk := f.read(64 * 1024):
-                validator.observe(chunk)
-        validator.finalize()
-        return validator.calculated_checksum
+        return hashlib.sha256(open(file_path, 'rb').read(), usedforsecurity=False).hexdigest()
 
     @classmethod
     def _read_metadata(cls, file_path: Path) -> GrzSubmissionMetadata:
@@ -269,7 +260,6 @@ class Submission:
         self.files_dir = Path(files_dir)
 
         self.metadata = SubmissionMetadata(self.metadata_dir / "metadata.json")
-        self._validator_op = ValidateOperation()
 
     @property
     def files(self) -> dict[Path, SubmissionFileMetadata]:
