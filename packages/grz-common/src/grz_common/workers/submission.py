@@ -12,7 +12,7 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
-from grz_pydantic_models.submission.metadata import get_accepted_versions
+from grz_pydantic_models.submission.metadata import Donor, File, LabDatum, get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
     File,
@@ -129,53 +129,55 @@ class SubmissionMetadata:
             if r1_files and r2_files:
                 yield from zip(r1_files, r2_files, strict=True)
 
-    def iter_paired_end_fastqs(self) -> Generator[tuple[list[tuple[File, File]], Thresholds], None, None]:
+    def iter_paired_end_fastqs(
+        self,
+    ) -> Generator[tuple[Donor, LabDatum, list[tuple[File, File]], Thresholds], None, None]:
         """
-        Yields (List of R1/R2 Pairs, Threshold) for every Paired-End unit.
+        Yields (Donor, LabDatum, List of R1/R2 Pairs, Threshold) for every Paired-End unit.
         """
         for donor in self.content.donors:
-            for lab_data in donor.lab_data:
-                if lab_data.sequencing_layout != SequencingLayout.paired_end:
+            for lab_datum in donor.lab_data:
+                if lab_datum.sequencing_layout != SequencingLayout.paired_end:
                     continue
-                if not lab_data.sequence_data:
+                if not lab_datum.sequence_data:
                     continue
 
-                files = [f for f in lab_data.sequence_data.files if f.file_type == FileType.fastq]
-                thresholds = self.content.determine_thresholds_for(donor, lab_data)
+                files = [f for f in lab_datum.sequence_data.files if f.file_type == FileType.fastq]
+                thresholds = self.content.determine_thresholds_for(donor, lab_datum)
                 pairs = list(self.pair_files(files))
 
                 if pairs:
-                    yield pairs, thresholds
+                    yield donor, lab_datum, pairs, thresholds
 
-    def iter_single_end_fastqs(self) -> Generator[tuple[list[File], Thresholds], None, None]:
+    def iter_single_end_fastqs(self) -> Generator[tuple[Donor, LabDatum, list[File], Thresholds], None, None]:
         """
-        Yields (List of Files, Threshold) for every Single-End unit.
+        Yields (Donor, LabDatum, List of Files, Threshold) for every Single-End unit.
         """
         for donor in self.content.donors:
-            for lab_data in donor.lab_data:
+            for lab_datum in donor.lab_data:
                 # Handle Single, Reverse, Other, etc.
-                if lab_data.sequencing_layout == SequencingLayout.paired_end:
+                if lab_datum.sequencing_layout == SequencingLayout.paired_end:
                     continue
-                if not lab_data.sequence_data:
+                if not lab_datum.sequence_data:
                     continue
 
-                files = [f for f in lab_data.sequence_data.files if f.file_type == FileType.fastq]
-                thresholds = self.content.determine_thresholds_for(donor, lab_data)
+                files = [f for f in lab_datum.sequence_data.files if f.file_type == FileType.fastq]
+                thresholds = self.content.determine_thresholds_for(donor, lab_datum)
 
                 if files:
-                    yield files, thresholds
+                    yield donor, lab_datum, files, thresholds
 
-    def iter_bams(self) -> Generator[File, None, None]:
+    def iter_bams(self) -> Generator[tuple[Donor, LabDatum, File], None, None]:
         """
         Yields every BAM file in the submission.
         """
         for donor in self.content.donors:
-            for lab_data in donor.lab_data:
-                if not lab_data.sequence_data:
+            for lab_datum in donor.lab_data:
+                if not lab_datum.sequence_data:
                     continue
-                for f in lab_data.sequence_data.files:
+                for f in lab_datum.sequence_data.files:
                     if f.file_type == FileType.bam:
-                        yield f
+                        yield donor, lab_datum, f
 
     def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """
@@ -295,7 +297,7 @@ class Submission:
                 return not (checksum_passed and seq_data_passed)
             return not checksum_passed
 
-        for pairs, thresholds in self.metadata.iter_paired_end_fastqs():
+        for _donor, _lab_datum, pairs, thresholds in self.metadata.iter_paired_end_fastqs():
             mean_read_length_threshold = thresholds.mean_read_length
             for r1_meta, r2_meta in pairs:
                 r1_path = self.files_dir / r1_meta.file_path
@@ -307,7 +309,7 @@ class Submission:
                     )
                 checked_files.update({r1_path, r2_path})
 
-        for fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
+        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
             mean_read_length_threshold = thresholds.mean_read_length
             for f_meta in fastq_files:
                 f_path = self.files_dir / f_meta.file_path
@@ -316,7 +318,7 @@ class Submission:
                         grz_check_args.extend(["--fastq-single", str(f_path), str(mean_read_length_threshold)])
                     checked_files.add(f_path)
 
-        for bam_meta in self.metadata.iter_bams():
+        for _donor, _lab_datum, bam_meta in self.metadata.iter_bams():
             bam_path = self.files_dir / bam_meta.file_path
             if bam_path not in checked_files:
                 if should_check_file(bam_path, bam_meta):
@@ -574,7 +576,7 @@ class Submission:
                 validation_passed=validation_passed,
             )
 
-        for bam_file in self.metadata.iter_bams():
+        for _donor, _lab_datum, bam_file in self.metadata.iter_bams():
             logged_state = progress_logger.get_state(
                 self.files_dir / bam_file.file_path,
                 bam_file,
@@ -602,7 +604,7 @@ class Submission:
             # return log state
             return ValidationState(errors=errors, validation_passed=validation_passed)
 
-        for fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
+        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
             for fastq_file in fastq_files:
                 logged_state = progress_logger.get_state(
                     self.files_dir / fastq_file.file_path,
@@ -616,7 +618,7 @@ class Submission:
         self,
         progress_logger: FileProgressLogger[ValidationState],
     ) -> Generator[str, None, None]:
-        for fastq_files, thresholds in self.metadata.iter_paired_end_fastqs():
+        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_paired_end_fastqs():
             for fastq_r1, fastq_r2 in fastq_files:
                 local_fastq_r1_path = self.files_dir / fastq_r1.file_path
                 local_fastq_r2_path = self.files_dir / fastq_r2.file_path
