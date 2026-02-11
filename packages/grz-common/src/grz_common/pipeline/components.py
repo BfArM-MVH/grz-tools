@@ -36,6 +36,26 @@ CRYPT4GH_MAGIC = b"crypt4gh"
 MULTIPART_DEFAULT_PART_SIZE = 8 * 1024 * 1024  # 8MiB
 MULTIPART_MAX_PARTS = 1000  # Ceph S3 limit
 MULTIPART_MIN_PART_SIZE = 5 * 1024 * 1024  # S3 Standard Min (5MB)
+READ_CHUNK_SIZE = 1 * 1024 * 1024
+
+
+def calculate_s3_part_size(file_size: int | None, user_part_size: int | None = None) -> int:
+    """
+    Calculate the appropriate part size for a multipart upload.
+    Ensures the number of parts stays within limits (Ceph/Bluestore/Quobyte: 1000).
+    """
+    if user_part_size is not None:
+        return user_part_size
+
+    if file_size is None or file_size <= 0:
+        return MULTIPART_DEFAULT_PART_SIZE
+
+    # If default part size would result in too many parts, increase it
+    if file_size / MULTIPART_DEFAULT_PART_SIZE > MULTIPART_MAX_PARTS:
+        optimal = math.ceil(file_size / MULTIPART_MAX_PARTS)
+        return max(optimal, MULTIPART_MIN_PART_SIZE)
+
+    return max(MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MIN_PART_SIZE)
 
 
 class PipelineError(Exception):
@@ -156,8 +176,7 @@ class Crypt4GHDecryptor(TransformStream):
 
     def _process_body(self) -> None:
         while len(self._cipher_residue) < CIPHER_SEGMENT_SIZE:
-            # use larger read chunk (64KB) for better throughput than the default 8KB
-            chunk = self.source.read(64 * 1024)
+            chunk = self.source.read(READ_CHUNK_SIZE)
             if not chunk:
                 self._eof = True
                 break
@@ -244,7 +263,7 @@ class Crypt4GHEncryptor(TransformStream):
             self._output_buffer.extend(crypt4gh.header.serialize(header_packets))
             self._header_sent = True
 
-        chunk = self.source.read(64 * 1024)
+        chunk = self.source.read(READ_CHUNK_SIZE)
         if not chunk:
             self._eof = True
             if self._plain_residue:
@@ -392,32 +411,16 @@ class S3MultipartUploader:
         bucket: str,
         key: str,
         part_size: int | None = None,
-        file_size: int | None = None,
         max_threads: int = 4,
     ):
         self.s3 = s3_client
         self.bucket = bucket
         self.key = key
-        self.part_size = self._calculate_part_size(part_size, file_size)
+        self.part_size = part_size
         self.executor = ThreadPoolExecutor(max_workers=max_threads)
         self._upload_id: str | None = None
         self._parts: list[dict[str, Any]] = []
         self._error: BaseException | None = None
-
-    def _calculate_part_size(self, user_part_size: int | None, file_size: int | None) -> int:
-        if user_part_size is not None:
-            return user_part_size
-
-        if file_size is None or file_size <= 0:
-            return MULTIPART_DEFAULT_PART_SIZE
-
-        # If the default part size exceeds the max parts limit, increase the part size
-        if file_size / MULTIPART_DEFAULT_PART_SIZE > MULTIPART_MAX_PARTS:
-            optimal = math.ceil(file_size / MULTIPART_MAX_PARTS)
-            # Ensure we respect min part size
-            return max(optimal, MULTIPART_MIN_PART_SIZE)
-
-        return max(MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MIN_PART_SIZE)
 
     def upload(self, input_stream: io.BufferedIOBase) -> None:
         log.info(f"S3Uploader: Starting upload to s3://{self.bucket}/{self.key} (Part size: {self.part_size})")
