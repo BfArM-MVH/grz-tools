@@ -21,6 +21,7 @@ from .components import (
     S3MultipartUploader,
     TqdmObserver,
     ValidatorObserver,
+    calculate_s3_part_size,
 )
 from .context import ConsistencyValidator, SubmissionContext
 
@@ -228,7 +229,7 @@ class SubmissionProcessor:
                 target_s3,
                 target_bucket,
                 dest_key,
-                file_size=file_meta.file_size_in_bytes,
+                part_size=calculate_s3_part_size(file_meta.file_size_in_bytes, None),
                 max_threads=self.max_concurrent_uploads,
             )
 
