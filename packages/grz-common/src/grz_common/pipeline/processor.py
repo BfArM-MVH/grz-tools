@@ -10,11 +10,15 @@ from tqdm.auto import tqdm
 
 from ..models.s3 import S3Options
 from ..transfer import init_s3_client
+from .components import (
+    Crypt4GHDecryptor,
+    Crypt4GHEncryptor,
+    S3Downloader,
+    S3MultipartUploader,
+    TqdmObserver,
+    ValidatorObserver,
+)
 from .context import ConsistencyValidator, SubmissionContext
-from .crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
-from .s3 import S3Downloader, S3MultipartUploader
-from .tqdm import TqdmObserver
-from .validators import ValidatorObserver
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +71,7 @@ class SubmissionProcessor:
         files_map = submission_metadata.files
         total_bytes = sum(f.file_size_in_bytes for f in files_map.values())
 
-        partner_map = {} #self._build_partner_map(submission_metadata.content)
+        partner_map = {}  # self._build_partner_map(submission_metadata.content)
 
         log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
 
