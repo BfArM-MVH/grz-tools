@@ -1108,7 +1108,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
             patterns.append((self.submission.local_case_id, "REDACTED_LOCAL_CASE_ID"))
         return patterns
 
-    def to_redacted_dict(self, archive_consented: bool) -> dict[str, Any]:
+    def to_redacted_dict(self) -> dict[str, Any]:
         """
         Create a redacted dictionary representation suitable for archiving.
 
@@ -1133,12 +1133,6 @@ class GrzSubmissionMetadata(StrictBaseModel):
         for donor in metadata_dict.get("donors", []):
             if donor.get("relation") == "index":
                 donor["donorPseudonym"] = "index"
-
-        # add archive metadata
-        metadata_dict["_archive_metadata"] = {
-            "consented": archive_consented,
-            "archive_type": "consented" if archive_consented else "non_consented",
-        }
 
         return metadata_dict
 
