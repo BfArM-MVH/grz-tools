@@ -122,11 +122,14 @@ def process(
         except Exception as e:
             raise click.ClickException(f"Failed to add submission: {e}") from e
 
+    status_file_path = log_dir / "progress_processing.cjson"
+
     processor = SubmissionProcessor(
         configuration=config,
         source_s3_options=s3_options,
         keys=keys,
         redact_patterns=redact_patterns,
+        status_file_path=status_file_path,
     )
 
     with DbContext(
@@ -136,7 +139,6 @@ def process(
         end_state=SubmissionStateEnum.PROCESSED,
         enabled=update_db,
     ):
-        # Run the streaming pipeline
         processor.run(submission_metadata, threads=threads, max_concurrent_uploads=concurrent_uploads)
 
     # TODO
