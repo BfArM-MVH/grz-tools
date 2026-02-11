@@ -12,12 +12,13 @@ from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
-from grz_pydantic_models.submission.metadata import Donor, File, LabDatum, get_accepted_versions
+from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
-    File,
+    Donor,
     FileType,
     GrzSubmissionMetadata,
+    LabDatum,
     ReadOrder,
     SequencingLayout,
 )
@@ -113,7 +114,9 @@ class SubmissionMetadata:
         return self._files
 
     @staticmethod
-    def pair_files(files: list[File]) -> Generator[tuple[File, File], None, None]:
+    def pair_files(
+        files: list[SubmissionFileMetadata],
+    ) -> Generator[tuple[SubmissionFileMetadata, SubmissionFileMetadata], None, None]:
         """
         Groups a list of FASTQ files by Flowcell and Lane, yielding (R1, R2) pairs.
         """
@@ -131,7 +134,9 @@ class SubmissionMetadata:
 
     def iter_paired_end_fastqs(
         self,
-    ) -> Generator[tuple[Donor, LabDatum, list[tuple[File, File]], Thresholds], None, None]:
+    ) -> Generator[
+        tuple[Donor, LabDatum, list[tuple[SubmissionFileMetadata, SubmissionFileMetadata]], Thresholds], None, None
+    ]:
         """
         Yields (Donor, LabDatum, List of R1/R2 Pairs, Threshold) for every Paired-End unit.
         """
@@ -149,7 +154,9 @@ class SubmissionMetadata:
                 if pairs:
                     yield donor, lab_datum, pairs, thresholds
 
-    def iter_single_end_fastqs(self) -> Generator[tuple[Donor, LabDatum, list[File], Thresholds], None, None]:
+    def iter_single_end_fastqs(
+        self,
+    ) -> Generator[tuple[Donor, LabDatum, list[SubmissionFileMetadata], Thresholds], None, None]:
         """
         Yields (Donor, LabDatum, List of Files, Threshold) for every Single-End unit.
         """
@@ -167,7 +174,7 @@ class SubmissionMetadata:
                 if files:
                     yield donor, lab_datum, files, thresholds
 
-    def iter_bams(self) -> Generator[tuple[Donor, LabDatum, File], None, None]:
+    def iter_bams(self) -> Generator[tuple[Donor, LabDatum, SubmissionFileMetadata], None, None]:
         """
         Yields every BAM file in the submission.
         """
@@ -284,7 +291,7 @@ class Submission:
         grz_check_args = []
         checked_files = set()
 
-        def should_check_file(file_path: Path, file_metadata: File) -> bool:
+        def should_check_file(file_path: Path, file_metadata: SubmissionFileMetadata) -> bool:
             # Check against both logs. If either is missing a "pass", re-check.
             checksum_state = checksum_progress_logger.get_state(file_path, file_metadata)
             seq_data_state = seq_data_progress_logger.get_state(file_path, file_metadata)
@@ -455,7 +462,7 @@ class Submission:
                 self.__log.error(f"Error processing grz-check report entry: {line.strip()}. Error: {e}")
 
     @staticmethod
-    def _validate_file_data_fallback(metadata: File, local_file_path: Path) -> Generator[str]:
+    def _validate_file_data_fallback(metadata: SubmissionFileMetadata, local_file_path: Path) -> Generator[str]:
         """
         Validates whether the provided file matches this metadata.
         (Fallback method)
