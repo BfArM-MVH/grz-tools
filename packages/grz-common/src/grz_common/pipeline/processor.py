@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import date
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from grz_common.constants import TQDM_DEFAULTS
@@ -11,6 +12,7 @@ from grzctl.models.config import ProcessConfig
 from tqdm.auto import tqdm
 
 from ..models.s3 import S3Options
+from ..progress import FileProgressLogger, ProcessingState
 from ..transfer import init_s3_client
 from .components import (
     Crypt4GHDecryptor,
@@ -36,6 +38,7 @@ class SubmissionProcessor:
         configuration: ProcessConfig,
         source_s3_options: S3Options,
         keys: dict[str, bytes],
+        status_file_path: Path,
         redact_patterns: list[tuple[str, str]] | None = None,
     ):
         self.config = configuration
@@ -45,6 +48,7 @@ class SubmissionProcessor:
 
         self.context = SubmissionContext()
         self.consistency = ConsistencyValidator(self.context)
+        self.progress_logger = FileProgressLogger[ProcessingState](status_file_path)
 
         self.source_s3 = init_s3_client(source_s3_options)
         self._target_s3_map = {}
@@ -93,7 +97,7 @@ class SubmissionProcessor:
                         target_s3=target_s3,
                         target_bucket=target_s3_options.bucket,
                         target_public_key=target_public_key,
-                        pbar=pbar_global,
+                        pbar_global=pbar_global,
                         max_concurrent_uploads=max_concurrent_uploads,
                     )
                 )
@@ -120,9 +124,16 @@ class SubmissionProcessor:
         target_s3: Any,
         target_bucket: str,
         target_public_key: bytes,
-        pbar: Any,
+        pbar_global: Any,
         max_concurrent_uploads: int,
     ):
+        state = self.progress_logger.get_state(str(file_meta.file_path), file_meta)
+        if state and state.get("processing_successful"):
+            log.info(f"Skipping {file_meta.file_path}, already processed.")
+            # Advance global bar since we skip this file's bytes
+            pbar_global.update(file_meta.file_size_in_bytes)
+            return
+
         if self.context.has_errors:
             return
 
@@ -142,7 +153,7 @@ class SubmissionProcessor:
                 )
 
                 encrypted = stack.enter_context(Crypt4GHEncryptor(validator, target_public_key))
-                monitored = stack.enter_context(TqdmObserver(encrypted, pbar))
+                monitored = stack.enter_context(TqdmObserver(encrypted, pbar_global))
 
                 uploader = S3MultipartUploader(
                     target_s3,
@@ -165,6 +176,9 @@ class SubmissionProcessor:
         except Exception as e:
             log.error(f"Failed {file_meta.file_path}: {e}")
             self.context.add_error(str(e))
+            self.progress_logger.set_state(
+                str(file_meta.file_path), file_meta, {"processing_successful": False, "errors": [str(e)]}
+            )
 
     def _upload_final_metadata(
         self, submission_metadata: SubmissionMetadata, sub_id: str, s3_client, bucket: str, public_key: bytes
