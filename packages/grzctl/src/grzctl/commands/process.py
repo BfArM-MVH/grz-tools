@@ -83,42 +83,10 @@ def process(
     """
     config = ProcessConfig.model_validate(configuration)
 
-    # select correct S3 inbox options
-    s3_options = config.s3
-    if config.s3.inboxes:
-        le_id = submission_id.split("_")[0]
-        if le_id in config.s3.inboxes:
-            submitter_inboxes = config.s3.inboxes[le_id]
-            if inbox_bucket:
-                if inbox_bucket in submitter_inboxes:
-                    s3_options = config.s3.model_copy(update={"bucket": inbox_bucket})
-                else:
-                    raise click.ClickException(f"Inbox bucket '{inbox_bucket}' not found for submitter '{le_id}'")
-            elif len(submitter_inboxes) == 1:
-                # automatically use the only available bucket
-                bucket_name = next(iter(submitter_inboxes))
-                s3_options = config.s3.model_copy(update={"bucket": bucket_name})
-            else:
-                inbox_names = ", ".join(submitter_inboxes.keys())
-                raise click.ClickException(
-                    f"Multiple inboxes found for submitter '{le_id}' ({inbox_names}), please specify --inbox-bucket"
-                )
-        elif not config.s3.bucket:
-            raise click.ClickException(f"No inboxes found for submitter '{le_id}' and no default bucket configured.")
-
-    if not s3_options.bucket:
-        raise click.ClickException("S3 bucket is required. Specify it in config or via --inbox-bucket.")
+    s3_options = _select_inbox_options(config, submission_id, inbox_bucket)
+    _, metadata_dir, log_dir, encrypted_files_dir = _setup_directories(output_dir)
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
-
-    # setup directories
-    submission_dir_path = Path(output_dir)
-    metadata_dir = submission_dir_path / "metadata"
-    log_dir = submission_dir_path / "logs"
-    encrypted_files_dir = submission_dir_path / "encrypted_files"
-
-    for d in [submission_dir_path, metadata_dir, log_dir, encrypted_files_dir]:
-        d.mkdir(mode=0o770, parents=True, exist_ok=True)
 
     # first, download metadata to understand the submission structure
     log.info("Downloading metadata...")
@@ -169,7 +137,7 @@ def process(
         enabled=update_db,
     ):
         # Run the streaming pipeline
-        processor.run(submission_metadata, threads=threads)
+        processor.run(submission_metadata, threads=threads, max_concurrent_uploads=concurrent_uploads)
 
     # TODO
     encrypted_submission = EncryptedSubmission(
@@ -188,6 +156,46 @@ def process(
         save_pruefbericht=save_pruefbericht,
         update_db=update_db,
     )
+
+
+def _select_inbox_options(config: Any, submission_id: str, inbox_bucket: str | None) -> Any:
+    """Determine S3 options based on submission ID and config."""
+    s3_options = config.s3
+    if not config.s3.inboxes:
+        if not s3_options.bucket:
+            raise click.ClickException("S3 bucket is required.")
+        return s3_options
+
+    le_id = submission_id.split("_")[0]
+    if le_id not in config.s3.inboxes:
+        if not config.s3.bucket:
+            raise click.ClickException(f"No inboxes found for '{le_id}'.")
+        return s3_options
+
+    submitter_inboxes = config.s3.inboxes[le_id]
+    if inbox_bucket:
+        if inbox_bucket not in submitter_inboxes:
+            raise click.ClickException(f"Inbox bucket '{inbox_bucket}' not found.")
+        return config.s3.model_copy(update={"bucket": inbox_bucket})
+
+    if len(submitter_inboxes) == 1:
+        bucket_name = next(iter(submitter_inboxes))
+        return config.s3.model_copy(update={"bucket": bucket_name})
+
+    raise click.ClickException(f"Multiple inboxes found for '{le_id}', specify --inbox-bucket")
+
+
+def _setup_directories(output_dir: str) -> tuple[Path, Path, Path, Path]:
+    """Create and return required directories."""
+    base_dir = Path(output_dir)
+    metadata_dir = base_dir / "metadata"
+    log_dir = base_dir / "logs"
+    encrypted_files_dir = base_dir / "encrypted_files"
+
+    for d in [base_dir, metadata_dir, log_dir, encrypted_files_dir]:
+        d.mkdir(mode=0o770, parents=True, exist_ok=True)
+
+    return base_dir, metadata_dir, log_dir, encrypted_files_dir
 
 
 def _prepare_redact_patterns(encrypted_submission: EncryptedSubmission) -> list[tuple[str, str]]:

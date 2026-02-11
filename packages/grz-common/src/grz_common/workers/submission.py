@@ -61,7 +61,7 @@ class SubmissionMetadata:
 
     def _calculate_metadata_checksum(self, file_path: Path) -> str:
         """Calculate SHA256 checksum of the metadata file."""
-        return hashlib.sha256(open(file_path, 'rb').read(), usedforsecurity=False).hexdigest()
+        return hashlib.sha256(open(file_path, "rb").read(), usedforsecurity=False).hexdigest()
 
     @classmethod
     def _read_metadata(cls, file_path: Path) -> GrzSubmissionMetadata:
