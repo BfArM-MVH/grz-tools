@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import io
 import logging
+import math
 import os
 import tempfile
 import threading
@@ -16,6 +17,7 @@ from typing import Any
 
 import crypt4gh.header
 import crypt4gh.lib
+import pysam
 from grz_pydantic_models.submission.metadata.v1 import FileType
 from nacl.bindings import (
     crypto_aead_chacha20poly1305_ietf_decrypt,
@@ -30,6 +32,10 @@ SEGMENT_SIZE = crypt4gh.lib.SEGMENT_SIZE
 CIPHER_SEGMENT_SIZE = crypt4gh.lib.CIPHER_SEGMENT_SIZE
 INT_WIDTH = 4
 CRYPT4GH_MAGIC = b"crypt4gh"
+
+MULTIPART_DEFAULT_PART_SIZE = 8 * 1024 * 1024  # 8MiB
+MULTIPART_MAX_PARTS = 1000  # Ceph S3 limit
+MULTIPART_MIN_PART_SIZE = 5 * 1024 * 1024  # S3 Standard Min (5MB)
 
 
 class PipelineError(Exception):
@@ -70,7 +76,6 @@ class TransformStream(StreamWrapper, metaclass=ABCMeta):
         raise NotImplementedError
 
     def read(self, size: int | None = -1) -> bytes:
-        # Normalize size=-1 to None or handle internally
         target_size = size if size is not None else -1
 
         if target_size == -1:
@@ -106,18 +111,17 @@ class ObserverStream(StreamWrapper, metaclass=ABCMeta):
         return chunk
 
 
-# --- Implementations ---
-
-
 class TqdmObserver(ObserverStream):
-    def __init__(self, source: io.BufferedIOBase, pbar: Any):
+    def __init__(self, source: io.BufferedIOBase, pbar: Any | list[Any]):
         super().__init__(source)
-        self.pbar = pbar
+        self.pbars = pbar if isinstance(pbar, list) else [pbar]
         self._lock = threading.Lock()
 
     def observe(self, chunk: bytes) -> None:
+        n = len(chunk)
         with self._lock:
-            self.pbar.update(len(chunk))
+            for pbar in self.pbars:
+                pbar.update(n)
 
 
 class Crypt4GHDecryptor(TransformStream):
@@ -133,12 +137,11 @@ class Crypt4GHDecryptor(TransformStream):
         if not self._header_parsed:
             self._process_header()
             if not self._header_parsed:
-                return  # Still waiting for header data
+                return
 
         self._process_body()
 
     def _process_header(self) -> None:
-        # Read minimal header size (Magic + Ver + Count = 16 bytes)
         required_min = 16
         while len(self._header_buffer) < required_min:
             chunk = self.source.read(required_min - len(self._header_buffer))
@@ -152,21 +155,19 @@ class Crypt4GHDecryptor(TransformStream):
         self._try_parse_header()
 
     def _process_body(self) -> None:
-        # Read until we have at least one full cipher block or hit EOF
         while len(self._cipher_residue) < CIPHER_SEGMENT_SIZE:
-            chunk = self.source.read(io.DEFAULT_BUFFER_SIZE)
+            # use larger read chunk (64KB) for better throughput than the default 8KB
+            chunk = self.source.read(64 * 1024)
             if not chunk:
                 self._eof = True
                 break
             self._cipher_residue.extend(chunk)
 
-        # Process full segments
         while len(self._cipher_residue) >= CIPHER_SEGMENT_SIZE:
             segment = self._cipher_residue[:CIPHER_SEGMENT_SIZE]
             self._cipher_residue = self._cipher_residue[CIPHER_SEGMENT_SIZE:]
             self._output_buffer.extend(self._decrypt_segment(segment))
 
-        # Handle EOF residue
         if self._eof and self._cipher_residue:
             self._output_buffer.extend(self._decrypt_segment(bytes(self._cipher_residue)))
             self._cipher_residue.clear()
@@ -181,18 +182,14 @@ class Crypt4GHDecryptor(TransformStream):
                 packet_count = int.from_bytes(f.read(INT_WIDTH), "little")
 
                 for _ in range(packet_count):
-                    # Ensure we have packet length
                     if f.tell() + INT_WIDTH > len(self._header_buffer):
                         self._read_more_header(INT_WIDTH)
-                        # Re-check in next loop/call (simpler to just retry logic or recurse,
-                        # but here we rely on _fill_buffer loop)
                         return
 
                     f_pos = f.tell()
                     pkt_len = int.from_bytes(self._header_buffer[f_pos : f_pos + INT_WIDTH], "little")
                     f.seek(INT_WIDTH, os.SEEK_CUR)
 
-                    # Ensure we have packet body
                     needed = pkt_len - INT_WIDTH
                     if f.tell() + needed > len(self._header_buffer):
                         self._read_more_header(needed)
@@ -202,7 +199,6 @@ class Crypt4GHDecryptor(TransformStream):
 
                 header_length = f.tell()
 
-            # We have full header
             header_bytes = self._header_buffer[:header_length]
             keys = [(0, self._private_key, None)]
             session_keys, _ = crypt4gh.header.deconstruct(io.BytesIO(header_bytes), keys, sender_pubkey=None)
@@ -213,17 +209,13 @@ class Crypt4GHDecryptor(TransformStream):
             self._session_key = session_keys[0]
             self._header_parsed = True
 
-            # Move residue
             self._cipher_residue.extend(self._header_buffer[header_length:])
-            self._header_buffer.clear()  # Clear instead of None to satisfy type checker
+            self._header_buffer.clear()
 
         except Exception as e:
-            # Propagate true errors, suppress 'needs more data' if we are handling it
-            # But here we throw if data is invalid
             raise OSError(f"Crypt4GH Header Error: {e}") from e
 
     def _read_more_header(self, size: int) -> None:
-        """Helper to read more data into header buffer."""
         chunk = self.source.read(size)
         if chunk:
             self._header_buffer.extend(chunk)
@@ -232,7 +224,6 @@ class Crypt4GHDecryptor(TransformStream):
         assert self._session_key is not None, "Session key not initialized"
         nonce = segment[:NONCE_LENGTH]
         ciphertext = segment[NONCE_LENGTH:]
-        # nacl bindings require bytes
         return crypto_aead_chacha20poly1305_ietf_decrypt(bytes(ciphertext), None, bytes(nonce), self._session_key)
 
 
@@ -269,7 +260,6 @@ class Crypt4GHEncryptor(TransformStream):
 
     def _encrypt_segment(self, plaintext: bytes) -> bytes:
         nonce = os.urandom(NONCE_LENGTH)
-        # Fix: Ensure plaintext is bytes for nacl
         ciphertext = crypto_aead_chacha20poly1305_ietf_encrypt(bytes(plaintext), None, nonce, self._session_key)
         return nonce + ciphertext
 
@@ -294,7 +284,6 @@ class ValidatorObserver(ObserverStream):
         self._bytes_seen = 0
 
         if self.file_type == FileType.bam:
-            # Use delete=False so we can close and re-open with pysam, then unlink manually
             self._bam_temp = tempfile.NamedTemporaryFile(suffix=".bam", delete=False)  # noqa: SIM115
             self._bam_path = self._bam_temp.name
 
@@ -369,10 +358,11 @@ class ValidatorObserver(ObserverStream):
 
     def _finalize_bam(self) -> None:
         if self._bam_temp and self._bam_path:
-            # Ensure written
             self._bam_temp.flush()
-            # BAM validation would happen here via Pysam opening self._bam_path
-            pass
+            try:
+                pysam.AlignmentFile(self._bam_path, "rb", check_sq=False)
+            except Exception as e:
+                raise ValueError(f"BAM Validation Failed: {e}") from e
 
 
 class S3Downloader(io.BufferedIOBase):
@@ -396,24 +386,41 @@ class S3Downloader(io.BufferedIOBase):
 
 
 class S3MultipartUploader:
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         s3_client: Any,
         bucket: str,
         key: str,
-        part_size: int = 64 * 1024 * 1024,
+        part_size: int | None = None,
+        file_size: int | None = None,
         max_threads: int = 4,
     ):
         self.s3 = s3_client
         self.bucket = bucket
         self.key = key
-        self.part_size = part_size
+        self.part_size = self._calculate_part_size(part_size, file_size)
         self.executor = ThreadPoolExecutor(max_workers=max_threads)
         self._upload_id: str | None = None
         self._parts: list[dict[str, Any]] = []
         self._error: BaseException | None = None
 
+    def _calculate_part_size(self, user_part_size: int | None, file_size: int | None) -> int:
+        if user_part_size is not None:
+            return user_part_size
+
+        if file_size is None or file_size <= 0:
+            return MULTIPART_DEFAULT_PART_SIZE
+
+        # If the default part size exceeds the max parts limit, increase the part size
+        if file_size / MULTIPART_DEFAULT_PART_SIZE > MULTIPART_MAX_PARTS:
+            optimal = math.ceil(file_size / MULTIPART_MAX_PARTS)
+            # Ensure we respect min part size
+            return max(optimal, MULTIPART_MIN_PART_SIZE)
+
+        return max(MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MIN_PART_SIZE)
+
     def upload(self, input_stream: io.BufferedIOBase) -> None:
+        log.info(f"S3Uploader: Starting upload to s3://{self.bucket}/{self.key} (Part size: {self.part_size})")
         try:
             resp = self.s3.create_multipart_upload(Bucket=self.bucket, Key=self.key)
             self._upload_id = resp["UploadId"]

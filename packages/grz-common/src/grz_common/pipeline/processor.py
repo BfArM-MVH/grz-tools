@@ -2,6 +2,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import date
+from io import BytesIO
 from typing import Any
 
 from grz_common.constants import TQDM_DEFAULTS
@@ -147,15 +148,13 @@ class SubmissionProcessor:
                     target_s3,
                     target_bucket,
                     dest_key,
-                    part_size=64 * 1024 * 1024,
+                    file_size=file_meta.file_size_in_bytes,
                     max_threads=max_concurrent_uploads,
                 )
 
                 uploader.upload(monitored)
-
                 validator.verify()
 
-                # Record Validation Metrics
                 self.context.record_stats(file_meta.file_path, validator.metrics)
 
             # Fail-Fast Consistency
@@ -172,5 +171,5 @@ class SubmissionProcessor:
     ):
         """Redacts and uploads the final metadata."""
         dest_key = f"{sub_id}/metadata/metadata.json"
-        redacted_metadata = submission_metadata  # TODO: use redaction
-        s3_client.put_object(Bucket=bucket, Key=dest_key, Body=redacted_metadata)
+        redacted_metadata = submission_metadata.content.to_redacted_dict()  # TODO: use redaction
+        s3_client.put_object(Bucket=bucket, Key=dest_key, Body=BytesIO(str(redacted_metadata).encode("utf-8")))
