@@ -1,16 +1,18 @@
-"""Command for processing a submission through the streaming pipeline."""
+"""Command for processing a submission."""
 
 import json
 import logging
-from datetime import date
+import re
 from pathlib import Path
 from typing import Any
 
 import click
+import crypt4gh.keys
 import grz_common.cli as grzcli
+from grz_common.pipeline.processor import SubmissionProcessor
+from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.download import S3BotoDownloadWorker
-from grz_common.workers.streaming import StreamingPipelineConfig, StreamingPipelineWorker
-from grz_common.workers.submission import EncryptedSubmission
+from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
 from grz_db.models.submission import SubmissionStateEnum
 
@@ -39,37 +41,36 @@ log = logging.getLogger(__name__)
 @click.option(
     "--submit-pruefbericht/--no-submit-pruefbericht",
     default=False,
-    help="Submit Prüfbericht to BfArM after successful processing. Requires pruefbericht config.",
+    help="Submit Prüfbericht to BfArM after successful processing.",
 )
 @click.option(
     "--save-pruefbericht",
     type=click.Path(),
     default=None,
-    help="Save generated Prüfbericht (with redacted TAN) to the specified path.",
+    help="Save generated Prüfbericht to the specified path.",
 )
 @click.option(
     "--redact-logs/--no-redact-logs",
     default=True,
-    help="Redact sensitive information (tanG, localCaseId) from logs before archiving.",
+    help="Redact sensitive information from logs before archiving.",
 )
 @click.option(
     "--concurrent-uploads",
     type=int,
     default=4,
-    help="Maximum concurrent part uploads per file for S3 multipart uploads.",
+    help="Maximum concurrent part uploads per file.",
 )
 @click.option(
     "--inbox-bucket",
     default=None,
     help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
 )
-def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
+def process(
     configuration: dict[str, Any],
     submission_id: str,
     output_dir: str,
     threads: int,
     update_db: bool,
-    validate: bool,
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
     redact_logs: bool,
@@ -79,34 +80,10 @@ def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
 ):
     """
     Process a submission through the streaming pipeline.
-
-    This command performs the complete submission processing workflow as defined
-    in the GRZ Data Steward SOP:
-
-    1. Download metadata from inbox
-    2. Determine consent status (consented vs non-consented archive)
-    3. Stream download -> decrypt -> [validate, re-encrypt -> archive] -> clean
-    4. Redact sensitive information (tanG, localCaseId) from logs
-    5. Upload metadata and logs to archive
-    6. Generate and submit Prüfbericht to BfArM
-
-    This minimizes disk I/O by processing data as streams wherever possible,
-    reducing the need for temporary storage.
-
-    The target archive (consented or non-consented) is automatically selected
-    based on the submission's consent status. If all donors have research consent,
-    the submission goes to the consented archive; otherwise to the non-consented archive.
-
-    On any failure during processing, all uploaded files are automatically cleaned up
-    to prevent incomplete submissions in the archive.
-
-    Example usage:
-        grzctl process --config-file config.yaml --submission-id "123456789_1970-01-01_00000000" \
-            --output-dir incoming/123456789_1970-01-01_00000000
     """
     config = ProcessConfig.model_validate(configuration)
 
-    # Select correct S3 inbox options
+    # select correct S3 inbox options
     s3_options = config.s3
     if config.s3.inboxes:
         le_id = submission_id.split("_")[0]
@@ -133,21 +110,15 @@ def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
         raise click.ClickException("S3 bucket is required. Specify it in config or via --inbox-bucket.")
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
-    log.info(f"Validation: {'enabled' if validate else 'disabled'}")
 
     # setup directories
     submission_dir_path = Path(output_dir)
-    if not submission_dir_path.is_dir():
-        log.debug("Creating submission directory %s", submission_dir_path)
-        submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
-
     metadata_dir = submission_dir_path / "metadata"
-    encrypted_files_dir = submission_dir_path / "encrypted_files"
     log_dir = submission_dir_path / "logs"
+    encrypted_files_dir = submission_dir_path / "encrypted_files"
 
-    for dir_path in [metadata_dir, encrypted_files_dir, log_dir]:
-        if not dir_path.exists():
-            dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
+    for d in [submission_dir_path, metadata_dir, log_dir, encrypted_files_dir]:
+        d.mkdir(mode=0o770, parents=True, exist_ok=True)
 
     # first, download metadata to understand the submission structure
     log.info("Downloading metadata...")
@@ -155,18 +126,22 @@ def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
         s3_options, status_file_path=log_dir / "progress_download.cjson", threads=threads
     )
     download_worker.download_metadata(submission_id, metadata_dir, metadata_file_name="metadata.json")
+    local_metadata_path = metadata_dir / "metadata.json"
 
-    # parse the encrypted submission
-    encrypted_submission = EncryptedSubmission(
-        metadata_dir=metadata_dir,
-        encrypted_files_dir=encrypted_files_dir,
-        log_dir=log_dir,
-    )
+    keys = {
+        "private": Crypt4GH.retrieve_private_key(config.keys.grz_private_key_path),
+        "consented_public": crypt4gh.keys.get_public_key(config.keys.consented_archive_public_key_path),
+        "non_consented_public": crypt4gh.keys.get_public_key(config.keys.non_consented_archive_public_key_path),
+    }
 
-    # log consent status (using today's date for consent check)
-    is_consented = encrypted_submission.metadata.content.consents_to_research(date.today())
-    log.info(f"Submission consent status: {'consented for research' if is_consented else 'NOT consented for research'}")
-    log.info(f"Target archive: {'consented' if is_consented else 'non-consented'}")
+    submission_metadata = SubmissionMetadata(local_metadata_path)
+
+    redact_patterns = []
+    if redact_logs:
+        redact_patterns.append((re.escape(submission_metadata.content.submission.tan_g), "REDACTED_TAN"))
+        redact_patterns.append(
+            (re.escape(submission_metadata.content.submission.local_case_id), "REDACTED_LOCAL_CASE_ID")
+        )
 
     # register submission in db if not yet registered
     if update_db and config.db:
@@ -179,29 +154,11 @@ def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
         except Exception as e:
             raise click.ClickException(f"Failed to add submission: {e}") from e
 
-    # prepare redaction patterns for log files
-    redact_patterns: list[tuple[str, str]] | None = (
-        _prepare_redact_patterns(encrypted_submission) if redact_logs else None
-    )
-
-    pipeline_config = StreamingPipelineConfig(
-        source_s3=s3_options,
-        consented_archive_s3=config.consented_archive_s3,
-        non_consented_archive_s3=config.non_consented_archive_s3,
-        grz_private_key_path=config.keys.grz_private_key_path,
-        consented_archive_public_key_path=config.keys.consented_archive_public_key_path,
-        non_consented_archive_public_key_path=config.keys.non_consented_archive_public_key_path,
-        threads=threads,
-        skip_validation=not validate,
-        max_concurrent_uploads=concurrent_uploads,
+    processor = SubmissionProcessor(
+        configuration=config,
+        source_s3_options=s3_options,
+        keys=keys,
         redact_patterns=redact_patterns,
-    )
-
-    # create and run the pipeline worker
-    pipeline_worker = StreamingPipelineWorker(
-        config=pipeline_config,
-        status_file_path=log_dir / "progress_processing.cjson",
-        log_dir=log_dir,
     )
 
     with DbContext(
@@ -211,11 +168,16 @@ def process(  # noqa: PLR0913, C901, PLR0912, PLR0915
         end_state=SubmissionStateEnum.PROCESSED,
         enabled=update_db,
     ):
-        pipeline_worker.process_submission(encrypted_submission)
+        # Run the streaming pipeline
+        processor.run(submission_metadata)
 
-    log.info("Streaming pipeline completed successfully!")
+    # TODO
+    encrypted_submission = EncryptedSubmission(
+        metadata_dir=metadata_dir,
+        encrypted_files_dir=encrypted_files_dir,
+        log_dir=log_dir,
+    )
 
-    # generate and optionally submit Prüfbericht
     _handle_pruefbericht(
         config=config,
         configuration=configuration,
@@ -289,7 +251,6 @@ def _handle_pruefbericht(  # noqa: PLR0913
         # pruefbericht_config is guaranteed to exist as it's mandatory in ProcessConfig
         pruefbericht_config: PruefberichtModel = config.pruefbericht
 
-        # these checks are safe because we validated all values above
         if (auth_url := pruefbericht_config.authorization_url) is None:
             raise ValueError("pruefbericht.authorization_url is required but not configured")
         if (client_id := pruefbericht_config.client_id) is None:
