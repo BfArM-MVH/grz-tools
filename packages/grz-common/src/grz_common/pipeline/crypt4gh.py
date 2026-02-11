@@ -27,13 +27,14 @@ class Crypt4GHDecryptor(TransformStream):
         self._header_length = 0
 
     def _fill_buffer(self) -> None:
-        # 1. Parse Header
+        # Phase 1: Parse Header
         if not self._header_parsed:
             chunk = self.source.read(io.DEFAULT_BUFFER_SIZE)
             if not chunk:
-                # EOF reached before header was parsed -> Empty or corrupt file
+                # If we hit EOF before parsing header, and buffer has ANY data, it's corrupt.
+                # If buffer is empty, it's an empty file (technically invalid for c4gh).
                 if len(self._header_buffer) > 0:
-                    raise OSError("Unexpected EOF while reading Crypt4GH header")
+                    raise IOError("Unexpected EOF while reading Crypt4GH header")
                 self._eof = True
                 return
 
@@ -41,7 +42,7 @@ class Crypt4GHDecryptor(TransformStream):
             self._try_parse_header()
             return
 
-        # 2. Buffer Body (Need full blocks)
+        # Phase 2: Decrypt Body
         if len(self._cipher_residue) < CIPHER_SEGMENT_SIZE:
             chunk = self.source.read(io.DEFAULT_BUFFER_SIZE)
             if not chunk:
@@ -50,54 +51,59 @@ class Crypt4GHDecryptor(TransformStream):
                 return
             self._cipher_residue.extend(chunk)
 
-        # 3. Decrypt Blocks
+        # Process full blocks
         while len(self._cipher_residue) >= CIPHER_SEGMENT_SIZE:
             segment = self._cipher_residue[:CIPHER_SEGMENT_SIZE]
             self._cipher_residue = self._cipher_residue[CIPHER_SEGMENT_SIZE:]
             self._output_buffer.extend(self._decrypt_segment(segment))
 
     def _try_parse_header(self) -> None:
-        # Need at least 16 bytes for magic+ver+count
+        # Need at least Magic(8) + Ver(4) + Count(4) = 16 bytes
         if len(self._header_buffer) < 16:
             return
 
         try:
             with io.BytesIO(self._header_buffer) as f:
-                # 1. Strict Magic Check
+                # Strict Magic Check
                 magic = f.read(8)
                 if magic != CRYPT4GH_MAGIC:
+                    # Fail fast if this isn't a Crypt4GH file
                     raise ValueError(f"Invalid Crypt4GH magic bytes: {magic!r}")
 
                 _ = int.from_bytes(f.read(INT_WIDTH), "little")
                 packet_count = int.from_bytes(f.read(INT_WIDTH), "little")
 
                 for _ in range(packet_count):
+                    # Check length field available
                     if f.tell() + INT_WIDTH > len(self._header_buffer):
                         return
+
                     pkt_len = int.from_bytes(f.read(INT_WIDTH), "little")
 
+                    # Check packet body available
                     if f.tell() + pkt_len - INT_WIDTH > len(self._header_buffer):
                         return
+
                     f.seek(pkt_len - INT_WIDTH, os.SEEK_CUR)
 
                 self._header_length = f.tell()
 
+            # We have the full header. Parse it.
             header_bytes = self._header_buffer[: self._header_length]
             keys = [(0, self._private_key, None)]
 
-            # This raises exception if keys don't match or header is bad
             session_keys, _ = crypt4gh.header.deconstruct(io.BytesIO(header_bytes), keys, sender_pubkey=None)
 
             self._session_key = session_keys[0]
             self._header_parsed = True
 
-            # Move remainder to residue
+            # Move remaining bytes (encrypted body) to residue
             self._cipher_residue.extend(self._header_buffer[self._header_length :])
             self._header_buffer = None
 
         except Exception as e:
-            # Propagate actual errors (like bad keys) immediately
-            raise OSError(f"Crypt4GH Header Error: {e}") from e
+            # Propagate specific validation errors
+            raise IOError(f"Crypt4GH Header Error: {e}") from e
 
     def _decrypt_segment(self, segment: bytes) -> bytes:
         nonce = segment[:NONCE_LENGTH]

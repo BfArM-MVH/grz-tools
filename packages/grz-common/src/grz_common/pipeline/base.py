@@ -40,6 +40,7 @@ class StreamWrapper(io.BufferedIOBase):
 class TransformStream(StreamWrapper, metaclass=ABCMeta):
     """
     Base class for streams that MODIFY data (Encryption, Decryption).
+    Guarantees full reads (up to 'size') unless EOF is reached.
     """
 
     def __init__(self, source: io.BufferedIOBase):
@@ -50,27 +51,31 @@ class TransformStream(StreamWrapper, metaclass=ABCMeta):
     @abstractmethod
     def _fill_buffer(self) -> None:
         """
-        Implementation specific logic to read from source, transform data,
-        and append to self._output_buffer.
+        Logic to read from source, transform, and append to self._output_buffer.
         Must set self._eof = True when source is exhausted.
         """
         raise NotImplementedError
 
     def read(self, size: int = -1) -> bytes:
+        # 1. Handle "Read All" (size=-1) or "Read until EOF"
         if size == -1:
-            return self.readall()
+            while not self._eof:
+                self._fill_buffer()
+            ret = bytes(self._output_buffer)
+            self._output_buffer.clear()
+            return ret
 
-        # 1. Serve from buffer if possible
+        # 2. Serve from buffer if we already have enough
         if len(self._output_buffer) >= size:
             ret = self._output_buffer[:size]
             self._output_buffer = self._output_buffer[size:]
             return bytes(ret)
 
-        # 2. Fill buffer until we have enough data or hit EOF
+        # 3. Fill buffer until we have enough data or hit EOF
         while len(self._output_buffer) < size and not self._eof:
             self._fill_buffer()
 
-        # 3. Return what we have (short reads allowed in io)
+        # 4. Return what we have (may be short if EOF hit)
         limit = min(len(self._output_buffer), size)
         ret = self._output_buffer[:limit]
         self._output_buffer = self._output_buffer[limit:]
