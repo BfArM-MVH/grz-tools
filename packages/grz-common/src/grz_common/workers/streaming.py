@@ -69,7 +69,7 @@ class StreamingPipelineConfig:
     # chunk size for streaming operations
     chunk_size: int = 64 * 1024  # 64KB, matches Crypt4GH segment size
     # maximum concurrent part uploads per file (for multipart S3 uploads)
-    max_concurrent_uploads: int = 4
+    max_concurrent_uploads: int = 1
     # patterns to redact from logs before uploading: list of (pattern, replacement) tuples
     redact_patterns: list[tuple[str, str]] | None = None
 
