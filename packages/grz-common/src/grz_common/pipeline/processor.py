@@ -6,6 +6,7 @@ from typing import Any
 
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
+from grzctl.models.config import ProcessConfig
 from tqdm.auto import tqdm
 
 from ..models.s3 import S3Options
@@ -31,7 +32,7 @@ class SubmissionProcessor:
 
     def __init__(
         self,
-        configuration: Any,
+        configuration: ProcessConfig,
         source_s3_options: S3Options,
         keys: dict[str, bytes],
         redact_patterns: list[tuple[str, str]] | None = None,
@@ -54,7 +55,7 @@ class SubmissionProcessor:
             self._target_s3_map[key] = init_s3_client(options)
         return self._target_s3_map[key]
 
-    def run(self, submission_metadata: SubmissionMetadata, threads: int = 1):
+    def run(self, submission_metadata: SubmissionMetadata, threads: int = 1, max_concurrent_uploads: int = 4):
         """
         Run the pipeline.
         """
@@ -92,6 +93,7 @@ class SubmissionProcessor:
                         target_bucket=target_s3_options.bucket,
                         target_public_key=target_public_key,
                         pbar=pbar_global,
+                        max_concurrent_uploads=max_concurrent_uploads,
                     )
                 )
             for f in futures:
@@ -118,14 +120,43 @@ class SubmissionProcessor:
         target_bucket: str,
         target_public_key: bytes,
         pbar: Any,
+        max_concurrent_uploads: int,
     ):
         if self.context.has_errors:
             return
 
         try:
-            self._run_pipeline(
-                file_meta, submission_id, source_bucket, target_s3, target_bucket, target_public_key, pbar
-            )
+            src_key = f"{submission_id}/files/{file_meta.file_path}.c4gh"
+            dest_key = f"{submission_id}/files/{file_meta.encrypted_file_path()}"
+
+            with ExitStack() as stack:
+                # Pipeline Construction
+                source = stack.enter_context(S3Downloader(self.source_s3, source_bucket, src_key))
+                decrypted = stack.enter_context(Crypt4GHDecryptor(source, self.keys["private"]))
+
+                validator = stack.enter_context(
+                    ValidatorObserver(
+                        decrypted, file_type=file_meta.file_type, expected_checksum=file_meta.file_checksum
+                    )
+                )
+
+                encrypted = stack.enter_context(Crypt4GHEncryptor(validator, target_public_key))
+                monitored = stack.enter_context(TqdmObserver(encrypted, pbar))
+
+                uploader = S3MultipartUploader(
+                    target_s3,
+                    target_bucket,
+                    dest_key,
+                    part_size=64 * 1024 * 1024,
+                    max_threads=max_concurrent_uploads,
+                )
+
+                uploader.upload(monitored)
+
+                validator.verify()
+
+                # Record Validation Metrics
+                self.context.record_stats(file_meta.file_path, validator.metrics)
 
             # Fail-Fast Consistency
             partner = partner_map.get(file_meta.file_path)
@@ -135,44 +166,6 @@ class SubmissionProcessor:
         except Exception as e:
             log.error(f"Failed {file_meta.file_path}: {e}")
             self.context.add_error(str(e))
-
-    def _run_pipeline(  # noqa: PLR0913
-        self,
-        file_meta: Any,
-        sub_id: str,
-        src_bucket: str,
-        target_s3: Any,
-        target_bucket: str,
-        target_pub_key: bytes,
-        pbar: Any,
-    ):
-        src_key = f"{sub_id}/files/{file_meta.file_path}.c4gh"
-        dest_key = f"{sub_id}/files/{file_meta.encrypted_file_path()}"
-
-        with ExitStack() as stack:
-            # Pipeline Construction
-            source = stack.enter_context(S3Downloader(self.source_s3, src_bucket, src_key))
-            decrypted = stack.enter_context(Crypt4GHDecryptor(source, self.keys["private"]))
-
-            validator = stack.enter_context(
-                ValidatorObserver(decrypted, file_type=file_meta.file_type, expected_checksum=file_meta.file_checksum)
-            )
-
-            encrypted = stack.enter_context(Crypt4GHEncryptor(validator, target_pub_key))
-            monitored = stack.enter_context(TqdmObserver(encrypted, pbar))
-
-            uploader = S3MultipartUploader(
-                target_s3,
-                target_bucket,
-                dest_key,
-                part_size=self.config.chunk_size,
-                max_threads=self.config.max_concurrent_uploads,
-            )
-
-            uploader.upload(monitored)
-
-            # Record Validation Metrics
-            self.context.record_stats(file_meta.file_path, validator.metrics)
 
     def _upload_final_metadata(
         self, submission_metadata: SubmissionMetadata, sub_id: str, s3_client, bucket: str, public_key: bytes
