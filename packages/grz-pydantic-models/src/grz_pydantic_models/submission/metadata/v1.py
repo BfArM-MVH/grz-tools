@@ -1108,7 +1108,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
             patterns.append((self.submission.local_case_id, "REDACTED_LOCAL_CASE_ID"))
         return patterns
 
-    def to_redacted_dict(self, archive_consented: bool) -> dict[str, Any]:
+    def to_redacted_dict(self) -> dict[str, Any]:
         """
         Create a redacted dictionary representation suitable for archiving.
 
