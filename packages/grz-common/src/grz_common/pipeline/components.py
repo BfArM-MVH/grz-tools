@@ -1,7 +1,5 @@
 """Base classes and implementations for pipeline components."""
 
-from __future__ import annotations
-
 import contextlib
 import hashlib
 import io
@@ -20,19 +18,10 @@ import crypt4gh.header
 import crypt4gh.lib
 import pysam
 from grz_pydantic_models.submission.metadata.v1 import FileType
-from nacl.bindings import (
-    crypto_aead_chacha20poly1305_ietf_decrypt,
-    crypto_aead_chacha20poly1305_ietf_encrypt,
-)
+from nacl.bindings import crypto_aead_chacha20poly1305_ietf_encrypt
 from nacl.public import PrivateKey
 
 log = logging.getLogger(__name__)
-
-NONCE_LENGTH = 12
-SEGMENT_SIZE = crypt4gh.lib.SEGMENT_SIZE
-CIPHER_SEGMENT_SIZE = crypt4gh.lib.CIPHER_SEGMENT_SIZE
-INT_WIDTH = 4
-CRYPT4GH_MAGIC = b"crypt4gh"
 
 MULTIPART_DEFAULT_PART_SIZE = 8 * 1024 * 1024  # 8MiB
 MULTIPART_MAX_PARTS = 1000  # Ceph S3 limit
@@ -80,44 +69,6 @@ class StreamWrapper(io.BufferedIOBase):
             with contextlib.suppress(Exception):
                 self.source.close()
             super().close()
-
-
-class TransformStream(StreamWrapper, metaclass=ABCMeta):
-    """
-    Base class for streams that MODIFY data.
-    """
-
-    def __init__(self, source: io.BufferedIOBase):
-        super().__init__(source)
-        self._output_buffer = bytearray()
-        self._eof = False
-
-    @abstractmethod
-    def _fill_buffer(self) -> None:
-        raise NotImplementedError
-
-    def read(self, size: int | None = -1) -> bytes:
-        target_size = size if size is not None else -1
-
-        if target_size == -1:
-            while not self._eof:
-                self._fill_buffer()
-            ret = bytes(self._output_buffer)
-            self._output_buffer.clear()
-            return ret
-
-        if len(self._output_buffer) >= target_size:
-            ret = self._output_buffer[:target_size]
-            self._output_buffer = self._output_buffer[target_size:]
-            return bytes(ret)
-
-        while len(self._output_buffer) < target_size and not self._eof:
-            self._fill_buffer()
-
-        limit = min(len(self._output_buffer), target_size)
-        ret = self._output_buffer[:limit]
-        self._output_buffer = self._output_buffer[limit:]
-        return bytes(ret)
 
 
 class ObserverStream(StreamWrapper, metaclass=ABCMeta):
@@ -188,109 +139,100 @@ class TqdmObserver(ObserverStream):
                 pbar.update(n)
 
 
+class TransformStream(StreamWrapper, metaclass=ABCMeta):
+    """
+    Base class for streams that MODIFY data.
+    """
+
+    def __init__(self, source: io.BufferedIOBase):
+        super().__init__(source)
+        self._output_buffer = bytearray()
+        self._eof = False
+
+    @abstractmethod
+    def _fill_buffer(self) -> bytes:
+        """
+        Read and transform data from the source stream.
+
+        Subclasses must implement this method to read from the source, apply any transformation, and return the processed bytes.
+
+        Example for a simple passthrough implementation::
+
+            def _fill_buffer(self) -> bytes:
+                return self.source.read(READ_CHUNK_SIZE)
+
+        :returns: Transformed data chunk, or empty bytes when EOF is reached.
+        """
+        raise NotImplementedError
+
+    def read(self, size: int | None = -1) -> bytes:
+        target_size = size if size is not None else -1
+        read_all = target_size == -1
+
+        # Keep filling the output buffer until we have enough data to return or reach EOF
+        while (read_all or len(self._output_buffer) < target_size) and (chunk := self._fill_buffer()):
+            self._output_buffer.extend(chunk)
+
+        # Return up to target_size bytes from the output buffer
+        limit = min(len(self._output_buffer), target_size)
+        ret = self._output_buffer[:limit]
+        del self._output_buffer[:limit]
+        return bytes(ret)
+
+
 class Crypt4GHDecryptor(TransformStream):
+    CIPHER_DIFF = crypt4gh.lib.CIPHER_DIFF
+    CIPHER_SEGMENT_SIZE = crypt4gh.lib.CIPHER_SEGMENT_SIZE
+
     def __init__(self, source: io.BufferedIOBase, private_key: bytes):
         super().__init__(source)
         self._private_key = private_key
-        self._session_key: bytes | None = None
+        self._session_keys: bytes | None = None
         self._header_parsed = False
-        self._header_buffer = bytearray()
         self._cipher_residue = bytearray()
 
-    def _fill_buffer(self) -> None:
+    def _fill_buffer(self) -> bytes:
         if not self._header_parsed:
-            self._process_header()
-            if not self._header_parsed:
-                return
+            self._read_header()
 
-        self._process_body()
+        return self._decrypt_next_segment()
 
-    def _process_header(self) -> None:
-        required_min = 16
-        while len(self._header_buffer) < required_min:
-            chunk = self.source.read(required_min - len(self._header_buffer))
-            if not chunk:
-                if len(self._header_buffer) > 0:
-                    raise OSError(f"Crypt4GH: Unexpected EOF reading header (got {len(self._header_buffer)} bytes)")
-                self._eof = True
-                return
-            self._header_buffer.extend(chunk)
-
-        self._try_parse_header()
-
-    def _process_body(self) -> None:
-        while len(self._cipher_residue) < CIPHER_SEGMENT_SIZE:
-            chunk = self.source.read(READ_CHUNK_SIZE)
-            if not chunk:
-                self._eof = True
-                break
-            self._cipher_residue.extend(chunk)
-
-        while len(self._cipher_residue) >= CIPHER_SEGMENT_SIZE:
-            segment = self._cipher_residue[:CIPHER_SEGMENT_SIZE]
-            self._cipher_residue = self._cipher_residue[CIPHER_SEGMENT_SIZE:]
-            self._output_buffer.extend(self._decrypt_segment(segment))
-
-        if self._eof and self._cipher_residue:
-            self._output_buffer.extend(self._decrypt_segment(bytes(self._cipher_residue)))
-            self._cipher_residue.clear()
-
-    def _try_parse_header(self) -> None:
+    def _read_header(self) -> None:
+        """Parse the Crypt4GH header to extract the session key for decryption."""
         try:
-            with io.BytesIO(self._header_buffer) as f:
-                if f.read(8) != CRYPT4GH_MAGIC:
-                    raise ValueError("Invalid Crypt4GH Magic")
-
-                _ = int.from_bytes(f.read(INT_WIDTH), "little")
-                packet_count = int.from_bytes(f.read(INT_WIDTH), "little")
-
-                for _ in range(packet_count):
-                    if f.tell() + INT_WIDTH > len(self._header_buffer):
-                        self._read_more_header(INT_WIDTH)
-                        return
-
-                    f_pos = f.tell()
-                    pkt_len = int.from_bytes(self._header_buffer[f_pos : f_pos + INT_WIDTH], "little")
-                    f.seek(INT_WIDTH, os.SEEK_CUR)
-
-                    needed = pkt_len - INT_WIDTH
-                    if f.tell() + needed > len(self._header_buffer):
-                        self._read_more_header(needed)
-                        return
-
-                    f.seek(needed, os.SEEK_CUR)
-
-                header_length = f.tell()
-
-            header_bytes = self._header_buffer[:header_length]
             keys = [(0, self._private_key, None)]
-            session_keys, _ = crypt4gh.header.deconstruct(io.BytesIO(header_bytes), keys, sender_pubkey=None)
+            # Decrypt header to extract session keys using crypt4gh library
+            session_keys, edit_list = crypt4gh.header.deconstruct(self.source, keys, sender_pubkey=None)
+
+            if edit_list is not None:
+                raise ValueError("Edit lists in Crypt4GH headers are not supported!")
 
             if not session_keys:
                 raise ValueError("No session keys found in Crypt4GH header")
 
-            self._session_key = session_keys[0]
+            self._session_keys = session_keys
             self._header_parsed = True
-
-            self._cipher_residue.extend(self._header_buffer[header_length:])
-            self._header_buffer.clear()
-
         except Exception as e:
             raise OSError(f"Crypt4GH Header Error: {e}") from e
 
-    def _read_more_header(self, size: int) -> None:
-        chunk = self.source.read(size)
-        if chunk:
-            self._header_buffer.extend(chunk)
-
-    def _decrypt_segment(self, segment: bytes) -> bytes:
-        assert self._session_key is not None, "Session key not initialized"
-        nonce = segment[:NONCE_LENGTH]
-        ciphertext = segment[NONCE_LENGTH:]
-        return crypto_aead_chacha20poly1305_ietf_decrypt(bytes(ciphertext), None, bytes(nonce), self._session_key)
+    def _decrypt_next_segment(self) -> bytes:
+        """Decrypt and return the next segment, or None if EOF."""
+        ciphersegment = self.infile.read(self.CIPHER_SEGMENT_SIZE)
+        if not ciphersegment:
+            # EOF reached
+            return b""
+        elif len(ciphersegment) <= self.CIPHER_DIFF:
+            # This means we have a truncated segment:
+            # Even an empty plaintext segment would have CIPHER_DIFF bytes of overhead
+            raise ValueError("Truncated cipher segment")
+        else:
+            return crypt4gh.lib.decrypt_block(ciphersegment, self._session_keys)
 
 
 class Crypt4GHEncryptor(TransformStream):
+    NONCE_LENGTH = 12
+    SEGMENT_SIZE = crypt4gh.lib.SEGMENT_SIZE
+
     def __init__(self, source: io.BufferedIOBase, recipient_pubkey: bytes, sender_privkey: bytes | None = None):
         super().__init__(source)
         self._recipient_pubkey = recipient_pubkey
@@ -299,31 +241,32 @@ class Crypt4GHEncryptor(TransformStream):
         self._header_sent = False
         self._plain_residue = bytearray()
 
-    def _fill_buffer(self) -> None:
+    def _fill_buffer(self) -> bytes:
         if not self._header_sent:
-            keys = [(0, self._sender_privkey, self._recipient_pubkey)]
-            header_content = crypt4gh.header.make_packet_data_enc(0, self._session_key)
-            header_packets = crypt4gh.header.encrypt(header_content, keys)
-            self._output_buffer.extend(crypt4gh.header.serialize(header_packets))
+            header = self._compose_header()
             self._header_sent = True
 
-        chunk = self.source.read(READ_CHUNK_SIZE)
-        if not chunk:
-            self._eof = True
-            if self._plain_residue:
-                self._output_buffer.extend(self._encrypt_segment(bytes(self._plain_residue)))
-                self._plain_residue.clear()
-            return
+            return header
 
-        self._plain_residue.extend(chunk)
-        while len(self._plain_residue) >= SEGMENT_SIZE:
-            block = self._plain_residue[:SEGMENT_SIZE]
-            self._plain_residue = self._plain_residue[SEGMENT_SIZE:]
-            self._output_buffer.extend(self._encrypt_segment(bytes(block)))
+        return self._encrypt_next_segment()
 
-    def _encrypt_segment(self, plaintext: bytes) -> bytes:
-        nonce = os.urandom(NONCE_LENGTH)
-        ciphertext = crypto_aead_chacha20poly1305_ietf_encrypt(bytes(plaintext), None, nonce, self._session_key)
+    def _compose_header(self) -> bytes:
+        keys = [(0, self._sender_privkey, self._recipient_pubkey)]
+
+        header_content = crypt4gh.header.make_packet_data_enc(0, self._session_key)
+        header_packets = crypt4gh.header.encrypt(header_content, keys)
+
+        return crypt4gh.header.serialize(header_packets)
+
+    def _encrypt_next_segment(self) -> bytes:
+        segment = self.source.read(self.SEGMENT_SIZE)
+
+        if len(segment) == 0:
+            # EOF reached
+            return b""
+
+        nonce = os.urandom(self.NONCE_LENGTH)
+        ciphertext = crypto_aead_chacha20poly1305_ietf_encrypt(segment, None, nonce, self._session_key)
         return nonce + ciphertext
 
 
