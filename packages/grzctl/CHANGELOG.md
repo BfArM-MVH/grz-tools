@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.4.0...grzctl-v2.0.0) (2026-02-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501))
+
+### Features
+
+* **grz-pydantic-models:** Enforce differring checksums for sequencing data ([#496](https://github.com/BfArM-MVH/grz-tools/issues/496)) ([2fc80db](https://github.com/BfArM-MVH/grz-tools/commit/2fc80db0dea956d8f820ce8f8212b6b402fd53ca)), closes [#430](https://github.com/BfArM-MVH/grz-tools/issues/430)
+* **grzctl,grz-cli,grz-common:** Merge multiple configuration files ([#490](https://github.com/BfArM-MVH/grz-tools/issues/490)) ([8ae881d](https://github.com/BfArM-MVH/grz-tools/commit/8ae881d4f65882ae5d8823bdb00971eec246a395))
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501)) ([8953102](https://github.com/BfArM-MVH/grz-tools/commit/895310211d36796d995c37f1929a12458195d4c7))
+* **grzctl:** Make 'identifiers.le' config optional for 'grzctl report' command ([#488](https://github.com/BfArM-MVH/grz-tools/issues/488)) ([f065e5a](https://github.com/BfArM-MVH/grz-tools/commit/f065e5a8115bd3ff791b0657ff2513c9e4c2f076))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models,grz-cli,grzctl:** Fix MII Consent Period to use datetime instead of date ([#491](https://github.com/BfArM-MVH/grz-tools/issues/491)) ([0eb69fd](https://github.com/BfArM-MVH/grz-tools/commit/0eb69fd9f0c63360ed19f20b1468ab0700270c81))
+* **grzctl:** fix displayed QC stats ([#508](https://github.com/BfArM-MVH/grz-tools/issues/508)) ([4a175e7](https://github.com/BfArM-MVH/grz-tools/commit/4a175e7f8091fb3ded8e8354b89b6d2a243993cf)), closes [#451](https://github.com/BfArM-MVH/grz-tools/issues/451)
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.3.0...grzctl-v1.4.0) (2025-12-04)
 
 
