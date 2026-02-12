@@ -1,13 +1,12 @@
-use crate::checker::{FileReport, Stats};
-use crate::checks::common::{CheckOutcome, check_file};
+use crate::checker::{DataSource, FileReport, Stats};
+use crate::checks::common::{CheckOutcome, check_data};
 use indicatif::ProgressBar;
 use noodles::bam;
 use noodles::sam::alignment::record::cigar::op::Kind;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
 
-pub fn check_bam(path: &Path, file_pb: &ProgressBar, global_pb: &ProgressBar) -> FileReport {
-    check_file(path, file_pb, global_pb, false, |reader| {
+pub fn check_bam(input: DataSource, file_pb: &ProgressBar, global_pb: &ProgressBar) -> FileReport {
+    check_data(input, file_pb, global_pb, false, |reader| {
         let mut bam_reader = bam::io::Reader::new(BufReader::new(reader));
         let header = match bam_reader.read_header() {
             Ok(h) => h,
@@ -97,6 +96,5 @@ pub fn check_bam(path: &Path, file_pb: &ProgressBar, global_pb: &ProgressBar) ->
 
 #[derive(Debug)]
 pub struct BamCheckJob {
-    pub path: PathBuf,
-    pub size: u64,
+    pub input: DataSource,
 }

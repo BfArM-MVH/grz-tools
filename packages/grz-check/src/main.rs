@@ -3,7 +3,7 @@ use clap::{ArgGroup, Parser};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::checker::Job;
+use crate::checker::{DataSource, Job};
 use crate::checks::bam::BamCheckJob;
 use crate::checks::fastq::{PairedFastqJob, ReadLengthCheck, SingleFastqJob};
 use crate::checks::raw::RawJob;
@@ -118,11 +118,9 @@ fn create_jobs(
         let fq2_size = fs::metadata(&fq2_path)?.len();
         total_bytes += fq1_size + fq2_size;
         jobs.push(Job::PairedFastq(PairedFastqJob {
-            fq1_path,
-            fq2_path,
+            input1: DataSource::from_path(&fq1_path)?,
+            input2: DataSource::from_path(&fq2_path)?,
             length_check,
-            fq1_size,
-            fq2_size,
         }));
     }
 
@@ -137,9 +135,8 @@ fn create_jobs(
         let size = fs::metadata(&path)?.len();
         total_bytes += size;
         jobs.push(Job::SingleFastq(SingleFastqJob {
-            path,
+            input: DataSource::from_path(&path)?,
             length_check,
-            size,
         }));
     }
 
@@ -147,7 +144,9 @@ fn create_jobs(
         let path = PathBuf::from(path_str);
         let size = fs::metadata(&path)?.len();
         total_bytes += size;
-        jobs.push(Job::Bam(BamCheckJob { path, size }));
+        jobs.push(Job::Bam(BamCheckJob {
+            input: DataSource::from_path(&path)?,
+        }));
     }
 
     for path_str in raw {
@@ -156,7 +155,9 @@ fn create_jobs(
             .with_context(|| format!("Could not get metadata for {}", path.display()))?
             .len();
         total_bytes += size;
-        jobs.push(Job::Raw(RawJob { path, size }));
+        jobs.push(Job::Raw(RawJob {
+            input: DataSource::from_path(&path)?,
+        }));
     }
 
     Ok((jobs, total_bytes))
