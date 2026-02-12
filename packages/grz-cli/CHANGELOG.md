@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.1...grz-cli-v1.6.0) (2026-02-12)
+
+
+### Features
+
+* **grzctl,grz-cli,grz-common:** Merge multiple configuration files ([#490](https://github.com/BfArM-MVH/grz-tools/issues/490)) ([8ae881d](https://github.com/BfArM-MVH/grz-tools/commit/8ae881d4f65882ae5d8823bdb00971eec246a395))
+
+
+### Bug Fixes
+
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.5.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.0...grz-cli-v1.5.1) (2025-12-04)
 
 
