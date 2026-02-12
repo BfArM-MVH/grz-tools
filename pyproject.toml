@@ -17,6 +17,7 @@ members = [
     "packages/grzctl",
     "packages/grz-db",
     "packages/grz-pydantic-models",
+    "packages/grz-check",
 ]
 
 [tool.uv.sources]
@@ -25,6 +26,7 @@ grz-cli = { workspace = true }
 grzctl = { workspace = true }
 grz-db = { workspace = true }
 grz-pydantic-models = { workspace = true }
+grz-check = { workspace = true }
 
 [project.optional-dependencies]
 test = [
