@@ -7,7 +7,7 @@ import json
 import logging
 import math
 import re
-import shutil
+import tempfile
 from importlib.metadata import version
 from os import PathLike
 from os.path import getsize
@@ -23,6 +23,7 @@ from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
+from ..utils.redaction import redact_file
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
 MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
@@ -261,19 +262,26 @@ class S3BotoUploadWorker(UploadWorker):
         self._upload_logged_files(encrypted_submission, progress_logger, files_to_upload)
 
         # do not track upload state for logs, instead just reupload in case of a failure
+        redaction_patterns = encrypted_submission.metadata.content.create_redaction_patterns()
         for file_path, s3_object_id in encrypted_submission.get_log_files_and_object_id().items():
             try:
-                self.upload_file(file_path, s3_object_id)
-                self.__log.info(f"Upload complete for {str(file_path)}.")
+                with tempfile.NamedTemporaryFile() as redacted_tmpfile:
+                    self.__log.debug("Redacting log file '%s' for upload: '%s'", file_path, redacted_tmpfile.name)
+                    redacted_tmpfile_path = Path(redacted_tmpfile.name)
+
+                    redact_file(file_path, redacted_tmpfile_path, redaction_patterns)
+
+                    self.upload_file(redacted_tmpfile_path, s3_object_id)
+                    self.__log.info(f"Upload complete for {str(file_path)}.")
             except Exception as e:
                 self.__log.error("Upload failed for '%s'", str(file_path))
                 raise e
 
-        # make a back up copy of metadata before editing
-        shutil.copy(metadata_file_path, metadata_file_path.with_suffix(".orig.json"))
+        with tempfile.NamedTemporaryFile(mode="w") as redacted_metadata_tmpfile:
+            # read original metadata
+            with open(metadata_file_path) as fd:
+                metadata = json.load(fd)
 
-        with open(metadata_file_path, mode="r+") as metadata_file:
-            metadata = json.load(metadata_file)
             # redact tanG as all zeros
             metadata["submission"]["tanG"] = REDACTED_TAN
 
@@ -285,11 +293,12 @@ class S3BotoUploadWorker(UploadWorker):
                     # redact index donorPseudonym (which can be the tanG)
                     donor["donorPseudonym"] = "index"
 
-            metadata_file.seek(0)
-            json.dump(metadata, metadata_file, indent=2)
-            metadata_file.truncate()
+            json.dump(metadata, redacted_metadata_tmpfile, indent=2)
+            # ensure all data is written to disk before upload
+            redacted_metadata_tmpfile.flush()
 
-        self._upload_metadata(metadata_file_path, metadata_s3_object_id)
+            # upload redacted metadata
+            self._upload_metadata(redacted_metadata_tmpfile.name, metadata_s3_object_id)
 
     def _check_for_completed_submission(self, s3_object_id: str) -> bool:
         try:
