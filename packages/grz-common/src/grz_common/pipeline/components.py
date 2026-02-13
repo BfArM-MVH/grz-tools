@@ -217,7 +217,7 @@ class Crypt4GHDecryptor(TransformStream):
 
     def _decrypt_next_segment(self) -> bytes:
         """Decrypt and return the next segment, or None if EOF."""
-        ciphersegment = self.infile.read(self.CIPHER_SEGMENT_SIZE)
+        ciphersegment = self.source.read(self.CIPHER_SEGMENT_SIZE)
         if not ciphersegment:
             # EOF reached
             return b""
