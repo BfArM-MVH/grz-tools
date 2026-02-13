@@ -221,7 +221,7 @@ class SubmissionProcessor:
 
             shutil.copyfileobj(monitored, uploader, length=part_size)
 
-            validator.verify()
+            validator.validate()
 
             if metrics:
                 log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
