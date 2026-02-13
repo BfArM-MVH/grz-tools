@@ -8,8 +8,6 @@ dependencies = [
     "grzctl",
     "grz-db",
     "grz-pydantic-models",
-    "boto3-stubs~=1.42.38",
-    "isal>=1.8.0",
 ]
 
 [tool.uv.workspace]
@@ -71,8 +69,13 @@ lint = [
     "types-pyyaml",
     "types-tqdm",
     "types-boto3[s3] >=1.36,<2",
+    "boto3-stubs >=1.36,<2",
     "pydantic",
     "mypy",
+]
+fast = [
+    "numba>=0.63.1",
+    "isal>=1.8.0",
 ]
 
 [tool.ruff]
