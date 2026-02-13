@@ -139,27 +139,20 @@ class Worker:
                 self.__log.error(error_msg)
                 raise SubmissionValidationError(error_msg) from e
 
-        # Fallback validation
+        # Fallback validation (combined checksum + sequencing data)
         self.__log.info("Starting checksum validation (fallback)...")
+        self.__log.info("Starting sequencing data validation (fallback)...")
         if errors := list(
-            submission._validate_checksums_fallback(progress_log_file=self.progress_file_checksum_validation)
+            submission.validate_files_fallback(
+                checksum_progress_file=self.progress_file_checksum_validation,
+                seq_data_progress_file=self.progress_file_sequencing_data_validation,
+            )
         ):
-            error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
+            error_msg = "\n".join(["File validation failed! Errors:", *errors])
             self.__log.error(error_msg)
             raise SubmissionValidationError(error_msg)
         else:
             self.__log.info("Checksum validation successful!")
-
-        self.__log.info("Starting sequencing data validation (fallback)...")
-        if errors := list(
-            submission._validate_sequencing_data_fallback(
-                progress_log_file=self.progress_file_sequencing_data_validation
-            )
-        ):
-            error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
-            self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
-        else:
             self.__log.info("Sequencing data validation successful!")
 
     def encrypt(
