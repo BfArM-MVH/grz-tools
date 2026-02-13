@@ -59,10 +59,10 @@ class Crypt4GH:
         :param public_keys: Prepared Crypt4GH keys for encryption
         :param show_progress: Whether to show progress bar
         """
+        from ..pipeline.components.crypt4gh import Crypt4GHEncryptor  # noqa: PLC0415
+
         input_path = Path(input_path)
         output_path = Path(output_path)
-
-        from ..pipeline.components.crypt4gh import Crypt4GHEncryptor  # noqa: PLC0415
 
         # extract public key and signing key from prepared keys tuple
         _, signing_key, public_key = public_keys[0]
@@ -109,8 +109,8 @@ class Crypt4GH:
 
     @staticmethod
     def decrypt_file(
-        input_path: Path,
-        output_path: Path,
+        input_path: str | Path,
+        output_path: str | Path,
         private_key: bytes,
         show_progress: bool = True,
     ):
@@ -124,6 +124,9 @@ class Crypt4GH:
         """
         from ..pipeline.components.crypt4gh import Crypt4GHDecryptor  # noqa: PLC0415
 
+        input_path = Path(input_path)
+        output_path = Path(output_path)
+        
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
