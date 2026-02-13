@@ -32,7 +32,7 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
-from ..pipeline.components import Crypt4GHEncryptor, TqdmObserver, Crypt4GHDecryptor
+from ..pipeline.components import Crypt4GHDecryptor, Crypt4GHEncryptor, TqdmObserver
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.crypt import Crypt4GH
 from ..validation import UserInterruptException, run_grz_check

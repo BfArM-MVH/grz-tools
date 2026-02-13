@@ -65,7 +65,7 @@ log = logging.getLogger(__name__)
     default=None,
     help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
 )
-def process(
+def process(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_id: str,
     output_dir: str,

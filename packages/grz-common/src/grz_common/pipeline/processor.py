@@ -37,7 +37,7 @@ class SubmissionProcessor:
     Inbox -> Decrypt -> Validate -> Re-Encrypt -> Archive
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         configuration: ProcessConfig,
         source_s3_options: S3Options,
