@@ -557,7 +557,8 @@ class Submission:
                             expected_checksum=meta.file_checksum,
                             mean_read_length_threshold=threshold_map.get(meta.file_path),
                         )
-                        shutil.copyfileobj(validator, os.devnull)
+                        while validator.read(1024**2):
+                            pass
 
                         validator.validate()
                         if "read_count" in validator.metrics:
