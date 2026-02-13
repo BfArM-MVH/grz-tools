@@ -97,10 +97,13 @@ class SubmissionProcessor:
         files_map = submission_metadata.files
         total_bytes = sum(f.file_size_in_bytes for f in files_map.values())
 
-        # TODO: Implement helper in metadata model
-        # for r1, r2 in submission_metadata.get_paired_fastqs():
-        #     self.partner_map[r1.file_path] = r2.file_path
-        #     self.partner_map[r2.file_path] = r1.file_path
+        self.partner_map.clear()
+        for (_donor, _lab_datum, pairs, _thresholds) in submission_metadata.iter_paired_end_fastqs():
+            for fq1, fq2 in pairs:
+                key1 = fq1.file_path
+                key2 = fq2.file_path
+                self.partner_map[key1] = key2
+                self.partner_map[key2] = key1
 
         log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
 
