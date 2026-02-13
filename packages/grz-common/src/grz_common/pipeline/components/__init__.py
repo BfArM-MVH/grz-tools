@@ -104,6 +104,12 @@ class ValidatingStream(ObserverStream, metaclass=ABCMeta):
     Automatically runs validate() when the context manager exits.
     """
 
+    _is_validated: bool
+
+    def __init__(self, source: io.BufferedIOBase):
+        super().__init__(source)
+        self._is_validated = False
+
     @abstractmethod
     def validate(self) -> None:
         """
@@ -116,13 +122,20 @@ class ValidatingStream(ObserverStream, metaclass=ABCMeta):
     def metrics(self) -> dict[str, Any]:
         return {}
 
+    def _run_validation(self):
+        if not self._is_validated:
+            try:
+                self.validate()
+            finally:
+                self._is_validated = True
+
     def close(self):
         """
         Trigger validation on close if it hasn't happened yet.
         """
         if not self.closed:
             try:
-                self.validate()
+                self._run_validation()
             except Exception:
                 # if validation fails, we still want to try closing the underlying stream,
                 # but we must re-raise the validation error.
@@ -131,8 +144,7 @@ class ValidatingStream(ObserverStream, metaclass=ABCMeta):
             super().close()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # if an exception already occurred in the block, we don't want to mask it
-        # with a validation error unless we want to enforce validation even on failure.
+        # Only validate if no exception occurred within the block
         if exc_type is None:
-            self.validate()
+            self._run_validation()
         super().__exit__(exc_type, exc_val, exc_tb)

@@ -12,13 +12,13 @@ from grz_pydantic_models.submission.metadata import FileType
 from . import ValidatingStream
 
 try:
-    from isal import isal_zlib as zlib
+    from isal import isal_zlib as zlib  # type: ignore[import-not-found]
 except ImportError:
     import zlib
 
 try:
-    import numpy as np
-    from numba import jit
+    import numpy as np  # type: ignore[import-not-found]
+    from numba import jit  # type: ignore[import-not-found]
 
     HAS_NUMBA = True
 except ImportError:
@@ -180,7 +180,11 @@ class FastqValidator(ValidatingStream):
 
     @property
     def metrics(self) -> dict[str, Any]:
-        return {"read_count": self._read_count, "total_bases": self._total_read_len}
+        return {
+            "read_count": self._read_count,
+            "total_bases": self._total_read_len,
+            "line_count": self._read_count * 4,
+        }
 
 
 if HAS_NUMBA:
@@ -249,20 +253,65 @@ class BamValidator(ValidatingStream):
         super().__init__(source)
         self._temp = tempfile.NamedTemporaryFile(suffix=".bam", delete=False)  # noqa: SIM115
         self._path = self._temp.name
+        self._bytes_seen = 0
 
     def observe(self, chunk: bytes) -> None:
+        self._bytes_seen += len(chunk)
         self._temp.write(chunk)
 
     def validate(self) -> None:
-        self._temp.close()
+        if not self._temp.closed:
+            self._temp.close()
+
+        if not os.path.exists(self._path):
+            raise ValueError(f"BAM Invalid: Temp file disappeared at {self._path}")
+
+        if os.path.getsize(self._path) == 0:
+            self._cleanup()
+            raise ValueError("BAM Invalid: Stream resulted in an empty file.")
+
         try:
-            pysam.AlignmentFile(self._path, "rb", check_sq=False)
+            with pysam.AlignmentFile(self._path, "rb", check_sq=False) as bam:
+                header = bam.header.to_dict()
+
+                concerning_keys = header.keys() - {"HD"}
+                if concerning_keys:
+                    log.warning("Detected a header in BAM, ensure it contains no private information!")
+
+                secondary_warned = False
+                hard_clipped_warned = False
+
+                for read in bam.fetch(until_eof=True):
+                    if not secondary_warned and read.is_secondary:
+                        log.warning(
+                            "Detected secondary alignment in BAM. Consider filtering to save bandwidth and storage."
+                        )
+                        secondary_warned = True
+
+                    if not hard_clipped_warned and not read.is_secondary:
+                        stats = read.get_cigar_stats()
+                        # index 5 is the count of H (hard clip) ops
+                        if stats and len(stats) > 0 and stats[0][5] > 0:
+                            log.warning(
+                                "Detected hard-clipped bases in primary alignment. This is a loss of information from raw reads."
+                            )
+                            hard_clipped_warned = True
+
         except Exception as e:
             raise ValueError(f"BAM Invalid: {e}") from e
+
         finally:
-            if os.path.exists(self._path):
-                with contextlib.suppress(OSError):
-                    os.unlink(self._path)
+            self._cleanup()
+
+    def _cleanup(self):
+        """Helper to ensure file removal."""
+        if os.path.exists(self._path):
+            with contextlib.suppress(OSError):
+                os.unlink(self._path)
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {"size": self._bytes_seen}
 
 
 class ValidatorObserver(ValidatingStream):
