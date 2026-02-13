@@ -1,4 +1,5 @@
 import logging
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import date
@@ -212,15 +213,18 @@ class SubmissionProcessor:
             monitored = stack.enter_context(TqdmObserver(encrypted, pbar))
             monitored = self._measure(stack, monitored, "5_Monitor", metrics)
 
-            uploader = S3MultipartUploader(
-                self.target_s3,
-                self.target_bucket,
-                dest_key,
-                part_size=part_size,
-                max_threads=self.max_concurrent_uploads,
+            uploader = stack.enter_context(
+                S3MultipartUploader(
+                    self.target_s3,
+                    self.target_bucket,
+                    dest_key,
+                    part_size=part_size,
+                    max_threads=self.max_concurrent_uploads,
+                )
             )
 
-            uploader.upload(monitored)
+            shutil.copyfileobj(monitored, uploader, length=part_size)
+
             validator.verify()
 
             if metrics:
