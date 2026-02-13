@@ -36,7 +36,10 @@ keywords = ["GRZ", "GDC", "S3"]
 
 [project.optional-dependencies]
 # Intel ISA-L for 2-4x faster gzip operations
-fast = ["isal>=1.8.0"]
+fast = [
+    "numba>=0.63.1",
+    "isal>=1.8.0",
+]
 
 [dependency-groups]
 dev = [
