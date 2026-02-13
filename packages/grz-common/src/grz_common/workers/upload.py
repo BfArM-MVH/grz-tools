@@ -1,38 +1,36 @@
-"""Module for uploading encrypted submissions to a remote storage"""
+"""Module for uploading encrypted submissions to a remote storage."""
 
 from __future__ import annotations
 
 import abc
 import json
 import logging
-import math
+import os
 import re
 import shutil
 from importlib.metadata import version
 from os import PathLike
-from os.path import getsize
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import botocore.handlers
-from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
+from ..pipeline.components import TqdmObserver
+from ..pipeline.components.s3 import S3MultipartUploader
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
-
-MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
-MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
     from .submission import EncryptedSubmission
 
 log = logging.getLogger(__name__)
 
-# see discussion: https://github.com/boto/boto3/discussions/4251 for acception bucketnames with : in the name
+# accept bucket names with ":" in the name
+# see: https://github.com/boto/boto3/discussions/4251
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")  # type: ignore[import-untyped]
 
 
@@ -104,39 +102,27 @@ class S3BotoUploadWorker(UploadWorker):
     @override
     def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):
         """
-        Upload a single file to the specified object ID
+        Upload a single file to the specified object ID using streaming pipeline.
+
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
         """
         self.__log.info(f"Uploading {local_file_path} to {s3_object_id}...")
+        file_size = os.stat(local_file_path).st_size
 
-        filesize = getsize(local_file_path)
-        multipart_chunksize = self._s3_options.multipart_chunksize
-
-        chunksize = (
-            math.ceil(filesize / MULTIPART_MAX_CHUNKS)
-            if filesize / multipart_chunksize > MULTIPART_MAX_CHUNKS
-            else multipart_chunksize
-        )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunk(s)"
-        )
-
-        config = TransferConfig(
-            multipart_threshold=MULTIPART_THRESHOLD,
-            multipart_chunksize=chunksize,
-            max_concurrency=self._threads,
-            use_threads=self._threads > 1,
-        )
-
-        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        progress_bar = tqdm(total=filesize, desc="UPLOAD  ", **TQDM_DEFAULTS, postfix=f"{s3_object_id}")  # type: ignore[call-overload]
-        transfer.upload_file(
-            str(local_file_path),
-            self._s3_options.bucket,
-            s3_object_id,
-            callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-        )
+        with (
+            S3MultipartUploader(self._s3_client, self._s3_options.bucket, s3_object_id) as uploader,
+            tqdm(
+                total=file_size,
+                desc="UPLOAD  ",
+                postfix={"file": local_file_path},
+                leave=False,
+                **TQDM_DEFAULTS,
+            ) as pbar,
+            open(local_file_path, "rb") as f,
+            TqdmObserver(f, pbar=pbar) as monitored_source,
+        ):
+            shutil.copyfileobj(monitored_source, uploader)
 
     def _remote_id_exists(self, s3_object_id: str) -> bool:
         """

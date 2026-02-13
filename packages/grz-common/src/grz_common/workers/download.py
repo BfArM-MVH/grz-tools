@@ -1,4 +1,4 @@
-"""Module for downloading encrypted submissions to local storage"""
+"""Module for downloading encrypted submissions to local storage."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import datetime
 import enum
 import itertools
 import logging
-import math
 import re
+import shutil
 from collections import OrderedDict
 from operator import attrgetter, itemgetter
 from os import PathLike
@@ -15,26 +15,24 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import botocore.handlers
-from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
+from ..pipeline.components import TqdmObserver
+from ..pipeline.components.s3 import S3Downloader
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
-
-MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
-MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
-MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
     from .submission import EncryptedSubmission
 
 log = logging.getLogger(__name__)
 
-# see discussion: https://github.com/boto/boto3/discussions/4251 to accept bucket names with ":" in the name
+# accept bucket names with ":" in the name
+# see: https://github.com/boto/boto3/discussions/4251
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")
 
 
@@ -123,39 +121,26 @@ class S3BotoDownloadWorker:
             self.__log.error("Download failed for metadata '%s'", metadata_key)
             raise e
 
-    def _download_with_progress(self, local_file_path: str, s3_object_id: str):
+    def _download_with_progress(self, local_file_path: str, s3_object_id: str, file_metadata: SubmissionFileMetadata):
         """
-        Download a single file from S3 to local storage.
+        Download a single file from S3 to local storage using streaming pipeline.
 
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
         """
-        s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
-        filesize = s3_object_meta["ContentLength"]
-
-        chunksize = (
-            math.ceil(filesize / MULTIPART_MAX_CHUNKS)
-            if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
-            else MULTIPART_CHUNKSIZE
-        )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunks"
-        )
-
-        config = TransferConfig(
-            multipart_threshold=MULTIPART_THRESHOLD,
-            multipart_chunksize=chunksize,
-            max_concurrency=self._threads,
-        )
-
-        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        with tqdm(total=filesize, postfix=f"{s3_object_id}", **TQDM_DEFAULTS) as progress_bar:  # type: ignore[call-overload]
-            transfer.download_file(
-                self._s3_options.bucket,
-                s3_object_id,
-                local_file_path,
-                callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-            )
+        with (
+            S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) as downloader,
+            tqdm(
+                total=file_metadata.file_size_in_bytes,
+                desc="DOWNLOAD",
+                postfix={"file": local_file_path},
+                leave=False,
+                **TQDM_DEFAULTS,
+            ) as pbar,
+            TqdmObserver(downloader, pbar=pbar) as monitored,
+            open(local_file_path, "wb") as f,
+        ):
+            shutil.copyfileobj(monitored, f)
 
     def download_file(
         self,
@@ -175,7 +160,7 @@ class S3BotoDownloadWorker:
         try:
             local_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-            self._download_with_progress(str(local_file_path), s3_object_id)
+            self._download_with_progress(str(local_file_path), s3_object_id, file_metadata)
 
             self.__log.info(f"Download complete for {str(local_file_path)}.")
             progress_logger.set_state(local_file_path, file_metadata, state=DownloadState(download_successful=True))

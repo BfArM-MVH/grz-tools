@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
+import shutil
 import subprocess
 import typing
 from collections.abc import Generator
-from functools import partial
 from itertools import groupby
 from os import PathLike
 from pathlib import Path
+from typing import Any
 
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
-    ChecksumType,
     Donor,
     FileType,
     GrzSubmissionMetadata,
@@ -25,14 +27,16 @@ from grz_pydantic_models.submission.metadata.v1 import (
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import ValidationError
+from tqdm.auto import tqdm
 
+from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
+from ..pipeline.components import TqdmObserver
+from ..pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
+from ..pipeline.components.validation import ValidatorObserver
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
-from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
 from ..validation import UserInterruptException, run_grz_check
-from ..validation.bam import validate_bam
-from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +61,13 @@ class SubmissionMetadata:
         """
         self.file_path = metadata_file
         self.content = self._read_metadata(self.file_path)
-        self._checksum = calculate_sha256(self.file_path, progress=False)
+        self._checksum = self._calculate_metadata_checksum(self.file_path)
 
         self._files: dict | None = None
+
+    def _calculate_metadata_checksum(self, file_path: Path) -> str:
+        """Calculate SHA256 checksum of the metadata file."""
+        return hashlib.sha256(open(file_path, "rb").read(), usedforsecurity=False).hexdigest()
 
     @classmethod
     def _read_metadata(cls, file_path: Path) -> GrzSubmissionMetadata:
@@ -461,202 +469,109 @@ class Submission:
             except Exception as e:
                 self.__log.error(f"Error processing grz-check report entry: {line.strip()}. Error: {e}")
 
-    @staticmethod
-    def _validate_file_data_fallback(metadata: SubmissionFileMetadata, local_file_path: Path) -> Generator[str]:
-        """
-        Validates whether the provided file matches this metadata.
-        (Fallback method)
-
-        :param metadata: Metadata model object
-        :param local_file_path: Path to the actual file (resolved if symlinked)
-        :return: Generator of errors
-        """
-        # Resolve file path
-        local_file_path = local_file_path.resolve()
-
-        # Check if path exists
-        if not local_file_path.exists():
-            yield f"{str(Path('files') / metadata.file_path)} does not exist! Ensure filePath is relative to the files/ directory under the submission root."
-            # Return here as following tests cannot work
-            return
-
-        # Check if path is a file
-        if not local_file_path.is_file():
-            yield f"{str(metadata.file_path)} is not a file!"
-            # Return here as following tests cannot work
-            return
-
-        # Check if the checksum is correct
-        if metadata.checksum_type == "sha256":
-            calculated_checksum = calculate_sha256(local_file_path)
-            if metadata.file_checksum != calculated_checksum:
-                yield (
-                    f"{str(metadata.file_path)}: Checksum mismatch! "
-                    f"Expected: '{metadata.file_checksum}', calculated: '{calculated_checksum}'."
-                )
-        else:
-            yield (
-                f"{str(metadata.file_path)}: Unsupported checksum type: {metadata.checksum_type}. "
-                f"Supported types: {[e.value for e in ChecksumType]}"
-            )
-
-        # Check file size
-        if metadata.file_size_in_bytes != local_file_path.stat().st_size:
-            yield (
-                f"{str(metadata.file_path)}: File size mismatch! "
-                f"Expected: '{metadata.file_size_in_bytes}', observed: '{local_file_path.stat().st_size}'."
-            )
-
-    def _validate_checksums_fallback(self, progress_log_file: str | PathLike) -> Generator[str]:
-        """
-        Validates the checksum of the files against the metadata.
-        (Fallback method)
-
-        :return: Generator of errors
-        """
-        progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
-        # cleanup log file and keep only files listed here
-        progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
-        # fields:
-        # - "errors": List[str]
-        # - "validation_passed": bool
-
-        def validate_file(local_file_path, file_metadata):
-            self.__log.debug("Validating '%s'...", str(local_file_path))
-
-            # validate the file
-            errors = list(self._validate_file_data_fallback(file_metadata, local_file_path))
-            validation_passed = len(errors) == 0
-
-            # return log state
-            return ValidationState(errors=errors, validation_passed=validation_passed)
-
-        for local_file_path, file_metadata in self.files.items():
-            logged_state = progress_logger.get_state(
-                local_file_path,
-                file_metadata,
-                default=validate_file,  # validate the file if the state was not calculated yet
-            )
-
-            if logged_state:
-                yield from logged_state["errors"]
-
-    def _validate_sequencing_data_fallback(self, progress_log_file: str | PathLike) -> Generator[str]:
-        """
-        Quick-validates sequencing data linked in this submission.
-        (Fallback method)
-
-        :return: Generator of errors
-        """
-        # Import here to avoid circular import issues
-        from ..progress import FileProgressLogger  # noqa: PLC0415
-
-        progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
-        # cleanup log file and keep only files listed here
-        progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
-
-        yield from self._validate_paired_end_fallback(progress_logger)
-        yield from self._validate_single_end_fallback(progress_logger)
-        yield from self._validate_bams_fallback(progress_logger)
-
-    def _validate_bams_fallback(
-        self,
-        progress_logger: FileProgressLogger[ValidationState],
+    def validate_files_fallback(
+        self, checksum_progress_file: str | PathLike, seq_data_progress_file: str | PathLike
     ) -> Generator[str, None, None]:
         """
-        Basic BAM sanity checks.
-        (Fallback method)
-
-        :param progress_logger: Progress logger
+        Validates files (checksum and content) using streaming validation.
+        Replaces `grz-check` usage when external tools are unavailable.
         """
+        checksum_logger = FileProgressLogger[ValidationState](log_file_path=checksum_progress_file)
+        checksum_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
 
-        def validate_file(local_file_path, _file_metadata) -> ValidationState:
-            self.__log.debug("Validating '%s'...", str(local_file_path))
+        sequence_logger = FileProgressLogger[ValidationState](log_file_path=seq_data_progress_file)
+        sequence_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
 
-            # validate the file
-            errors = list(validate_bam(local_file_path))
-            validation_passed = len(errors) == 0
+        # get thresholds for fastq validation
+        threshold_map = {}
+        for _, _, pairs, thresholds in self.metadata.iter_paired_end_fastqs():
+            for f1, f2 in pairs:
+                threshold_map[f1.file_path] = thresholds.mean_read_length
+                threshold_map[f2.file_path] = thresholds.mean_read_length
+        for _, _, files, thresholds in self.metadata.iter_single_end_fastqs():
+            for f in files:
+                threshold_map[f.file_path] = thresholds.mean_read_length
 
-            # return log state
-            return ValidationState(
-                errors=errors,
-                validation_passed=validation_passed,
-            )
+        # validate files, including fastq read counts
+        read_counts = {}
+        self._validate_files_fallback(checksum_logger, read_counts, sequence_logger, threshold_map)
+        self._validate_paired_end_readcounts(read_counts, sequence_logger)
 
-        for _donor, _lab_datum, bam_file in self.metadata.iter_bams():
-            logged_state = progress_logger.get_state(
-                self.files_dir / bam_file.file_path,
-                bam_file,
-                default=validate_file,  # validate the file if the state was not calculated yet
-            )
-            if logged_state:
-                yield from logged_state["errors"]
+        yield from self._aggregate_validation_errors(checksum_logger, sequence_logger)
 
-    def _validate_single_end_fallback(
-        self,
-        progress_logger: FileProgressLogger[ValidationState],
-    ) -> Generator[str, None, None]:
-        def validate_file(
-            thresholds: Thresholds, local_file_path: Path, file_metadata: SubmissionFileMetadata
-        ) -> ValidationState:
-            self.__log.debug("Validating '%s'...", str(local_file_path))
+    def _validate_paired_end_readcounts(
+        self, read_counts: dict[Any, Any], sequence_logger: FileProgressLogger[ValidationState]
+    ):
+        """
+        Ensure paired end read counts match
+        """
+        for _, _, pairs, _ in self.metadata.iter_paired_end_fastqs():
+            for f1, f2 in pairs:
+                c1 = read_counts.get(f1.file_path)
+                c2 = read_counts.get(f2.file_path)
 
-            # validate the file
-            mean_read_length_threshold = thresholds.mean_read_length
-            errors = list(
-                validate_single_end_reads(local_file_path, mean_read_length_threshold=mean_read_length_threshold)
-            )
-            validation_passed = len(errors) == 0
+                if c1 is not None and c2 is not None and c1 != c2:
+                    msg = f"Read count mismatch: {f1.file_path}({c1}) != {f2.file_path}({c2})"
 
-            # return log state
-            return ValidationState(errors=errors, validation_passed=validation_passed)
-
-        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
-            for fastq_file in fastq_files:
-                logged_state = progress_logger.get_state(
-                    self.files_dir / fastq_file.file_path,
-                    fastq_file,
-                    default=partial(validate_file, thresholds),  # validate the file if the state was not calculated yet
-                )
-                if logged_state:
-                    yield from logged_state["errors"]
-
-    def _validate_paired_end_fallback(
-        self,
-        progress_logger: FileProgressLogger[ValidationState],
-    ) -> Generator[str, None, None]:
-        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_paired_end_fastqs():
-            for fastq_r1, fastq_r2 in fastq_files:
-                local_fastq_r1_path = self.files_dir / fastq_r1.file_path
-                local_fastq_r2_path = self.files_dir / fastq_r2.file_path
-
-                # get saved state
-                logged_state_r1 = progress_logger.get_state(local_fastq_r1_path, fastq_r1)
-                logged_state_r2 = progress_logger.get_state(local_fastq_r2_path, fastq_r2)
-
-                if logged_state_r1 is None or logged_state_r2 is None or logged_state_r1 != logged_state_r2:
-                    # calculate state
-                    errors = list(
-                        validate_paired_end_reads(
-                            local_fastq_r1_path,  # fastq R1
-                            local_fastq_r2_path,  # fastq R2
-                            mean_read_length_threshold=thresholds.mean_read_length,
+                    for meta in (f1, f2):
+                        path = self.files_dir / meta.file_path
+                        state = sequence_logger.get_state(path, meta) or ValidationState(
+                            errors=[], validation_passed=False
                         )
-                    )
-                    validation_passed = len(errors) == 0
+                        if msg not in state.get("errors", []):
+                            state["errors"].append(msg)
+                            state["validation_passed"] = False
+                            sequence_logger.set_state(path, meta, state)
 
-                    state = ValidationState(errors=errors, validation_passed=validation_passed)
-                    # update state for both files
-                    progress_logger.set_state(  # fastq R1
-                        local_fastq_r1_path, fastq_r1, state
-                    )
-                    progress_logger.set_state(  # fastq R2
-                        local_fastq_r2_path, fastq_r2, state
-                    )
-                    yield from state["errors"]
+    def _validate_files_fallback(
+        self,
+        checksum_logger: FileProgressLogger[ValidationState],
+        read_counts: dict[Any, Any],
+        sequence_logger: FileProgressLogger[ValidationState],
+        threshold_map: dict[Any, Any],
+    ):
+        for local_path, meta in self.files.items():
+            # check existing state from progress logs
+            checksum_state = checksum_logger.get_state(local_path, meta)
+            sequence_state = sequence_logger.get_state(local_path, meta)
+
+            checksum_passed = checksum_state and checksum_state.get("validation_passed")
+            sequence_passed = sequence_state and sequence_state.get("validation_passed")
+            is_fastq_or_bam = meta.file_type in {FileType.fastq, FileType.bam}
+
+            # if it's not a fastq/bam file and checksums are fine, skip
+            if checksum_passed and (not is_fastq_or_bam or sequence_passed):
+                continue
+
+            self.__log.debug("Validating '%s'...", str(local_path))
+            errors = []
+
+            try:
+                if not local_path.is_file():
+                    errors.append(f"File not found: {local_path}")
                 else:
-                    # both fastq states are equal, so simply yield one of them
-                    yield from logged_state_r1["errors"]
+                    with open(local_path, "rb") as f:
+                        validator = ValidatorObserver(
+                            f,
+                            file_type=meta.file_type,
+                            expected_checksum=meta.file_checksum,
+                            mean_read_length_threshold=threshold_map.get(meta.file_path),
+                        )
+                        while validator.read(1024**2):
+                            pass
+
+                        validator.validate()
+                        if "read_count" in validator.metrics:
+                            read_counts[meta.file_path] = validator.metrics["read_count"]
+
+            except Exception as e:
+                errors.append(str(e))
+
+            # update progress logs
+            state = ValidationState(errors=errors, validation_passed=not errors)
+            checksum_logger.set_state(local_path, meta, state)
+            if is_fastq_or_bam:
+                sequence_logger.set_state(local_path, meta, state)
 
     def encrypt(
         self,
@@ -691,6 +606,7 @@ class Submission:
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
             raise FileNotFoundError(msg)
+        # TODO parse and use submitter_private_key_path if available
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -703,6 +619,7 @@ class Submission:
 
         try:
             public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
+            recipient_public_key = public_keys[0][2]
         except Exception as e:
             self.__log.error(f"Error preparing public keys: {e}")
             raise e
@@ -734,7 +651,20 @@ class Submission:
                     )
 
                 try:
-                    Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
+                    with (
+                        open(file_path, "rb") as src,
+                        open(encrypted_file_path, "wb") as f,
+                        tqdm(
+                            total=os.stat(file_path).st_size,
+                            desc="ENCRYPT ",
+                            postfix={"file": Path(file_path).name},
+                            leave=False,
+                            **TQDM_DEFAULTS,
+                        ) as pbar,
+                        TqdmObserver(src, pbar=pbar) as monitored,
+                        Crypt4GHEncryptor(monitored, recipient_public_key, None) as encryptor,
+                    ):
+                        shutil.copyfileobj(encryptor, f)
 
                     self.__log.info(f"Encryption complete for {str(file_path)}. ")
                     progress_logger.set_state(
@@ -910,7 +840,20 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
+                    with (
+                        open(encrypted_file_path, "rb") as src,
+                        open(decrypted_file_path, "wb") as f,
+                        tqdm(
+                            total=os.stat(encrypted_file_path).st_size,
+                            desc="DECRYPT ",
+                            postfix={"file": Path(encrypted_file_path).name},
+                            leave=False,
+                            **TQDM_DEFAULTS,
+                        ) as pbar,
+                        TqdmObserver(src, pbar=pbar) as monitored,
+                        Crypt4GHDecryptor(monitored, private_key) as decryptor,
+                    ):
+                        shutil.copyfileobj(decryptor, f)
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(
