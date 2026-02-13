@@ -126,7 +126,7 @@ class Crypt4GH:
 
         input_path = Path(input_path)
         output_path = Path(output_path)
-        
+
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
