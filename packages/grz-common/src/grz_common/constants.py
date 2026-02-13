@@ -1,9 +1,5 @@
 """Constants for progress bars, JSON schema validation, S3 multipart uploads, and other settings."""
 
-import logging
-
-from tqdm.auto import tqdm
-
 TQDM_BAR_FORMAT = "{desc} ▕{bar:50}▏ {n_fmt:>10}/{total_fmt:<10} ({rate_fmt:>12}, ETA: {remaining:>6}) {postfix}"
 TQDM_DEFAULTS = {
     "bar_format": TQDM_BAR_FORMAT,
@@ -14,19 +10,6 @@ TQDM_DEFAULTS = {
     "colour": "cyan",
     "ascii": "░▒█",
 }
-
-
-class TqdmLoggingHandler(logging.Handler):
-    """Logging handler that writes through tqdm to avoid progress bar corruption."""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        """Emit a log record using tqdm.write() to avoid progress bar issues."""
-        try:
-            msg = self.format(record)
-            tqdm.write(msg)
-        except Exception:
-            self.handleError(record)
-
 
 # Maximum number of parts for multipart upload
 MULTIPART_MAX_PARTS = 1000
