@@ -160,7 +160,7 @@ class S3BotoDownloadWorker:
         try:
             local_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-            self._download_with_progress(str(local_file_path), s3_object_id)
+            self._download_with_progress(str(local_file_path), s3_object_id, file_metadata)
 
             self.__log.info(f"Download complete for {str(local_file_path)}.")
             progress_logger.set_state(local_file_path, file_metadata, state=DownloadState(download_successful=True))
