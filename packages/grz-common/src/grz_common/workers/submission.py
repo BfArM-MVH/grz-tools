@@ -32,7 +32,7 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
-from ..pipeline.components import Crypt4GHEncryptor, TqdmObserver
+from ..pipeline.components import Crypt4GHEncryptor, TqdmObserver, Crypt4GHDecryptor
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.crypt import Crypt4GH
 from ..validation import UserInterruptException, run_grz_check
@@ -946,7 +946,20 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
+                    with (
+                        open(encrypted_file_path, "rb") as src,
+                        open(decrypted_file_path, "wb") as f,
+                        tqdm(
+                            total=os.stat(encrypted_file_path).st_size,
+                            desc="DECRYPT ",
+                            postfix={"file": Path(encrypted_file_path).name},
+                            leave=False,
+                            **TQDM_DEFAULTS,
+                        ) as pbar,
+                        TqdmObserver(src, pbar=pbar) as monitored,
+                        Crypt4GHDecryptor(monitored, private_key) as decryptor,
+                    ):
+                        shutil.copyfileobj(decryptor, f)
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(
