@@ -248,14 +248,16 @@ def _handle_pruefbericht(  # noqa: PLR0913
         save_path = Path(save_pruefbericht)
         redacted_data = pruefbericht.model_dump(by_alias=True, mode="json")
         redacted_data["SubmittedCase"]["tan"] = "<REDACTED>"
-        save_path.write_text(json.dumps(redacted_data, indent=2))
+        with open(save_path, "w") as f:
+            json.dump(redacted_data, f, indent=2)
         log.info(f"Saved Prüfbericht (with redacted TAN) to: {save_path}")
 
     # also save a copy to the logs directory (with redacted TAN)
     pruefbericht_log_path = log_dir / "pruefbericht.json"
     redacted_for_log = pruefbericht.model_dump(by_alias=True, mode="json")
     redacted_for_log["SubmittedCase"]["tan"] = "<REDACTED>"
-    pruefbericht_log_path.write_text(json.dumps(redacted_for_log, indent=2))
+    with open(pruefbericht_log_path, "w") as f:
+        json.dump(redacted_for_log, f, indent=2)
     log.info(f"Saved Prüfbericht copy to logs: {pruefbericht_log_path}")
 
     # submit Prüfbericht if requested
