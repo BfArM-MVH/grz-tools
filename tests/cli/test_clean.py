@@ -15,7 +15,7 @@ from grz_common.workers.submission import Submission
 from .. import mock_files
 
 
-def test_clean_and_list(temp_s3_config_file_path, remote_bucket, working_dir_path, tmp_path):
+def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
@@ -73,13 +73,13 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket, working_dir_pat
 
         assert result_clean.exit_code == 0, result_clean.output
 
-        uploaded_keys = {o.key for o in remote_bucket.objects.all()}
-        assert len(uploaded_keys) == 2
+        uploaded_keys = {o.key for o in remote_bucket_with_version.objects.all()}
+        assert len(uploaded_keys) == 3
         assert f"{submission_id}/metadata/metadata.json" in uploaded_keys
         assert f"{submission_id}/cleaned" in uploaded_keys
         assert f"{submission_id}/cleaning" not in uploaded_keys
         # ensure metadata is empty
-        assert remote_bucket.Object(f"{submission_id}/metadata/metadata.json").content_length == 0
+        assert remote_bucket_with_version.Object(f"{submission_id}/metadata/metadata.json").content_length == 0
 
         list_args = ["list", "--config-file", temp_s3_config_file_path, "--json", "--show-cleaned"]
 

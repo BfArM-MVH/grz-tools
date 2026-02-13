@@ -2,6 +2,8 @@
 
 import json
 import os
+from datetime import date
+from importlib.metadata import version
 from os import PathLike
 from pathlib import Path
 from shutil import copyfile, which
@@ -144,6 +146,48 @@ def create_large_file(content: str | bytes, output_file: str | PathLike, target_
             bytes_written = outfile.write(content)
             current_size += bytes_written
     return current_size
+
+
+#@pytest.fixture
+#def remote_bucket_with_version(remote_bucket):
+#    """Mock S3 bucket with version.json file at root."""
+#    current_version = version("grz-cli")
+
+#    # Create a valid version file with ALL required fields
+#    version_content = {
+#        "schema_version": 1,
+#        "minimal_version": current_version,
+#        "recommended_version": current_version,
+#        "max_version": current_version,
+#        "enforced_from": date.today().isoformat(),
+#    }
+
+#    remote_bucket.put_object(Key="version.json", Body=json.dumps(version_content))
+#    return remote_bucket
+
+@pytest.fixture
+def remote_bucket_with_version(remote_bucket):
+    """Mock S3 bucket with version.json file at root."""
+    current_version = version("grz-cli")
+
+    version_content = {
+        "schema_version": 1,
+        "grzcli_version": [
+            {
+                "minimal_version": current_version,
+                "recommended_version": current_version,
+                "max_version": current_version,
+                "enforced_from": date.today().isoformat(),
+            }
+        ],
+    }
+
+    remote_bucket.put_object(
+        Key="version.json",
+        Body=json.dumps(version_content),
+    )
+
+    return remote_bucket
 
 
 @pytest.fixture

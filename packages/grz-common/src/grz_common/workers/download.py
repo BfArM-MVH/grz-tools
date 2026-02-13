@@ -9,6 +9,7 @@ import logging
 import math
 import re
 from collections import OrderedDict
+from collections.abc import Iterable
 from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
@@ -251,10 +252,14 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
     s3_client = init_s3_client(s3_options)
     paginator = s3_client.get_paginator("list_objects_v2")
 
-    objects = itertools.chain.from_iterable(
+    objects: Iterable[dict[str, object]] = itertools.chain.from_iterable(
         page["Contents"] for page in paginator.paginate(Bucket=s3_options.bucket) if "Contents" in page
     )
+
+    # Filter out non-submission objects (like version.json)
+    objects = filter(lambda obj: "/" in obj["Key"], objects)
     objects_sorted = sorted(objects, key=itemgetter("Key"))
+
     submission2objects = {
         key: tuple(group) for key, group in itertools.groupby(objects_sorted, key=lambda o: o["Key"].split("/")[0])
     }
