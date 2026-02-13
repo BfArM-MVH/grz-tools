@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import shutil
 import subprocess
 import typing
 from collections.abc import Generator
@@ -26,8 +28,11 @@ from grz_pydantic_models.submission.metadata.v1 import (
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import ValidationError
+from tqdm.auto import tqdm
 
+from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
+from ..pipeline.components import Crypt4GHEncryptor, TqdmObserver
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.crypt import Crypt4GH
 from ..validation import UserInterruptException, run_grz_check
@@ -707,6 +712,7 @@ class Submission:
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
             raise FileNotFoundError(msg)
+        # TODO parse and use submitter_private_key_path if available
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -719,6 +725,7 @@ class Submission:
 
         try:
             public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
+            recipient_public_key = public_keys[0][2]
         except Exception as e:
             self.__log.error(f"Error preparing public keys: {e}")
             raise e
@@ -750,7 +757,20 @@ class Submission:
                     )
 
                 try:
-                    Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
+                    with (
+                        open(file_path, "rb") as src,
+                        open(encrypted_file_path, "wb") as f,
+                        tqdm(
+                            total=os.stat(file_path).st_size,
+                            desc="ENCRYPT ",
+                            postfix={"file": Path(file_path).name},
+                            leave=False,
+                            **TQDM_DEFAULTS,
+                        ) as pbar,
+                        TqdmObserver(src, pbar=pbar) as monitored,
+                        Crypt4GHEncryptor(monitored, recipient_public_key, None) as encryptor,
+                    ):
+                        shutil.copyfileobj(encryptor, f)
 
                     self.__log.info(f"Encryption complete for {str(file_path)}. ")
                     progress_logger.set_state(
