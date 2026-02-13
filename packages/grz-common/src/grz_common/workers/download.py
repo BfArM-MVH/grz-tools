@@ -7,6 +7,7 @@ import enum
 import itertools
 import logging
 import re
+import shutil
 from collections import OrderedDict
 from operator import attrgetter, itemgetter
 from os import PathLike
@@ -16,8 +17,11 @@ from typing import TYPE_CHECKING
 import botocore.handlers
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import BaseModel
+from tqdm.auto import tqdm
 
+from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
+from ..pipeline.components import S3Downloader, TqdmObserver
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
 
@@ -116,24 +120,26 @@ class S3BotoDownloadWorker:
             self.__log.error("Download failed for metadata '%s'", metadata_key)
             raise e
 
-    def _download_with_progress(self, local_file_path: str, s3_object_id: str):
+    def _download_with_progress(self, local_file_path: str, s3_object_id: str, file_metadata: SubmissionFileMetadata):
         """
         Download a single file from S3 to local storage using streaming pipeline.
 
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
         """
-        from ..pipeline.operations import DownloadOperation  # noqa: PLC0415
-
-        download_op = DownloadOperation(
-            self._s3_client,
-            self._s3_options.bucket,
-        )
-        download_op.to_file(
-            s3_object_id,
-            Path(local_file_path),
-            show_progress=True,
-        )
+        with (
+            S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) as downloader,
+            tqdm(
+                total=file_metadata.file_size_in_bytes,
+                desc="DOWNLOAD",
+                postfix={"file": local_file_path},
+                leave=False,
+                **TQDM_DEFAULTS,
+            ) as pbar,
+            TqdmObserver(downloader, pbar=pbar) as monitored,
+            open(local_file_path, "wb") as f,
+        ):
+            shutil.copyfileobj(monitored, f)
 
     def download_file(
         self,
