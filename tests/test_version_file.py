@@ -1,38 +1,44 @@
-"""Tests for VersionFile schema and validation."""
-
-from datetime import date
+"""Tests for VersionFile container behavior."""
 
 import pytest
-from grz_common.models.version import VersionFile
-from packaging.version import Version
+from grz_common.models.version import VersionFile, VersionInfo
 
-
-def test_full_schema_parsing():
+def test_versionfile_accepts_policy_list():
     vf = VersionFile(
-        minimal_version="1.6.0",
-        recommended_version="1.6",
-        max_version="1.6.0",
-        enforced_from="2026-03-01",
+        grzcli_version=[
+            {
+                "minimal_version": "1.6.0",
+                "recommended_version": "1.6",
+                "max_version": "1.6.0",
+                "enforced_from": "2026-03-01",
+            }
+        ]
     )
 
-    assert vf.minimal_version == Version("1.6.0")
-    assert vf.recommended_version == Version("1.6")
-    assert vf.max_version == Version("1.6.0")
-    assert vf.enforced_from == date(2026, 3, 1)
+    assert len(vf.grzcli_version) == 1
+    assert isinstance(vf.grzcli_version[0], VersionInfo)
 
-
-def test_recommended_cannot_be_lower_than_minimal():
+def test_versionfile_requires_at_least_one_policy():
     with pytest.raises(ValueError):
-        VersionFile(
-            minimal_version="1.5.0",
-            recommended_version="1.4.0",
-        )
+        VersionFile(grzcli_version=[])
 
+def test_multiple_policies_parsed():
+    vf = VersionFile(
+        grzcli_version=[
+            {
+                "minimal_version": "1.6.0",
+                "recommended_version": "1.6",
+                "max_version": "1.6.0",
+                "enforced_from": "2026-03-01",
+            },
+            {
+                "minimal_version": "1.7.0",
+                "recommended_version": "1.7",
+                "max_version": "1.7.0",
+                "enforced_from": "2026-06-01",
+            },
+        ]
+    )
 
-def test_max_cannot_be_lower_than_recommended():
-    with pytest.raises(ValueError):
-        VersionFile(
-            minimal_version="1.5.0",
-            recommended_version="1.5.1",
-            max_version="1.5.0",
-        )
+    assert len(vf.grzcli_version) == 2
+
