@@ -15,7 +15,6 @@ def mock_submission():
     # bypass __init__ to avoid loading metadata file from disk
     submission = Submission.__new__(Submission)
     submission.files_dir = Path(".")
-    submission._validator_op = ValidateOperation()
 
     return submission
 
