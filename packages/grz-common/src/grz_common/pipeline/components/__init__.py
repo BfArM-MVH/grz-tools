@@ -96,3 +96,43 @@ class TransformStream(StreamWrapper, metaclass=ABCMeta):
         ret = self._output_buffer[:limit]
         del self._output_buffer[:limit]
         return bytes(ret)
+
+
+class ValidatingStream(ObserverStream, metaclass=ABCMeta):
+    """
+    Base class for streams that perform validation.
+    Automatically runs validate() when the context manager exits.
+    """
+
+    @abstractmethod
+    def validate(self) -> None:
+        """
+        Run final validity checks.
+        Should raise an exception if validation fails.
+        """
+        pass
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {}
+
+    def close(self):
+        """
+        Trigger validation on close if it hasn't happened yet.
+        """
+        if not self.closed:
+            try:
+                self.validate()
+            except Exception:
+                # if validation fails, we still want to try closing the underlying stream,
+                # but we must re-raise the validation error.
+                super().close()
+                raise
+            super().close()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # if an exception already occurred in the block, we don't want to mask it
+        # with a validation error unless we want to enforce validation even on failure.
+        if exc_type is None:
+            self.validate()
+        super().__exit__(exc_type, exc_val, exc_tb)
