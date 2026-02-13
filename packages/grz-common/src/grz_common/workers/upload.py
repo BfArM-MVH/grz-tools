@@ -5,6 +5,7 @@ from __future__ import annotations
 import abc
 import json
 import logging
+import os
 import re
 import shutil
 from importlib.metadata import version
@@ -14,8 +15,11 @@ from typing import TYPE_CHECKING, override
 
 import botocore.handlers
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
+from tqdm.auto import tqdm
 
+from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
+from ..pipeline.components import S3MultipartUploader, TqdmObserver
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
 
@@ -102,20 +106,22 @@ class S3BotoUploadWorker(UploadWorker):
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
         """
-        from ..pipeline.operations import UploadOperation  # noqa: PLC0415
-
         self.__log.info(f"Uploading {local_file_path} to {s3_object_id}...")
+        file_size = os.stat(local_file_path).st_size
 
-        upload_op = UploadOperation(
-            self._s3_client,
-            self._s3_options.bucket,
-            max_concurrent_uploads=self._threads,
-        )
-        upload_op.from_file(
-            s3_object_id,
-            Path(local_file_path),
-            show_progress=True,
-        )
+        with (
+            S3MultipartUploader(self._s3_client, self._s3_options.bucket, s3_object_id) as uploader,
+            tqdm(
+                total=file_size,
+                desc="UPLOAD  ",
+                postfix={"file": local_file_path},
+                leave=False,
+                **TQDM_DEFAULTS,
+            ) as pbar,
+            open(local_file_path, "rb") as f,
+            TqdmObserver(f, pbar=pbar) as monitored_source,
+        ):
+            shutil.copyfileobj(monitored_source, uploader)
 
     def _remote_id_exists(self, s3_object_id: str) -> bool:
         """
