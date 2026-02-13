@@ -106,7 +106,7 @@ class FastqValidator(ValidatingStream):
                 f"Seq len ({self._current_seq_len}) != Qual len (inconsistent)"
             )
 
-    def _process_chunk_python(self, chunk: bytes) -> None:
+    def _process_chunk_python(self, chunk: bytes) -> None:  # noqa: C901
         start = 0
         n_len = len(chunk)
 
@@ -186,7 +186,7 @@ class FastqValidator(ValidatingStream):
 if HAS_NUMBA:
 
     @jit(nopython=True, nogil=True, cache=True)
-    def _validate_chunk_numba(chunk_data, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte):  # noqa: C901
+    def _validate_chunk_numba(chunk_data, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte):  # noqa: C901, PLR0913
         """
         Validates a single chunk of FASTQ data using Numba.
 
@@ -247,7 +247,7 @@ class BamValidator(ValidatingStream):
 
     def __init__(self, source: io.BufferedIOBase):
         super().__init__(source)
-        self._temp = tempfile.NamedTemporaryFile(suffix=".bam", delete=False)
+        self._temp = tempfile.NamedTemporaryFile(suffix=".bam", delete=False)  # noqa: SIM115
         self._path = self._temp.name
 
     def observe(self, chunk: bytes) -> None:

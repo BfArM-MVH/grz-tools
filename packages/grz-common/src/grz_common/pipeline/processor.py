@@ -98,7 +98,7 @@ class SubmissionProcessor:
         total_bytes = sum(f.file_size_in_bytes for f in files_map.values())
 
         self.partner_map.clear()
-        for (_donor, _lab_datum, pairs, _thresholds) in submission_metadata.iter_paired_end_fastqs():
+        for _donor, _lab_datum, pairs, _thresholds in submission_metadata.iter_paired_end_fastqs():
             for fq1, fq2 in pairs:
                 key1 = fq1.file_path
                 key2 = fq2.file_path
