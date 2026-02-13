@@ -59,23 +59,31 @@ class Crypt4GH:
         :param public_keys: Prepared Crypt4GH keys for encryption
         :param show_progress: Whether to show progress bar
         """
+        input_path = Path(input_path)
+        output_path = Path(output_path)
+
         from ..pipeline.components.crypt4gh import Crypt4GHEncryptor  # noqa: PLC0415
 
         # extract public key and signing key from prepared keys tuple
         _, signing_key, public_key = public_keys[0]
 
-        with open(input_path, "rb") as in_fd, open(output_path, "wb") as out_fd:
-            if show_progress:
-                in_fd = TqdmObserver(
-                    in_fd,
-                    pbar=tqdm.tqdm(
-                        total=input_path.stat().st_size,
-                        desc=f"Encrypting {input_path.name}: ",
-                        unit="B",
-                        unit_scale=True,
-                    ),
+        with (
+            open(input_path, "rb") as in_fd,
+            open(output_path, "wb") as out_fd,
+            (
+                tqdm.tqdm(
+                    total=input_path.stat().st_size,
+                    desc="ENCRYPT",
+                    postfix=input_path.name,
+                    unit="B",
+                    unit_scale=True,
                 )
-
+                if show_progress
+                else None
+            ) as pbar,
+        ):
+            if pbar:
+                in_fd = TqdmObserver(in_fd, pbar=pbar)
             decrypted_stream = Crypt4GHEncryptor(in_fd, public_key, signing_key)
             shutil.copyfileobj(decrypted_stream, out_fd)
 
@@ -116,17 +124,23 @@ class Crypt4GH:
         """
         from ..pipeline.components.crypt4gh import Crypt4GHDecryptor  # noqa: PLC0415
 
-        with open(input_path, "rb") as in_fd, open(output_path, "wb") as out_fd:
-            if show_progress:
-                in_fd = TqdmObserver(
-                    in_fd,
-                    pbar=tqdm.tqdm(
-                        total=input_path.stat().st_size,
-                        desc=f"Decrypting {input_path.name}: ",
-                        unit="B",
-                        unit_scale=True,
-                    ),
+        with (
+            open(input_path, "rb") as in_fd,
+            open(output_path, "wb") as out_fd,
+            (
+                tqdm.tqdm(
+                    total=input_path.stat().st_size,
+                    desc="DECRYPT",
+                    postfix=input_path.name,
+                    unit="B",
+                    unit_scale=True,
                 )
+                if show_progress
+                else None
+            ) as pbar,
+        ):
+            if pbar:
+                in_fd = TqdmObserver(in_fd, pbar=pbar)
 
             decrypted_stream = Crypt4GHDecryptor(in_fd, private_key)
             shutil.copyfileobj(decrypted_stream, out_fd)
