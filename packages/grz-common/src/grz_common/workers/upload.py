@@ -19,7 +19,8 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
-from ..pipeline.components import S3MultipartUploader, TqdmObserver
+from ..pipeline.components import TqdmObserver
+from ..pipeline.components.s3 import S3MultipartUploader
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
 

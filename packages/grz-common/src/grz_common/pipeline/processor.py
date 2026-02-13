@@ -16,16 +16,12 @@ from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, ProcessingState
 from ..transfer import init_s3_client
 from .components import (
-    Crypt4GHDecryptor,
-    Crypt4GHEncryptor,
-    MeasuringStream,
-    MetricsRegistry,
-    S3Downloader,
-    S3MultipartUploader,
     TqdmObserver,
-    ValidatorObserver,
-    calculate_s3_part_size,
 )
+from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
+from .components.perf import MeasuringStream, MetricsRegistry
+from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
+from .components.validation import ValidatorObserver
 from .context import ConsistencyValidator, SubmissionContext
 
 log = logging.getLogger(__name__)
