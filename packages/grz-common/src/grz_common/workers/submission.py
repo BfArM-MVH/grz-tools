@@ -606,7 +606,8 @@ class Submission:
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
             raise FileNotFoundError(msg)
-        # TODO parse and use submitter_private_key_path if available
+        else:
+            submitter_private_key = Crypt4GH.retrieve_private_key(submitter_private_key_path)
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -662,7 +663,7 @@ class Submission:
                             **TQDM_DEFAULTS,
                         ) as pbar,
                         TqdmObserver(src, pbar=pbar) as monitored,
-                        Crypt4GHEncryptor(monitored, recipient_public_key, None) as encryptor,
+                        Crypt4GHEncryptor(monitored, recipient_public_key, submitter_private_key) as encryptor,
                     ):
                         shutil.copyfileobj(encryptor, f)
 
