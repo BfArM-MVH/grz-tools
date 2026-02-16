@@ -5,11 +5,12 @@ from contextlib import ExitStack
 from datetime import date
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
 from grzctl.models.config import ProcessConfig
+from pydantic import AnyHttpUrl
 from tqdm.auto import tqdm
 
 from ..models.s3 import S3Options
@@ -25,6 +26,9 @@ from .components.validation import ValidatorObserver
 from .context import ConsistencyValidator, SubmissionContext
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from types_boto3_s3.client import S3Client
 
 
 class SubmissionProcessor:
@@ -61,7 +65,7 @@ class SubmissionProcessor:
         log.debug(f"Configuring S3 client pool size: {self.pool_size}")
 
         self.source_s3 = init_s3_client(s3_options=source_s3_options, max_pool_connections=self.pool_size)
-        self._target_s3_map = {}
+        self._target_s3_map: dict[tuple[AnyHttpUrl, str], S3Client] = {}
 
         self.submission_id: str | None = None
         self.target_s3: Any = None
@@ -108,7 +112,7 @@ class SubmissionProcessor:
         log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
 
         with (
-            tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global,
+            tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global,  # type: ignore[call-overload]
             ThreadPoolExecutor(max_workers=self.threads) as pool,
         ):
             futures = [
@@ -155,7 +159,7 @@ class SubmissionProcessor:
             return
 
         try:
-            with tqdm(
+            with tqdm(  # type: ignore[call-overload]
                 total=file_meta.file_size_in_bytes,
                 desc="Processing",
                 postfix={"file": file_name},
@@ -188,6 +192,11 @@ class SubmissionProcessor:
             )
 
     def _run_pipeline(self, file_meta: Any, pbar: Any):
+        if not self.target_public_key:
+            raise RuntimeError("Target public key not set.")
+        if not self.target_bucket:
+            raise RuntimeError("Target bucket not set.")
+
         src_key = f"{self.submission_id}/files/{file_meta.file_path}.c4gh"
         dest_key = f"{self.submission_id}/files/{file_meta.encrypted_file_path()}"
 
