@@ -173,40 +173,41 @@ class Observer(Pipeable):
             self.sink.close()
 
 
-class tee(Transformer):  # noqa: N801
+class Tee(Stream):
     """Branches the stream to an Observer in a background thread."""
 
-    def __init__(self, observer: Observer, max_queue_size: int = 16):
+    def __init__(self, observer: Observer, max_queue_size: int = 128, threaded: bool = False):
         self.observer = observer
         self.max_queue_size = max_queue_size
+        self._threaded = threaded
         self._queue: queue.Queue | None = None
         self._thread: threading.Thread | None = None
         self._exc: Exception | None = None
-
         super().__init__(None)
 
     @Stream.source.setter
     def source(self, value):
         """Overrides the source setter to initiate the background worker thread."""
         self._source = value
-
-        # Only start the background infrastructure if we have a valid source.
-        if value is not None:
+        if value is not None and self._threaded:
             self._queue = queue.Queue(maxsize=self.max_queue_size)
             self._thread = threading.Thread(target=self._worker, daemon=True)
             self._thread.start()
 
-    def _fill_buffer(self) -> bytes:
-        if self._exc:
-            raise self._exc
-        return self.source.read(READ_CHUNK_SIZE)
-
     def read(self, size: int | None = -1) -> bytes:
-        chunk = super().read(size)
-        if chunk and self._queue:
+        chunk = self._source.read(size)
+        if chunk:
             if self._exc:
                 raise self._exc
-            self._queue.put(chunk)
+
+            if self._threaded:
+                self._queue.put(chunk, block=True)
+            else:
+                try:
+                    self.observer.write(chunk)
+                except Exception as e:
+                    self._exc = e
+                    raise
         return chunk
 
     def _worker(self):
@@ -220,17 +221,15 @@ class tee(Transformer):  # noqa: N801
             self.observer.close()
         except Exception as e:
             self._exc = e
-        finally:
-            # Ensure the queue task is marked as done even on error
-            # to prevent join() from hanging if applicable.
-            pass
 
     def close(self):
-        if self._thread and self._thread.is_alive() and self._queue:
-            self._queue.put(None)
-            self._thread.join()
+        if self._threaded:
+            if self._thread and self._thread.is_alive():
+                self._queue.put(None)
+                self._thread.join()
+        else:
+            self.observer.close()
 
-        # Propagate background errors (e.g., ValueError from Validator) to the main thread
         if self._exc:
             raise self._exc
         super().close()
