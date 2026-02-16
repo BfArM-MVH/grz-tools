@@ -296,6 +296,7 @@ class BamValidator(ObserverWithMetrics):
 
         finally:
             self._cleanup()
+            super().close()
 
     def _cleanup(self):
         """Helper to ensure file removal."""
