@@ -84,6 +84,6 @@ def test_db(
             "latest_change_request": {},
         }
     ]
-    actual_output = json.loads(result.output)
+    actual_output = json.loads(result.stdout)
     actual_output[0]["latest_state"]["timestamp"] = "MASKED"
     assert actual_output == expected_output
