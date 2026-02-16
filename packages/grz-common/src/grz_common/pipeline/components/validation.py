@@ -29,7 +29,7 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 
-class ChecksumVerifier(ValidatingStream):
+class ChecksumValidator(ValidatingStream):
     def __init__(self, source: io.BufferedIOBase, algorithm: str = "sha256", expected_checksum: str | None = None):
         super().__init__(source)
         self.expected = expected_checksum
@@ -320,7 +320,7 @@ class ValidatorObserver(ValidatingStream):
     """
 
     def __init__(self, source: io.BufferedIOBase, file_type: FileType, expected_checksum: str | None = None, **kwargs):
-        self._hasher = ChecksumVerifier(source, expected_checksum=expected_checksum)
+        self._hasher = ChecksumValidator(source, expected_checksum=expected_checksum)
         self._format_validator: ValidatingStream | None = None
 
         if file_type == FileType.fastq:
