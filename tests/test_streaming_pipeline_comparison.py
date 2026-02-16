@@ -13,11 +13,8 @@ import grz_cli.cli
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
-from grz_common.pipeline import (
-    Crypt4GHDecryptor,
-    PipelineContext,
-    RawChecksumValidator,
-)
+from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor
+from grz_common.pipeline.components.validation import ChecksumValidator
 from grz_common.utils.checksums import calculate_sha256
 
 # Path to test fixtures
@@ -151,37 +148,20 @@ class TestManualCliVsStreamingPipeline:
         decrypt_key: bytes,
     ) -> str:
         """
-        Decrypt a file using the streaming pipeline Crypt4GHDecryptor.
-
-        This is the same decryptor used internally by grzctl process.
+        Decrypt a file using the streaming pipeline Crypt4GHDecryptor with ChecksumVerifier.
 
         Returns the SHA256 checksum of the decrypted content.
         """
-        context = PipelineContext()
-        decryptor = Crypt4GHDecryptor(decrypt_key)
-        checksum_validator = RawChecksumValidator()
-
-        decryptor.initialize(context)
-        checksum_validator.initialize(context)
-
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(encrypted_path, "rb") as infile, open(output_path, "wb") as outfile:
-            while chunk := infile.read(65536):
-                decrypted = decryptor.process(chunk)
-                if decrypted:
-                    checksum_validator.observe(decrypted)
-                    outfile.write(decrypted)
-
-            final = decryptor.flush()
-            if final:
-                checksum_validator.observe(final)
-                outfile.write(final)
-
-        decryptor.finalize()
-        checksum_validator.finalize()
-
-        return checksum_validator.calculated_checksum
+        with open(encrypted_path, "rb") as infile:
+            with Crypt4GHDecryptor(infile, decrypt_key) as decryptor:
+                with ChecksumValidator(decryptor) as checksum:
+                    with open(output_path, "wb") as outfile:
+                        while data := checksum.read(65536):
+                            outfile.write(data)
+                    checksum.validate()
+                    return checksum.metrics["checksum"]
 
     def test_decrypt_produces_same_checksums(
         self,
@@ -318,27 +298,13 @@ class TestStreamingPipelineChunkSizes:
         checksums = []
 
         for chunk_size in chunk_sizes:
-            context = PipelineContext()
-            decryptor = Crypt4GHDecryptor(grz_private_key)
-            checksum_validator = RawChecksumValidator()
-
-            decryptor.initialize(context)
-            checksum_validator.initialize(context)
-
-            with open(test_file, "rb") as f:
-                while chunk := f.read(chunk_size):
-                    decrypted = decryptor.process(chunk)
-                    if decrypted:
-                        checksum_validator.observe(decrypted)
-
-                final = decryptor.flush()
-                if final:
-                    checksum_validator.observe(final)
-
-            decryptor.finalize()
-            checksum_validator.finalize()
-
-            checksums.append(checksum_validator.calculated_checksum)
+            with open(test_file, "rb") as infile:
+                with Crypt4GHDecryptor(infile, grz_private_key) as decryptor:
+                    with ChecksumValidator(decryptor) as checksum:
+                        while checksum.read(chunk_size):
+                            pass
+                        checksum.validate()
+                        checksums.append(checksum.metrics["checksum"])
 
         # All checksums should be identical
         assert all(cs == checksums[0] for cs in checksums), (
