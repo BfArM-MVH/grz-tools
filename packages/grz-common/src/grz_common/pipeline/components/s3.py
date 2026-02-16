@@ -5,7 +5,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from . import Stream, Observer
+from . import Observer, Stream
 
 log = logging.getLogger(__name__)
 

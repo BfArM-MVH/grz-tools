@@ -30,7 +30,7 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
-from ..pipeline.components import DevNullSink, Stream, TqdmObserver, tee
+from ..pipeline.components import DevNullSink, ObserverWithMetrics, Stream, Tee, TqdmObserver
 from ..pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from ..pipeline.components.validation import BamValidator, ChecksumValidator, FastqValidator
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
@@ -522,7 +522,7 @@ class Submission:
                             state["validation_passed"] = False
                             sequence_logger.set_state(path, meta, state)
 
-    def _validate_files_fallback(
+    def _validate_files_fallback(  # noqa: C901
         self,
         checksum_logger: FileProgressLogger[ValidationState],
         read_counts: dict[Any, Any],
@@ -550,16 +550,16 @@ class Submission:
                     errors.append(f"File not found: {local_path}")
                 else:
                     checksum_val = ChecksumValidator(expected_checksum=meta.file_checksum)
-                    format_val = None
+                    format_val: ObserverWithMetrics | None = None
                     if meta.file_type == FileType.fastq:
                         format_val = FastqValidator(mean_read_length_threshold=threshold_map.get(meta.file_path))
                     elif meta.file_type == FileType.bam:
                         format_val = BamValidator()
 
                     with open(local_path, "rb") as f, DevNullSink() as null_sink:
-                        pipeline = Stream(f) | tee(checksum_val)
+                        pipeline = Stream(f) | Tee(checksum_val)
                         if format_val:
-                            pipeline = pipeline | tee(format_val)
+                            pipeline = pipeline | Tee(format_val)
 
                         pipeline >> null_sink
 
@@ -672,7 +672,7 @@ class Submission:
                     ):
                         pipeline = (
                             Stream(src)
-                            | tee(TqdmObserver(pbar))
+                            | Tee(TqdmObserver(pbar))
                             | Crypt4GHEncryptor(
                                 recipient_pubkey=recipient_public_key, sender_privkey=submitter_private_key
                             )
@@ -864,7 +864,7 @@ class EncryptedSubmission:
                             **TQDM_DEFAULTS,
                         ) as pbar,
                     ):
-                        pipeline = Stream(src) | tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
+                        pipeline = Stream(src) | Tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
                         pipeline >> f
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")

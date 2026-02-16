@@ -7,7 +7,7 @@ from typing import Any
 
 import pysam
 
-from . import Observer
+from . import ObserverWithMetrics
 
 try:
     from isal import isal_zlib as zlib  # type: ignore[import-not-found]
@@ -15,19 +15,17 @@ except ImportError:
     import zlib
 
 try:
-    import numpy as np
-    from numba import jit
+    from numba import jit  # type: ignore[import-not-found]
 
     HAS_NUMBA = True
 except ImportError:
     HAS_NUMBA = False
-    np = None
     jit = None
 
 log = logging.getLogger(__name__)
 
 
-class ChecksumValidator(Observer):
+class ChecksumValidator(ObserverWithMetrics):
     """SHA256 Checksum Observer."""
 
     def __init__(self, algorithm: str = "sha256", expected_checksum: str | None = None):
@@ -51,7 +49,7 @@ class ChecksumValidator(Observer):
         return {"checksum": self._hasher.hexdigest(), "size": self._bytes_seen}
 
 
-class FastqValidator(Observer):
+class FastqValidator(ObserverWithMetrics):
     """Validates a decompressed FASTQ stream."""
 
     def __init__(self, mean_read_length_threshold: float | None = None):
@@ -79,8 +77,6 @@ class FastqValidator(Observer):
             raise ValueError(f"FASTQ Validator: GZIP error: {e}") from e
 
     def _process_chunk_numba(self, chunk: bytes) -> None:
-        chunk_arr = np.frombuffer(chunk, dtype=np.uint8)
-
         (
             status,
             self._line_state,
@@ -90,7 +86,7 @@ class FastqValidator(Observer):
             self._current_line_len,
             self._last_chunk_byte,
         ) = _validate_chunk_numba(
-            chunk_arr,
+            chunk,
             self._line_state,
             self._read_count,
             self._total_read_len,
@@ -241,7 +237,7 @@ if HAS_NUMBA:
         return 0, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte
 
 
-class BamValidator(Observer):
+class BamValidator(ObserverWithMetrics):
     """
     Validates a BAM stream.
     Writes to a temp file because pysam requires random access.

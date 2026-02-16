@@ -13,8 +13,7 @@ import grz_cli.cli
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
-
-from grz_common.pipeline.components import Stream, tee
+from grz_common.pipeline.components import Stream, Tee
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor
 from grz_common.pipeline.components.validation import ChecksumValidator
 from grz_common.utils.checksums import calculate_sha256
@@ -158,7 +157,7 @@ class TestManualCliVsStreamingPipeline:
 
         checksum = ChecksumValidator()
         with open(encrypted_path, "rb") as infile, open(output_path, "wb") as outfile:
-            (Stream(infile) | Crypt4GHDecryptor(private_key=decrypt_key) | tee(checksum)) >> outfile
+            (Stream(infile) | Crypt4GHDecryptor(private_key=decrypt_key) | Tee(checksum)) >> outfile
 
         return checksum.metrics["checksum"]
 
@@ -300,7 +299,7 @@ class TestStreamingPipelineChunkSizes:
             checksum_val = ChecksumValidator()
 
             with open(test_file, "rb") as infile:
-                pipeline = Stream(infile) | Crypt4GHDecryptor(private_key=grz_private_key) | tee(checksum_val)
+                pipeline = Stream(infile) | Crypt4GHDecryptor(private_key=grz_private_key) | Tee(checksum_val)
 
                 with pipeline:
                     while pipeline.read(chunk_size):
