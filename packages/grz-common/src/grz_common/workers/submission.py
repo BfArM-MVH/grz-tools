@@ -493,7 +493,7 @@ class Submission:
                 threshold_map[f.file_path] = thresholds.mean_read_length
 
         # validate files, including fastq read counts
-        read_counts = {}
+        read_counts: dict[Any, Any] = {}
         self._validate_files_fallback(checksum_logger, read_counts, sequence_logger, threshold_map)
         self._validate_paired_end_readcounts(read_counts, sequence_logger)
 
