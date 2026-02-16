@@ -143,7 +143,7 @@ def process(  # noqa: PLR0913
     ):
         processor.run(submission_metadata)
 
-    # TODO
+    # TODO: have a pruefbericht function that doesn't need an EncryptedSubmission instance?
     encrypted_submission = EncryptedSubmission(
         metadata_dir=metadata_dir,
         encrypted_files_dir=encrypted_files_dir,
