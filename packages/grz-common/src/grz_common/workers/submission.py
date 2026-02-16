@@ -654,7 +654,7 @@ class Submission:
                     with (
                         open(file_path, "rb") as src,
                         open(encrypted_file_path, "wb") as f,
-                        tqdm(
+                        tqdm(  # type: ignore[call-overload]
                             total=os.stat(file_path).st_size,
                             desc="ENCRYPT ",
                             postfix={"file": Path(file_path).name},
@@ -843,7 +843,7 @@ class EncryptedSubmission:
                     with (
                         open(encrypted_file_path, "rb") as src,
                         open(decrypted_file_path, "wb") as f,
-                        tqdm(
+                        tqdm(  # type: ignore[call-overload]
                             total=os.stat(encrypted_file_path).st_size,
                             desc="DECRYPT ",
                             postfix={"file": Path(encrypted_file_path).name},
