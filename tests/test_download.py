@@ -1,6 +1,7 @@
 """Tests for the download module"""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from grz_common.utils.checksums import calculate_sha256
@@ -50,13 +51,18 @@ def test_boto_download(
         status_file_path=temp_download_log_file_path,
     )
 
+    mock_meta = MagicMock()
+
     # Execute download
     local_file_path = files_dir / "large_test_file.fastq"
+    mock_meta.file_size_in_bytes = 1000
     s3_object_id = f"{submission_id}/large_test_file.fastq"
-    download_worker._download_with_progress(str(local_file_path), s3_object_id)
+    download_worker._download_with_progress(str(local_file_path), s3_object_id, mock_meta)
+
     local_file_path = files_dir / "small_test_file.txt"
+    mock_meta.file_size_in_bytes = 100
     s3_object_id = f"{submission_id}/small_test_file.txt"
-    download_worker._download_with_progress(str(local_file_path), s3_object_id)
+    download_worker._download_with_progress(str(local_file_path), s3_object_id, mock_meta)
 
     # Assert that the files have been downloaded correctly
     assert (files_dir / "large_test_file.fastq").exists(), "Fastq file was not downloaded."

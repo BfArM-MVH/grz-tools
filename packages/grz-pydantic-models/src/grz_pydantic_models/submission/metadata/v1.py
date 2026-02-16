@@ -11,7 +11,7 @@ from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import (
     AfterValidator,
@@ -1090,6 +1090,51 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
     def consents_to_research(self, date: date) -> bool:
         return all(donor.consents_to_research(date) for donor in self.donors)
+
+    def create_redaction_patterns(self) -> list[tuple[str, str]]:
+        """
+        Create redaction patterns for tanG and localCaseId from this metadata.
+
+        Returns patterns for sensitive information that should be redacted
+        before archiving logs.
+
+        :returns: List of (pattern, replacement) tuples for log redaction
+        """
+        patterns: list[tuple[str, str]] = []
+        # only add tanG if it's not already redacted (all zeros)
+        if self.submission.tan_g and self.submission.tan_g != REDACTED_TAN:
+            patterns.append((self.submission.tan_g, "REDACTED_TAN_G"))
+        if self.submission.local_case_id:
+            patterns.append((self.submission.local_case_id, "REDACTED_LOCAL_CASE_ID"))
+        return patterns
+
+    def to_redacted_dict(self) -> dict[str, Any]:
+        """
+        Create a redacted dictionary representation suitable for archiving.
+
+        Redacts:
+        - tanG (replaced with REDACTED_TAN constant)
+        - localCaseId (replaced with empty string)
+        - Index donor pseudonym (replaced with "index")
+
+        Also adds archive metadata indicating consent status.
+
+        :param archive_consented: Whether submission is going to consented archive
+        :returns: Redacted metadata dictionary
+        """
+        # get the base dictionary representation
+        metadata_dict = self.model_dump(mode="json", by_alias=True)
+
+        # redact sensitive fields
+        metadata_dict["submission"]["tanG"] = REDACTED_TAN
+        metadata_dict["submission"]["localCaseId"] = ""
+
+        # redact index donor pseudonym
+        for donor in metadata_dict.get("donors", []):
+            if donor.get("relation") == "index":
+                donor["donorPseudonym"] = "index"
+
+        return metadata_dict
 
     @field_validator("donors", mode="after")
     @classmethod
