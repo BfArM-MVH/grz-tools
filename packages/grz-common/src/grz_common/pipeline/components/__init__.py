@@ -268,3 +268,6 @@ class DevNullSink(Writable, io.BufferedIOBase):
 
     def write(self, data) -> int:
         return len(data)
+
+    def close(self):
+        super(IOBase, self).close()
