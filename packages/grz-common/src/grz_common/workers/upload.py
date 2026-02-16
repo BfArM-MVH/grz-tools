@@ -19,7 +19,7 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
-from ..pipeline.components import TqdmObserver
+from ..pipeline.components import Stream, TqdmObserver, tee
 from ..pipeline.components.s3 import S3MultipartUploader
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
@@ -112,18 +112,15 @@ class S3BotoUploadWorker(UploadWorker):
         file_size = os.stat(local_file_path).st_size
 
         with (
-            S3MultipartUploader(self._s3_client, self._s3_options.bucket, s3_object_id) as uploader,
-            tqdm(  # type: ignore[call-overload]
-                total=file_size,
-                desc="UPLOAD  ",
-                postfix={"file": local_file_path},
-                leave=False,
-                **TQDM_DEFAULTS,
+            tqdm(
+                total=file_size, desc="UPLOAD  ", postfix={"file": local_file_path}, leave=False, **TQDM_DEFAULTS
             ) as pbar,
             open(local_file_path, "rb") as f,
-            TqdmObserver(f, pbar=pbar) as monitored_source,
         ):
-            shutil.copyfileobj(monitored_source, uploader)
+            pipeline = Stream(f) | tee(TqdmObserver(pbar))
+            uploader = S3MultipartUploader(self._s3_client, self._s3_options.bucket, s3_object_id)
+
+            pipeline >> uploader
 
     def _remote_id_exists(self, s3_object_id: str) -> bool:
         """
@@ -224,10 +221,6 @@ class S3BotoUploadWorker(UploadWorker):
 
     @override
     def archive(self, encrypted_submission: EncryptedSubmission):
-        """
-        Archive an encrypted submission
-        :param encrypted_submission: The encrypted submission to upload
-        """
         progress_logger = FileProgressLogger[UploadState](self._status_file_path)
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 

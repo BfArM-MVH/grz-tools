@@ -1,7 +1,5 @@
 import logging
-import shutil
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -9,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
+from grz_pydantic_models.submission.metadata import FileType
 from grzctl.models.config import ProcessConfig
 from pydantic import AnyHttpUrl
 from tqdm.auto import tqdm
@@ -16,13 +15,11 @@ from tqdm.auto import tqdm
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, ProcessingState
 from ..transfer import init_s3_client
-from .components import (
-    TqdmObserver,
-)
+from .components import Observer, TqdmObserver, tee
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
-from .components.perf import MeasuringStream, MetricsRegistry
+from .components.perf import MeasuringObserver, MeasuringStream, MetricsRegistry
 from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
-from .components.validation import ValidatorObserver
+from .components.validation import BamValidator, ChecksumValidator, FastqValidator
 from .context import ConsistencyValidator, SubmissionContext
 
 log = logging.getLogger(__name__)
@@ -80,11 +77,13 @@ class SubmissionProcessor:
             self._target_s3_map[key] = init_s3_client(s3_options=options, max_pool_connections=self.pool_size)
         return self._target_s3_map[key]
 
-    def _measure(self, stack: ExitStack, stream: Any, name: str, registry: MetricsRegistry | None) -> Any:
+    def _measure(self, stream: Any, name: str, registry: MetricsRegistry | None, is_observer: bool = False) -> Any:
         """Conditionally wrap a stream with measuring instrumentation."""
-        if self.enable_metrics and registry:
-            return stack.enter_context(MeasuringStream(stream, name, registry))
-        return stream
+        if not self.enable_metrics or not registry:
+            return stream
+        if is_observer:
+            return stream | MeasuringObserver(name, registry)
+        return MeasuringStream(stream, name, registry)
 
     def run(self, submission_metadata: SubmissionMetadata):
         self.submission_id = submission_metadata.content.submission_id
@@ -159,14 +158,7 @@ class SubmissionProcessor:
             return
 
         try:
-            with tqdm(  # type: ignore[call-overload]
-                total=file_meta.file_size_in_bytes,
-                desc="Processing",
-                postfix={"file": file_name},
-                leave=False,
-                **TQDM_DEFAULTS,
-            ) as pbar_local:
-                self._run_pipeline(file_meta, pbar=[pbar_global, pbar_local])
+            self._run_pipeline(file_meta, pbar_global, file_name, s3_size)
 
             partner = self.partner_map.get(file_meta.file_path)
             if partner and not self.consistency.check_pair(file_meta.file_path, partner):
@@ -191,7 +183,7 @@ class SubmissionProcessor:
                 mtime=s3_mtime,
             )
 
-    def _run_pipeline(self, file_meta: Any, pbar: Any):
+    def _run_pipeline(self, file_meta: Any, pbar_global: Any, file_name: str, s3_size: int):
         if not self.target_public_key:
             raise RuntimeError("Target public key not set.")
         if not self.target_bucket:
@@ -203,42 +195,63 @@ class SubmissionProcessor:
         part_size = calculate_s3_part_size(file_meta.file_size_in_bytes, None)
         metrics = MetricsRegistry() if self.enable_metrics else None
 
-        with ExitStack() as stack:
-            source = stack.enter_context(S3Downloader(self.source_s3, self.source_s3_options.bucket, src_key))
-            source = self._measure(stack, source, "1_Source", metrics)
+        checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
+        format_validator: Observer | None = None
 
-            decrypted = stack.enter_context(Crypt4GHDecryptor(source, self.keys["private"]))
-            decrypted = self._measure(stack, decrypted, "2_Decrypt", metrics)
-
-            validator = stack.enter_context(
-                ValidatorObserver(decrypted, file_type=file_meta.file_type, expected_checksum=file_meta.file_checksum)
+        if file_meta.file_type == FileType.fastq:
+            format_validator = FastqValidator(
+                mean_read_length_threshold=getattr(file_meta, "mean_read_length_threshold", None)
             )
-            validator_stream = self._measure(stack, validator, "3_Validate", metrics)
+        elif file_meta.file_type == FileType.bam:
+            format_validator = BamValidator()
 
-            encrypted = stack.enter_context(Crypt4GHEncryptor(validator_stream, self.target_public_key))
-            encrypted = self._measure(stack, encrypted, "4_Encrypt", metrics)
+        with tqdm(
+            total=file_meta.file_size_in_bytes,
+            desc="Processing",
+            postfix={"file": file_name},
+            leave=False,
+            **TQDM_DEFAULTS,
+        ) as pbar_local:
+            pipeline = S3Downloader(self.source_s3, self.source_s3_options.bucket, src_key)
+            pipeline = self._measure(pipeline, "1_Source", metrics)
 
-            monitored = stack.enter_context(TqdmObserver(encrypted, pbar))
-            monitored = self._measure(stack, monitored, "5_Monitor", metrics)
+            pipeline = pipeline | Crypt4GHDecryptor(private_key=self.keys["private"])
+            pipeline = self._measure(pipeline, "2_Decrypt", metrics)
 
-            uploader = stack.enter_context(
-                S3MultipartUploader(
-                    self.target_s3,
-                    self.target_bucket,
-                    dest_key,
-                    part_size=part_size,
-                    max_threads=self.max_concurrent_uploads,
-                )
+            validation_chain = checksum_validator
+            if self.enable_metrics and metrics:
+                validation_chain = validation_chain | MeasuringObserver("3a_Checksum", metrics)
+
+            if format_validator:
+                validation_chain = validation_chain | format_validator
+                if self.enable_metrics and metrics:
+                    validation_chain = validation_chain | MeasuringObserver("3b_Format", metrics)
+
+            pipeline = pipeline | tee(validation_chain)
+
+            pipeline = pipeline | Crypt4GHEncryptor(recipient_pubkey=self.target_public_key)
+            pipeline = self._measure(pipeline, "4_Encrypt", metrics)
+
+            pipeline = pipeline | tee(TqdmObserver([pbar_global, pbar_local]))
+
+            uploader = S3MultipartUploader(
+                self.target_s3,
+                self.target_bucket,
+                dest_key,
+                part_size=part_size,
+                max_threads=self.max_concurrent_uploads,
             )
 
-            shutil.copyfileobj(monitored, uploader, length=part_size)
+            pipeline >> uploader
 
-            validator.validate()
+        stats = checksum_validator.metrics
+        if format_validator:
+            stats.update(format_validator.metrics)
 
-            if metrics:
-                log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
+        if metrics:
+            log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
 
-            self.context.record_stats(file_meta.file_path, validator.metrics)
+        self.context.record_stats(file_meta.file_path, stats)
 
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata):
         """Redacts and uploads the final metadata."""

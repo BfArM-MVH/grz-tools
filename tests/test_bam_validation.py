@@ -3,6 +3,7 @@
 import importlib.resources
 import logging
 
+from grz_common.pipeline.components import DevNullSink, Stream, tee
 from grz_common.pipeline.components.validation import BamValidator
 
 from . import resources
@@ -12,12 +13,10 @@ def test_valid_hifi_bam():
     """Valid HiFi BAM files should pass validation"""
     bam_ptr = importlib.resources.files(resources).joinpath("reads", "valid_HiFi.bam")
 
-    with importlib.resources.as_file(bam_ptr) as bam_path:
+    with importlib.resources.as_file(bam_ptr) as bam_path, DevNullSink() as null_sink:
+        validator = BamValidator()
         with open(bam_path, "rb") as f:
-            with BamValidator(f) as validator:
-                while validator.read(1024 * 1024):
-                    pass
-                # validate() is called on __exit__
+            (Stream(f) | tee(validator)) >> null_sink
 
 
 def test_hard_clipped_primary(caplog):
@@ -25,10 +24,9 @@ def test_hard_clipped_primary(caplog):
     bam_ptr = importlib.resources.files(resources).joinpath("reads", "hard_clipped_primary.bam")
 
     with importlib.resources.as_file(bam_ptr) as bam_path, caplog.at_level(logging.WARNING):
-        with open(bam_path, "rb") as f:
-            with BamValidator(f) as validator:
-                while validator.read(1024 * 1024):
-                    pass
+        validator = BamValidator()
+        with open(bam_path, "rb") as f, DevNullSink() as null_sink:
+            (Stream(f) | tee(validator)) >> null_sink
 
     assert "Detected hard-clipped bases in primary alignment" in caplog.text
 
@@ -38,10 +36,9 @@ def test_secondary(caplog):
     bam_ptr = importlib.resources.files(resources).joinpath("reads", "secondary.bam")
 
     with importlib.resources.as_file(bam_ptr) as bam_path, caplog.at_level(logging.WARNING):
-        with open(bam_path, "rb") as f:
-            with BamValidator(f) as validator:
-                while validator.read(1024 * 1024):
-                    pass
+        validator = BamValidator()
+        with open(bam_path, "rb") as f, DevNullSink() as null_sink:
+            (Stream(f) | tee(validator)) >> null_sink
 
     assert "Detected secondary alignment in BAM" in caplog.text
     # hard-clipped bases are fine in secondaries

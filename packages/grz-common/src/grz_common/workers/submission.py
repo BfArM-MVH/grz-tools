@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import subprocess
 import typing
 from collections.abc import Generator
@@ -31,9 +30,9 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
-from ..pipeline.components import TqdmObserver
+from ..pipeline.components import DevNullSink, Stream, TqdmObserver, tee
 from ..pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
-from ..pipeline.components.validation import ValidatorObserver
+from ..pipeline.components.validation import BamValidator, ChecksumValidator, FastqValidator
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.crypt import Crypt4GH
 from ..validation import UserInterruptException, run_grz_check
@@ -550,19 +549,26 @@ class Submission:
                 if not local_path.is_file():
                     errors.append(f"File not found: {local_path}")
                 else:
-                    with (
-                        open(local_path, "rb") as f,
-                        ValidatorObserver(
-                            f,
-                            file_type=meta.file_type,
-                            expected_checksum=meta.file_checksum,
-                            mean_read_length_threshold=threshold_map.get(meta.file_path),
-                        ) as validator,
-                    ):
-                        validator.read(-1)
+                    checksum_val = ChecksumValidator(expected_checksum=meta.file_checksum)
+                    format_val = None
+                    if meta.file_type == FileType.fastq:
+                        format_val = FastqValidator(mean_read_length_threshold=threshold_map.get(meta.file_path))
+                    elif meta.file_type == FileType.bam:
+                        format_val = BamValidator()
 
-                    if "read_count" in validator.metrics:
-                        read_counts[meta.file_path] = validator.metrics["read_count"]
+                    with open(local_path, "rb") as f, DevNullSink() as null_sink:
+                        pipeline = Stream(f) | tee(checksum_val)
+                        if format_val:
+                            pipeline = pipeline | tee(format_val)
+
+                        pipeline >> null_sink
+
+                    metrics = checksum_val.metrics
+                    if format_val:
+                        metrics.update(format_val.metrics)
+
+                    if "read_count" in metrics:
+                        read_counts[meta.file_path] = metrics["read_count"]
 
             except Exception as e:
                 errors.append(str(e))
@@ -602,6 +608,7 @@ class Submission:
             raise FileNotFoundError(msg)
         if not submitter_private_key_path:
             self.__log.warning("No submitter private key provided, skipping signing.")
+            submitter_private_key = None
         elif not Path(submitter_private_key_path).expanduser().is_file():
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
@@ -662,10 +669,15 @@ class Submission:
                             leave=False,
                             **TQDM_DEFAULTS,
                         ) as pbar,
-                        TqdmObserver(src, pbar=pbar) as monitored,
-                        Crypt4GHEncryptor(monitored, recipient_public_key, submitter_private_key) as encryptor,
                     ):
-                        shutil.copyfileobj(encryptor, f)
+                        pipeline = (
+                            Stream(src)
+                            | tee(TqdmObserver(pbar))
+                            | Crypt4GHEncryptor(
+                                recipient_pubkey=recipient_public_key, sender_privkey=submitter_private_key
+                            )
+                        )
+                        pipeline >> f
 
                     self.__log.info(f"Encryption complete for {str(file_path)}. ")
                     progress_logger.set_state(
@@ -851,10 +863,9 @@ class EncryptedSubmission:
                             leave=False,
                             **TQDM_DEFAULTS,
                         ) as pbar,
-                        TqdmObserver(src, pbar=pbar) as monitored,
-                        Crypt4GHDecryptor(monitored, private_key) as decryptor,
                     ):
-                        shutil.copyfileobj(decryptor, f)
+                        pipeline = Stream(src) | tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
+                        pipeline >> f
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(
