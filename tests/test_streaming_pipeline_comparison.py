@@ -154,14 +154,13 @@ class TestManualCliVsStreamingPipeline:
         """
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(encrypted_path, "rb") as infile:
-            with Crypt4GHDecryptor(infile, decrypt_key) as decryptor:
-                with ChecksumValidator(decryptor) as checksum:
-                    with open(output_path, "wb") as outfile:
-                        while data := checksum.read(65536):
-                            outfile.write(data)
-                    checksum.validate()
-                    return checksum.metrics["checksum"]
+        with (
+            open(encrypted_path, "rb") as infile,
+            Crypt4GHDecryptor(infile, decrypt_key) as decryptor,
+            ChecksumValidator(decryptor) as checksum,
+        ):
+            shutil.copyfileobj(checksum, open(output_path, "wb"))
+            return checksum.metrics["checksum"]
 
     def test_decrypt_produces_same_checksums(
         self,
@@ -298,13 +297,15 @@ class TestStreamingPipelineChunkSizes:
         checksums = []
 
         for chunk_size in chunk_sizes:
-            with open(test_file, "rb") as infile:
-                with Crypt4GHDecryptor(infile, grz_private_key) as decryptor:
-                    with ChecksumValidator(decryptor) as checksum:
-                        while checksum.read(chunk_size):
-                            pass
-                        checksum.validate()
-                        checksums.append(checksum.metrics["checksum"])
+            with (
+                open(test_file, "rb") as infile,
+                Crypt4GHDecryptor(infile, grz_private_key) as decryptor,
+                ChecksumValidator(decryptor) as checksum,
+            ):
+                while checksum.read(chunk_size):
+                    pass
+                checksum.validate()
+                checksums.append(checksum.metrics["checksum"])
 
         # All checksums should be identical
         assert all(cs == checksums[0] for cs in checksums), (
