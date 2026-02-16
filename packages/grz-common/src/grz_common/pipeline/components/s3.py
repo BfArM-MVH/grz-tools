@@ -106,7 +106,7 @@ class S3MultipartUploader(io.BufferedIOBase):
             self._cleanup()
             raise
 
-    def write(self, b: bytes) -> int:
+    def write(self, b) -> int:
         """
         Write bytes to the buffer. Uploads parts when buffer is full.
         """
