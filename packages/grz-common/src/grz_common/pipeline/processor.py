@@ -243,7 +243,6 @@ class SubmissionProcessor:
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata):
         """Redacts and uploads the final metadata."""
         dest_key = f"{self.submission_id}/metadata/metadata.json"
-        # TODO: Implement proper redaction in SubmissionMetadata model
         redacted_metadata = submission_metadata.content.to_redacted_dict()
 
         self.target_s3.put_object(
