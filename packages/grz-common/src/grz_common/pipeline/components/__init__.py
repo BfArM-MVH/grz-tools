@@ -13,7 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 
 log = logging.getLogger(__name__)
 
-READ_CHUNK_SIZE = 1 * 1024 * 1024
+READ_CHUNK_SIZE = 8 * 1024 * 1024
 
 
 class PipelineError(Exception):
