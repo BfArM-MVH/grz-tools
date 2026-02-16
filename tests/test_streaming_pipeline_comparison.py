@@ -160,7 +160,7 @@ class TestManualCliVsStreamingPipeline:
             ChecksumValidator(decryptor) as checksum,
         ):
             shutil.copyfileobj(checksum, open(output_path, "wb"))
-            return checksum.metrics["checksum"]
+        return checksum.metrics["checksum"]
 
     def test_decrypt_produces_same_checksums(
         self,
