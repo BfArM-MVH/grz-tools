@@ -182,6 +182,7 @@ class FastqValidator(ValidatingStream):
     def metrics(self) -> dict[str, Any]:
         return {
             "read_count": self._read_count,
+            "mean_read_length": self._total_read_len / self._read_count,
             "total_bases": self._total_read_len,
             "line_count": self._read_count * 4,
         }
