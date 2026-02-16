@@ -76,7 +76,7 @@ class FastqValidator(Observer):
             if decompressed:
                 self._processor(decompressed)
         except zlib.error as e:
-            log.warning(f"FASTQ Validator: GZIP error: {e}")
+            raise ValueError(f"FASTQ Validator: GZIP error: {e}") from e
 
     def _process_chunk_numba(self, chunk: bytes) -> None:
         chunk_arr = np.frombuffer(chunk, dtype=np.uint8)
@@ -156,6 +156,11 @@ class FastqValidator(Observer):
             start = pos + 1
 
     def close(self):
+        with contextlib.suppress(Exception):
+            final = self._decompressor.flush()
+            if final:
+                self._processor(final)
+
         if self._current_line_len > 0:
             raise ValueError("Invalid FASTQ: Unexpected EOF (incomplete line). File may be truncated.")
 
@@ -174,7 +179,7 @@ class FastqValidator(Observer):
     def metrics(self) -> dict[str, Any]:
         return {
             "read_count": self._read_count,
-            "mean_read_length": self._total_read_len / self._read_count,
+            "mean_read_length": (self._total_read_len / self._read_count) if self._read_count > 0 else 0,
             "total_bases": self._total_read_len,
             "line_count": self._read_count * 4,
         }

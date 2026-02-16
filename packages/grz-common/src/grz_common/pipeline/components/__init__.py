@@ -1,6 +1,6 @@
 """
 Base classes and implementations for pipeline components.
-Supports fluent syntax: source | transform | tee(observer) >> sink
+Uses '|' (or) for chaining and '>>' (rshift) for execution.
 """
 
 import contextlib
@@ -42,16 +42,13 @@ class Pipeable:
         2. stream | transformer_instance -> transformer_instance.source = stream
         3. observer | observer -> Links push-based observers in a side-channel.
         """
-        # Case 1: Chaining Pull-based Transformers via Class
         if isinstance(other, type):
             return other(self)
 
-        # Case 2: Chaining Push-based Observers (used inside a tee branch)
         if isinstance(self, Observer) and isinstance(other, Observer):
             self.set_sink(other)
             return self
 
-        # Case 3: Connecting a Transformer instance
         if isinstance(other, Transformer):
             other.source = self
             return other
@@ -77,6 +74,7 @@ class Pipeable:
             if hasattr(self, "close"):
                 self.close()
             if hasattr(other, "close"):
+                # Sinks like open files or DevNullSink need closing to ensure flush
                 other.close()
         return other
 
@@ -85,7 +83,8 @@ class Stream(io.BufferedIOBase, Pipeable):
     """Wraps a source input."""
 
     def __init__(self, source: io.BufferedIOBase | None = None):
-        self.source = source
+        super().__init__()
+        self._source = source
 
     @property
     def source(self):
@@ -102,9 +101,9 @@ class Stream(io.BufferedIOBase, Pipeable):
 
     def close(self):
         if not self.closed:
-            if self.source:
+            if self._source:
                 with contextlib.suppress(Exception):
-                    self.source.close()
+                    self._source.close()
             super().close()
 
 
@@ -192,13 +191,14 @@ class tee(Transformer):  # noqa: N801
 
     def _fill_buffer(self) -> bytes:
         if self._exc:
-            raise RuntimeError("Tee background worker failed") from self._exc
+            raise self._exc
         return self.source.read(READ_CHUNK_SIZE)
 
     def read(self, size: int | None = -1) -> bytes:
         chunk = super().read(size)
         if chunk and self._queue:
-            # This blocks if queue is full, providing backpressure to the main pipeline
+            if self._exc:
+                raise self._exc
             self._queue.put(chunk)
         return chunk
 
@@ -210,20 +210,22 @@ class tee(Transformer):  # noqa: N801
                     break
                 self.observer.write(chunk)
                 self._queue.task_done()
+            self.observer.close()
         except Exception as e:
             self._exc = e
         finally:
-            with contextlib.suppress(Exception):
-                self.observer.close()
+            # Ensure the queue task is marked as done even on error
+            # to prevent join() from hanging if applicable.
+            pass
 
     def close(self):
         if self._thread and self._thread.is_alive() and self._queue:
             self._queue.put(None)
             self._thread.join()
 
-        # Propagate background errors to the main thread
+        # Propagate background errors (e.g., ValueError from Validator) to the main thread
         if self._exc:
-            raise RuntimeError("Tee background worker failed") from self._exc
+            raise self._exc
         super().close()
 
 
