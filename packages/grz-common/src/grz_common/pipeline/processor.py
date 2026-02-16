@@ -5,7 +5,7 @@ from contextlib import ExitStack
 from datetime import date
 from io import BytesIO
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
