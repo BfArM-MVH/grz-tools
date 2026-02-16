@@ -550,19 +550,19 @@ class Submission:
                 if not local_path.is_file():
                     errors.append(f"File not found: {local_path}")
                 else:
-                    with open(local_path, "rb") as f:
-                        validator = ValidatorObserver(
+                    with (
+                        open(local_path, "rb") as f,
+                        ValidatorObserver(
                             f,
                             file_type=meta.file_type,
                             expected_checksum=meta.file_checksum,
                             mean_read_length_threshold=threshold_map.get(meta.file_path),
-                        )
-                        while validator.read(1024**2):
-                            pass
+                        ) as validator,
+                    ):
+                        validator.read(-1)
 
-                        validator.validate()
-                        if "read_count" in validator.metrics:
-                            read_counts[meta.file_path] = validator.metrics["read_count"]
+                    if "read_count" in validator.metrics:
+                        read_counts[meta.file_path] = validator.metrics["read_count"]
 
             except Exception as e:
                 errors.append(str(e))
