@@ -3,15 +3,16 @@
 import logging
 import os
 import shutil
+from contextlib import nullcontext
 from functools import partial
 from getpass import getpass
 from os import PathLike
 from pathlib import Path
 
 import crypt4gh.keys
-import tqdm.auto as tqdm
 from grz_common.pipeline.components import TqdmObserver
 from nacl.public import PrivateKey
+from tqdm.auto import tqdm
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class Crypt4GH:
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
             (
-                tqdm.tqdm(
+                tqdm(
                     total=input_path.stat().st_size,
                     desc="ENCRYPT",
                     postfix=input_path.name,
@@ -79,12 +80,12 @@ class Crypt4GH:
                     unit_scale=True,
                 )
                 if show_progress
-                else None
+                else nullcontext()
             ) as pbar,
         ):
-            if pbar:
-                in_fd = TqdmObserver(in_fd, pbar=pbar)
-            decrypted_stream = Crypt4GHEncryptor(in_fd, public_key, signing_key)
+            decrypted_stream = Crypt4GHEncryptor(
+                TqdmObserver(in_fd, pbar=pbar) if pbar else in_fd, public_key, signing_key
+            )
             shutil.copyfileobj(decrypted_stream, out_fd)
 
     @staticmethod
@@ -131,7 +132,7 @@ class Crypt4GH:
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
             (
-                tqdm.tqdm(
+                tqdm(
                     total=input_path.stat().st_size,
                     desc="DECRYPT",
                     postfix=input_path.name,
@@ -139,11 +140,8 @@ class Crypt4GH:
                     unit_scale=True,
                 )
                 if show_progress
-                else None
+                else nullcontext()
             ) as pbar,
         ):
-            if pbar:
-                in_fd = TqdmObserver(in_fd, pbar=pbar)
-
-            decrypted_stream = Crypt4GHDecryptor(in_fd, private_key)
+            decrypted_stream = Crypt4GHDecryptor(TqdmObserver(in_fd, pbar=pbar) if pbar else in_fd, private_key)
             shutil.copyfileobj(decrypted_stream, out_fd)
