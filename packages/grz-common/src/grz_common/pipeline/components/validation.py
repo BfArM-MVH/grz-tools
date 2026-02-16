@@ -1,15 +1,13 @@
 import contextlib
 import hashlib
-import io
 import logging
 import os
 import tempfile
 from typing import Any
 
 import pysam
-from grz_pydantic_models.submission.metadata import FileType
 
-from . import ValidatingStream
+from . import Observer
 
 try:
     from isal import isal_zlib as zlib  # type: ignore[import-not-found]
@@ -17,8 +15,8 @@ except ImportError:
     import zlib
 
 try:
-    import numpy as np  # type: ignore[import-not-found]
-    from numba import jit  # type: ignore[import-not-found]
+    import numpy as np
+    from numba import jit
 
     HAS_NUMBA = True
 except ImportError:
@@ -29,9 +27,11 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 
-class ChecksumValidator(ValidatingStream):
-    def __init__(self, source: io.BufferedIOBase, algorithm: str = "sha256", expected_checksum: str | None = None):
-        super().__init__(source)
+class ChecksumValidator(Observer):
+    """SHA256 Checksum Observer."""
+
+    def __init__(self, algorithm: str = "sha256", expected_checksum: str | None = None):
+        super().__init__()
         self.expected = expected_checksum
         self._hasher = hashlib.new(algorithm)
         self._bytes_seen = 0
@@ -40,23 +40,22 @@ class ChecksumValidator(ValidatingStream):
         self._bytes_seen += len(chunk)
         self._hasher.update(chunk)
 
-    def validate(self) -> None:
+    def close(self):
         calculated = self._hasher.hexdigest()
         if self.expected and calculated != self.expected:
             raise ValueError(f"Checksum mismatch! Exp: {self.expected}, Got: {calculated}")
+        super().close()
 
     @property
     def metrics(self) -> dict[str, Any]:
         return {"checksum": self._hasher.hexdigest(), "size": self._bytes_seen}
 
 
-class FastqValidator(ValidatingStream):
-    """
-    Validates a decompressed FASTQ stream.
-    """
+class FastqValidator(Observer):
+    """Validates a decompressed FASTQ stream."""
 
-    def __init__(self, source: io.BufferedIOBase, mean_read_length_threshold: float | None = None):
-        super().__init__(source)
+    def __init__(self, mean_read_length_threshold: float | None = None):
+        super().__init__()
         self._decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
         self._processor = self._process_chunk_numba if HAS_NUMBA else self._process_chunk_python
         self._threshold = mean_read_length_threshold
@@ -156,15 +155,7 @@ class FastqValidator(ValidatingStream):
             self._last_chunk_byte = 10
             start = pos + 1
 
-    def validate(self) -> None:
-        with contextlib.suppress(Exception):
-            final = self._decompressor.flush()
-            if final:
-                if HAS_NUMBA:
-                    self._process_chunk_numba(final)
-                else:
-                    self._process_chunk_python(final)
-
+    def close(self):
         if self._current_line_len > 0:
             raise ValueError("Invalid FASTQ: Unexpected EOF (incomplete line). File may be truncated.")
 
@@ -177,6 +168,7 @@ class FastqValidator(ValidatingStream):
             mean_length = self._total_read_len / self._read_count
             if mean_length < self._threshold:
                 raise ValueError(f"Mean read length ({mean_length:.2f}) is below threshold ({self._threshold})")
+        super().close()
 
     @property
     def metrics(self) -> dict[str, Any]:
@@ -244,14 +236,14 @@ if HAS_NUMBA:
         return 0, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte
 
 
-class BamValidator(ValidatingStream):
+class BamValidator(Observer):
     """
     Validates a BAM stream.
     Writes to a temp file because pysam requires random access.
     """
 
-    def __init__(self, source: io.BufferedIOBase):
-        super().__init__(source)
+    def __init__(self):
+        super().__init__()
         self._temp = tempfile.NamedTemporaryFile(suffix=".bam", delete=False)  # noqa: SIM115
         self._path = self._temp.name
         self._bytes_seen = 0
@@ -260,7 +252,7 @@ class BamValidator(ValidatingStream):
         self._bytes_seen += len(chunk)
         self._temp.write(chunk)
 
-    def validate(self) -> None:
+    def close(self) -> None:
         if not self._temp.closed:
             self._temp.close()
 
@@ -313,40 +305,3 @@ class BamValidator(ValidatingStream):
     @property
     def metrics(self) -> dict[str, Any]:
         return {"size": self._bytes_seen}
-
-
-class ValidatorObserver(ValidatingStream):
-    """
-    Composite observer that chains checksum and format validation.
-    """
-
-    def __init__(self, source: io.BufferedIOBase, file_type: FileType, expected_checksum: str | None = None, **kwargs):
-        self._hasher = ChecksumValidator(source, expected_checksum=expected_checksum)
-        self._format_validator: ValidatingStream | None = None
-
-        if file_type == FileType.fastq:
-            threshold = kwargs.get("mean_read_length_threshold")
-            self._format_validator = FastqValidator(self._hasher, mean_read_length_threshold=threshold)
-        elif file_type == FileType.bam:
-            self._format_validator = BamValidator(self._hasher)
-
-        upstream = self._format_validator if self._format_validator else self._hasher
-        super().__init__(upstream)
-
-    def observe(self, chunk: bytes) -> None:
-        # No-op: The work is done by the upstream components (Hasher/Verifier)
-        # when self.read() calls upstream.read()
-        pass
-
-    def validate(self) -> None:
-        self._hasher.validate()
-
-        if self._format_validator:
-            self._format_validator.validate()
-
-    @property
-    def metrics(self) -> dict[str, Any]:
-        data = self._hasher.metrics.copy()
-        if self._format_validator:
-            data.update(self._format_validator.metrics)
-        return data

@@ -1,10 +1,11 @@
 import contextlib
 import hashlib
-import io
 import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+from . import Stream, Observer
 
 log = logging.getLogger(__name__)
 
@@ -33,29 +34,26 @@ def calculate_s3_part_size(file_size: int | None, user_part_size: int | None = N
     return max(MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MIN_PART_SIZE)
 
 
-class S3Downloader(io.BufferedIOBase):
+class S3Downloader(Stream):
+    """Reading from S3 is the Source of the pipeline."""
+
     def __init__(self, s3_client: Any, bucket: str, key: str):
         self.response = s3_client.get_object(Bucket=bucket, Key=key)
-        self.stream = self.response["Body"]
+        # S3 Body is already a buffered stream, but we wrap it to be Pipeable
+        super().__init__(self.response["Body"])
         self.length = self.response.get("ContentLength", 0)
 
     def read(self, size: int | None = -1) -> bytes:
         try:
-            if size == -1 or size is None:
-                return self.stream.read()
-            return self.stream.read(size)
+            return super().read(size)
         except Exception as e:
             raise OSError(f"S3 Read Error: {e}") from e
 
-    def close(self) -> None:
-        if hasattr(self, "stream"):
-            self.stream.close()
-        super().close()
 
-
-class S3MultipartUploader(io.BufferedIOBase):
+class S3MultipartUploader(Observer):
     """
-    A write-only stream that uploads data to S3 using Multipart Upload.
+    Writing to S3 is a Sink (Observer).
+    It buffers data and uploads parts.
     """
 
     def __init__(
@@ -81,19 +79,6 @@ class S3MultipartUploader(io.BufferedIOBase):
         self._part_number = 1
         self._closed = False
 
-    def writable(self) -> bool:
-        return True
-
-    def __enter__(self):
-        self._start_multipart_upload()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type:
-            self.abort()
-        else:
-            self.close()
-
     def _start_multipart_upload(self):
         if self._upload_id:
             return
@@ -106,9 +91,9 @@ class S3MultipartUploader(io.BufferedIOBase):
             self._cleanup()
             raise
 
-    def write(self, b) -> int:
+    def observe(self, chunk: bytes) -> None:
         """
-        Write bytes to the buffer. Uploads parts when buffer is full.
+        Buffers incoming bytes and submits uploads when part_size is reached.
         """
         if self._closed:
             raise ValueError("I/O operation on closed file.")
@@ -118,14 +103,12 @@ class S3MultipartUploader(io.BufferedIOBase):
 
         self._check_futures()
 
-        self._buffer.extend(b)
+        self._buffer.extend(chunk)
         while len(self._buffer) >= self.part_size:
-            chunk = self._buffer[: self.part_size]
+            part_data = self._buffer[: self.part_size]
             del self._buffer[: self.part_size]
-            self._submit_part(chunk, self._part_number)
+            self._submit_part(part_data, self._part_number)
             self._part_number += 1
-
-        return len(b)
 
     def close(self) -> None:
         """
@@ -156,6 +139,7 @@ class S3MultipartUploader(io.BufferedIOBase):
             raise e
         finally:
             self._cleanup()
+            super().close()
 
     def abort(self) -> None:
         """Abort the multipart upload on S3."""

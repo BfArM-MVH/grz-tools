@@ -13,6 +13,8 @@ import grz_cli.cli
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
+
+from grz_common.pipeline.components import Stream, tee
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor
 from grz_common.pipeline.components.validation import ChecksumValidator
 from grz_common.utils.checksums import calculate_sha256
@@ -154,12 +156,10 @@ class TestManualCliVsStreamingPipeline:
         """
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with (
-            open(encrypted_path, "rb") as infile,
-            Crypt4GHDecryptor(infile, decrypt_key) as decryptor,
-            ChecksumValidator(decryptor) as checksum,
-        ):
-            shutil.copyfileobj(checksum, open(output_path, "wb"))
+        checksum = ChecksumValidator()
+        with open(encrypted_path, "rb") as infile, open(output_path, "wb") as outfile:
+            (Stream(infile) | Crypt4GHDecryptor(private_key=decrypt_key) | tee(checksum)) >> outfile
+
         return checksum.metrics["checksum"]
 
     def test_decrypt_produces_same_checksums(
@@ -297,15 +297,16 @@ class TestStreamingPipelineChunkSizes:
         checksums = []
 
         for chunk_size in chunk_sizes:
-            with (
-                open(test_file, "rb") as infile,
-                Crypt4GHDecryptor(infile, grz_private_key) as decryptor,
-                ChecksumValidator(decryptor) as checksum,
-            ):
-                while checksum.read(chunk_size):
-                    pass
-                checksum.validate()
-                checksums.append(checksum.metrics["checksum"])
+            checksum_val = ChecksumValidator()
+
+            with open(test_file, "rb") as infile:
+                pipeline = Stream(infile) | Crypt4GHDecryptor(private_key=grz_private_key) | tee(checksum_val)
+
+                with pipeline:
+                    while pipeline.read(chunk_size):
+                        pass
+
+            checksums.append(checksum_val.metrics["checksum"])
 
         # All checksums should be identical
         assert all(cs == checksums[0] for cs in checksums), (

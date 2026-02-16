@@ -2,7 +2,6 @@
 
 import logging
 import os
-import shutil
 from contextlib import nullcontext
 from functools import partial
 from getpass import getpass
@@ -10,7 +9,7 @@ from os import PathLike
 from pathlib import Path
 
 import crypt4gh.keys
-from grz_common.pipeline.components import TqdmObserver
+from grz_common.pipeline.components import Stream, TqdmObserver, tee
 from nacl.public import PrivateKey
 from tqdm.auto import tqdm
 
@@ -18,7 +17,7 @@ log = logging.getLogger(__name__)
 
 
 class Crypt4GH:
-    """Crypt4GH encryption/decryption utility class."""
+    """Crypt4GH encryption/decryption utility class using the streaming pipeline."""
 
     Key = tuple[int, bytes, bytes]
 
@@ -53,7 +52,7 @@ class Crypt4GH:
         show_progress: bool = True,
     ):
         """
-        Encrypt a file using Crypt4GH.
+        Encrypt a file using the Crypt4GH streaming pipeline.
 
         :param input_path: Path to the input file
         :param output_path: Path to the output encrypted file
@@ -75,7 +74,7 @@ class Crypt4GH:
                 tqdm(
                     total=input_path.stat().st_size,
                     desc="ENCRYPT",
-                    postfix=input_path.name,
+                    postfix={"file": input_path.name},
                     unit="B",
                     unit_scale=True,
                 )
@@ -83,10 +82,11 @@ class Crypt4GH:
                 else nullcontext()
             ) as pbar,
         ):
-            decrypted_stream = Crypt4GHEncryptor(
-                TqdmObserver(in_fd, pbar=pbar) if pbar else in_fd, public_key, signing_key
-            )
-            shutil.copyfileobj(decrypted_stream, out_fd)
+            pipeline = Stream(in_fd)
+            if show_progress and pbar:
+                pipeline = pipeline | tee(TqdmObserver(pbar))
+            pipeline = pipeline | Crypt4GHEncryptor(recipient_pubkey=public_key, sender_privkey=signing_key)
+            pipeline >> out_fd
 
     @staticmethod
     def retrieve_private_key(seckey_path: str | PathLike) -> bytes:
@@ -98,7 +98,7 @@ class Crypt4GH:
         """
         seckeypath = os.path.expanduser(str(seckey_path))
         if not os.path.exists(seckeypath):
-            raise ValueError("Secret key not found")
+            raise ValueError(f"Secret key not found: {seckey_path}")
 
         passphrase = os.getenv("C4GH_PASSPHRASE")
         if passphrase:
@@ -110,17 +110,17 @@ class Crypt4GH:
 
     @staticmethod
     def decrypt_file(
-        input_path: str | Path,
-        output_path: str | Path,
+        input_path: str | PathLike,
+        output_path: str | PathLike,
         private_key: bytes,
         show_progress: bool = True,
     ):
         """
-        Decrypt a file using the provided private key.
+        Decrypt a file using the Crypt4GH streaming pipeline.
 
         :param input_path: Path to the encrypted file
         :param output_path: Path to the decrypted file
-        :param private_key: The private key bytes
+        :param private_key: The private key bytes for decryption
         :param show_progress: Whether to show progress bar
         """
         from ..pipeline.components.crypt4gh import Crypt4GHDecryptor  # noqa: PLC0415
@@ -135,7 +135,7 @@ class Crypt4GH:
                 tqdm(
                     total=input_path.stat().st_size,
                     desc="DECRYPT",
-                    postfix=input_path.name,
+                    postfix={"file": input_path.name},
                     unit="B",
                     unit_scale=True,
                 )
@@ -143,5 +143,8 @@ class Crypt4GH:
                 else nullcontext()
             ) as pbar,
         ):
-            decrypted_stream = Crypt4GHDecryptor(TqdmObserver(in_fd, pbar=pbar) if pbar else in_fd, private_key)
-            shutil.copyfileobj(decrypted_stream, out_fd)
+            pipeline = Stream(in_fd)
+            if show_progress and pbar:
+                pipeline = pipeline | tee(TqdmObserver(pbar))
+            pipeline = pipeline | Crypt4GHDecryptor(private_key=private_key)
+            pipeline >> out_fd

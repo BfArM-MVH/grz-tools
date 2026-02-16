@@ -7,7 +7,6 @@ import enum
 import itertools
 import logging
 import re
-import shutil
 from collections import OrderedDict
 from collections.abc import Iterable
 from operator import attrgetter, itemgetter
@@ -22,7 +21,7 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
-from ..pipeline.components import TqdmObserver
+from ..pipeline.components import TqdmObserver, tee
 from ..pipeline.components.s3 import S3Downloader
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
@@ -130,18 +129,17 @@ class S3BotoDownloadWorker:
         :param s3_object_id: The S3 object key to download.
         """
         with (
-            S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) as downloader,
-            tqdm(  # type: ignore[call-overload]
+            tqdm(
                 total=file_metadata.file_size_in_bytes,
                 desc="DOWNLOAD",
                 postfix={"file": local_file_path},
                 leave=False,
                 **TQDM_DEFAULTS,
             ) as pbar,
-            TqdmObserver(downloader, pbar=pbar) as monitored,
             open(local_file_path, "wb") as f,
         ):
-            shutil.copyfileobj(monitored, f)
+            pipeline = S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) | tee(TqdmObserver(pbar))
+            pipeline >> f
 
     def download_file(
         self,
