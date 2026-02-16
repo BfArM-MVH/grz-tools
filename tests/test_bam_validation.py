@@ -3,7 +3,7 @@
 import importlib.resources
 import logging
 
-from grz_common.pipeline.components import DevNullSink, Stream, tee
+from grz_common.pipeline.components import DevNullSink, Stream, Tee
 from grz_common.pipeline.components.validation import BamValidator
 
 from . import resources
@@ -16,7 +16,7 @@ def test_valid_hifi_bam():
     with importlib.resources.as_file(bam_ptr) as bam_path, DevNullSink() as null_sink:
         validator = BamValidator()
         with open(bam_path, "rb") as f:
-            (Stream(f) | tee(validator)) >> null_sink
+            (Stream(f) | Tee(validator)) >> null_sink
 
 
 def test_hard_clipped_primary(caplog):
@@ -26,7 +26,7 @@ def test_hard_clipped_primary(caplog):
     with importlib.resources.as_file(bam_ptr) as bam_path, caplog.at_level(logging.WARNING):
         validator = BamValidator()
         with open(bam_path, "rb") as f, DevNullSink() as null_sink:
-            (Stream(f) | tee(validator)) >> null_sink
+            (Stream(f) | Tee(validator)) >> null_sink
 
     assert "Detected hard-clipped bases in primary alignment" in caplog.text
 
@@ -38,7 +38,7 @@ def test_secondary(caplog):
     with importlib.resources.as_file(bam_ptr) as bam_path, caplog.at_level(logging.WARNING):
         validator = BamValidator()
         with open(bam_path, "rb") as f, DevNullSink() as null_sink:
-            (Stream(f) | tee(validator)) >> null_sink
+            (Stream(f) | Tee(validator)) >> null_sink
 
     assert "Detected secondary alignment in BAM" in caplog.text
     # hard-clipped bases are fine in secondaries

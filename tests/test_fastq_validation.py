@@ -1,14 +1,14 @@
 """Tests for the fastq_validation module using FastqValidator."""
 
 import pytest
-from grz_common.pipeline.components import DevNullSink, Stream, tee
+from grz_common.pipeline.components import DevNullSink, Stream, Tee
 from grz_common.pipeline.components.validation import FastqValidator
 
 
 def run_validator(path: str, threshold: float = 0.0):
     validator = FastqValidator(mean_read_length_threshold=threshold)
     with open(path, "rb") as f, DevNullSink() as sink:
-        (Stream(f) | tee(validator)) >> sink
+        (Stream(f) | Tee(validator)) >> sink
     return True, [], validator.metrics
 
 

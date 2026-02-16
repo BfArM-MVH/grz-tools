@@ -1,5 +1,5 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
-from grz_pydantic_models.submission.metadata import FileType
+from grz_pydantic_models.submission.metadata import File, FileType
+from grz_pydantic_models.submission.thresholds import Thresholds
 from grzctl.models.config import ProcessConfig
 from pydantic import AnyHttpUrl
 from tqdm.auto import tqdm
@@ -15,7 +16,7 @@ from tqdm.auto import tqdm
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, ProcessingState
 from ..transfer import init_s3_client
-from .components import Observer, TqdmObserver, tee
+from .components import ObserverWithMetrics, Tee, TqdmObserver
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .components.perf import MeasuringObserver, MeasuringStream, MetricsRegistry
 from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
@@ -43,13 +44,15 @@ class SubmissionProcessor:
         redact_patterns: list[tuple[str, str]] | None = None,
         max_concurrent_uploads: int = 1,
         threads: int = 1,
-        enable_metrics: bool = False,
+        enable_metrics: bool = True,
+        background_tee: bool = False,
     ):
         self.config = configuration
         self.source_s3_options = source_s3_options
         self.keys = keys
         self.redact_patterns = redact_patterns or []
         self.enable_metrics = enable_metrics
+        self.background_tee = background_tee
 
         self.context = SubmissionContext()
         self.consistency = ConsistencyValidator(self.context)
@@ -108,18 +111,32 @@ class SubmissionProcessor:
                 self.partner_map[key1] = key2
                 self.partner_map[key2] = key1
 
+        thresholds: dict[str, Thresholds] = {}
+        for _, _, files, t in submission_metadata.iter_single_end_fastqs():
+            for f in files:
+                thresholds[f.file_path] = t
+        for _, _, pairs, t in submission_metadata.iter_paired_end_fastqs():
+            for fq1, fq2 in pairs:
+                thresholds[fq1.file_path] = t
+                thresholds[fq2.file_path] = t
+
         log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
 
         with (
             tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global,  # type: ignore[call-overload]
             ThreadPoolExecutor(max_workers=self.threads) as pool,
         ):
-            futures = [
-                pool.submit(self._process_one_file, file_meta=file_meta, pbar_global=pbar_global)
+            futures: list[Future] = [
+                pool.submit(
+                    self._process_one_file,
+                    file_meta=file_meta,
+                    threshold=thresholds.get(file_meta.file_path, None),
+                    pbar_global=pbar_global,
+                )
                 for file_meta in files_map.values()
             ]
-            for f in futures:
-                f.result()
+            for future in futures:
+                future.result()
 
         if self.context.has_errors:
             raise RuntimeError("Submission failed consistency checks or validation.")
@@ -127,7 +144,7 @@ class SubmissionProcessor:
         self._upload_final_metadata(submission_metadata)
         log.info(f"Submission {self.submission_id} processed successfully.")
 
-    def _process_one_file(self, file_meta: Any, pbar_global: Any):
+    def _process_one_file(self, file_meta: File, threshold: Thresholds | None, pbar_global: Any):
         src_key = f"{self.submission_id}/files/{file_meta.file_path}.c4gh"
         file_path_str = str(file_meta.file_path)
         file_name = file_path_str.split("/")[-1]
@@ -158,7 +175,7 @@ class SubmissionProcessor:
             return
 
         try:
-            self._run_pipeline(file_meta, pbar_global, file_name, s3_size)
+            self._run_pipeline(file_meta, threshold, pbar_global, file_name)
 
             partner = self.partner_map.get(file_meta.file_path)
             if partner and not self.consistency.check_pair(file_meta.file_path, partner):
@@ -183,7 +200,7 @@ class SubmissionProcessor:
                 mtime=s3_mtime,
             )
 
-    def _run_pipeline(self, file_meta: Any, pbar_global: Any, file_name: str, s3_size: int):
+    def _run_pipeline(self, file_meta: File, threshold: Thresholds | None, pbar_global: Any, file_name: str):
         if not self.target_public_key:
             raise RuntimeError("Target public key not set.")
         if not self.target_bucket:
@@ -196,16 +213,16 @@ class SubmissionProcessor:
         metrics = MetricsRegistry() if self.enable_metrics else None
 
         checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
-        format_validator: Observer | None = None
+        format_validator: ObserverWithMetrics | None = None
 
         if file_meta.file_type == FileType.fastq:
             format_validator = FastqValidator(
-                mean_read_length_threshold=getattr(file_meta, "mean_read_length_threshold", None)
+                mean_read_length_threshold=threshold.mean_read_length if threshold else None
             )
         elif file_meta.file_type == FileType.bam:
             format_validator = BamValidator()
 
-        with tqdm(
+        with tqdm(  # type: ignore[call-overload]
             total=file_meta.file_size_in_bytes,
             desc="Processing",
             postfix={"file": file_name},
@@ -227,12 +244,12 @@ class SubmissionProcessor:
                 if self.enable_metrics and metrics:
                     validation_chain = validation_chain | MeasuringObserver("3b_Format", metrics)
 
-            pipeline = pipeline | tee(validation_chain)
+            pipeline = pipeline | Tee(validation_chain, threaded=self.background_tee)
 
             pipeline = pipeline | Crypt4GHEncryptor(recipient_pubkey=self.target_public_key)
             pipeline = self._measure(pipeline, "4_Encrypt", metrics)
 
-            pipeline = pipeline | tee(TqdmObserver([pbar_global, pbar_local]))
+            pipeline = pipeline | Tee(TqdmObserver([pbar_global, pbar_local]), threaded=self.background_tee)
 
             uploader = S3MultipartUploader(
                 self.target_s3,
@@ -249,7 +266,7 @@ class SubmissionProcessor:
             stats.update(format_validator.metrics)
 
         if metrics:
-            log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
+            log.debug(f"Performance for {file_meta.file_path}: {metrics.report()}")
 
         self.context.record_stats(file_meta.file_path, stats)
 

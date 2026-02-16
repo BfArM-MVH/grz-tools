@@ -1,7 +1,7 @@
 import threading
 import time
 
-from . import Stream, Observer
+from . import Observer, Stream
 
 
 class MetricsRegistry:

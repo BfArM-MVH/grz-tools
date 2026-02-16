@@ -9,6 +9,7 @@ import logging
 import queue
 import shutil
 import threading
+from io import IOBase
 from typing import Any, Protocol, runtime_checkable
 
 log = logging.getLogger(__name__)
@@ -173,6 +174,15 @@ class Observer(Pipeable):
             self.sink.close()
 
 
+class Metrics(Protocol):
+    @property
+    def metrics(self) -> dict[str, Any]: ...
+
+
+class ObserverWithMetrics(Observer, Metrics):
+    pass
+
+
 class Tee(Stream):
     """Branches the stream to an Observer in a background thread."""
 
@@ -185,7 +195,7 @@ class Tee(Stream):
         self._exc: Exception | None = None
         super().__init__(None)
 
-    @Stream.source.setter
+    @Stream.source.setter  # type: ignore[attr-defined]
     def source(self, value):
         """Overrides the source setter to initiate the background worker thread."""
         self._source = value
@@ -195,14 +205,13 @@ class Tee(Stream):
             self._thread.start()
 
     def read(self, size: int | None = -1) -> bytes:
-        chunk = self._source.read(size)
+        chunk = self._source.read(size)  # type: ignore[union-attr]
         if chunk:
             if self._exc:
                 raise self._exc
 
             if self._threaded:
-                self._queue.put(chunk, block=True)
-            else:
+                self._queue.put(chunk, block=True)  # type: ignore[union-attr]
                 try:
                     self.observer.write(chunk)
                 except Exception as e:
@@ -254,5 +263,5 @@ class DevNullSink(Writable, io.BufferedIOBase):
     def writable(self) -> bool:
         return True
 
-    def write(self, data: bytes) -> int:
+    def write(self, data) -> int:
         return len(data)
