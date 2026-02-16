@@ -184,7 +184,10 @@ class ObserverWithMetrics(Observer, Metrics):
 
 
 class Tee(Stream):
-    """Branches the stream to an Observer in a background thread."""
+    """
+    Branches the stream to an Observer.
+    Supports asynchronous background threads or synchronous execution.
+    """
 
     def __init__(self, observer: Observer, max_queue_size: int = 128, threaded: bool = False):
         self.observer = observer
@@ -197,7 +200,6 @@ class Tee(Stream):
 
     @Stream.source.setter  # type: ignore[attr-defined]
     def source(self, value):
-        """Overrides the source setter to initiate the background worker thread."""
         self._source = value
         if value is not None and self._threaded:
             self._queue = queue.Queue(maxsize=self.max_queue_size)
@@ -212,6 +214,7 @@ class Tee(Stream):
 
             if self._threaded:
                 self._queue.put(chunk, block=True)  # type: ignore[union-attr]
+            else:
                 try:
                     self.observer.write(chunk)
                 except Exception as e:
@@ -222,18 +225,18 @@ class Tee(Stream):
     def _worker(self):
         try:
             while True:
-                chunk = self._queue.get()
+                chunk = self._queue.get()  # type: ignore[union-attr]
                 if chunk is None:
                     break
                 self.observer.write(chunk)
-                self._queue.task_done()
+                self._queue.task_done()  # type: ignore[union-attr]
             self.observer.close()
         except Exception as e:
             self._exc = e
 
     def close(self):
         if self._threaded:
-            if self._thread and self._thread.is_alive():
+            if self._thread and self._thread.is_alive() and self._queue:
                 self._queue.put(None)
                 self._thread.join()
         else:
