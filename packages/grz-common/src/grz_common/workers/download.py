@@ -131,7 +131,7 @@ class S3BotoDownloadWorker:
         """
         with (
             S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) as downloader,
-            tqdm(
+            tqdm(  # type: ignore[call-overload]
                 total=file_metadata.file_size_in_bytes,
                 desc="DOWNLOAD",
                 postfix={"file": local_file_path},

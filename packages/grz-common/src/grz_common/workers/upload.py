@@ -113,7 +113,7 @@ class S3BotoUploadWorker(UploadWorker):
 
         with (
             S3MultipartUploader(self._s3_client, self._s3_options.bucket, s3_object_id) as uploader,
-            tqdm(
+            tqdm(  # type: ignore[call-overload]
                 total=file_size,
                 desc="UPLOAD  ",
                 postfix={"file": local_file_path},
