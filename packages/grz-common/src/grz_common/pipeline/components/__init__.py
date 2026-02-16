@@ -49,7 +49,7 @@ class Pipeable:
             self.set_sink(other)
             return self
 
-        if isinstance(other, Transformer):
+        if isinstance(other, (Transformer, Tee)):
             other.source = self
             return other
 
@@ -125,15 +125,22 @@ class Transformer(Stream):
 
     def read(self, size: int | None = -1) -> bytes:
         target_size = size if size is not None else -1
-        read_all = target_size == -1
 
-        while read_all or len(self._output_buffer) < target_size:
+        if not self._output_buffer:
+            chunk = self._fill_buffer()
+            if not chunk:
+                return b""
+            if target_size == -1 or len(chunk) == target_size:
+                return chunk
+            self._output_buffer.extend(chunk)
+
+        while target_size == -1 or len(self._output_buffer) < target_size:
             chunk = self._fill_buffer()
             if not chunk:
                 break
             self._output_buffer.extend(chunk)
 
-        limit = min(len(self._output_buffer), target_size) if not read_all else len(self._output_buffer)
+        limit = len(self._output_buffer) if target_size == -1 else min(len(self._output_buffer), target_size)
         ret = self._output_buffer[:limit]
         del self._output_buffer[:limit]
         return bytes(ret)
