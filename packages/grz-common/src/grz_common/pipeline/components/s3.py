@@ -167,6 +167,8 @@ class S3MultipartUploader(io.BufferedIOBase):
     def _submit_part(self, data: bytes, part_num: int):
         if not self._executor:
             raise RuntimeError("Executor not initialized")
+        if not self._upload_id:
+            raise RuntimeError("Multipart upload not yet initialized")
 
         future = self._executor.submit(self._upload_part, self._upload_id, part_num, data)
         self._futures.append(future)
