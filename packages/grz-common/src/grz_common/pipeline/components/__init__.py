@@ -3,6 +3,7 @@ Base classes and implementations for pipeline components.
 Uses '|' (or) for chaining and '>>' (rshift) for execution.
 """
 
+import abc
 import contextlib
 import io
 import logging
@@ -108,7 +109,7 @@ class Stream(io.BufferedIOBase, Pipeable):
             super().close()
 
 
-class Transformer(Stream):
+class Transformer(Stream, metaclass=abc.ABCMeta):
     """
     Reads from upstream, transforms data, yields to downstream.
     """
@@ -117,6 +118,7 @@ class Transformer(Stream):
         super().__init__(source)
         self._output_buffer = bytearray()
 
+    @abc.abstractmethod
     def _fill_buffer(self) -> bytes:
         """
         Override this: Read from self.source, transform, return bytes.
@@ -147,7 +149,7 @@ class Transformer(Stream):
         return bytes(ret)
 
 
-class Observer(Pipeable):
+class Observer(Pipeable, metaclass=abc.ABCMeta):
     """
     Accepts data via write(), processes it, and pushes to next observer (if any).
     """
@@ -165,9 +167,10 @@ class Observer(Pipeable):
             self.sink.write(data)
         return len(data)
 
+    @abc.abstractmethod
     def observe(self, chunk: bytes) -> None:
         """Subclasses implement logic here."""
-        pass
+        raise NotImplementedError()
 
     def close(self):
         if self.sink:
@@ -179,7 +182,7 @@ class Metrics(Protocol):
     def metrics(self) -> dict[str, Any]: ...
 
 
-class ObserverWithMetrics(Observer, Metrics):
+class ObserverWithMetrics(Observer, Metrics, metaclass=abc.ABCMeta):
     pass
 
 
