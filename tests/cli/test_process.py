@@ -39,6 +39,7 @@ def process_config_content(
     """
     db_dir = tmpdir_factory.mktemp("db")
     db_file = db_dir / "test.db"
+    local_storage_dir = tmpdir_factory.mktemp("local_storage")
 
     return {
         "s3": {
@@ -78,6 +79,7 @@ def process_config_content(
             },
             "known_public_keys": str(db_known_keys_file_path),
         },
+        "detailed_qc": {"salt": "salty", "target_percentage": "0.0", "local_storage": str(local_storage_dir)},
     }
 
 
@@ -270,12 +272,8 @@ class TestGrzctlProcess:
         self,
         aws_credentials_for_process,
         temp_data_dir_path,
-        crypt4gh_grz_private_key_file_path,
-        crypt4gh_grz_public_key_file_path,
-        db_alice_private_key_file_path,
-        db_known_keys_file_path,
         working_dir_path,
-        tmp_path,
+        process_config_content,
     ):
         """
         Test multi-inbox selection logic.
@@ -295,56 +293,15 @@ class TestGrzctlProcess:
 
         # Upload submission to inbox-b
         upload_submission_to_inbox(inbox_b, submission_id)
+        config_content = process_config_content.copy()
 
-        db_dir = tmp_path / "db"
-        db_dir.mkdir()
-        db_file = db_dir / "test.db"
-
-        # Create config with multiple inboxes
-        config_content = {
-            "s3": {
-                "endpoint_url": "https://s3.amazonaws.com",
-                "access_key": "testing",
-                "secret": "testing",
-                "inboxes": {
-                    le_id: {
-                        "inbox-a": {},
-                        "inbox-b": {},
-                    }
-                },
-            },
-            "consented_archive_s3": {
-                "endpoint_url": "https://s3.amazonaws.com",
-                "bucket": "consented-archive",
-                "access_key": "testing",
-                "secret": "testing",
-            },
-            "non_consented_archive_s3": {
-                "endpoint_url": "https://s3.amazonaws.com",
-                "bucket": "non-consented-archive",
-                "access_key": "testing",
-                "secret": "testing",
-            },
-            "keys": {
-                "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
-                "consented_archive_public_key_path": str(crypt4gh_grz_public_key_file_path),
-                "non_consented_archive_public_key_path": str(crypt4gh_grz_public_key_file_path),
-            },
-            "pruefbericht": {
-                "authorization_url": "https://bfarm.localhost/token",
-                "api_base_url": "https://bfarm.localhost/api/",
-                "client_id": "pytest",
-                "client_secret": "pysecret",
-            },
-            "db": {
-                "database_url": f"sqlite:///{str(db_file)}",
-                "author": {
-                    "name": "Alice",
-                    "private_key_path": str(db_alice_private_key_file_path),
-                },
-                "known_public_keys": str(db_known_keys_file_path),
-            },
+        config_content["s3"]["inboxes"] = {
+            le_id: {
+                "inbox-a": {},
+                "inbox-b": {},
+            }
         }
+        del config_content["s3"]["bucket"]
 
         config_file = temp_data_dir_path / "config.multi.yaml"
         import yaml
