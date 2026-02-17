@@ -158,7 +158,15 @@ class Observer(Pipeable, metaclass=abc.ABCMeta):
         self.sink: Writable | None = None
 
     def set_sink(self, sink: Writable):
-        self.sink = sink
+        """
+        Recursively finds the end of the chain and attaches the sink there.
+        """
+        if self.sink is None:
+            self.sink = sink
+        elif isinstance(self.sink, Observer):
+            self.sink.set_sink(sink)
+        else:
+            self.sink = sink
         return self
 
     def write(self, data: bytes) -> int:
