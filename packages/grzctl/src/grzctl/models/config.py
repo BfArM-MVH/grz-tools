@@ -55,6 +55,17 @@ class ProcessKeyConfigModel(IgnoringBaseSettings):
     """Path to the public key for re-encryption of non-consented submissions."""
 
 
+class DetailedQcModel(IgnoringBaseSettings):
+    local_storage: Annotated[str, Field(min_length=1)]
+    """Path to local storage for detailed QC staging."""
+
+    salt: str | float | int
+    """Salt to use for deterministic determination of submissions selected for detailed QC."""
+
+    target_percentage: Annotated[float, Field(ge=0.0, le=100.0)] = 2.0
+    """Target percentage of submissions selected for detailed QC per month."""
+
+
 class ProcessConfig(IgnoringBaseSettings):
     """Configuration for the streaming pipeline process command."""
 
@@ -76,6 +87,9 @@ class ProcessConfig(IgnoringBaseSettings):
     # Database configuration
     db: DbModel
     """Database configuration for submission tracking."""
+
+    detailed_qc: DetailedQcModel
+    """Configuration for detailed QC selection and staging."""
 
 
 class PruefberichtConfig(IgnoringBaseSettings):
