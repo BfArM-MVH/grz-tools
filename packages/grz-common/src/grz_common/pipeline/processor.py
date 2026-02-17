@@ -146,6 +146,7 @@ class SubmissionProcessor:
 
         self._upload_final_metadata(submission_metadata)
         log.info(f"Submission {self.submission_id} processed successfully.")
+        # TODO: cleanup inbox if successful and requested
 
     def _process_one_file(self, file_meta: File, threshold: Thresholds | None, pbar_global: Any):
         src_key = f"{self.submission_id}/files/{file_meta.file_path}.c4gh"
@@ -242,6 +243,8 @@ class SubmissionProcessor:
 
             pipeline = pipeline | Crypt4GHDecryptor(private_key=self.keys["private"])
             pipeline = self._measure(pipeline, "2_Decrypt", metrics)
+
+            # TODO: depending on whether should_qc is true, also stream to local storage after decryption
 
             pipeline = pipeline | Tee(validation_chain, threaded=self.background_tee)
 
