@@ -285,7 +285,7 @@ class SubmissionProcessor:
             stats.update(format_validator.metrics)
 
         if metrics:
-            log.debug(f"Performance for {file_meta.file_path}: {metrics.report()}")
+            log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
 
         self.context.record_stats(file_meta.file_path, stats)
 
