@@ -97,9 +97,12 @@ class SubmissionProcessor:
     def run(self, submission_metadata: SubmissionMetadata):
         self.submission_id = submission_metadata.content.submission_id
         is_consented = submission_metadata.content.consents_to_research(date.today())
-        db = SubmissionDb(self.config.db.database_url, self.config.db.author)
-        self.should_qc = db.should_qc(
-            self.submission_id, self.config.detailed_qc.target_percentage, self.config.detailed_qc.salt
+        db = SubmissionDb(self.config.db.database_url, self.config.db.author)  # type: ignore[arg-type]
+        target_percentage = self.config.detailed_qc.target_percentage
+        self.should_qc = (
+            db.should_qc(self.submission_id, target_percentage, self.config.detailed_qc.salt)
+            if target_percentage > 0.0
+            else False
         )
 
         target_s3_options = self.config.consented_archive_s3 if is_consented else self.config.non_consented_archive_s3
@@ -218,6 +221,8 @@ class SubmissionProcessor:
             raise RuntimeError("Target public key not set.")
         if not self.target_bucket:
             raise RuntimeError("Target bucket not set.")
+        if not self.submission_id:
+            raise RuntimeError("Submission id not set.")
 
         src_key = f"{self.submission_id}/files/{file_meta.file_path}.c4gh"
         dest_key = f"{self.submission_id}/files/{file_meta.encrypted_file_path()}"
