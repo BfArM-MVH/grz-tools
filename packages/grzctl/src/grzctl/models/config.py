@@ -59,7 +59,7 @@ class DetailedQcModel(IgnoringBaseSettings):
     local_storage: Annotated[str, Field(min_length=1)]
     """Path to local storage for detailed QC staging."""
 
-    salt: str | float | int
+    salt: str
     """Salt to use for deterministic determination of submissions selected for detailed QC."""
 
     target_percentage: Annotated[float, Field(ge=0.0, le=100.0)] = 2.0
