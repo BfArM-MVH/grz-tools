@@ -1,5 +1,6 @@
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import ExitStack
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
+from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
 from grzctl.models.config import ProcessConfig
@@ -68,6 +70,7 @@ class SubmissionProcessor:
         self._target_s3_map: dict[tuple[AnyHttpUrl, str], S3Client] = {}
 
         self.submission_id: str | None = None
+        self.should_qc: bool = False
         self.target_s3: Any = None
         self.target_bucket: str | None = None
         self.target_public_key: bytes | None = None
@@ -94,6 +97,10 @@ class SubmissionProcessor:
     def run(self, submission_metadata: SubmissionMetadata):
         self.submission_id = submission_metadata.content.submission_id
         is_consented = submission_metadata.content.consents_to_research(date.today())
+        db = SubmissionDb(self.config.db.database_url, self.config.db.author)
+        self.should_qc = db.should_qc(
+            self.submission_id, self.config.detailed_qc.target_percentage, self.config.detailed_qc.salt
+        )
 
         target_s3_options = self.config.consented_archive_s3 if is_consented else self.config.non_consented_archive_s3
         self.target_bucket = target_s3_options.bucket
@@ -147,6 +154,8 @@ class SubmissionProcessor:
         self._upload_final_metadata(submission_metadata)
         log.info(f"Submission {self.submission_id} processed successfully.")
         # TODO: cleanup inbox if successful and requested
+        self.should_qc = False
+        self.submission_id = None
 
     def _process_one_file(self, file_meta: File, threshold: Thresholds | None, pbar_global: Any):
         src_key = f"{self.submission_id}/files/{file_meta.file_path}.c4gh"
@@ -231,20 +240,28 @@ class SubmissionProcessor:
             wrapped_format = self._measure(format_validator, "3b_Format", metrics, is_observer=True)
             validation_chain = validation_chain | wrapped_format
 
-        with tqdm(  # type: ignore[call-overload]
-            total=file_meta.file_size_in_bytes,
-            desc="Processing",
-            postfix={"file": file_name},
-            leave=False,
-            **TQDM_DEFAULTS,
-        ) as pbar_local:
+        with (
+            tqdm(  # type: ignore[call-overload]
+                total=file_meta.file_size_in_bytes,
+                desc="Processing",
+                postfix={"file": file_name},
+                leave=False,
+                **TQDM_DEFAULTS,
+            ) as pbar_local,
+            ExitStack() as stack,
+        ):
             pipeline = S3Downloader(self.source_s3, self.source_s3_options.bucket, src_key)
             pipeline = self._measure(pipeline, "1_Source", metrics)
 
             pipeline = pipeline | Crypt4GHDecryptor(private_key=self.keys["private"])
             pipeline = self._measure(pipeline, "2_Decrypt", metrics)
 
-            # TODO: depending on whether should_qc is true, also stream to local storage after decryption
+            if self.should_qc:
+                path = Path(self.config.detailed_qc.local_storage) / self.submission_id / "files" / file_meta.file_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                writer = stack.enter_context(open(path, "wb"))
+                writer = self._measure(writer, "2b_Write", metrics, is_observer=True)
+                pipeline = pipeline | Tee(writer, threaded=self.background_tee)
 
             pipeline = pipeline | Tee(validation_chain, threaded=self.background_tee)
 
