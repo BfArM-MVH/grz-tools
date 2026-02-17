@@ -85,7 +85,10 @@ class SubmissionProcessor:
         if not self.enable_metrics or not registry:
             return stream
         if is_observer:
-            return stream | MeasuringObserver(name, registry)
+            wrapper = MeasuringObserver(name, registry)
+            wrapper.set_sink(stream)
+            return wrapper
+
         return MeasuringStream(stream, name, registry)
 
     def run(self, submission_metadata: SubmissionMetadata):
@@ -213,14 +216,19 @@ class SubmissionProcessor:
         metrics = MetricsRegistry() if self.enable_metrics else None
 
         checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
-        format_validator: ObserverWithMetrics | None = None
+        validation_chain = self._measure(checksum_validator, "3a_Checksum", metrics, is_observer=True)
 
+        format_validator: ObserverWithMetrics | None = None
         if file_meta.file_type == FileType.fastq:
             format_validator = FastqValidator(
                 mean_read_length_threshold=threshold.mean_read_length if threshold else None
             )
         elif file_meta.file_type == FileType.bam:
             format_validator = BamValidator()
+
+        if format_validator:
+            wrapped_format = self._measure(format_validator, "3b_Format", metrics, is_observer=True)
+            validation_chain = validation_chain | wrapped_format
 
         with tqdm(  # type: ignore[call-overload]
             total=file_meta.file_size_in_bytes,
@@ -234,15 +242,6 @@ class SubmissionProcessor:
 
             pipeline = pipeline | Crypt4GHDecryptor(private_key=self.keys["private"])
             pipeline = self._measure(pipeline, "2_Decrypt", metrics)
-
-            validation_chain = checksum_validator
-            if self.enable_metrics and metrics:
-                validation_chain = validation_chain | MeasuringObserver("3a_Checksum", metrics)
-
-            if format_validator:
-                validation_chain = validation_chain | format_validator
-                if self.enable_metrics and metrics:
-                    validation_chain = validation_chain | MeasuringObserver("3b_Format", metrics)
 
             pipeline = pipeline | Tee(validation_chain, threaded=self.background_tee)
 

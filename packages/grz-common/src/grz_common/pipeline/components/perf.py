@@ -63,3 +63,6 @@ class MeasuringObserver(Observer):
 
         self.registry.update(self.name, len(data), duration)
         return res
+
+    def observe(self, chunk: bytes) -> None:
+        pass
