@@ -889,40 +889,18 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         raise click.Abort()
 
     if output_json:
-        submission_dict: dict[str, Any] = {
-            "id": submission.id,
-            "tan_g": submission.tan_g,
-            "pseudonym": submission.pseudonym,
-            "submission_date": submission.submission_date.isoformat() if submission.submission_date else None,
-            "submission_type": submission.submission_type,
-            "submitter_id": submission.submitter_id,
-            "data_node_id": submission.data_node_id,
-            "disease_type": submission.disease_type,
-            "genomic_study_type": submission.genomic_study_type,
-            "genomic_study_subtype": submission.genomic_study_subtype,
-            "basic_qc_passed": submission.basic_qc_passed,
-            "consented": submission.consented,
-            "detailed_qc_passed": submission.detailed_qc_passed,
-            "states": [],
-        }
+        submission_dict = submission.model_dump(mode="json")
+        submission_dict["states"] = []
 
-        if submission.states:
-            sorted_states = sorted(submission.states, key=lambda s: s.timestamp)
-            for state_log in sorted_states:
-                signature_status, verifying_key_comment = _verify_signature(
-                    ctx.obj["public_keys"], state_log.author_name, state_log
-                )
-                submission_dict["states"].append(
-                    {
-                        "id": state_log.id,
-                        "timestamp": state_log.timestamp.isoformat(),
-                        "state": state_log.state.value,
-                        "data": state_log.data,
-                        "data_steward": state_log.author_name,
-                        "data_steward_signature": signature_status,
-                        "signature_key_comment": verifying_key_comment,
-                    }
-                )
+        for state_log in sorted(submission.states, key=lambda s: s.timestamp):
+            signature_status, verifying_key_comment = _verify_signature(
+                ctx.obj["public_keys"], state_log.author_name, state_log
+            )
+            state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
+            state_dict["data_steward"] = state_log.author_name
+            state_dict["data_steward_signature"] = signature_status
+            state_dict["signature_key_comment"] = verifying_key_comment
+            submission_dict["states"].append(state_dict)
 
         json.dump(submission_dict, sys.stdout)
         sys.stdout.write("\n")
