@@ -8,7 +8,9 @@ from typing import Any
 import click
 import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
+from grz_db.models.submission import SubmissionStateEnum
 
+from ..dbcontext import DbContext
 from ..models.config import DecryptConfig
 
 log = logging.getLogger(__name__)
@@ -18,11 +20,13 @@ log = logging.getLogger(__name__)
 @grzcli.configuration
 @grzcli.submission_dir
 @grzcli.force
+@grzcli.update_db
 def decrypt(
     configuration: dict[str, Any],
     config_file: tuple[Path],
     submission_dir,
     force,
+    update_db,
     **kwargs,
 ):
     """
@@ -47,6 +51,14 @@ def decrypt(
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
     )
-    worker_inst.decrypt(grz_privkey_path, force=force)
+    submission_id = worker_inst.parse_encrypted_submission().submission_id
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.DECRYPTING,
+        end_state=SubmissionStateEnum.DECRYPTED,
+        enabled=update_db,
+    ):
+        worker_inst.decrypt(grz_privkey_path, force=force)
 
     log.info("Decryption successful!")

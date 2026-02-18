@@ -7,22 +7,23 @@ import logging
 import subprocess
 import typing
 from collections.abc import Generator
+from functools import partial
 from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
-import grz_pydantic_models.submission.thresholds as thresholds_model
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
-    File,
+    Donor,
     FileType,
     GrzSubmissionMetadata,
+    LabDatum,
     ReadOrder,
-    SequenceData,
     SequencingLayout,
 )
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
+from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import ValidationError
 
 from ..models.identifiers import IdentifiersModel
@@ -112,6 +113,79 @@ class SubmissionMetadata:
         self._files = submission_files
         return self._files
 
+    @staticmethod
+    def pair_files(
+        files: list[SubmissionFileMetadata],
+    ) -> Generator[tuple[SubmissionFileMetadata, SubmissionFileMetadata], None, None]:
+        """
+        Groups a list of FASTQ files by Flowcell and Lane, yielding (R1, R2) pairs.
+        """
+        key_func = lambda f: (f.flowcell_id, f.lane_id)
+        files.sort(key=key_func)
+
+        for _, group in groupby(files, key_func):
+            group_files = list(group)
+
+            r1_files = [f for f in group_files if f.read_order == ReadOrder.r1]
+            r2_files = [f for f in group_files if f.read_order == ReadOrder.r2]
+
+            if r1_files and r2_files:
+                yield from zip(r1_files, r2_files, strict=True)
+
+    def iter_paired_end_fastqs(
+        self,
+    ) -> Generator[
+        tuple[Donor, LabDatum, list[tuple[SubmissionFileMetadata, SubmissionFileMetadata]], Thresholds], None, None
+    ]:
+        """
+        Yields (Donor, LabDatum, List of R1/R2 Pairs, Threshold) for every Paired-End unit.
+        """
+        for donor in self.content.donors:
+            for lab_datum in donor.lab_data:
+                if lab_datum.sequencing_layout != SequencingLayout.paired_end:
+                    continue
+                if not lab_datum.sequence_data:
+                    continue
+
+                files = [f for f in lab_datum.sequence_data.files if f.file_type == FileType.fastq]
+                thresholds = self.content.determine_thresholds_for(donor, lab_datum)
+                pairs = list(self.pair_files(files))
+
+                if pairs:
+                    yield donor, lab_datum, pairs, thresholds
+
+    def iter_single_end_fastqs(
+        self,
+    ) -> Generator[tuple[Donor, LabDatum, list[SubmissionFileMetadata], Thresholds], None, None]:
+        """
+        Yields (Donor, LabDatum, List of Files, Threshold) for every Single-End unit.
+        """
+        for donor in self.content.donors:
+            for lab_datum in donor.lab_data:
+                # Handle Single, Reverse, Other, etc.
+                if lab_datum.sequencing_layout == SequencingLayout.paired_end:
+                    continue
+                if not lab_datum.sequence_data:
+                    continue
+
+                files = [f for f in lab_datum.sequence_data.files if f.file_type == FileType.fastq]
+                thresholds = self.content.determine_thresholds_for(donor, lab_datum)
+
+                if files:
+                    yield donor, lab_datum, files, thresholds
+
+    def iter_bams(self) -> Generator[tuple[Donor, LabDatum, SubmissionFileMetadata], None, None]:
+        """
+        Yields every BAM file in the submission.
+        """
+        for donor in self.content.donors:
+            for lab_datum in donor.lab_data:
+                if not lab_datum.sequence_data:
+                    continue
+                for f in lab_datum.sequence_data.files:
+                    if f.file_type == FileType.bam:
+                        yield donor, lab_datum, f
+
     def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """
         Validates this submission's metadata (content).
@@ -200,7 +274,7 @@ class Submission:
 
         return retval
 
-    def validate_files_with_grz_check(  # noqa: C901, PLR0915, PLR0912
+    def validate_files_with_grz_check(  # noqa: C901, PLR0912
         self, checksum_progress_file: str | PathLike, seq_data_progress_file: str | PathLike, threads: int | None
     ) -> Generator[str, None, None]:
         """
@@ -212,10 +286,12 @@ class Submission:
         seq_data_progress_logger = FileProgressLogger[ValidationState](log_file_path=seq_data_progress_file)
         seq_data_progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
 
+        log_dir = Path(checksum_progress_file).parent
+
         grz_check_args = []
         checked_files = set()
 
-        def should_check_file(file_path: Path, file_metadata: File) -> bool:
+        def should_check_file(file_path: Path, file_metadata: SubmissionFileMetadata) -> bool:
             # Check against both logs. If either is missing a "pass", re-check.
             checksum_state = checksum_progress_logger.get_state(file_path, file_metadata)
             seq_data_state = seq_data_progress_logger.get_state(file_path, file_metadata)
@@ -228,52 +304,33 @@ class Submission:
                 return not (checksum_passed and seq_data_passed)
             return not checksum_passed
 
-        # Collect args for FASTQ and BAM from sequencing data
-        for donor in self.metadata.content.donors:
-            for lab_data in donor.lab_data:
-                if not lab_data.sequence_data:
-                    continue
+        for _donor, _lab_datum, pairs, thresholds in self.metadata.iter_paired_end_fastqs():
+            mean_read_length_threshold = thresholds.mean_read_length
+            for r1_meta, r2_meta in pairs:
+                r1_path = self.files_dir / r1_meta.file_path
+                r2_path = self.files_dir / r2_meta.file_path
 
-                thresholds = self.metadata.content.determine_thresholds_for(donor, lab_data)
-                mean_read_length_threshold = thresholds.mean_read_length
+                if should_check_file(r1_path, r1_meta) or should_check_file(r2_path, r2_meta):
+                    grz_check_args.extend(
+                        ["--fastq-paired", str(r1_path), str(r2_path), str(mean_read_length_threshold)]
+                    )
+                checked_files.update({r1_path, r2_path})
 
-                sequence_data = lab_data.sequence_data
-                fastq_files = [f for f in sequence_data.files if f.file_type == FileType.fastq]
-                bam_files = [f for f in sequence_data.files if f.file_type == FileType.bam]
+        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
+            mean_read_length_threshold = thresholds.mean_read_length
+            for f_meta in fastq_files:
+                f_path = self.files_dir / f_meta.file_path
+                if f_path not in checked_files:
+                    if should_check_file(f_path, f_meta):
+                        grz_check_args.extend(["--fastq-single", str(f_path), str(mean_read_length_threshold)])
+                    checked_files.add(f_path)
 
-                if lab_data.sequencing_layout == SequencingLayout.paired_end:
-                    key = lambda f: (f.flowcell_id, f.lane_id)
-                    fastq_files.sort(key=key)
-                    for _key, group in groupby(fastq_files, key):
-                        files = list(group)
-                        fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
-                        fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
-
-                        for r1_meta, r2_meta in zip(fastq_r1_files, fastq_r2_files, strict=True):
-                            r1_path = self.files_dir / r1_meta.file_path
-                            r2_path = self.files_dir / r2_meta.file_path
-                            if should_check_file(r1_path, r1_meta) or should_check_file(r2_path, r2_meta):
-                                grz_check_args.extend(
-                                    ["--fastq-paired", str(r1_path), str(r2_path), str(mean_read_length_threshold)]
-                                )
-                            checked_files.add(r1_path)
-                            checked_files.add(r2_path)
-                else:
-                    for f_meta in fastq_files:
-                        f_path = self.files_dir / f_meta.file_path
-                        if f_path in checked_files:
-                            continue
-                        if should_check_file(f_path, f_meta):
-                            grz_check_args.extend(["--fastq-single", str(f_path), str(mean_read_length_threshold)])
-                        checked_files.add(f_path)
-
-                for bam_meta in bam_files:
-                    bam_path = self.files_dir / bam_meta.file_path
-                    if bam_path in checked_files:
-                        continue
-                    if should_check_file(bam_path, bam_meta):
-                        grz_check_args.extend(["--bam", str(bam_path)])
-                    checked_files.add(bam_path)
+        for _donor, _lab_datum, bam_meta in self.metadata.iter_bams():
+            bam_path = self.files_dir / bam_meta.file_path
+            if bam_path not in checked_files:
+                if should_check_file(bam_path, bam_meta):
+                    grz_check_args.extend(["--bam", str(bam_path)])
+                checked_files.add(bam_path)
 
         # Handle any other files with --raw for calculating checksums
         for file_path, file_metadata in self.files.items():
@@ -283,31 +340,46 @@ class Submission:
         if not grz_check_args:
             self.__log.info("All files are already validated. Skipping `grz-check`.")
         else:
-            log_dir = Path(checksum_progress_file).parent
-            temp_report_path = log_dir / "grz-check.report.jsonl"
-            temp_report_path.unlink(missing_ok=True)
+            yield from self._run_grz_check_command(
+                grz_check_args, threads, log_dir, checksum_progress_logger, seq_data_progress_logger
+            )
 
-            command_args = ["--output", str(temp_report_path), *grz_check_args]
-            if threads:
-                command_args.extend(["--threads", str(threads)])
-            try:
-                run_grz_check(command_args)
-            except UserInterruptException:
-                self.__log.warning("Validation cancelled by user. Processing partial results...")
-                raise
-            except subprocess.CalledProcessError as e:
-                self.__log.error(f"`grz-check` failed with exit code {e.returncode}")
-                yield "`grz-check` execution failed. See logs for details."
-            finally:
-                if temp_report_path.is_file():
-                    self.__log.info(f"Processing report file: {temp_report_path}")
-                    with temp_report_path.open("r") as f:
-                        self._process_grz_check_report(f, checksum_progress_logger, seq_data_progress_logger)  # type: ignore
-                    temp_report_path.unlink()
-                else:
-                    self.__log.warning("`grz-check` did not produce a report file.")
+        yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
-        # Aggregate errors from both logs
+    def _run_grz_check_command(
+        self,
+        grz_check_args: list[str],
+        threads: int | None,
+        log_dir: Path,
+        checksum_logger: FileProgressLogger,
+        seq_logger: FileProgressLogger,
+    ) -> Generator[str, None, None]:
+        """Helper to encapsulate the subprocess execution and report processing."""
+        temp_report_path = log_dir / "grz-check.report.jsonl"
+        temp_report_path.unlink(missing_ok=True)
+
+        command_args = ["--output", str(temp_report_path), *grz_check_args]
+        if threads:
+            command_args.extend(["--threads", str(threads)])
+
+        try:
+            run_grz_check(command_args)
+        except UserInterruptException:
+            self.__log.warning("Validation cancelled by user. Processing partial results...")
+            raise
+        except subprocess.CalledProcessError as e:
+            self.__log.error(f"`grz-check` failed with exit code {e.returncode}")
+            yield "`grz-check` execution failed. See logs for details."
+        finally:
+            if temp_report_path.is_file():
+                with temp_report_path.open("r") as f:
+                    self._process_grz_check_report(f, checksum_logger, seq_logger)
+                temp_report_path.unlink()
+
+    def _aggregate_validation_errors(
+        self, checksum_progress_logger: FileProgressLogger, seq_data_progress_logger: FileProgressLogger
+    ) -> Generator[str, None, None]:
+        """Aggregates all errors from both progress loggers into a flat generator."""
         all_errors = set()
         for local_file_path, file_metadata in self.files.items():
             checksum_state = checksum_progress_logger.get_state(local_file_path, file_metadata)
@@ -390,7 +462,7 @@ class Submission:
                 self.__log.error(f"Error processing grz-check report entry: {line.strip()}. Error: {e}")
 
     @staticmethod
-    def _validate_file_data_fallback(metadata: File, local_file_path: Path) -> Generator[str]:
+    def _validate_file_data_fallback(metadata: SubmissionFileMetadata, local_file_path: Path) -> Generator[str]:
         """
         Validates whether the provided file matches this metadata.
         (Fallback method)
@@ -482,50 +554,19 @@ class Submission:
         progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
         # cleanup log file and keep only files listed here
         progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
-        # fields:
-        # - "errors": List[str]
-        # - "validation_passed": bool
 
-        def find_fastq_files(sequence_data: SequenceData) -> list[File]:
-            return [f for f in sequence_data.files if f.file_type == FileType.fastq]
-
-        def find_bam_files(sequence_data: SequenceData) -> list[File]:
-            return [f for f in sequence_data.files if f.file_type == FileType.bam]
-
-        for donor in self.metadata.content.donors:
-            for lab_datum in donor.lab_data:
-                sequencing_layout = lab_datum.sequencing_layout
-                sequence_data = lab_datum.sequence_data
-                # find all FASTQ files
-                fastq_files = find_fastq_files(sequence_data) if sequence_data else []
-                bam_files = find_bam_files(sequence_data) if sequence_data else []
-
-                if not lab_datum.library_type.endswith("_lr"):
-                    match sequencing_layout:
-                        case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
-                            yield from self._validate_single_end_fallback(
-                                fastq_files,
-                                progress_logger,
-                                self.metadata.content.determine_thresholds_for(donor, lab_datum),
-                            )
-                        case SequencingLayout.paired_end:
-                            yield from self._validate_paired_end_fallback(
-                                fastq_files,
-                                progress_logger,
-                                self.metadata.content.determine_thresholds_for(donor, lab_datum),
-                            )
-                yield from self._validate_bams_fallback(bam_files, progress_logger)
+        yield from self._validate_paired_end_fallback(progress_logger)
+        yield from self._validate_single_end_fallback(progress_logger)
+        yield from self._validate_bams_fallback(progress_logger)
 
     def _validate_bams_fallback(
         self,
-        bam_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
     ) -> Generator[str, None, None]:
         """
         Basic BAM sanity checks.
         (Fallback method)
 
-        :param bam_files: List of BAM files
         :param progress_logger: Progress logger
         """
 
@@ -542,7 +583,7 @@ class Submission:
                 validation_passed=validation_passed,
             )
 
-        for bam_file in bam_files:
+        for _donor, _lab_datum, bam_file in self.metadata.iter_bams():
             logged_state = progress_logger.get_state(
                 self.files_dir / bam_file.file_path,
                 bam_file,
@@ -553,11 +594,11 @@ class Submission:
 
     def _validate_single_end_fallback(
         self,
-        fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
-        thresholds: thresholds_model.Thresholds,
     ) -> Generator[str, None, None]:
-        def validate_file(local_file_path, file_metadata: SubmissionFileMetadata) -> ValidationState:
+        def validate_file(
+            thresholds: Thresholds, local_file_path: Path, file_metadata: SubmissionFileMetadata
+        ) -> ValidationState:
             self.__log.debug("Validating '%s'...", str(local_file_path))
 
             # validate the file
@@ -570,32 +611,22 @@ class Submission:
             # return log state
             return ValidationState(errors=errors, validation_passed=validation_passed)
 
-        for fastq_file in fastq_files:
-            logged_state = progress_logger.get_state(
-                self.files_dir / fastq_file.file_path,
-                fastq_file,
-                default=validate_file,  # validate the file if the state was not calculated yet
-            )
-            if logged_state:
-                yield from logged_state["errors"]
+        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
+            for fastq_file in fastq_files:
+                logged_state = progress_logger.get_state(
+                    self.files_dir / fastq_file.file_path,
+                    fastq_file,
+                    default=partial(validate_file, thresholds),  # validate the file if the state was not calculated yet
+                )
+                if logged_state:
+                    yield from logged_state["errors"]
 
     def _validate_paired_end_fallback(
         self,
-        fastq_files: list[File],
         progress_logger: FileProgressLogger[ValidationState],
-        thresholds: thresholds_model.Thresholds,
     ) -> Generator[str, None, None]:
-        mean_read_length_threshold = thresholds.mean_read_length
-        key = lambda f: (f.flowcell_id, f.lane_id)
-        fastq_files.sort(key=key)
-        for _key, group in groupby(fastq_files, key):
-            files = list(group)
-
-            # separate R1 and R2 files
-            fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
-            fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
-
-            for fastq_r1, fastq_r2 in zip(fastq_r1_files, fastq_r2_files, strict=True):
+        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_paired_end_fastqs():
+            for fastq_r1, fastq_r2 in fastq_files:
                 local_fastq_r1_path = self.files_dir / fastq_r1.file_path
                 local_fastq_r2_path = self.files_dir / fastq_r2.file_path
 
@@ -609,7 +640,7 @@ class Submission:
                         validate_paired_end_reads(
                             local_fastq_r1_path,  # fastq R1
                             local_fastq_r2_path,  # fastq R2
-                            mean_read_length_threshold=mean_read_length_threshold,
+                            mean_read_length_threshold=thresholds.mean_read_length,
                         )
                     )
                     validation_passed = len(errors) == 0

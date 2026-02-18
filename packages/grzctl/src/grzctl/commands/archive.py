@@ -6,7 +6,9 @@ from typing import Any
 
 import click
 from grz_common.workers.worker import Worker
+from grz_db.models.submission import SubmissionStateEnum
 
+from ..dbcontext import DbContext
 from ..models.config import ArchiveConfig
 
 log = logging.getLogger(__name__)
@@ -18,10 +20,12 @@ import grz_common.cli as grzcli
 @grzcli.configuration
 @grzcli.submission_dir
 @grzcli.threads
+@grzcli.update_db
 def archive(
     configuration: dict[str, Any],
     submission_dir,
     threads,
+    update_db,
     **kwargs,
 ):
     """
@@ -40,6 +44,14 @@ def archive(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-    worker_inst.archive(config.s3)
+    submission_id = worker_inst.parse_encrypted_submission().submission_id
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.ARCHIVING,
+        end_state=SubmissionStateEnum.ARCHIVED,
+        enabled=update_db,
+    ):
+        worker_inst.archive(config.s3)
 
     log.info("Archival finished!")

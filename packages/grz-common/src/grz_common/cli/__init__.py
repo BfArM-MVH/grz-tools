@@ -170,3 +170,7 @@ output_json = click.option("--json", "output_json", is_flag=True, help="Output J
 show_details = click.option("--details", "show_details", is_flag=True, help="Show more detailed output.")
 
 force = click.option("--force/--no-force", help="Overwrite files and ignore cached results (dangerous!)")
+
+update_db = click.option(
+    "--update-db/--no-update-db", default=True, help="Update the submission state in the database automatically."
+)

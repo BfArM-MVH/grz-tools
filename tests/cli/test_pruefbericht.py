@@ -14,6 +14,8 @@ from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from .. import mock_files
 
+TEST_SUBMISSION_ID = "123456789_1970-01-01_00000000"
+
 
 @pytest.fixture
 def requests_mock(assert_all_requests_are_fired: bool = False):
@@ -122,6 +124,8 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
         submit_args = [
             "pruefbericht",
             "submit",
+            "--submission-id",
+            TEST_SUBMISSION_ID,
             "--config-file",
             temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
@@ -156,6 +160,8 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_
         submit_args = [
             "pruefbericht",
             "submit",
+            "--submission-id",
+            TEST_SUBMISSION_ID,
             "--config-file",
             temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
@@ -194,6 +200,8 @@ def test_valid_submission_with_expired_token(
         submit_args = [
             "pruefbericht",
             "submit",
+            "--submission-id",
+            TEST_SUBMISSION_ID,
             "--config-file",
             temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
@@ -310,6 +318,8 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
         submit_args = [
             "pruefbericht",
             "submit",
+            "--submission-id",
+            TEST_SUBMISSION_ID,
             "--config-file",
             temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
