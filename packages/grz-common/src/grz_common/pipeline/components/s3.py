@@ -5,7 +5,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from . import Observer, Stream
+from . import Observer, ReadStream
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def calculate_s3_part_size(file_size: int | None, user_part_size: int | None = N
     return max(MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MIN_PART_SIZE)
 
 
-class S3Downloader(Stream):
+class S3Downloader(ReadStream):
     """Reading from S3 is the Source of the pipeline."""
 
     def __init__(self, s3_client: Any, bucket: str, key: str):

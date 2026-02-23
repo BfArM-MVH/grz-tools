@@ -22,7 +22,7 @@ from ..transfer import init_s3_client
 from ..utils.crypt import Crypt4GH
 from .components import ObserverWithMetrics, Tee, TqdmObserver
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
-from .components.perf import MeasuringObserver, MeasuringStream, MetricsRegistry
+from .components.perf import MeasuringWriteStream, MeasuringReadStream, MetricsRegistry
 from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
 from .components.validation import BamValidator, ChecksumValidator, FastqValidator
 from .context import ConsistencyValidator, SubmissionContext
@@ -96,11 +96,11 @@ class SubmissionProcessor:
         if not self.enable_metrics or not registry:
             return stream
         if is_observer:
-            wrapper = MeasuringObserver(name, registry)
+            wrapper = MeasuringWriteStream(name, registry)
             wrapper.set_sink(stream)
             return wrapper
 
-        return MeasuringStream(stream, name, registry)
+        return MeasuringReadStream(stream, name, registry)
 
     def run(self, submission_metadata: SubmissionMetadata):
         self.submission_id = submission_metadata.content.submission_id
