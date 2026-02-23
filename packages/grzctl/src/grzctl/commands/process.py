@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -225,6 +226,7 @@ def _handle_pruefbericht(  # noqa: PLR0913
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
     update_db: bool,
+    max_retries: int = 10,
 ) -> None:
     """
     Generate and optionally submit Prüfbericht to BfArM.
@@ -277,6 +279,9 @@ def _handle_pruefbericht(  # noqa: PLR0913
 
         log.info("Submitting Prüfbericht to BfArM...")
 
+        initial_delay = 30.0
+        backoff_factor = 2.0
+
         with DbContext(
             configuration=configuration,
             submission_id=submission_id,
@@ -284,13 +289,26 @@ def _handle_pruefbericht(  # noqa: PLR0913
             end_state=SubmissionStateEnum.REPORTED,
             enabled=update_db,
         ):
-            _expiry, _token = _try_submit_pruefbericht(
-                pruefbericht=pruefbericht,
-                api_base_url=str(api_base_url),
-                auth_url=str(auth_url),
-                client_id=client_id,
-                client_secret=client_secret,
-                token="",
-            )
+            for attempt in range(1, max_retries + 2):
+                try:
+                    _expiry, _token = _try_submit_pruefbericht(
+                        pruefbericht=pruefbericht,
+                        api_base_url=str(api_base_url),
+                        auth_url=str(auth_url),
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        token="",
+                    )
+                    break
+                except Exception as e:
+                    if attempt > max_retries:
+                        log.error(f"Prüfbericht submission failed after {max_retries} retries.")
+                        raise e
+                    wait_time = initial_delay * (backoff_factor ** (attempt - 1))
+
+                    log.warning(
+                        f"Prüfbericht submission attempt {attempt} failed with error: {e}. Retrying in {wait_time} seconds..."
+                    )
+                    time.sleep(wait_time)
 
         log.info("Prüfbericht submitted successfully!")
