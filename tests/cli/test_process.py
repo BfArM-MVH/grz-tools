@@ -13,6 +13,8 @@ import boto3
 import click.testing
 import grzctl.cli
 import pytest
+import yaml
+from grzctl.models.config import ProcessConfig
 from moto import mock_aws
 
 # Path to test fixtures
@@ -189,7 +191,6 @@ class TestGrzctlProcess:
         1. Uploads a submission to the mock inbox bucket
         2. Runs grzctl process
         3. Verifies files are uploaded to the archive bucket
-        4. Verifies the processed files can be decrypted correctly
         """
         submission_id = "260914050_2024-07-15_c64603a7"
 
@@ -210,7 +211,6 @@ class TestGrzctlProcess:
             submission_id,
             "--output-dir",
             str(working_dir_path),
-            "--no-validate",  # Skip validation for faster test
             "--no-submit-pruefbericht",
             "--no-update-db",
         ]
@@ -257,7 +257,6 @@ class TestGrzctlProcess:
             submission_id,
             "--output-dir",
             str(working_dir_path),
-            "--no-validate",
             "--no-submit-pruefbericht",
             "--no-update-db",
         ]
@@ -330,7 +329,6 @@ class TestGrzctlProcess:
             str(working_dir_path),
             "--inbox-bucket",
             "inbox-b",
-            "--no-validate",
             "--no-submit-pruefbericht",
             "--no-update-db",
         ]
@@ -355,7 +353,6 @@ class TestGrzctlProcess:
             submission_id,
             "--output-dir",
             str(working_dir_path / "fail"),
-            "--no-validate",
             "--no-submit-pruefbericht",
             "--no-update-db",
         ]
@@ -442,7 +439,6 @@ class TestProcessVsManualWorkflow:
             submission_id,
             "--output-dir",
             str(working_dir_process),
-            "--no-validate",
             "--no-submit-pruefbericht",
             "--no-update-db",
         ]
@@ -509,7 +505,7 @@ class TestProcessValidationFailure:
         inbox_keys = {o.key for o in s3_buckets["inbox"].objects.all()}
         assert f"{submission_id}/metadata/metadata.json" in inbox_keys
 
-        # Run grzctl process WITH validation enabled
+        # Run grzctl process
         args = [
             "process",
             "--config-file",
@@ -518,7 +514,6 @@ class TestProcessValidationFailure:
             submission_id,
             "--output-dir",
             str(working_dir_path),
-            "--validate",  # Enable validation
             "--no-submit-pruefbericht",
             "--no-update-db",
         ]
