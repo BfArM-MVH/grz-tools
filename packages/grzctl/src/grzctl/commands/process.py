@@ -33,12 +33,6 @@ log = logging.getLogger(__name__)
 @grzcli.threads
 @grzcli.update_db
 @click.option(
-    "--validate/--no-validate",
-    "validate",
-    default=True,
-    help="Enable or disable validation of files during processing.",
-)
-@click.option(
     "--submit-pruefbericht/--no-submit-pruefbericht",
     default=False,
     help="Submit Prüfbericht to BfArM after successful processing.",
