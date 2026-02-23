@@ -104,6 +104,7 @@ def process(  # noqa: PLR0913
 
     submission_metadata = SubmissionMetadata(local_metadata_path)
 
+    # TODO see https://github.com/BfArM-MVH/grz-tools/pull/517
     redact_patterns = []
     if redact_logs:
         redact_patterns.append((re.escape(submission_metadata.content.submission.tan_g), "REDACTED_TAN"))
