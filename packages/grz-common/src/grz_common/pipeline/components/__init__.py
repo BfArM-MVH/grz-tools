@@ -220,19 +220,18 @@ class Tee(Stream):
             self._thread.start()
 
     def read(self, size: int | None = -1) -> bytes:
-        chunk = self._source.read(size)  # type: ignore[union-attr]
-        if chunk:
-            if self._exc:
-                raise self._exc
+        if self._threaded and self._exc:
+            raise self._exc
 
-            if self._threaded:
+        chunk = self._source.read(size)  # type: ignore[union-attr]
+        if self._threaded:
+            if chunk:
                 self._queue.put(chunk, block=True)  # type: ignore[union-attr]
             else:
-                try:
-                    self.observer.write(chunk)
-                except Exception as e:
-                    self._exc = e
-                    raise
+                self._queue.put(None)  # type: ignore[union-attr]
+        elif chunk:
+            self.observer.write(chunk)
+
         return chunk
 
     def _worker(self):
@@ -240,24 +239,28 @@ class Tee(Stream):
             while True:
                 chunk = self._queue.get()  # type: ignore[union-attr]
                 if chunk is None:
+                    self._queue.task_done()
                     break
                 self.observer.write(chunk)
-                self._queue.task_done()  # type: ignore[union-attr]
-            self.observer.close()
+                self._queue.task_done()
         except Exception as e:
             self._exc = e
 
     def close(self):
-        if self._threaded:
-            if self._thread and self._thread.is_alive() and self._queue:
-                self._queue.put(None)
-                self._thread.join()
-        else:
+        # close upstream sources first
+        super().close()
+
+        # shut down the background worker gracefully
+        if self._threaded and self._thread and self._thread.is_alive() and self._queue:
+            with contextlib.suppress(queue.Full):
+                self._queue.put_nowait(None)
+            self._thread.join()
+
+        if hasattr(self.observer, "close"):
             self.observer.close()
 
         if self._exc:
             raise self._exc
-        super().close()
 
 
 class TqdmObserver(Observer):
