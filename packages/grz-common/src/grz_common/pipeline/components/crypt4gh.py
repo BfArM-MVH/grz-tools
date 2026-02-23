@@ -30,14 +30,23 @@ class Crypt4GHDecryptor(Transformer):
         self._private_key = private_key
         self._session_keys: bytes | None = None
         self._header_parsed = False
+        self._buffer = bytearray()
 
     def _fill_buffer(self) -> bytes:
         if not self._header_parsed:
             self._read_header()
 
-        ciphersegment = self.source.read(self.CIPHER_SEGMENT_SIZE)
-        if not ciphersegment:
+        while len(self._buffer) < self.CIPHER_SEGMENT_SIZE:
+            chunk = self.source.read(self.CIPHER_SEGMENT_SIZE)
+            if not chunk:
+                break
+            self._buffer.extend(chunk)
+
+        if not self._buffer:
             return b""
+
+        ciphersegment = bytes(self._buffer[: self.CIPHER_SEGMENT_SIZE])
+        del self._buffer[: self.CIPHER_SEGMENT_SIZE]
 
         if len(ciphersegment) <= self.CIPHER_DIFF:
             raise ValueError("Truncated cipher segment")
