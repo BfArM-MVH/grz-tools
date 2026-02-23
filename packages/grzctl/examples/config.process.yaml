@@ -1,31 +1,39 @@
+definitions:
+  - &default_inbox_connection
+    endpoint_url: https://inbox.s3.example.com
+    access_key: ${GRZ_S3__ACCESS_KEY}
+    secret: ${GRZ_S3__SECRET}
+    private_key_path: /path/to/grz-default-inbox.sec
+
+  - &default_archive_s3_connection
+    endpoint_url: https://archive.s3.example.com
+    access_key: ${GRZ_S3__ACCESS_KEY}
+    secret: ${GRZ_S3__SECRET}
+
 s3:
-  endpoint_url: https://inbox.s3.example.com
-  # bucket: grz-inbox  # optional default bucket
-  access_key: ${GRZ_S3__ACCESS_KEY}
-  secret: ${GRZ_S3__SECRET}
   inboxes:
     "123456789":
-      grz-inbox: {}
-      another-bucket: {}
+      grz-inbox: *default_inbox_connection
+
     "987654321":
-      some-other-bucket: {}
+      some-other-bucket: *default_inbox_connection
 
-keys:
-  grz_private_key_path: /path/to/grz-inbox.sec
-  consented_archive_public_key_path: /path/to/archive-consented.pub
-  non_consented_archive_public_key_path: /path/to/archive-nonconsented.pub
+      bucket-with-different-key:
+        <<: *default_inbox_connection
+        private_key_path: /path/to/grz-key-for-bucket-with-different-key.sec
 
-consented_archive_s3:
-  endpoint_url: https://archive.s3.example.com
-  bucket: grz-archive-consented
-  access_key: ${GRZ_S3__ACCESS_KEY}
-  secret: ${GRZ_S3__SECRET}
+archives:
+  consented:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-consented
+    public_key_path: /path/to/archive-consented.pub
 
-non_consented_archive_s3:
-  endpoint_url: https://archive.s3.example.com
-  bucket: grz-archive-nonconsented
-  access_key: ${GRZ_S3__ACCESS_KEY}
-  secret: ${GRZ_S3__SECRET}
+  non_consented:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-nonconsented
+    public_key_path: /path/to/archive-nonconsented.pub
 
 pruefbericht:
   authorization_url: ${GRZ_PRUEFBERICHT__AUTHORIZATION_URL}
