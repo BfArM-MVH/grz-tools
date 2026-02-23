@@ -43,27 +43,36 @@ def process_config_content(
 
     return {
         "s3": {
-            "endpoint_url": "https://s3.amazonaws.com",
-            "bucket": "inbox",
-            "access_key": "testing",
-            "secret": "testing",
+            "inboxes": {
+                "260914050": {
+                    "inbox": {
+                        "endpoint_url": "https://s3.amazonaws.com",
+                        "access_key": "testing",
+                        "secret": "testing",
+                        "private_key_path": str(crypt4gh_grz_private_key_file_path),
+                    }
+                }
+            }
         },
-        "consented_archive_s3": {
-            "endpoint_url": "https://s3.amazonaws.com",
-            "bucket": "consented-archive",
-            "access_key": "testing",
-            "secret": "testing",
-        },
-        "non_consented_archive_s3": {
-            "endpoint_url": "https://s3.amazonaws.com",
-            "bucket": "non-consented-archive",
-            "access_key": "testing",
-            "secret": "testing",
-        },
-        "keys": {
-            "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
-            "consented_archive_public_key_path": str(crypt4gh_grz_public_key_file_path),
-            "non_consented_archive_public_key_path": str(crypt4gh_grz_public_key_file_path),
+        "archives": {
+            "consented": {
+                "s3": {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "bucket": "consented-archive",
+                    "access_key": "testing",
+                    "secret": "testing",
+                },
+                "public_key_path": str(crypt4gh_grz_public_key_file_path),
+            },
+            "non_consented": {
+                "s3": {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "bucket": "non-consented-archive",
+                    "access_key": "testing",
+                    "secret": "testing",
+                },
+                "public_key_path": str(crypt4gh_grz_public_key_file_path),
+            },
         },
         "pruefbericht": {
             "authorization_url": "https://bfarm.localhost/token",
@@ -295,13 +304,14 @@ class TestGrzctlProcess:
         upload_submission_to_inbox(inbox_b, submission_id)
         config_content = process_config_content.copy()
 
+        base_inbox_config = config_content["s3"]["inboxes"][le_id]["inbox"]
+
         config_content["s3"]["inboxes"] = {
             le_id: {
-                "inbox-a": {},
-                "inbox-b": {},
+                "inbox-a": base_inbox_config.copy(),
+                "inbox-b": base_inbox_config.copy(),
             }
         }
-        del config_content["s3"]["bucket"]
 
         config_file = temp_data_dir_path / "config.multi.yaml"
         import yaml
