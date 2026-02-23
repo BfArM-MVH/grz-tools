@@ -172,7 +172,7 @@ def _select_inbox_options(config: Any, submission_id: str, inbox_bucket: str | N
             raise click.ClickException("S3 bucket is required.")
         return s3_options
 
-    le_id = submission_id.split("_")[0]
+    le_id = submission_id.split("_", maxsplit=1)[0]
     if le_id not in config.s3.inboxes:
         if not config.s3.bucket:
             raise click.ClickException(f"No inboxes found for '{le_id}'.")

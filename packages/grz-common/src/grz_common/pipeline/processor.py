@@ -143,7 +143,7 @@ class SubmissionProcessor:
                 pool.submit(
                     self._process_one_file,
                     file_meta=file_meta,
-                    threshold=thresholds.get(file_meta.file_path, None),
+                    threshold=thresholds.get(file_meta.file_path),
                     pbar_global=pbar_global,
                 )
                 for file_meta in files_map.values()
@@ -163,7 +163,7 @@ class SubmissionProcessor:
     def _process_one_file(self, file_meta: File, threshold: Thresholds | None, pbar_global: Any):
         src_key = f"{self.submission_id}/files/{file_meta.file_path}.c4gh"
         file_path_str = str(file_meta.file_path)
-        file_name = file_path_str.split("/")[-1]
+        file_name = file_path_str.rsplit("/", maxsplit=1)[-1]
 
         try:
             head = self.source_s3.head_object(Bucket=self.source_s3_options.bucket, Key=src_key)
