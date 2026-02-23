@@ -1119,7 +1119,6 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         Also adds archive metadata indicating consent status.
 
-        :param archive_consented: Whether submission is going to consented archive
         :returns: Redacted metadata dictionary
         """
         # get the base dictionary representation
