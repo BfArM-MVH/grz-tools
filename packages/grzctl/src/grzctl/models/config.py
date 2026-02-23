@@ -2,7 +2,7 @@ from typing import Annotated
 
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.keys import KeyConfigModel
-from grz_common.models.s3 import S3ConfigModel, S3Options
+from grz_common.models.s3 import S3ConfigModel, S3ConnectionBase, S3Options
 from grz_pydantic_models.submission.metadata import GenomicDataCenterId
 from pydantic import Field
 
@@ -26,20 +26,42 @@ class CleanConfig(S3ConfigModel):
     pass
 
 
-class InboxConfig(IgnoringBaseModel):
-    """Configuration for a specific inbox."""
+class InboxConfig(S3ConnectionBase):
+    """
+    Configuration for a specific inbox.
+    Includes connection details and the private key needed to decrypt its contents.
+    """
 
-    pass
+    private_key_path: Annotated[str, Field(min_length=1)]
+    """Path to the GRZ private key used to decrypt files from this inbox."""
 
 
-class ProcessS3Options(S3Options):
-    """S3 options for the process command, supporting multiple inboxes."""
+class InboxTarget(IgnoringBaseModel):
+    """
+    Fully resolved source configuration.
+    Encapsulates everything needed to read and decrypt from a specific inbox.
+    """
 
-    bucket: str | None = None  # type: ignore[assignment]
-    """Default bucket name. Required if inboxes is not used or no matching inbox is found."""
+    s3: S3Options
+    """Fully resolved S3 options, including the bucket name."""
 
-    inboxes: dict[str, dict[str, InboxConfig]] | None = None
-    """Mapping of submitter IDs to a mapping of bucket names to inbox configurations."""
+    private_key_path: Annotated[str, Field(min_length=1)]
+    """Path to the GRZ private key used to decrypt files from this inbox."""
+
+
+class ProcessS3Options(IgnoringBaseModel):
+    """
+    Root S3 configuration for the process command.
+    Enforces that at least one LE and one inbox are defined.
+    """
+
+    inboxes: Annotated[
+        dict[str, Annotated[dict[str, InboxConfig], Field(min_length=1)]],
+        Field(min_length=1),
+    ]
+    """
+    Mapping: LE-Id -> BucketName -> InboxConfig.
+    """
 
 
 class ProcessKeyConfigModel(IgnoringBaseSettings):
@@ -66,21 +88,35 @@ class DetailedQcModel(IgnoringBaseSettings):
     """Target percentage of submissions selected for detailed QC per month."""
 
 
+class ArchiveTarget(IgnoringBaseModel):
+    """Encapsulates everything needed to write to a specific archive."""
+
+    s3: S3Options
+    """S3 connection details and bucket for this archive."""
+
+    public_key_path: Annotated[str, Field(min_length=1)]
+    """Path to the public key for re-encryption of files destined for this archive."""
+
+
+class ArchivesConfig(IgnoringBaseModel):
+    """Configuration for consented and non-consented archives."""
+
+    consented: ArchiveTarget
+    """Target definition for consented submissions."""
+
+    non_consented: ArchiveTarget
+    """Target definition for non-consented submissions."""
+
+
 class ProcessConfig(IgnoringBaseSettings):
     """Configuration for the streaming pipeline process command."""
 
     s3: ProcessS3Options
+    """Configuration for S3 connections."""
 
-    keys: ProcessKeyConfigModel
-    """Key configuration for decryption and re-encryption."""
+    archives: ArchivesConfig
+    """Configuration for consented and non-consented archives."""
 
-    consented_archive_s3: S3Options
-    """S3 configuration for the consented archive destination."""
-
-    non_consented_archive_s3: S3Options
-    """S3 configuration for the non-consented archive destination."""
-
-    # Prüfbericht configuration
     pruefbericht: PruefberichtModel
     """Configuration for Prüfbericht submission."""
 

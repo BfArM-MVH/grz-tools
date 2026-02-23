@@ -8,17 +8,16 @@ from pathlib import Path
 from typing import Any
 
 import click
-import crypt4gh.keys
 import grz_common.cli as grzcli
+from grz_common.models.s3 import S3Options
 from grz_common.pipeline.processor import SubmissionProcessor
-from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..dbcontext import DbContext
-from ..models.config import ProcessConfig
+from ..models.config import InboxTarget, ProcessConfig
 from ..models.pruefbericht import PruefberichtModel
 from .db.cli import get_submission_db_instance
 from .pruefbericht import _generate_pruefbericht_from_metadata
@@ -84,7 +83,7 @@ def process(  # noqa: PLR0913
     """
     config = ProcessConfig.model_validate(configuration)
 
-    s3_options = _select_inbox_options(config, submission_id, inbox_bucket)
+    inbox = _resolve_inbox_target(config, submission_id, inbox_bucket)
     _, metadata_dir, log_dir, encrypted_files_dir = _setup_directories(output_dir)
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
@@ -92,16 +91,10 @@ def process(  # noqa: PLR0913
     # first, download metadata to understand the submission structure
     log.info("Downloading metadata...")
     download_worker = S3BotoDownloadWorker(
-        s3_options, status_file_path=log_dir / "progress_download.cjson", threads=threads
+        inbox.s3, status_file_path=log_dir / "progress_download.cjson", threads=threads
     )
     download_worker.download_metadata(submission_id, metadata_dir, metadata_file_name="metadata.json")
     local_metadata_path = metadata_dir / "metadata.json"
-
-    keys = {
-        "private": Crypt4GH.retrieve_private_key(config.keys.grz_private_key_path),
-        "consented_public": crypt4gh.keys.get_public_key(config.keys.consented_archive_public_key_path),
-        "non_consented_public": crypt4gh.keys.get_public_key(config.keys.non_consented_archive_public_key_path),
-    }
 
     submission_metadata = SubmissionMetadata(local_metadata_path)
 
@@ -128,8 +121,7 @@ def process(  # noqa: PLR0913
 
     processor = SubmissionProcessor(
         configuration=config,
-        source_s3_options=s3_options,
-        keys=keys,
+        inbox=inbox,
         redact_patterns=redact_patterns,
         status_file_path=status_file_path,
         threads=threads,
@@ -164,31 +156,30 @@ def process(  # noqa: PLR0913
     )
 
 
-def _select_inbox_options(config: Any, submission_id: str, inbox_bucket: str | None) -> Any:
-    """Determine S3 options based on submission ID and config."""
-    s3_options = config.s3
-    if not config.s3.inboxes:
-        if not s3_options.bucket:
-            raise click.ClickException("S3 bucket is required.")
-        return s3_options
-
+def _resolve_inbox_target(config: ProcessConfig, submission_id: str, requested_bucket: str | None) -> InboxTarget:
     le_id = submission_id.split("_", maxsplit=1)[0]
+
     if le_id not in config.s3.inboxes:
-        if not config.s3.bucket:
-            raise click.ClickException(f"No inboxes found for '{le_id}'.")
-        return s3_options
+        available = ", ".join(config.s3.inboxes.keys())
+        raise click.ClickException(f"Submitter ID '{le_id}' not found in configuration. Available: {available}")
 
     submitter_inboxes = config.s3.inboxes[le_id]
-    if inbox_bucket:
-        if inbox_bucket not in submitter_inboxes:
-            raise click.ClickException(f"Inbox bucket '{inbox_bucket}' not found.")
-        return config.s3.model_copy(update={"bucket": inbox_bucket})
 
-    if len(submitter_inboxes) == 1:
-        bucket_name = next(iter(submitter_inboxes))
-        return config.s3.model_copy(update={"bucket": bucket_name})
+    if requested_bucket:
+        if requested_bucket not in submitter_inboxes:
+            raise click.ClickException(f"Inbox bucket '{requested_bucket}' not found for '{le_id}'.")
+        bucket_name = requested_bucket
+        inbox_config = submitter_inboxes[requested_bucket]
+    elif len(submitter_inboxes) == 1:
+        bucket_name, inbox_config = next(iter(submitter_inboxes.items()))
+    else:
+        available_buckets = ", ".join(submitter_inboxes.keys())
+        raise click.ClickException(
+            f"Multiple inboxes found for '{le_id}' ({available_buckets}). Please specify --inbox-bucket."
+        )
 
-    raise click.ClickException(f"Multiple inboxes found for '{le_id}', specify --inbox-bucket")
+    s3_options = S3Options(bucket=bucket_name, **inbox_config.model_dump())
+    return InboxTarget(s3=s3_options, private_key_path=inbox_config.private_key_path)
 
 
 def _setup_directories(output_dir: str) -> tuple[Path, Path, Path, Path]:
