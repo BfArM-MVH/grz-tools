@@ -107,7 +107,7 @@ class S3MultipartUploader(Observer):
         while len(self._buffer) >= self.part_size:
             part_data = self._buffer[: self.part_size]
             del self._buffer[: self.part_size]
-            self._submit_part(part_data, self._part_number)
+            self._submit_part(bytes(part_data), self._part_number)
             self._part_number += 1
 
     def close(self) -> None:
