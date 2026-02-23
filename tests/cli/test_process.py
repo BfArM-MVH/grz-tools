@@ -614,3 +614,76 @@ class TestProcessValidationFailure:
             Key=f"{submission_id}/files/invalid.fastq.gz.c4gh",
             Body=gzipped_content,  # Not actually encrypted for simplicity
         )
+
+
+class TestConfigValidation:
+    """Tests for config validation."""
+
+    def test_pydantic_nested_env_var_merging(self, tmp_path: Path, monkeypatch, process_config_content: dict):
+        """
+        Test that pydantic-settings correctly merges deeply nested dictionary
+        overrides from environment variables into the YAML-loaded config.
+        """
+        le_id = "260914050"
+        bucket_name = "grz-inbox-test"
+
+        process_config_content["s3"]["inboxes"] = {
+            le_id: {
+                bucket_name: {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "access_key": "testing",
+                    "secret": "testing",
+                    "private_key_path": "/path/to/test.sec",
+                    # Notice: private_key_passphrase is intentionally omitted here
+                }
+            }
+        }
+
+        config_file = tmp_path / "config.yaml"
+        with open(config_file, "w") as f:
+            yaml.dump(process_config_content, f)
+
+        env_var_name = f"GRZ_S3__INBOXES__{le_id}__{bucket_name}__PRIVATE_KEY_PASSPHRASE"
+        monkeypatch.setenv(env_var_name.upper(), "dotenv-secret-passphrase")
+
+        with open(config_file) as f:
+            raw_dict = yaml.safe_load(f)
+
+        config = ProcessConfig.model_validate(raw_dict)
+
+        resolved_inbox = config.s3.inboxes[le_id][bucket_name]
+        assert resolved_inbox.private_key_passphrase == "dotenv-secret-passphrase"
+
+    def test_pydantic_json_env_var_merging(self, tmp_path: Path, monkeypatch, process_config_content: dict):
+        """
+        Test that pydantic-settings correctly parses JSON from a single environment
+        variable to bypass bash hyphen limitations for dynamic dictionary keys.
+        """
+        le_id = "260914050"
+        bucket_name = "grz-inbox-test"
+
+        process_config_content["s3"]["inboxes"] = {
+            le_id: {
+                bucket_name: {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "access_key": "testing",
+                    "secret": "testing",
+                    "private_key_path": "/path/to/test.sec",
+                }
+            }
+        }
+
+        config_file = tmp_path / "config.yaml"
+        with open(config_file, "w") as f:
+            yaml.dump(process_config_content, f)
+
+        json_override = {le_id: {bucket_name: {"private_key_passphrase": "json-secret-passphrase"}}}
+        monkeypatch.setenv("GRZ_S3__INBOXES", json.dumps(json_override))
+
+        with open(config_file) as f:
+            raw_dict = yaml.safe_load(f)
+
+        config = ProcessConfig.model_validate(raw_dict)
+
+        resolved_inbox = config.s3.inboxes[le_id][bucket_name]
+        assert resolved_inbox.private_key_passphrase == "json-secret-passphrase"
