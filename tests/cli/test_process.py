@@ -30,15 +30,6 @@ def process_config_content(
     db_known_keys_file_path,
     tmpdir_factory,
 ):
-    """
-    Create configuration for grzctl process command.
-
-    This sets up:
-    - Inbox S3 bucket configuration
-    - Consented archive S3 bucket configuration
-    - Non-consented archive S3 bucket configuration
-    - Keys for decryption and re-encryption
-    """
     db_dir = tmpdir_factory.mktemp("db")
     db_file = db_dir / "test.db"
     local_storage_dir = tmpdir_factory.mktemp("local_storage")
@@ -617,13 +608,9 @@ class TestProcessValidationFailure:
 
 
 class TestConfigValidation:
-    """Tests for config validation."""
+    """Tests for process configuration parsing and environment variable merging."""
 
     def test_pydantic_nested_env_var_merging(self, tmp_path: Path, monkeypatch, process_config_content: dict):
-        """
-        Test that pydantic-settings correctly merges deeply nested dictionary
-        overrides from environment variables into the YAML-loaded config.
-        """
         le_id = "260914050"
         bucket_name = "grz-inbox-test"
 
@@ -634,7 +621,6 @@ class TestConfigValidation:
                     "access_key": "testing",
                     "secret": "testing",
                     "private_key_path": "/path/to/test.sec",
-                    # Notice: private_key_passphrase is intentionally omitted here
                 }
             }
         }
@@ -650,15 +636,9 @@ class TestConfigValidation:
             raw_dict = yaml.safe_load(f)
 
         config = ProcessConfig.model_validate(raw_dict)
-
-        resolved_inbox = config.s3.inboxes[le_id][bucket_name]
-        assert resolved_inbox.private_key_passphrase == "dotenv-secret-passphrase"
+        assert config.s3.inboxes[le_id][bucket_name].private_key_passphrase == "dotenv-secret-passphrase"
 
     def test_pydantic_json_env_var_merging(self, tmp_path: Path, monkeypatch, process_config_content: dict):
-        """
-        Test that pydantic-settings correctly parses JSON from a single environment
-        variable to bypass bash hyphen limitations for dynamic dictionary keys.
-        """
         le_id = "260914050"
         bucket_name = "grz-inbox-test"
 
@@ -684,6 +664,4 @@ class TestConfigValidation:
             raw_dict = yaml.safe_load(f)
 
         config = ProcessConfig.model_validate(raw_dict)
-
-        resolved_inbox = config.s3.inboxes[le_id][bucket_name]
-        assert resolved_inbox.private_key_passphrase == "json-secret-passphrase"
+        assert config.s3.inboxes[le_id][bucket_name].private_key_passphrase == "json-secret-passphrase"
