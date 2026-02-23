@@ -35,6 +35,9 @@ class InboxConfig(S3ConnectionBase):
     private_key_path: Annotated[str, Field(min_length=1)]
     """Path to the GRZ private key used to decrypt files from this inbox."""
 
+    private_key_passphrase: Annotated[str | None, Field(default=None)] = None
+    """Passphrase to the GRZ private key used to decrypt files from this inbox."""
+
 
 class InboxTarget(IgnoringBaseModel):
     """
@@ -47,6 +50,9 @@ class InboxTarget(IgnoringBaseModel):
 
     private_key_path: Annotated[str, Field(min_length=1)]
     """Path to the GRZ private key used to decrypt files from this inbox."""
+
+    private_key_passphrase: Annotated[str | None, Field(default=None)] = None
+    """Passphrase to the GRZ private key used to decrypt files from this inbox."""
 
 
 class ProcessS3Options(IgnoringBaseModel):
