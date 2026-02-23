@@ -37,6 +37,7 @@ class IgnoringBaseSettings(BaseSettings):
         use_enum_values=True,
         env_nested_delimiter="__",
         env_prefix="grz_",
+        env_file=".env",
     )
 
     def to_yaml(self, fd):

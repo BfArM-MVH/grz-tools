@@ -54,7 +54,9 @@ class SubmissionProcessor:
         self.source_s3_options = inbox.s3
 
         log.debug("Loading crypt4gh keys...")
-        self.private_key = Crypt4GH.retrieve_private_key(inbox.private_key_path)
+        self.private_key = Crypt4GH.retrieve_private_key(
+            inbox.private_key_path, passphrase=inbox.private_key_passphrase
+        )
         self.consented_pub_key = get_public_key(configuration.archives.consented.public_key_path)
         self.non_consented_pub_key = get_public_key(configuration.archives.non_consented.public_key_path)
 

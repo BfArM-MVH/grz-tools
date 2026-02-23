@@ -89,20 +89,22 @@ class Crypt4GH:
             pipeline >> out_fd
 
     @staticmethod
-    def retrieve_private_key(seckey_path: str | PathLike) -> bytes:
+    def retrieve_private_key(seckey_path: str | PathLike, passphrase: str | None = None) -> bytes:
         """
         Read Crypt4GH private key from specified path.
 
         :param seckey_path: Path to the private key
+        :param passphrase: Passphrase for the private key. If None, will check C4GH_PASSPHRASE envvar, if that is also undefined, will prompt for user input.
         :returns: Private key bytes
         """
         seckeypath = os.path.expanduser(str(seckey_path))
         if not os.path.exists(seckeypath):
             raise ValueError(f"Secret key not found: {seckey_path}")
 
-        passphrase = os.getenv("C4GH_PASSPHRASE")
         if passphrase:
             passphrase_callback = lambda: passphrase
+        elif global_passphrase := os.getenv("C4GH_PASSPHRASE"):
+            passphrase_callback = lambda: global_passphrase
         else:
             passphrase_callback = partial(getpass, prompt=f"Passphrase for {seckey_path}: ")
 
