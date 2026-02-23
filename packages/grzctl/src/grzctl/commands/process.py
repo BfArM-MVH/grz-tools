@@ -217,7 +217,7 @@ def _prepare_redact_patterns(encrypted_submission: EncryptedSubmission) -> list[
     return patterns
 
 
-def _handle_pruefbericht(  # noqa: PLR0913
+def _handle_pruefbericht(  # noqa: C901, PLR0913
     config: ProcessConfig,
     configuration: dict[str, Any],
     encrypted_submission: EncryptedSubmission,
