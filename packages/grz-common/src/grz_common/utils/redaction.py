@@ -6,7 +6,7 @@ from pathlib import Path
 
 def redact_file(input_file: Path, output_file: Path, patterns: list[tuple[str, str]]) -> bool:
     """
-    Redact patterns from a file and write to another file.
+    Read input_file, apply redaction patterns, and write result to output_file.
 
     :param input_file: Path to file to redact
     :param output_file: Path to file to write the redacted file to
