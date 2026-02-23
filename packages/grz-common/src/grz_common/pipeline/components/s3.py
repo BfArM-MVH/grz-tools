@@ -196,8 +196,16 @@ class S3MultipartUploader(Observer):
         return f"{combined_hash}-{len(digests)}"
 
     def _check_futures(self):
-        """Check if any background tasks failed."""
-        self._futures = [f for f in self._futures if not f.done() or f.result()]
+        """Check if any background tasks failed and collect completed parts."""
+        active = []
+        for f in self._futures:
+            if f.done():
+                # .result() raises the exception if the future failed,
+                # otherwise it returns the part dictionary we need to keep.
+                self._parts.append(f.result())
+            else:
+                active.append(f)
+        self._futures = active
 
     def _cleanup(self):
         if self._executor:
