@@ -591,7 +591,7 @@ def _diff_donors(
                 else None,
             }
         )
-        donor_before = pseudonym2before.get(donor_after.pseudonym, None)
+        donor_before = pseudonym2before.get(donor_after.pseudonym)
         pending_pseudonyms.add(donor_after.pseudonym)
         change = "added"
         if donor_before == donor_after:
