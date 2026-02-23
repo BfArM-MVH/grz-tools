@@ -157,6 +157,9 @@ class FastqValidator(ObserverWithMetrics):
             if final:
                 self._processor(final)
 
+        if self._read_count == 0:
+            raise ValueError("Invalid FASTQ: Counted zero reads. File may be empty.")
+
         if self._current_line_len > 0:
             raise ValueError("Invalid FASTQ: Unexpected EOF (incomplete line). File may be truncated.")
 
