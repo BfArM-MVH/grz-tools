@@ -1,7 +1,5 @@
 """Utility functions for redacting sensitive information from files."""
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 
@@ -30,7 +28,3 @@ def redact_file(input_file: Path, output_file: Path, patterns: list[tuple[str, s
     output_file.write_text(content)
 
     return modified
-
-    except Exception:
-        # let caller handle logging
-        raise
