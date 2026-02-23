@@ -1114,7 +1114,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         Redacts:
         - tanG (replaced with REDACTED_TAN constant)
-        - localCaseId (replaced with empty string)
+        - localCaseId (replaced with "REDACTED_LOCAL_CASE_ID")
         - Index donor pseudonym (replaced with "index")
 
         Also adds archive metadata indicating consent status.
