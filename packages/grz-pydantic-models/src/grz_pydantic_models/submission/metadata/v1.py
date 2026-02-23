@@ -1134,12 +1134,6 @@ class GrzSubmissionMetadata(StrictBaseModel):
             if donor.get("relation") == "index":
                 donor["donorPseudonym"] = "index"
 
-        # add archive metadata
-        metadata_dict["_archive_metadata"] = {
-            "consented": archive_consented,
-            "archive_type": "consented" if archive_consented else "non_consented",
-        }
-
         return metadata_dict
 
     @field_validator("donors", mode="after")
