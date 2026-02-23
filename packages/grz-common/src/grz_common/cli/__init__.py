@@ -8,7 +8,7 @@ from typing import Any
 
 import click
 import platformdirs
-from grz_common.utils.system import get_cpu_count
+from grz_common.utils.system import get_effective_cpu_count
 
 from ..utils.config import read_and_merge_config_files
 
@@ -142,7 +142,7 @@ def read_config_from_ctx(ctx: click.Context) -> dict[str, Any]:
 
 threads = click.option(
     "--threads",
-    default=min(get_cpu_count(), 4),
+    default=min(get_effective_cpu_count(), 4),
     type=int,
     show_default=True,
     help="Number of threads to use for parallel operations",
