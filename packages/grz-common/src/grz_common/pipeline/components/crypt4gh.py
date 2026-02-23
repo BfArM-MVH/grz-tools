@@ -97,15 +97,26 @@ class Crypt4GHEncryptor(Transformer):
         self._sender_privkey = sender_privkey or bytes(PrivateKey.generate())
         self._session_key = os.urandom(32)
         self._header_sent = False
+        self._buffer = bytearray()
 
     def _fill_buffer(self) -> bytes:
         if not self._header_sent:
             self._header_sent = True
             return self._compose_header()
 
-        segment = self.source.read(self.SEGMENT_SIZE)
-        if not segment:
+        # ensure we always get SEGMENT_SIZE long segments to minimize crypt4gh overhead
+        while len(self._buffer) < self.SEGMENT_SIZE:
+            chunk = self.source.read(self.SEGMENT_SIZE)
+            if not chunk:
+                break
+            self._buffer.extend(chunk)
+
+        if not self._buffer:
             return b""
+
+        segment_len = min(self.SEGMENT_SIZE, len(self._buffer))
+        segment = bytes(self._buffer[:segment_len])
+        del self._buffer[:segment_len]
 
         nonce = os.urandom(self.NONCE_LENGTH)
         ciphertext = crypto_aead_chacha20poly1305_ietf_encrypt(segment, None, nonce, self._session_key)
