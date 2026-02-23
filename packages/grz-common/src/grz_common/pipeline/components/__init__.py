@@ -31,6 +31,8 @@ class PipelineError(Exception):
 class Readable(Protocol):
     def read(self, size: int) -> bytes: ...
     def readable(self) -> bool: ...
+    @property
+    def closed(self) -> bool: ...
     def close(self) -> None: ...
 
 
@@ -38,6 +40,8 @@ class Readable(Protocol):
 class Writable(Protocol):
     def write(self, data: bytes) -> int: ...
     def writable(self) -> bool: ...
+    @property
+    def closed(self) -> bool: ...
     def close(self) -> None: ...
 
 
@@ -48,20 +52,20 @@ class Pipeable:
         """
         Piping operator for chaining components.
 
-        1. stream | TransformerClass -> TransformerClass(stream)
-        2. stream | transformer_instance -> transformer_instance.source = stream
-        3. observer | observer -> Links push-based observers in a side-channel.
+        1. self: Pipeable | Class -> Class(self)
+        2. self: Readable | other: ReadStream  -> other.set_source(self)
+        3. self: WriteStream | other: Writable -> self.set_sink(other)
         """
         if isinstance(other, type):
             return other(self)
 
+        if isinstance(self, Readable) and isinstance(other, ReadStream):
+            other.set_source(self)
+            return other
+
         if isinstance(self, WriteStream) and isinstance(other, Writable):
             self.set_sink(other)
             return self
-
-        if isinstance(other, (Transformer, Tee)):
-            other.source = self
-            return other
 
         raise TypeError(f"Operator '|' expects a Transformer or Observer, got {type(other)}")
 
@@ -70,26 +74,24 @@ class Pipeable:
         Redirection operator for driving the pipeline into a sink.
         Usage: (source | transform) >> sink
         """
-        if not hasattr(other, "write") or not callable(other.write):
+        if not isinstance(other, Writable):
             raise TypeError(f"Operator '>>' expects a Writable sink, got {type(other)}")
 
-        if not hasattr(self, "read"):
-            raise TypeError(f"Cannot drive pipeline: {type(self)} is not readable.")
+        if not isinstance(self, Readable):
+            raise TypeError(f"Cannot drive pipeline: {type(self)} is not Readable.")
 
         try:
             # Drive the pull-based pipeline into the sink
             shutil.copyfileobj(self, other, length=READ_CHUNK_SIZE)
         finally:
             # Ensure close propagates down the whole chain to join threads and flush buffers
-            if hasattr(self, "close"):
-                self.close()
-            if hasattr(other, "close"):
-                # Sinks like open files or DevNullSink need closing to ensure flush
-                other.close()
+            self.close()
+            # Sinks like open files or DevNullSink need closing to ensure flush
+            other.close()
         return other
 
 
-class ReadStream(Readable, Pipeable):
+class ReadStream(io.BufferedIOBase, Pipeable):
     """Wraps a source input."""
 
     def __init__(self, source: io.BufferedIOBase | None = None):
@@ -103,9 +105,15 @@ class ReadStream(Readable, Pipeable):
     def source(self):
         return self._source
 
-    @source.setter
-    def source(self, value):
-        self._source = value
+    def set_source(self, source: Readable):
+        if self.closed:
+            raise RuntimeError("Stream closed")
+
+        if not isinstance(source, Readable):
+            raise TypeError(f"Source must be a readable object with a 'read' method. Got: {type(source).__name__}")
+
+        self._source = source
+        return self
 
     def read(self, size: int | None = -1) -> bytes:
         if self.source is None:
@@ -160,35 +168,46 @@ class Transformer(ReadStream, metaclass=abc.ABCMeta):
         return bytes(ret)
 
 
-class WriteStream(Writable, Pipeable):
+class WriteStream(io.BufferedIOBase, Pipeable):
     """Wraps a sink output."""
 
-    def __init__(self):
-        self.sink: Writable | None = None
+    def __init__(self, sink: Writable | None = None):
+        self._sink = sink
 
     def writable(self) -> bool:
         return True
+
+    @property
+    def sink(self) -> Writable | None:
+        return self._sink
 
     def set_sink(self, sink: Writable):
         """
         Recursively finds the end of the chain and attaches the sink there.
         """
-        if not hasattr(sink, "write") or not callable(sink.write):
+        if self.closed:
+            raise RuntimeError("Stream closed")
+
+        if not isinstance(sink, Writable):
             raise TypeError(f"Sink must be a writable object with a 'write' method. Got: {type(sink).__name__}")
-        if self.sink is None:
-            self.sink = sink
-        elif isinstance(self.sink, WriteStream):
+
+        if self._sink is None:
+            self._sink = sink
+        elif isinstance(self._sink, WriteStream):
             self.sink.set_sink(sink)
         else:
-            self.sink = sink
+            self._sink = sink
+
         return self
 
     def write(self, data: bytes) -> int:
         return self.sink.write(data)
 
     def close(self):
-        if self.sink:
-            self.sink.close()
+        if not self.closed:
+            if self.sink:
+                self.sink.close()
+            super().close()
 
 
 class Observer(WriteStream, metaclass=abc.ABCMeta):
@@ -232,10 +251,9 @@ class Tee(ReadStream):
         self._exc: Exception | None = None
         super().__init__(None)
 
-    @ReadStream.source.setter  # type: ignore[attr-defined]
-    def source(self, value):
-        self._source = value
-        if value is not None and self._threaded:
+    def set_source(self, source: Readable):
+        super().set_source(source)
+        if source is not None and self._threaded:
             self._queue = queue.Queue(maxsize=self.max_queue_size)
             self._thread = threading.Thread(target=self._worker, daemon=True)
             self._thread.start()
@@ -244,7 +262,7 @@ class Tee(ReadStream):
         if self._threaded and self._exc:
             raise self._exc
 
-        chunk = self._source.read(size)  # type: ignore[union-attr]
+        chunk = self.source.read(size)  # type: ignore[union-attr]
         if self._threaded:
             if chunk:
                 self._queue.put(chunk, block=True)  # type: ignore[union-attr]
