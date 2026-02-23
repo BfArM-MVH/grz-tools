@@ -6,18 +6,20 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from crypt4gh.keys import get_public_key
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
-from grzctl.models.config import ProcessConfig
+from grzctl.models.config import InboxTarget, ProcessConfig
 from pydantic import AnyHttpUrl
 from tqdm.auto import tqdm
 
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, ProcessingState
 from ..transfer import init_s3_client
+from ..utils.crypt import Crypt4GH
 from .components import ObserverWithMetrics, Tee, TqdmObserver
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .components.perf import MeasuringObserver, MeasuringStream, MetricsRegistry
@@ -40,8 +42,7 @@ class SubmissionProcessor:
     def __init__(  # noqa: PLR0913
         self,
         configuration: ProcessConfig,
-        source_s3_options: S3Options,
-        keys: dict[str, bytes],
+        inbox: InboxTarget,
         status_file_path: Path,
         redact_patterns: list[tuple[str, str]] | None = None,
         max_concurrent_uploads: int = 1,
@@ -50,8 +51,13 @@ class SubmissionProcessor:
         background_tee: bool = False,
     ):
         self.config = configuration
-        self.source_s3_options = source_s3_options
-        self.keys = keys
+        self.source_s3_options = inbox.s3
+
+        log.debug("Loading crypt4gh keys...")
+        self.private_key = Crypt4GH.retrieve_private_key(inbox.private_key_path)
+        self.consented_pub_key = get_public_key(configuration.archives.consented.public_key_path)
+        self.non_consented_pub_key = get_public_key(configuration.archives.non_consented.public_key_path)
+
         self.redact_patterns = redact_patterns or []
         self.enable_metrics = enable_metrics
         self.background_tee = background_tee
@@ -66,7 +72,7 @@ class SubmissionProcessor:
         self.pool_size = max(10, threads * (1 + max_concurrent_uploads) + 1)
         log.debug(f"Configuring S3 client pool size: {self.pool_size}")
 
-        self.source_s3 = init_s3_client(s3_options=source_s3_options, max_pool_connections=self.pool_size)
+        self.source_s3 = init_s3_client(s3_options=self.source_s3_options, max_pool_connections=self.pool_size)
         self._target_s3_map: dict[tuple[AnyHttpUrl, str], S3Client] = {}
 
         self.submission_id: str | None = None
@@ -105,10 +111,10 @@ class SubmissionProcessor:
             else False
         )
 
-        target_s3_options = self.config.consented_archive_s3 if is_consented else self.config.non_consented_archive_s3
-        self.target_bucket = target_s3_options.bucket
-        self.target_s3 = self._get_target_s3(target_s3_options)
-        self.target_public_key = self.keys["consented_public"] if is_consented else self.keys["non_consented_public"]
+        target_archive = self.config.archives.consented if is_consented else self.config.archives.non_consented
+        self.target_bucket = target_archive.s3.bucket
+        self.target_s3 = self._get_target_s3(target_archive.s3)
+        self.target_public_key = self.consented_pub_key if is_consented else self.non_consented_pub_key
 
         log.info(f"Consent Status: {'Consented' if is_consented else 'Non-Consented'}")
         log.info(f"Target Archive: {self.target_bucket}")
@@ -258,7 +264,7 @@ class SubmissionProcessor:
             pipeline = S3Downloader(self.source_s3, self.source_s3_options.bucket, src_key)
             pipeline = self._measure(pipeline, "1_Source", metrics)
 
-            pipeline = pipeline | Crypt4GHDecryptor(private_key=self.keys["private"])
+            pipeline = pipeline | Crypt4GHDecryptor(private_key=self.private_key)
             pipeline = self._measure(pipeline, "2_Decrypt", metrics)
 
             if self.should_qc:
