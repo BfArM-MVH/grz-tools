@@ -1,12 +1,17 @@
 import json
 import logging
-from datetime import date, datetime
-from typing import Self, List
+from datetime import UTC, datetime
+from typing import Self
 
 import botocore
 from packaging.version import Version
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from ..exceptions import (
+    VersionFileAccessError,
+    VersionFileNotFoundError,
+    VersionFileValidationError,
+)
 from ..transfer import init_s3_client
 from .s3 import S3Options
 
@@ -17,36 +22,44 @@ class VersionInfo(BaseModel):
     """Version constraint definition for a specific enforcement window."""
 
     minimal_version: Version = Field(..., description="Minimum supported version")
-    recommended_version: Version = Field(..., description="Recommended version")
-    max_version: Version = Field(..., description="Highest version tested")
-    enforced_from: date = Field(
-        ..., description="Date after which minimal_version becomes compulsory"
-    )
+    enforced_from: datetime = Field(..., description="Datetime after which minimal_version becomes compulsory")
+    recommended_version: Version | None = Field(None, description="Recommended version")
+    max_version: Version | None = Field(None, description="Highest version tested")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @field_validator(
-        "minimal_version", "recommended_version", "max_version", mode="before"
-    )
+    @field_validator("minimal_version", "recommended_version", "max_version", mode="before")
     @classmethod
     def parse_version(cls, v):
-        if isinstance(v, Version):
+        if v is None or isinstance(v, Version):
             return v
         return Version(str(v))
 
     @field_validator("enforced_from", mode="before")
     @classmethod
-    def parse_date(cls, v):
-        if isinstance(v, date):
-            return v
-        return datetime.fromisoformat(str(v)).date()
+    def parse_datetime(cls, v):
+        if isinstance(v, datetime):
+            # Already a datetime — ensure it is timezone-aware by treating naive datetimes as UTC.
+            # This guarantees safe comparison with datetime.now(UTC) regardless of whether the
+            # value was constructed programmatically (e.g. in tests) or parsed from a string.
+            return v if v.tzinfo is not None else v.replace(tzinfo=UTC)
+
+        # Parse ISO 8601 strings. Strings without a timezone offset (e.g. "2026-03-01T00:00:00")
+        # are treated as UTC rather than local time, ensuring consistent behaviour across
+        # environments and avoiding ambiguity when comparing against datetime.now(UTC).
+        dt = datetime.fromisoformat(str(v))
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
     @model_validator(mode="after")
     def check_version_order(self):
-        if self.recommended_version < self.minimal_version:
+        if self.recommended_version is not None and self.recommended_version < self.minimal_version:
             raise ValueError("recommended_version must be >= minimal_version")
 
-        if self.max_version < self.recommended_version:
+        if (
+            self.max_version is not None
+            and self.recommended_version is not None
+            and self.max_version < self.recommended_version
+        ):
             raise ValueError("max_version must be >= recommended_version")
 
         return self
@@ -58,9 +71,7 @@ class VersionFile(BaseModel):
     schema_version: int = Field(1, description="Version of this schema")
 
     # List allows staged future policies
-    grzcli_version: List[VersionInfo] = Field(
-        ..., description="List of version policies for grz-cli"
-    )
+    grzcli_version: list[VersionInfo] = Field(..., description="List of version policies for grz-cli")
 
     @model_validator(mode="after")
     def ensure_non_empty(self):
@@ -79,17 +90,9 @@ class VersionFile(BaseModel):
         :raises VersionFileAccessError: If the version file cannot be accessed.
         :raises VersionFileValidationError: If the version file contents are invalid.
         """
-        from ..exceptions import (
-            VersionFileAccessError,
-            VersionFileNotFoundError,
-            VersionFileValidationError,
-        )
-
         try:
             s3_client = init_s3_client(s3_options)
-            logger.debug(
-                f"Fetching version file: s3://{s3_options.bucket}/{version_file_key}"
-            )
+            logger.debug(f"Fetching version file: s3://{s3_options.bucket}/{version_file_key}")
 
             response = s3_client.get_object(
                 Bucket=s3_options.bucket,
@@ -107,18 +110,11 @@ class VersionFile(BaseModel):
             error_code = e.response.get("Error", {}).get("Code")
 
             if error_code == "NoSuchKey":
-                msg = (
-                    f"Version file not found at "
-                    f"s3://{s3_options.bucket}/{version_file_key}."
-                )
+                msg = f"Version file not found at s3://{s3_options.bucket}/{version_file_key}."
                 logger.critical(msg)
                 raise VersionFileNotFoundError(msg) from e
 
-            msg = (
-                f"Unable to access "
-                f"s3://{s3_options.bucket}/{version_file_key} "
-                f"(Error code: {error_code})."
-            )
+            msg = f"Unable to access s3://{s3_options.bucket}/{version_file_key} (Error code: {error_code})."
             logger.error(msg, exc_info=e)
             raise VersionFileAccessError(msg) from e
 
