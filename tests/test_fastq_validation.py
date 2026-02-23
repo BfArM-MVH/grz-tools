@@ -1,14 +1,14 @@
 """Tests for the fastq_validation module using FastqValidator."""
 
 import pytest
-from grz_common.pipeline.components import Stream
+from grz_common.pipeline.components import ReadStream
 from grz_common.pipeline.components.validation import FastqValidator
 
 
 def run_validator(path: str, threshold: float = 0.0):
     validator = FastqValidator(mean_read_length_threshold=threshold)
     with open(path, "rb") as f:
-        Stream(f) >> validator
+        ReadStream(f) >> validator
     return True, [], validator.metrics
 
 

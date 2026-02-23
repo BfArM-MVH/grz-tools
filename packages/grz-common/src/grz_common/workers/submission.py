@@ -30,7 +30,7 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
-from ..pipeline.components import DevNullSink, ObserverWithMetrics, Stream, Tee, TqdmObserver
+from ..pipeline.components import DevNullSink, ObserverWithMetrics, ReadStream, Tee, TqdmObserver
 from ..pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from ..pipeline.components.validation import BamValidator, ChecksumValidator, FastqValidator
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
@@ -557,7 +557,7 @@ class Submission:
                         format_val = BamValidator()
 
                     with open(local_path, "rb") as f, DevNullSink() as null_sink:
-                        pipeline = Stream(f) | Tee(checksum_val)
+                        pipeline = ReadStream(f) | Tee(checksum_val)
                         if format_val:
                             pipeline = pipeline | Tee(format_val)
 
@@ -671,9 +671,9 @@ class Submission:
                         ) as pbar,
                     ):
                         pipeline = (
-                            Stream(src)
-                            | Tee(TqdmObserver(pbar))
-                            | Crypt4GHEncryptor(
+                                ReadStream(src)
+                                | Tee(TqdmObserver(pbar))
+                                | Crypt4GHEncryptor(
                                 recipient_pubkey=recipient_public_key, sender_privkey=submitter_private_key
                             )
                         )
@@ -864,7 +864,7 @@ class EncryptedSubmission:
                             **TQDM_DEFAULTS,
                         ) as pbar,
                     ):
-                        pipeline = Stream(src) | Tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
+                        pipeline = ReadStream(src) | Tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
                         pipeline >> f
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")

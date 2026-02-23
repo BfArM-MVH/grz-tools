@@ -2,7 +2,7 @@ import io
 import os
 
 import pytest
-from grz_common.pipeline.components.perf import MeasuringObserver, MeasuringStream, MetricsRegistry
+from grz_common.pipeline.components.perf import MeasuringWriteStream, MeasuringReadStream, MetricsRegistry
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def test_measuring_stream_integrity(registry, random_data):
     and records the read metric.
     """
     source = io.BytesIO(random_data)
-    stream = MeasuringStream(source, "test_source", registry)
+    stream = MeasuringReadStream(source, "test_source", registry)
     output = stream.read()
 
     assert output == random_data
@@ -39,7 +39,7 @@ def test_measuring_observer_chaining(registry, random_data):
     """
     sink = io.BytesIO()
 
-    observer = MeasuringObserver("test_observer", registry)
+    observer = MeasuringWriteStream("test_observer", registry)
     observer.set_sink(sink)
 
     bytes_written = observer.write(random_data)
@@ -53,7 +53,7 @@ def test_measuring_observer_chaining(registry, random_data):
 
 def test_measurement_small_reads(registry):
     """Ensure measuring very small chunks doesn't cause errors."""
-    stream = MeasuringStream(io.BytesIO(b"abc"), "small", registry)
+    stream = MeasuringReadStream(io.BytesIO(b"abc"), "small", registry)
     assert stream.read(1) == b"a"
     assert stream.read(1) == b"b"
     assert stream.read(1) == b"c"

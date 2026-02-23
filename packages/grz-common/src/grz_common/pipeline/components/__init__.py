@@ -28,8 +28,16 @@ class PipelineError(Exception):
 
 
 @runtime_checkable
+class Readable(Protocol):
+    def read(self, size: int) -> bytes: ...
+    def readable(self) -> bool: ...
+    def close(self) -> None: ...
+
+
+@runtime_checkable
 class Writable(Protocol):
     def write(self, data: bytes) -> int: ...
+    def writable(self) -> bool: ...
     def close(self) -> None: ...
 
 
@@ -47,7 +55,7 @@ class Pipeable:
         if isinstance(other, type):
             return other(self)
 
-        if isinstance(self, Observer) and isinstance(other, Observer):
+        if isinstance(self, WriteStream) and isinstance(other, Writable):
             self.set_sink(other)
             return self
 
@@ -81,12 +89,15 @@ class Pipeable:
         return other
 
 
-class Stream(io.BufferedIOBase, Pipeable):
+class ReadStream(Readable, Pipeable):
     """Wraps a source input."""
 
     def __init__(self, source: io.BufferedIOBase | None = None):
         super().__init__()
         self._source = source
+
+    def readable(self) -> bool:
+        return True
 
     @property
     def source(self):
@@ -109,7 +120,7 @@ class Stream(io.BufferedIOBase, Pipeable):
             super().close()
 
 
-class Transformer(Stream, metaclass=abc.ABCMeta):
+class Transformer(ReadStream, metaclass=abc.ABCMeta):
     """
     Reads from upstream, transforms data, yields to downstream.
     """
@@ -149,13 +160,14 @@ class Transformer(Stream, metaclass=abc.ABCMeta):
         return bytes(ret)
 
 
-class Observer(Pipeable, metaclass=abc.ABCMeta):
-    """
-    Accepts data via write(), processes it, and pushes to next observer (if any).
-    """
+class WriteStream(Writable, Pipeable):
+    """Wraps a sink output."""
 
     def __init__(self):
         self.sink: Writable | None = None
+
+    def writable(self) -> bool:
+        return True
 
     def set_sink(self, sink: Writable):
         """
@@ -165,11 +177,24 @@ class Observer(Pipeable, metaclass=abc.ABCMeta):
             raise TypeError(f"Sink must be a writable object with a 'write' method. Got: {type(sink).__name__}")
         if self.sink is None:
             self.sink = sink
-        elif isinstance(self.sink, Observer):
+        elif isinstance(self.sink, WriteStream):
             self.sink.set_sink(sink)
         else:
             self.sink = sink
         return self
+
+    def write(self, data: bytes) -> int:
+        return self.sink.write(data)
+
+    def close(self):
+        if self.sink:
+            self.sink.close()
+
+
+class Observer(WriteStream, metaclass=abc.ABCMeta):
+    """
+    Accepts data via write(), processes it, and pushes to next observer (if any).
+    """
 
     def write(self, data: bytes) -> int:
         self.observe(data)
@@ -182,10 +207,6 @@ class Observer(Pipeable, metaclass=abc.ABCMeta):
         """Subclasses implement logic here."""
         raise NotImplementedError()
 
-    def close(self):
-        if self.sink:
-            self.sink.close()
-
 
 class Metrics(Protocol):
     @property
@@ -196,7 +217,7 @@ class ObserverWithMetrics(Observer, Metrics, metaclass=abc.ABCMeta):
     pass
 
 
-class Tee(Stream):
+class Tee(ReadStream):
     """
     Branches the stream to an Observer.
     Supports asynchronous background threads or synchronous execution.
@@ -211,7 +232,7 @@ class Tee(Stream):
         self._exc: Exception | None = None
         super().__init__(None)
 
-    @Stream.source.setter  # type: ignore[attr-defined]
+    @ReadStream.source.setter  # type: ignore[attr-defined]
     def source(self, value):
         self._source = value
         if value is not None and self._threaded:

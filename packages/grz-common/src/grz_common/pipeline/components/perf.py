@@ -1,7 +1,7 @@
 import threading
 import time
 
-from . import Observer, Stream
+from . import ReadStream, WriteStream
 
 
 class MetricsRegistry:
@@ -30,8 +30,8 @@ class MetricsRegistry:
             return " | ".join(stats)
 
 
-class MeasuringStream(Stream):
-    """Wraps a stream to measure read latency and throughput (Pull)."""
+class MeasuringReadStream(ReadStream):
+    """Wraps a ReadStream to measure read latency and throughput (Pull)."""
 
     def __init__(self, source, name: str, registry: MetricsRegistry):
         super().__init__(source)
@@ -47,8 +47,8 @@ class MeasuringStream(Stream):
         return chunk
 
 
-class MeasuringObserver(Observer):
-    """Wraps an observer to measure processing time (Push)."""
+class MeasuringWriteStream(WriteStream):
+    """Wraps a WriteStream to measure processing time (Push)."""
 
     def __init__(self, name: str, registry: MetricsRegistry):
         super().__init__()
@@ -63,6 +63,3 @@ class MeasuringObserver(Observer):
 
         self.registry.update(self.name, len(data), duration)
         return res
-
-    def observe(self, chunk: bytes) -> None:
-        pass

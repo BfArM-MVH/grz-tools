@@ -9,7 +9,7 @@ from os import PathLike
 from pathlib import Path
 
 import crypt4gh.keys
-from grz_common.pipeline.components import Stream, Tee, TqdmObserver
+from grz_common.pipeline.components import ReadStream, Tee, TqdmObserver
 from nacl.public import PrivateKey
 from tqdm.auto import tqdm
 
@@ -82,7 +82,7 @@ class Crypt4GH:
                 else nullcontext()
             ) as pbar,
         ):
-            pipeline = Stream(in_fd)
+            pipeline = ReadStream(in_fd)
             if show_progress and pbar:
                 pipeline = pipeline | Tee(TqdmObserver(pbar))
             pipeline = pipeline | Crypt4GHEncryptor(recipient_pubkey=public_key, sender_privkey=signing_key)
@@ -145,7 +145,7 @@ class Crypt4GH:
                 else nullcontext()
             ) as pbar,
         ):
-            pipeline = Stream(in_fd)
+            pipeline = ReadStream(in_fd)
             if show_progress and pbar:
                 pipeline = pipeline | Tee(TqdmObserver(pbar))
             pipeline = pipeline | Crypt4GHDecryptor(private_key=private_key)
