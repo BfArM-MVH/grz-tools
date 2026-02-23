@@ -161,6 +161,8 @@ class Observer(Pipeable, metaclass=abc.ABCMeta):
         """
         Recursively finds the end of the chain and attaches the sink there.
         """
+        if not hasattr(sink, "write") or not callable(sink.write):
+            raise TypeError(f"Sink must be a writable object with a 'write' method. Got: {type(sink).__name__}")
         if self.sink is None:
             self.sink = sink
         elif isinstance(self.sink, Observer):
