@@ -53,5 +53,12 @@ def test_paired_end_all_checks_passed():
     assert valid2
     assert len(errors2) == 0
 
+    context = SubmissionContext()
+    context.record_stats(path1, stats1)
+    context.record_stats(path2, stats2)
+    consistency = ConsistencyValidator(context)
+    is_valid_pair = consistency.check_pair(path1, path2)
+
     # Verify line counts match
     assert stats1["line_count"] == stats2["line_count"]
+    assert is_valid_pair
