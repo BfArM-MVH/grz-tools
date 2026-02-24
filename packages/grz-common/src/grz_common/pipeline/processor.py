@@ -58,6 +58,26 @@ class SubmissionProcessor:
         background_tee: bool = False,
         update_db: bool = True,
     ):
+        """
+        Initialize the SubmissionProcessor with necessary configuration.
+
+        This sets up the execution environment, including:
+        - Loading the Crypt4GH private key for the inbox and public keys for archives.
+        - Initializing the S3 connection pool based on thread concurrency settings.
+        - Setting up the context for paired-end FASTQ consistency checks.
+        - Initializing the progress logger for state persistence.
+
+        :param configuration: Global processing configuration (DB, Archives, etc.).
+        :param inbox: Specific inbox target configuration (S3 credentials, keys).
+        :param status_file_path: Path to the local file used for tracking processing state.
+        :param redact_patterns: Optional list of regex patterns to redact from metadata. (TODO actually use these)
+        :param clean_inbox: Whether to remove files from the inbox after successful processing.
+        :param max_concurrent_uploads: Number of threads used for S3 multipart uploads _per file_.
+        :param threads: Number of files to process concurrently.
+        :param enable_metrics: Whether to collect and log throughput/latency metrics.
+        :param background_tee: Whether to use background threads for stream branching.
+        :param update_db: Whether to update the central database state during processing.
+        """
         self.config = configuration
         self._source_s3_options = inbox.s3
 
@@ -113,6 +133,19 @@ class SubmissionProcessor:
         return MeasuringReadStream(stream, name, registry)
 
     def run(self, submission_metadata: SubmissionMetadata):
+        """
+        Execute the processing pipeline for a single submission.
+
+        High-level view:
+        1. Determine the target archive based on consent status (at the time of execution!).
+        2. Check if submission should undergo detailed QC, in which case the decrypted files are written to local storage.
+        3. Spawn threads to process files (Download -> Decrypt -> Validate -> Encrypt -> Archive).
+        4. Archive redacted metadata.
+        5. Optionally clean the inbox.
+
+        :param submission_metadata: The parsed metadata object containing donor and file information.
+        :raises RuntimeError: If consistency checks fail or any file fails validation.
+        """
         self._submission_id = submission_metadata.content.submission_id
         is_consented = submission_metadata.content.consents_to_research(date.today())
         db = SubmissionDb(self.config.db.database_url, self.config.db.author)  # type: ignore[arg-type]
