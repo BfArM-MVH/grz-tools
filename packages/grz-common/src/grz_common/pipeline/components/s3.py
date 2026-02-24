@@ -5,7 +5,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from . import Observer, ReadStream
+from . import Observer, ReadStream, DataIntegrityError
 
 log = logging.getLogger(__name__)
 
@@ -185,7 +185,9 @@ class S3MultipartUploader(Observer):
 
         server_etag = complete.get("ETag", "").strip('"')
         if expected and server_etag != expected:
-            raise OSError(f"ETag mismatch! Exp: {expected}, Got: {server_etag}")
+            raise DataIntegrityError(
+                f"ETag mismatch! Exp: {expected}, Got: {server_etag}", stage=self.__class__.__name__
+            )
 
     def _calc_etag(self, parts: list[dict[str, Any]]) -> str:
         digests = [p["local_md5"] for p in parts if "local_md5" in p]
