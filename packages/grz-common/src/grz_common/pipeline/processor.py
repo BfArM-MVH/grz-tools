@@ -25,10 +25,6 @@ from .components import (
     ObserverWithMetrics,
     Tee,
     TqdmObserver,
-    DataValidationError,
-    DataIntegrityError,
-    StreamConfigurationError,
-    PipelineError,
 )
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .components.perf import MeasuringReadStream, MeasuringWriteStream, MetricsRegistry
