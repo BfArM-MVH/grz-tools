@@ -6,7 +6,7 @@ import crypt4gh.lib
 from nacl.bindings import crypto_aead_chacha20poly1305_ietf_encrypt
 from nacl.public import PrivateKey
 
-from . import Transformer, StreamConfigurationError
+from . import StreamConfigurationError, Transformer
 
 
 class Crypt4GHDecryptor(Transformer):
