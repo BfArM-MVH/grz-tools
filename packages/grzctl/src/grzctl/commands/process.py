@@ -59,6 +59,11 @@ log = logging.getLogger(__name__)
     default=None,
     help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
 )
+@click.option(
+    "--clean-inbox/--no-clean-inbox",
+    default=True,
+    help="Clean submission from inbox bucket after successful processing.",
+)
 def process(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_id: str,
@@ -70,6 +75,7 @@ def process(  # noqa: PLR0913
     redact_logs: bool,
     concurrent_uploads: int,
     inbox_bucket: str | None = None,
+    clean_inbox: bool = True,
     **kwargs,
 ):
     """
@@ -120,6 +126,7 @@ def process(  # noqa: PLR0913
         status_file_path=status_file_path,
         threads=threads,
         max_concurrent_uploads=concurrent_uploads,
+        clean_inbox=clean_inbox,
     )
 
     with DbContext(

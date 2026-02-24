@@ -12,7 +12,8 @@ from grz_common.workers.submission import SubmissionMetadata
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
-from grzctl.models.config import InboxTarget, ProcessConfig
+from grzctl.commands.clean import _clean_submission_from_bucket
+from grzctl.models.config import CleanConfig, InboxTarget, ProcessConfig
 from pydantic import AnyHttpUrl
 from tqdm.auto import tqdm
 
@@ -45,6 +46,7 @@ class SubmissionProcessor:
         inbox: InboxTarget,
         status_file_path: Path,
         redact_patterns: list[tuple[str, str]] | None = None,
+        clean_inbox: bool = True,
         max_concurrent_uploads: int = 1,
         threads: int = 1,
         enable_metrics: bool = True,
@@ -83,6 +85,7 @@ class SubmissionProcessor:
         self.target_bucket: str | None = None
         self.target_public_key: bytes | None = None
         self.partner_map: dict[str, str] = {}
+        self.clean_inbox = clean_inbox
 
     def _get_target_s3(self, options: S3Options):
         """Get or create an S3 client for the target options."""
@@ -164,7 +167,14 @@ class SubmissionProcessor:
 
         self._upload_final_metadata(submission_metadata)
         log.info(f"Submission {self.submission_id} processed successfully.")
-        # TODO: cleanup inbox if successful and requested
+
+        if self.clean_inbox:
+            _clean_submission_from_bucket(
+                self.source_s3_options.bucket,
+                CleanConfig.model_validate({"s3": self.source_s3_options.model_dump(by_alias=True)}),
+                self.submission_id,
+            )
+
         self.should_qc = False
         self.submission_id = None
 
