@@ -23,7 +23,7 @@ from ..transfer import init_s3_client
 from ..utils.crypt import Crypt4GH
 from .components import ObserverWithMetrics, Tee, TqdmObserver
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
-from .components.perf import MeasuringWriteStream, MeasuringReadStream, MetricsRegistry
+from .components.perf import MeasuringReadStream, MeasuringWriteStream, MetricsRegistry
 from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
 from .components.validation import BamValidator, ChecksumValidator, FastqValidator
 from .context import ConsistencyValidator, SubmissionContext
