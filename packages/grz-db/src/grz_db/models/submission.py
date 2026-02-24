@@ -670,7 +670,12 @@ class SubmissionDb:
             submission = session.exec(statement).first()
             return submission
 
-    def list_submissions(self, limit: int | None) -> Sequence[Submission]:
+    def list_submissions(
+        self,
+        limit: int | None,
+        state_filters: Sequence[SubmissionStateEnum] | None = None,
+        state_filter_mode: str = "latest",
+    ) -> Sequence[Submission]:
         """
         Lists all submissions in the database.
 
@@ -702,9 +707,34 @@ class SubmissionDb:
                     .nulls_first()
                 )
             )
-            if limit is not None:
+            # If filtering by state, apply limit after filtering to avoid dropping
+            # potential matches before filter evaluation.
+            if (state_filters is None) and (limit is not None):
                 statement = statement.limit(limit)
             submissions = session.exec(statement).all()
+
+            if state_filters:
+                state_filter_mode = state_filter_mode.lower()
+                if state_filter_mode not in {"latest", "any"}:
+                    raise ValueError(f"Unknown state_filter_mode '{state_filter_mode}'")
+
+                filter_set = set(state_filters)
+                if state_filter_mode == "latest":
+                    submissions = [
+                        submission
+                        for submission in submissions
+                        if (latest := submission.get_latest_state()) is not None and latest.state in filter_set
+                    ]
+                else:
+                    submissions = [
+                        submission
+                        for submission in submissions
+                        if any(state.state in filter_set for state in submission.states)
+                    ]
+
+                if limit is not None:
+                    submissions = submissions[:limit]
+
             return submissions
 
     def list_processed_between(self, start: datetime.date, end: datetime.date) -> Sequence[Submission]:
