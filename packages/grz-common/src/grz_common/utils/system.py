@@ -1,11 +1,15 @@
 import os
 import sys
+from typing import TYPE_CHECKING
 
-if sys.platform == "linux" and hasattr(os, "sched_getaffinity"):
+if TYPE_CHECKING:
+    # For type checking, always use the real signature
+    def _sched_getaffinity(pid: int, /) -> set[int]: ...
+elif sys.platform == "linux" and hasattr(os, "sched_getaffinity"):
     from os import sched_getaffinity as _sched_getaffinity
 else:
-
-    def _sched_getaffinity(pid=0):
+    # Fallback for non-Linux platforms
+    def _sched_getaffinity(pid: int, /) -> set[int]:
         cpu_count = os.cpu_count() or 1
         return set(range(cpu_count))
 
