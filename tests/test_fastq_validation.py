@@ -7,9 +7,12 @@ from grz_common.pipeline.context import ConsistencyValidator, SubmissionContext
 
 
 def run_validator(path: str, threshold: float = 0.0):
-    validator = FastqValidator(mean_read_length_threshold=threshold)
-    with open(path, "rb") as f:
-        ReadStream(f) >> validator
+    with (
+        open(path, "rb") as f,
+        ReadStream(f) as source,
+        FastqValidator(mean_read_length_threshold=threshold) as validator,
+    ):
+        source >> validator
     return True, [], validator.metrics
 
 
