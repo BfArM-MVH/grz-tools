@@ -160,7 +160,7 @@ def remote_bucket_with_version(remote_bucket):
                 "minimal_version": current_version,
                 "recommended_version": current_version,
                 "max_version": current_version,
-                "enforced_from": datetime.now().isoformat(),  # changed
+                "enforced_from": datetime.now().isoformat(),
             }
         ],
     }

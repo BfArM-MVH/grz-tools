@@ -11,7 +11,7 @@ def test_versionfile_accepts_policy_list():
                 "minimal_version": "1.6.0",
                 "recommended_version": "1.6",
                 "max_version": "1.6.0",
-                "enforced_from": "2026-03-01T00:00:00",  # changed
+                "enforced_from": "2026-03-01T00:00:00",
             }
         ]
     )
