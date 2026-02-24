@@ -16,7 +16,19 @@ def encrypted_dummy_key(tmp_path) -> tuple[str, bytes]:
     pub_key_path = tmp_path / "dummy_encrypted.pub"
     passphrase = b"my-secret-test-passphrase"
 
-    crypt4gh.keys.c4gh.generate(str(sec_key_path), str(pub_key_path), passphrase=passphrase)
+    # c4gh modifies umask _process wide_ so we have to be able to undo that…
+    prev_umask = os.umask(0)
+    os.umask(prev_umask)
+
+    try:
+        crypt4gh.keys.c4gh.generate(
+            str(sec_key_path),
+            str(pub_key_path),
+            passphrase=passphrase
+        )
+    finally:
+        os.umask(prev_umask)
+
     os.chmod(str(sec_key_path), S_IRUSR | S_IWUSR)
     return str(sec_key_path), passphrase
 
