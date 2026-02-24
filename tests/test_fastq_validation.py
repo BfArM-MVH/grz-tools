@@ -31,11 +31,13 @@ def test_paired_end_differing_line_numbers():
     _, _, stats1 = run_validator(path1, threshold=75)
     _, _, stats2 = run_validator(path2, threshold=75)
 
-    # Verify that we detected the mismatch in line counts
-    assert stats1["line_count"] != stats2["line_count"]
+    context = SubmissionContext()
+    context.record_stats(path1, stats1)
+    context.record_stats(path2, stats2)
+    consistency = ConsistencyValidator(context)
+    is_valid_pair = consistency.check_pair(path1, path2)
 
-    # TODO: ideally we'd use the larger pipeline context (partner_map and ConsistencyValidator)
-    #  to check that we notice this mismatch automatically
+    assert is_valid_pair is False, "ConsistencyValidator should have rejected differing read counts"
 
 
 def test_paired_end_all_checks_passed():
