@@ -127,6 +127,7 @@ def process(  # noqa: PLR0913
         threads=threads,
         max_concurrent_uploads=concurrent_uploads,
         clean_inbox=clean_inbox,
+        update_db=update_db,
     )
 
     with DbContext(
