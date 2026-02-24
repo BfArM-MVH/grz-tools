@@ -671,9 +671,9 @@ class Submission:
                         ) as pbar,
                     ):
                         pipeline = (
-                                ReadStream(src)
-                                | Tee(TqdmObserver(pbar))
-                                | Crypt4GHEncryptor(
+                            ReadStream(src)
+                            | Tee(TqdmObserver(pbar))
+                            | Crypt4GHEncryptor(
                                 recipient_pubkey=recipient_public_key, sender_privkey=submitter_private_key
                             )
                         )
@@ -864,7 +864,9 @@ class EncryptedSubmission:
                             **TQDM_DEFAULTS,
                         ) as pbar,
                     ):
-                        pipeline = ReadStream(src) | Tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
+                        pipeline = (
+                            ReadStream(src) | Tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
+                        )
                         pipeline >> f
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")

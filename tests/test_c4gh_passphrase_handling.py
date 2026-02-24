@@ -21,11 +21,7 @@ def encrypted_dummy_key(tmp_path) -> tuple[str, bytes]:
     os.umask(prev_umask)
 
     try:
-        crypt4gh.keys.c4gh.generate(
-            str(sec_key_path),
-            str(pub_key_path),
-            passphrase=passphrase
-        )
+        crypt4gh.keys.c4gh.generate(str(sec_key_path), str(pub_key_path), passphrase=passphrase)
     finally:
         os.umask(prev_umask)
 

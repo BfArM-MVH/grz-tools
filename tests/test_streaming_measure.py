@@ -2,7 +2,7 @@ import io
 import os
 
 import pytest
-from grz_common.pipeline.components.perf import MeasuringWriteStream, MeasuringReadStream, MetricsRegistry
+from grz_common.pipeline.components.perf import MeasuringReadStream, MeasuringWriteStream, MetricsRegistry
 
 
 @pytest.fixture
