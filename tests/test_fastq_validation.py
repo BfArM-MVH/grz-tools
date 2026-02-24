@@ -1,7 +1,7 @@
 """Tests for the fastq_validation module using FastqValidator."""
 
 import pytest
-from grz_common.pipeline.components import ReadStream
+from grz_common.pipeline.components import DataValidationError, ReadStream
 from grz_common.pipeline.components.validation import FastqValidator
 
 
@@ -16,7 +16,7 @@ def test_single_end_line_count_not_multiple_of_4():
     """Single end, line count not multiple of 4"""
     path = "tests/mock_files/fastq_files_1000/single_end_failing.line_count.fastq.gz"
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(DataValidationError) as excinfo:
         run_validator(path, threshold=75)
 
     assert "incomplete record" in str(excinfo.value).lower()
