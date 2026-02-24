@@ -1,11 +1,19 @@
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Self
+from typing import Annotated, Self
 
 import botocore
 from packaging.version import Version
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    PlainSerializer,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from ..exceptions import (
     VersionFileAccessError,
@@ -18,22 +26,34 @@ from .s3 import S3Options
 logger = logging.getLogger(__name__)
 
 
+# Custom type converters for packaging.version.Version
+def parse_version(v) -> Version:
+    """Convert string or Version to Version object."""
+    if v is None or isinstance(v, Version):
+        return v
+    return Version(str(v))
+
+
+def serialize_version(v: Version) -> str:
+    """Convert Version object to string."""
+    return str(v)
+
+
+# Annotated type that Pydantic understands
+PydanticVersion = Annotated[
+    Version,
+    BeforeValidator(parse_version),
+    PlainSerializer(serialize_version),
+]
+
+
 class VersionInfo(BaseModel):
     """Version constraint definition for a specific enforcement window."""
 
-    minimal_version: Version = Field(..., description="Minimum supported version")
+    minimal_version: PydanticVersion = Field(..., description="Minimum supported version")
     enforced_from: datetime = Field(..., description="Datetime after which minimal_version becomes compulsory")
-    recommended_version: Version | None = Field(None, description="Recommended version")
-    max_version: Version | None = Field(None, description="Highest version tested")
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @field_validator("minimal_version", "recommended_version", "max_version", mode="before")
-    @classmethod
-    def parse_version(cls, v):
-        if v is None or isinstance(v, Version):
-            return v
-        return Version(str(v))
+    recommended_version: PydanticVersion | None = Field(None, description="Recommended version")
+    max_version: PydanticVersion | None = Field(None, description="Highest version tested")
 
     @field_validator("enforced_from", mode="before")
     @classmethod
