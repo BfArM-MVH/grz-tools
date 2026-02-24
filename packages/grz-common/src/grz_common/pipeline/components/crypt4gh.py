@@ -36,6 +36,9 @@ class Crypt4GHDecryptor(Transformer):
         if not self._header_parsed:
             self._read_header()
 
+        if self.source is None:
+            raise RuntimeError("Stream source not set")
+
         while len(self._buffer) < self.CIPHER_SEGMENT_SIZE:
             chunk = self.source.read(self.CIPHER_SEGMENT_SIZE)
             if not chunk:
@@ -103,6 +106,9 @@ class Crypt4GHEncryptor(Transformer):
         if not self._header_sent:
             self._header_sent = True
             return self._compose_header()
+
+        if self.source is None:
+            raise RuntimeError("Stream source not set")
 
         # ensure we always get SEGMENT_SIZE long segments to minimize crypt4gh overhead
         while len(self._buffer) < self.SEGMENT_SIZE:

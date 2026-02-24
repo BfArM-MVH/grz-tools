@@ -97,7 +97,7 @@ class SubmissionProcessor:
             return stream
         if is_observer:
             wrapper = MeasuringWriteStream(name, registry)
-            wrapper.set_sink(stream)
+            wrapper.sink = stream
             return wrapper
 
         return MeasuringReadStream(stream, name, registry)

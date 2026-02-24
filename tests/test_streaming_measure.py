@@ -40,7 +40,7 @@ def test_measuring_observer_chaining(registry, random_data):
     sink = io.BytesIO()
 
     observer = MeasuringWriteStream("test_observer", registry)
-    observer.set_sink(sink)
+    observer.sink = sink
 
     bytes_written = observer.write(random_data)
     assert bytes_written == len(random_data)
