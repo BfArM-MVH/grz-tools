@@ -374,7 +374,9 @@ def test_submission_show_json(blank_database_config_path: Path):
         "id": metadata.submission_id,
         "tan_g": metadata.submission.tan_g,
         "pseudonym": metadata.submission.local_case_id,
-        "submission_date": metadata.submission.submission_date.isoformat() if metadata.submission.submission_date else None,
+        "submission_date": metadata.submission.submission_date.isoformat()
+        if metadata.submission.submission_date
+        else None,
         "submission_type": metadata.submission.submission_type,
         "submitter_id": metadata.submission.submitter_id,
         "data_node_id": metadata.submission.genomic_data_center_id,
