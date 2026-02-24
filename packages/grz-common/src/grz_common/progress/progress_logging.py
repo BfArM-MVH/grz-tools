@@ -85,13 +85,16 @@ class FileProgressLogger[T: State]:
         path_str = str(file_path)
         path_obj = Path(file_path)
 
-        if size is not None and mtime is not None:
-            return path_str, float(mtime), int(size)
-
+        mtime_ = None
+        size_ = None
         if path_obj.is_file():
-            return str(path_obj.resolve()), path_obj.stat().st_mtime, path_obj.stat().st_size
+            mtime_ = path_obj.stat().st_mtime
+            size_ = path_obj.stat().st_size
 
-        return path_str, -1.0, -1
+        mtime_ = mtime or mtime_ or -1.0
+        size_ = size or size_ or -1
+
+        return path_str, mtime_, size_
 
     def get_state(
         self,
