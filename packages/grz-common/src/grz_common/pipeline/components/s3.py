@@ -5,7 +5,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from . import Observer, ReadStream, DataIntegrityError
+from . import DataIntegrityError, Observer, ReadStream
 
 log = logging.getLogger(__name__)
 
