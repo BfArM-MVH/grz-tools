@@ -6,6 +6,7 @@ import hashlib
 import importlib.resources
 import json
 import random
+from datetime import date
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
@@ -368,9 +369,21 @@ def test_submission_show_json(blank_database_config_path: Path):
 
     parsed = json.loads(result_show_json.stdout)
 
-    # basic structure checks
-    assert isinstance(parsed, dict)
-    assert parsed["id"] == metadata.submission_id
-    assert parsed["pseudonym"] == metadata.submission.local_case_id
-    assert "states" in parsed
-    assert isinstance(parsed["states"], list)
+    # structure checks
+    assert parsed == {
+        "id": metadata.submission_id,
+        "tan_g": metadata.submission.tan_g,
+        "pseudonym": metadata.submission.local_case_id,
+        "submission_date": metadata.submission.submission_date.isoformat() if metadata.submission.submission_date else None,
+        "submission_type": metadata.submission.submission_type,
+        "submitter_id": metadata.submission.submitter_id,
+        "data_node_id": metadata.submission.genomic_data_center_id,
+        "coverage_type": metadata.submission.coverage_type,
+        "disease_type": metadata.submission.disease_type,
+        "basic_qc_passed": None,
+        "consented": metadata.consents_to_research(date=date.today()),
+        "detailed_qc_passed": None,
+        "genomic_study_type": metadata.submission.genomic_study_type,
+        "genomic_study_subtype": metadata.submission.genomic_study_subtype,
+        "states": [],
+    }
