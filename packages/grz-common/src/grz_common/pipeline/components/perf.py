@@ -1,5 +1,6 @@
 import threading
 import time
+from collections.abc import Buffer
 
 from . import ReadStream, WriteStream
 
@@ -40,6 +41,8 @@ class MeasuringReadStream(ReadStream):
 
     def read(self, size: int | None = -1) -> bytes:
         start = time.perf_counter()
+        if self.source is None:
+            raise RuntimeError("Stream source not set")
         chunk = self.source.read(size)
         duration = time.perf_counter() - start
 
@@ -55,11 +58,11 @@ class MeasuringWriteStream(WriteStream):
         self.name = name
         self.registry = registry
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: Buffer) -> int:
         start = time.perf_counter()
         # Measure total time (own processing + downstream push)
-        res = super().write(data)
+        bytes_written = super().write(data)
         duration = time.perf_counter() - start
 
-        self.registry.update(self.name, len(data), duration)
-        return res
+        self.registry.update(self.name, bytes_written, duration)
+        return bytes_written

@@ -10,7 +10,7 @@ import logging
 import queue
 import shutil
 import threading
-from io import IOBase
+from collections.abc import Buffer
 from typing import Any, Protocol, runtime_checkable
 
 log = logging.getLogger(__name__)
@@ -29,7 +29,9 @@ class PipelineError(Exception):
 
 @runtime_checkable
 class Readable(Protocol):
-    def read(self, size: int) -> bytes: ...
+    """Protocol for objects that can be read from."""
+
+    def read(self, size: int | None = -1) -> bytes: ...
     def readable(self) -> bool: ...
     @property
     def closed(self) -> bool: ...
@@ -38,7 +40,9 @@ class Readable(Protocol):
 
 @runtime_checkable
 class Writable(Protocol):
-    def write(self, data: bytes) -> int: ...
+    """Protocol for objects that can be written to."""
+
+    def write(self, data: Buffer) -> int: ...
     def writable(self) -> bool: ...
     @property
     def closed(self) -> bool: ...
@@ -48,7 +52,7 @@ class Writable(Protocol):
 class Pipeable:
     """Mixin to enable '|' (chaining) and '>>' (execution) operators for streaming."""
 
-    def __or__(self, other):
+    def __or__(self, other: Any) -> Any:
         """
         Piping operator for chaining components.
 
@@ -59,17 +63,17 @@ class Pipeable:
         if isinstance(other, type):
             return other(self)
 
-        if isinstance(self, Readable) and isinstance(other, ReadStream):
-            other.set_source(self)
+        if isinstance(self, Readable) and self.readable() and hasattr(other, "source"):
+            other.source = self
             return other
 
-        if isinstance(self, WriteStream) and isinstance(other, Writable):
-            self.set_sink(other)
+        if isinstance(self, WriteStream) and self.writable() and isinstance(other, Writable):
+            self.sink = other
             return self
 
         raise TypeError(f"Operator '|' expects a Transformer or Observer, got {type(other)}")
 
-    def __rshift__(self, other: Writable):
+    def __rshift__(self, other: Writable) -> Writable:
         """
         Redirection operator for driving the pipeline into a sink.
         Usage: (source | transform) >> sink
@@ -81,11 +85,11 @@ class Pipeable:
             raise TypeError(f"Cannot drive pipeline: {type(self)} is not Readable.")
 
         try:
-            # Drive the pull-based pipeline into the sink
             shutil.copyfileobj(self, other, length=READ_CHUNK_SIZE)
         finally:
             # Ensure close propagates down the whole chain to join threads and flush buffers
-            self.close()
+            if hasattr(self, "close"):
+                self.close()
             # Sinks like open files or DevNullSink need closing to ensure flush
             other.close()
         return other
@@ -94,18 +98,19 @@ class Pipeable:
 class ReadStream(io.BufferedIOBase, Pipeable):
     """Wraps a source input."""
 
-    def __init__(self, source: io.BufferedIOBase | None = None):
+    def __init__(self, source: Readable | None = None):
         super().__init__()
-        self._source = source
+        self._source: Readable | None = source
 
     def readable(self) -> bool:
         return True
 
     @property
-    def source(self):
+    def source(self) -> Readable | None:
         return self._source
 
-    def set_source(self, source: Readable):
+    @source.setter
+    def source(self, source: Readable) -> None:
         if self.closed:
             raise RuntimeError("Stream closed")
 
@@ -113,14 +118,13 @@ class ReadStream(io.BufferedIOBase, Pipeable):
             raise TypeError(f"Source must be a readable object with a 'read' method. Got: {type(source).__name__}")
 
         self._source = source
-        return self
 
     def read(self, size: int | None = -1) -> bytes:
-        if self.source is None:
+        if self._source is None:
             raise RuntimeError("Stream source not set. Use '|' to attach a source.")
-        return self.source.read(size)
+        return self._source.read(size)
 
-    def close(self):
+    def close(self) -> None:
         if not self.closed:
             if self._source:
                 with contextlib.suppress(Exception):
@@ -133,7 +137,7 @@ class Transformer(ReadStream, metaclass=abc.ABCMeta):
     Reads from upstream, transforms data, yields to downstream.
     """
 
-    def __init__(self, source: io.BufferedIOBase | None = None):
+    def __init__(self, source: Readable | None = None):
         super().__init__(source)
         self._output_buffer = bytearray()
 
@@ -172,19 +176,18 @@ class WriteStream(io.BufferedIOBase, Pipeable):
     """Wraps a sink output."""
 
     def __init__(self, sink: Writable | None = None):
-        self._sink = sink
+        super().__init__()
+        self._sink: Writable | None = sink
 
     def writable(self) -> bool:
         return True
 
-    @property
+    @property  # type: ignore[override]
     def sink(self) -> Writable | None:
         return self._sink
 
-    def set_sink(self, sink: Writable):
-        """
-        Recursively finds the end of the chain and attaches the sink there.
-        """
+    @sink.setter
+    def sink(self, sink: Writable) -> None:
         if self.closed:
             raise RuntimeError("Stream closed")
 
@@ -194,36 +197,38 @@ class WriteStream(io.BufferedIOBase, Pipeable):
         if self._sink is None:
             self._sink = sink
         elif isinstance(self._sink, WriteStream):
-            self.sink.set_sink(sink)
+            self._sink.sink = sink
         else:
             self._sink = sink
 
-        return self
+    def write(self, data: Buffer) -> int:
+        if self._sink is None:
+            raise RuntimeError("Stream sink not set.")
+        return self._sink.write(data)
 
-    def write(self, data: bytes) -> int:
-        return self.sink.write(data)
-
-    def close(self):
+    def close(self) -> None:
         if not self.closed:
-            if self.sink:
-                self.sink.close()
+            if self._sink:
+                self._sink.close()
             super().close()
 
 
 class Observer(WriteStream, metaclass=abc.ABCMeta):
-    """
-    Accepts data via write(), processes it, and pushes to next observer (if any).
-    """
+    """Accepts data via write(), processes it, and pushes to next observer (if any)."""
 
-    def write(self, data: bytes) -> int:
-        self.observe(data)
-        if self.sink:
-            self.sink.write(data)
-        return len(data)
+    def write(self, data: Buffer) -> int:
+        # use memoryview to handle the abstract Buffer type
+        mv = memoryview(data)
+        # observe protocol demands bytes
+        self.observe(mv.tobytes())
+
+        if self._sink:
+            return self._sink.write(data)
+
+        return len(mv)
 
     @abc.abstractmethod
     def observe(self, chunk: bytes) -> None:
-        """Subclasses implement logic here."""
         raise NotImplementedError()
 
 
@@ -243,16 +248,22 @@ class Tee(ReadStream):
     """
 
     def __init__(self, observer: Observer, max_queue_size: int = 128, threaded: bool = False):
+        super().__init__(None)
         self.observer = observer
         self.max_queue_size = max_queue_size
         self._threaded = threaded
-        self._queue: queue.Queue | None = None
+        self._queue: queue.Queue[bytes | None] | None = None
         self._thread: threading.Thread | None = None
         self._exc: Exception | None = None
-        super().__init__(None)
 
-    def set_source(self, source: Readable):
-        super().set_source(source)
+    @property
+    def source(self) -> Readable | None:
+        return self._source
+
+    @source.setter
+    def source(self, source: Readable) -> None:
+        super(Tee, type(self)).source.fset(self, source)  # type: ignore[attr-defined]
+
         if source is not None and self._threaded:
             self._queue = queue.Queue(maxsize=self.max_queue_size)
             self._thread = threading.Thread(target=self._worker, daemon=True)
@@ -262,21 +273,27 @@ class Tee(ReadStream):
         if self._threaded and self._exc:
             raise self._exc
 
-        chunk = self.source.read(size)  # type: ignore[union-attr]
-        if self._threaded:
+        if self._source is None:
+            raise RuntimeError("Stream source not set")
+
+        chunk = self._source.read(size)
+
+        if self._threaded and self._queue:
             if chunk:
-                self._queue.put(chunk, block=True)  # type: ignore[union-attr]
+                self._queue.put(chunk, block=True)
             else:
-                self._queue.put(None)  # type: ignore[union-attr]
+                self._queue.put(None)
         elif chunk:
             self.observer.write(chunk)
 
         return chunk
 
-    def _worker(self):
+    def _worker(self) -> None:
         try:
+            if not self._queue:
+                return
             while True:
-                chunk = self._queue.get()  # type: ignore[union-attr]
+                chunk = self._queue.get()
                 if chunk is None:
                     self._queue.task_done()
                     break
@@ -285,7 +302,7 @@ class Tee(ReadStream):
         except Exception as e:
             self._exc = e
 
-    def close(self):
+    def close(self) -> None:
         # close upstream sources first
         super().close()
 
@@ -315,14 +332,18 @@ class TqdmObserver(Observer):
                 pbar.update(n)
 
 
-class DevNullSink(Writable, io.BufferedIOBase):
+class DevNullSink(io.BufferedIOBase, Writable):
     """Sink that discards all data."""
 
     def writable(self) -> bool:
         return True
 
-    def write(self, data) -> int:
-        return len(data)
+    def write(self, data: Buffer) -> int:
+        return len(memoryview(data))
 
-    def close(self):
-        super(IOBase, self).close()
+    @property
+    def closed(self) -> bool:
+        return super().closed
+
+    def close(self) -> None:
+        super().close()
