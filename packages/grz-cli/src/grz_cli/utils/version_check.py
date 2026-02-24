@@ -1,6 +1,6 @@
 import logging
 import sys
-from datetime import UTC, datetime  # removed date
+from datetime import UTC, datetime
 from importlib.metadata import version
 
 from grz_common.models.s3 import S3Options
@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 def _select_active_policy(
     policies: list[VersionInfo],
-    now: datetime,  # changed
-) -> VersionInfo:
+    now: datetime,
+) -> VersionInfo| None:
     """Select the version policy that is active for the given datetime.
 
     :param policies: A non-empty list of available version policies.
@@ -25,9 +25,9 @@ def _select_active_policy(
     :raises ValueError: If policies is empty.
     """
     if not policies:
-        raise ValueError("No version policies defined.")
+        return None
 
-    applicable = [p for p in policies if p.enforced_from <= now]  # changed
+    applicable = [p for p in policies if p.enforced_from <= now]
 
     if not applicable:
         return min(policies, key=lambda p: p.enforced_from)
@@ -43,9 +43,9 @@ def check_version_and_exit_if_needed(
     version_file = VersionFile.from_s3(s3_options, version_file_key)
 
     current_version = pkg_version.Version(version("grz-cli"))
-    now = datetime.now(UTC)  # changed
+    now = datetime.now(UTC)
 
-    policy = _select_active_policy(version_file.grzcli_version, now)  # changed
+    policy = _select_active_policy(version_file.grzcli_version, now)
 
     if policy is None:
         logger.debug("No active version policy found — skipping version check.")
@@ -73,7 +73,7 @@ def check_version_and_exit_if_needed(
         sys.exit(1)
 
     # supported but behind recommended — skip if recommended_version not set
-    if recommended_version is not None and minimal_version <= current_version < recommended_version:  # changed
+    if recommended_version is not None and minimal_version <= current_version < recommended_version:
         logger.warning(
             f"You are using grz-cli {current_version}, but the recommended version is "
             f"{recommended_version}. Upgrading is strongly recommended."
@@ -81,7 +81,7 @@ def check_version_and_exit_if_needed(
         return
 
     # too new — skip if max_version not set
-    if max_version is not None and current_version > max_version:  # changed
+    if max_version is not None and current_version > max_version:
         logger.error(f"grz-cli version {current_version} is newer than the maximum supported version ({max_version}).")
         sys.exit(1)
 
