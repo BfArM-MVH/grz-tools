@@ -6,7 +6,7 @@ import crypt4gh.lib
 from nacl.bindings import crypto_aead_chacha20poly1305_ietf_encrypt
 from nacl.public import PrivateKey
 
-from . import Transformer
+from . import Transformer, StreamConfigurationError
 
 
 class Crypt4GHDecryptor(Transformer):
@@ -37,7 +37,7 @@ class Crypt4GHDecryptor(Transformer):
             self._read_header()
 
         if self.source is None:
-            raise RuntimeError("Stream source not set")
+            raise StreamConfigurationError("Stream source not set", stage=self.__class__.__name__)
 
         while len(self._buffer) < self.CIPHER_SEGMENT_SIZE:
             chunk = self.source.read(self.CIPHER_SEGMENT_SIZE)
@@ -108,7 +108,7 @@ class Crypt4GHEncryptor(Transformer):
             return self._compose_header()
 
         if self.source is None:
-            raise RuntimeError("Stream source not set")
+            raise StreamConfigurationError("Stream source not set", stage=self.__class__.__name__)
 
         # ensure we always get SEGMENT_SIZE long segments to minimize crypt4gh overhead
         while len(self._buffer) < self.SEGMENT_SIZE:

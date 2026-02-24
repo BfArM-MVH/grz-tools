@@ -24,7 +24,34 @@ class PipelineError(Exception):
     def __init__(self, message: str, stage: str | None = None, cause: Exception | None = None):
         self.stage = stage
         self.cause = cause
-        super().__init__(f"[{stage}] {message}" if stage else message)
+        msg = f"[{stage}] {message}" if stage else message
+        if cause:
+            msg += f" (Caused by: {type(cause).__name__}: {cause})"
+        super().__init__(msg)
+
+
+class StreamStateError(PipelineError):
+    """Raised when an operation is attempted on a closed or unusable stream."""
+
+    pass
+
+
+class StreamConfigurationError(PipelineError):
+    """Raised when the pipeline setup is invalid (e.g., missing source/sink)."""
+
+    pass
+
+
+class DataValidationError(PipelineError):
+    """Raised when data content fails validation (checksum, FASTQ/BAM format, etc.)."""
+
+    pass
+
+
+class DataIntegrityError(PipelineError):
+    """Raised when transfer integrity fails (e.g., S3 ETag mismatch)."""
+
+    pass
 
 
 @runtime_checkable
@@ -112,16 +139,15 @@ class ReadStream(io.BufferedIOBase, Pipeable):
     @source.setter
     def source(self, source: Readable) -> None:
         if self.closed:
-            raise RuntimeError("Stream closed")
+            raise StreamStateError("Cannot set source on a closed stream")
 
         if not isinstance(source, Readable):
-            raise TypeError(f"Source must be a readable object with a 'read' method. Got: {type(source).__name__}")
-
+            raise TypeError(f"Source must be a readable object. Got: {type(source).__name__}")
         self._source = source
 
     def read(self, size: int | None = -1) -> bytes:
         if self._source is None:
-            raise RuntimeError("Stream source not set. Use '|' to attach a source.")
+            raise StreamConfigurationError("Stream source not set. Use '|' to attach a source.")
         return self._source.read(size)
 
     def close(self) -> None:
@@ -189,7 +215,7 @@ class WriteStream(io.BufferedIOBase, Pipeable):
     @sink.setter
     def sink(self, sink: Writable) -> None:
         if self.closed:
-            raise RuntimeError("Stream closed")
+            raise StreamStateError("Cannot set sink on a closed stream")
 
         if not isinstance(sink, Writable):
             raise TypeError(f"Sink must be a writable object with a 'write' method. Got: {type(sink).__name__}")
@@ -203,7 +229,7 @@ class WriteStream(io.BufferedIOBase, Pipeable):
 
     def write(self, data: Buffer) -> int:
         if self._sink is None:
-            raise RuntimeError("Stream sink not set.")
+            raise StreamConfigurationError("Stream sink not set.")
         return self._sink.write(data)
 
     def close(self) -> None:

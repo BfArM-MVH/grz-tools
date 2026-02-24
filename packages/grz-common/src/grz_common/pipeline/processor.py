@@ -21,7 +21,15 @@ from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, ProcessingState
 from ..transfer import init_s3_client
 from ..utils.crypt import Crypt4GH
-from .components import ObserverWithMetrics, Tee, TqdmObserver
+from .components import (
+    ObserverWithMetrics,
+    Tee,
+    TqdmObserver,
+    DataValidationError,
+    DataIntegrityError,
+    StreamConfigurationError,
+    PipelineError,
+)
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .components.perf import MeasuringReadStream, MeasuringWriteStream, MetricsRegistry
 from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
@@ -224,7 +232,7 @@ class SubmissionProcessor:
             )
 
         except Exception as e:
-            log.error(f"Failed {file_meta.file_path}: {e}")
+            log.error(f"Failed processing {file_meta.file_path}: {e}")
             self.context.add_error(str(e))
             self.progress_logger.set_state(
                 file_path_str,
