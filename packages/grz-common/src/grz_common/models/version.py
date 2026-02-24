@@ -1,19 +1,12 @@
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Annotated, Self
+from typing import Any, Self
 
 import botocore
 from packaging.version import Version
-from pydantic import (
-    BaseModel,
-    BeforeValidator,
-    Field,
-    PlainSerializer,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic_core import core_schema
 
 from ..exceptions import (
     VersionFileAccessError,
@@ -26,25 +19,33 @@ from .s3 import S3Options
 logger = logging.getLogger(__name__)
 
 
-# Custom type converters for packaging.version.Version
-def parse_version(v) -> Version:
-    """Convert string or Version to Version object."""
-    if v is None or isinstance(v, Version):
-        return v
-    return Version(str(v))
+class PydanticVersion(Version):
+    """Wrapper around packaging.Version that Pydantic can serialize."""
 
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler):
+        """Define how Pydantic should validate and serialize Version objects."""
 
-def serialize_version(v: Version) -> str:
-    """Convert Version object to string."""
-    return str(v)
+        def validate_version(value: Any) -> Version:
+            """Convert input to Version object."""
+            if isinstance(value, Version):
+                return value
+            return Version(str(value))
 
+        def serialize_version(value: Version) -> str:
+            """Convert Version to string for serialization."""
+            return str(value)
 
-# Annotated type that Pydantic understands
-PydanticVersion = Annotated[
-    Version,
-    BeforeValidator(parse_version),
-    PlainSerializer(serialize_version),
-]
+        python_schema = core_schema.with_info_plain_validator_function(lambda v, _: validate_version(v))
+
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.str_schema(),
+            python_schema=python_schema,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                serialize_version,
+                return_schema=core_schema.str_schema(),
+            ),
+        )
 
 
 class VersionInfo(BaseModel):
@@ -90,14 +91,8 @@ class VersionFile(BaseModel):
 
     schema_version: int = Field(1, description="Version of this schema")
 
-    # List allows staged future policies
-    grzcli_version: list[VersionInfo] = Field(..., description="List of version policies for grz-cli")
-
-    @model_validator(mode="after")
-    def ensure_non_empty(self):
-        if not self.grzcli_version:
-            raise ValueError("At least one version policy must be defined.")
-        return self
+    # List allows staged future policies (empty list disables version checking)
+    grzcli_version: list[VersionInfo] = Field(default_factory=list, description="List of version policies for grz-cli")
 
     @classmethod
     def from_s3(cls, s3_options: S3Options, version_file_key: str) -> Self:

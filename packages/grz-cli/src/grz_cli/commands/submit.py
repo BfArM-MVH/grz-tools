@@ -1,7 +1,6 @@
 """Command for submitting (validating, encrypting, and uploading) a submission."""
 
 import logging
-from pathlib import Path
 
 import click
 from grz_cli.utils.version_check import check_version_and_exit_if_needed
@@ -23,7 +22,7 @@ from ..models.config import UploadConfig
 @grzcli.threads
 @grzcli.force
 @click.pass_context
-def submit(ctx, submission_dir, config_file: tuple[Path], threads, force):
+def submit(ctx, submission_dir, config_file, threads, force):
     """
     Validate, encrypt, and then upload.
 
