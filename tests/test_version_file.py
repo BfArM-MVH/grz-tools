@@ -1,6 +1,5 @@
 """Tests for VersionFile container behavior."""
 
-import pytest
 from grz_common.models.version import VersionFile, VersionInfo
 
 
@@ -20,9 +19,10 @@ def test_versionfile_accepts_policy_list():
     assert isinstance(vf.grzcli_version[0], VersionInfo)
 
 
-def test_versionfile_requires_at_least_one_policy():
-    with pytest.raises(ValueError):
-        VersionFile(grzcli_version=[])
+def test_versionfile_allows_empty_policy_list():
+    """Empty policy list should be valid - disables version checking."""
+    vf = VersionFile(grzcli_version=[])
+    assert len(vf.grzcli_version) == 0
 
 
 def test_multiple_policies_parsed():

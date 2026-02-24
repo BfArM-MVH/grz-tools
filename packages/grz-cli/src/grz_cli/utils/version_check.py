@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def _select_active_policy(
     policies: list[VersionInfo],
     now: datetime,
-) -> VersionInfo| None:
+) -> VersionInfo | None:
     """Select the version policy that is active for the given datetime.
 
     :param policies: A non-empty list of available version policies.
