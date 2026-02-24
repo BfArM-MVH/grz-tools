@@ -39,12 +39,16 @@ class ChecksumValidator(ObserverWithMetrics):
         self._hasher.update(chunk)
 
     def close(self):
-        calculated = self._hasher.hexdigest()
-        if self.expected and calculated != self.expected:
-            raise DataValidationError(
-                f"Checksum mismatch! Exp: {self.expected}, Got: {calculated}", stage=self.__class__.__name__
-            )
-        super().close()
+        if self.closed:
+            return
+        try:
+            calculated = self._hasher.hexdigest()
+            if self.expected and calculated != self.expected:
+                raise DataValidationError(
+                    f"Checksum mismatch! Exp: {self.expected}, Got: {calculated}", stage=self.__class__.__name__
+                )
+        finally:
+            super().close()
 
     @property
     def metrics(self) -> dict[str, Any]:
@@ -98,9 +102,10 @@ class FastqValidator(ObserverWithMetrics):
         )
 
         if status == 1:
-            raise ValueError(
+            raise DataValidationError(
                 f"FASTQ Record {self._read_count + 1} Invalid: "
-                f"Seq len ({self._current_seq_len}) != Qual len (inconsistent)"
+                f"Seq len ({self._current_seq_len}) != Qual len (inconsistent)",
+                stage=self.__class__.__name__,
             )
 
     def _process_chunk_python(self, chunk: bytes) -> None:  # noqa: C901
@@ -139,9 +144,10 @@ class FastqValidator(ObserverWithMetrics):
 
             elif self._line_state == 3:
                 if final_len != self._current_seq_len:
-                    raise ValueError(
+                    raise DataValidationError(
                         f"FASTQ Record {self._read_count + 1} Invalid: "
-                        f"Seq len ({self._current_seq_len}) != Qual len ({final_len})"
+                        f"Seq len ({self._current_seq_len}) != Qual len ({final_len})",
+                        stage=self.__class__.__name__,
                     )
                 self._read_count += 1
                 self._line_state = 0
@@ -154,35 +160,41 @@ class FastqValidator(ObserverWithMetrics):
             start = pos + 1
 
     def close(self):
-        with contextlib.suppress(Exception):
-            final = self._decompressor.flush()
-            if final:
-                self._processor(final)
+        if self.closed:
+            return
 
-        if self._read_count == 0:
-            raise DataValidationError(
-                "Invalid FASTQ: Counted zero reads. File may be empty.", stage=self.__class__.__name__
-            )
+        try:
+            with contextlib.suppress(Exception):
+                final = self._decompressor.flush()
+                if final:
+                    self._processor(final)
 
-        if self._current_line_len > 0:
-            raise DataValidationError(
-                "Invalid FASTQ: Unexpected EOF (incomplete line). File may be truncated.", stage=self.__class__.__name__
-            )
-
-        if self._line_state != 0:
-            raise DataValidationError(
-                f"Invalid FASTQ: Unexpected EOF (incomplete record). Finished at state {self._line_state}.",
-                stage=self.__class__.__name__,
-            )
-
-        if self._threshold is not None and self._read_count > 0:
-            mean_length = self._total_read_len / self._read_count
-            if mean_length < self._threshold:
+            if self._read_count == 0:
                 raise DataValidationError(
-                    f"Mean read length ({mean_length:.2f}) is below threshold ({self._threshold})",
+                    "Invalid FASTQ: Counted zero reads. File may be empty.", stage=self.__class__.__name__
+                )
+
+            if self._current_line_len > 0:
+                raise DataValidationError(
+                    "Invalid FASTQ: Unexpected EOF (incomplete line). File may be truncated.",
                     stage=self.__class__.__name__,
                 )
-        super().close()
+
+            if self._line_state != 0:
+                raise DataValidationError(
+                    f"Invalid FASTQ: Unexpected EOF (incomplete record). Finished at state {self._line_state}.",
+                    stage=self.__class__.__name__,
+                )
+
+            if self._threshold is not None and self._read_count > 0:
+                mean_length = self._total_read_len / self._read_count
+                if mean_length < self._threshold:
+                    raise DataValidationError(
+                        f"Mean read length ({mean_length:.2f}) is below threshold ({self._threshold})",
+                        stage=self.__class__.__name__,
+                    )
+        finally:
+            super().close()
 
     @property
     def metrics(self) -> dict[str, Any]:
@@ -266,20 +278,24 @@ class BamValidator(ObserverWithMetrics):
         self._bytes_seen += len(chunk)
         self._temp.write(chunk)
 
-    def close(self) -> None:
-        if not self._temp.closed:
-            self._temp.close()
-
-        if not os.path.exists(self._path):
-            raise DataValidationError(
-                f"BAM Invalid: Temp file disappeared at {self._path}", stage=self.__class__.__name__
-            )
-
-        if os.path.getsize(self._path) == 0:
-            self._cleanup()
-            raise DataValidationError("BAM Invalid: Stream resulted in an empty file.", stage=self.__class__.__name__)
-
+    def close(self) -> None:  # noqa: C901
+        if self.closed:
+            return
         try:
+            if not self._temp.closed:
+                self._temp.close()
+
+            if not os.path.exists(self._path):
+                raise DataValidationError(
+                    f"BAM Invalid: Temp file disappeared at {self._path}", stage=self.__class__.__name__
+                )
+
+            if os.path.getsize(self._path) == 0:
+                self._cleanup()
+                raise DataValidationError(
+                    "BAM Invalid: Stream resulted in an empty file.", stage=self.__class__.__name__
+                )
+
             with pysam.AlignmentFile(self._path, "rb", check_sq=False) as bam:
                 header = bam.header.to_dict()
 
