@@ -22,6 +22,7 @@ import rich.table
 import rich.text
 import textual.logging
 from cryptography.hazmat.primitives.serialization import load_ssh_public_key
+from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
@@ -874,8 +875,9 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
 
 @submission.command("show")
 @click.argument("submission_id", type=str)
+@output_json
 @click.pass_context
-def show(ctx: click.Context, submission_id: str):
+def show(ctx: click.Context, submission_id: str, output_json: bool):
     """
     Show details of a submission.
     """
@@ -885,6 +887,24 @@ def show(ctx: click.Context, submission_id: str):
     if not submission:
         console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
+
+    if output_json:
+        submission_dict = submission.model_dump(mode="json")
+        submission_dict["states"] = []
+
+        for state_log in sorted(submission.states, key=lambda s: s.timestamp):
+            signature_status, verifying_key_comment = _verify_signature(
+                ctx.obj["public_keys"], state_log.author_name, state_log
+            )
+            state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
+            state_dict["data_steward"] = state_log.author_name
+            state_dict["data_steward_signature"] = signature_status
+            state_dict["signature_key_comment"] = verifying_key_comment
+            submission_dict["states"].append(state_dict)
+
+        json.dump(submission_dict, sys.stdout)
+        sys.stdout.write("\n")
+        return
 
     attribute_table = rich.table.Table(box=None)
     attribute_table.add_column("Attribute", justify="right")
