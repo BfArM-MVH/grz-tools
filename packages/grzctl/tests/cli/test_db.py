@@ -417,6 +417,15 @@ def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path)
     history_match = next(filter(lambda item: item["id"] == sub_history_error_latest_uploaded, parsed_error_any))
     assert history_match["latest_state"]["state"] == "Uploaded"
 
+    # filter mode parsing remains case-insensitive
+    result_error_any_upper = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "ANY"],
+    )
+    assert result_error_any_upper.exit_code == 0, result_error_any_upper.stderr
+    parsed_error_any_upper = json.loads(result_error_any_upper.stdout)
+    assert {item["id"] for item in parsed_error_any_upper} == {sub_latest_error, sub_history_error_latest_uploaded}
+
     # multiple filters in default latest mode are OR-ed on latest state
     result_multi_latest = runner.invoke(
         cli,

@@ -78,6 +78,13 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     ERROR = "Error"
 
 
+class SubmissionStateFilterModeEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Submission state filter mode enum."""
+
+    LATEST = "latest"
+    ANY = "any"
+
+
 class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
     impl = sa.types.String
 
@@ -674,7 +681,7 @@ class SubmissionDb:
         self,
         limit: int | None,
         state_filters: Sequence[SubmissionStateEnum] | None = None,
-        state_filter_mode: str = "latest",
+        state_filter_mode: SubmissionStateFilterModeEnum = SubmissionStateFilterModeEnum.LATEST,
     ) -> Sequence[Submission]:
         """
         Lists all submissions in the database.
@@ -714,23 +721,20 @@ class SubmissionDb:
             submissions = session.exec(statement).all()
 
             if state_filters:
-                state_filter_mode = state_filter_mode.lower()
-                if state_filter_mode not in {"latest", "any"}:
-                    raise ValueError(f"Unknown state_filter_mode '{state_filter_mode}'")
-
-                filter_set = set(state_filters)
-                if state_filter_mode == "latest":
+                if state_filter_mode == SubmissionStateFilterModeEnum.LATEST:
                     submissions = [
                         submission
                         for submission in submissions
-                        if (latest := submission.get_latest_state()) is not None and latest.state in filter_set
+                        if (latest := submission.get_latest_state()) is not None and latest.state in state_filters
+                    ]
+                elif state_filter_mode == SubmissionStateFilterModeEnum.ANY:
+                    submissions = [
+                        submission
+                        for submission in submissions
+                        if any(state.state in state_filters for state in submission.states)
                     ]
                 else:
-                    submissions = [
-                        submission
-                        for submission in submissions
-                        if any(state.state in filter_set for state in submission.states)
-                    ]
+                    raise ValueError(f"Unknown state_filter_mode '{state_filter_mode}'")
 
                 if limit is not None:
                     submissions = submissions[:limit]

@@ -39,6 +39,7 @@ from grz_db.models.submission import (
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
+    SubmissionStateFilterModeEnum,
     SubmissionStateLog,
 )
 from grz_pydantic_models.common import StrictBaseModel
@@ -181,8 +182,8 @@ def upgrade(
 )
 @click.option(
     "--filter-mode",
-    type=click.Choice(["latest", "any"], case_sensitive=False),
-    default="latest",
+    type=click.Choice(SubmissionStateFilterModeEnum.list(), case_sensitive=False),
+    default=SubmissionStateFilterModeEnum.LATEST.value,
     show_default=True,
     help="How --state is evaluated: 'latest' or 'any' state in history.",
 )
@@ -194,12 +195,13 @@ def list_submissions(
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
     parsed_state_filters = tuple(SubmissionStateEnum(state) for state in state_filters) if state_filters else None
+    parsed_filter_mode = SubmissionStateFilterModeEnum(filter_mode)
 
     try:
         submissions = db_service.list_submissions(
             limit=limit,
             state_filters=parsed_state_filters,
-            state_filter_mode=filter_mode.lower(),
+            state_filter_mode=parsed_filter_mode,
         )
     except Exception as e:
         raise click.ClickException(str(e)) from e
