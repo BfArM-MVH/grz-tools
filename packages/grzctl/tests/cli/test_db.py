@@ -6,6 +6,7 @@ import hashlib
 import importlib.resources
 import json
 import random
+from datetime import date
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
@@ -334,6 +335,60 @@ def test_list_sort(blank_database_config_path: Path):
     result_list_parsed = json.loads(result_list.stdout)
     for i, submission in enumerate(expected_ordering):
         assert submission["id"] == result_list_parsed[i]["id"]
+
+
+def test_submission_show_json(blank_database_config_path: Path):
+    """
+    `grzctl db submission show --json` should return machine-readable JSON
+    with submission metadata and state history.
+    """
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    metadata = GrzSubmissionMetadata.model_validate_json(
+        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    )
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    # add submission
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission
+    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
+        result_populate = runner.invoke(
+            cli,
+            [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"],
+        )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # show submission as JSON
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+
+    parsed = json.loads(result_show_json.stdout)
+
+    # structure checks
+    assert parsed == {
+        "id": metadata.submission_id,
+        "tan_g": metadata.submission.tan_g,
+        "pseudonym": metadata.submission.local_case_id,
+        "submission_date": metadata.submission.submission_date.isoformat()
+        if metadata.submission.submission_date
+        else None,
+        "submission_type": metadata.submission.submission_type,
+        "submitter_id": metadata.submission.submitter_id,
+        "data_node_id": metadata.submission.genomic_data_center_id,
+        "coverage_type": metadata.submission.coverage_type,
+        "disease_type": metadata.submission.disease_type,
+        "basic_qc_passed": None,
+        "consented": metadata.consents_to_research(date=date.today()),
+        "detailed_qc_passed": None,
+        "genomic_study_type": metadata.submission.genomic_study_type,
+        "genomic_study_subtype": metadata.submission.genomic_study_subtype,
+        "states": [],
+    }
 
 
 def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path):
