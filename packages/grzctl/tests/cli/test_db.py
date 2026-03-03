@@ -413,35 +413,30 @@ def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path)
         result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
         assert result_add.exit_code == 0, result_add.stderr
 
-    assert runner.invoke(cli, [*args_common, "submission", "update", sub_latest_error, "Error"]).exit_code == 0
-    assert runner.invoke(cli, [*args_common, "submission", "update", sub_latest_qced, "QCed"]).exit_code == 0
-    assert (
-        runner.invoke(cli, [*args_common, "submission", "update", sub_latest_downloaded, "Downloaded"]).exit_code == 0
+    update_invocations = [
+        [*args_common, "submission", "update", sub_latest_error, "Error"],
+        [*args_common, "submission", "update", sub_latest_qced, "QCed"],
+        [*args_common, "submission", "update", sub_latest_downloaded, "Downloaded"],
+        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Uploaded"],
+        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Error"],
+    ]
+    for invoke_args in update_invocations:
+        result_update = runner.invoke(cli, invoke_args)
+        assert result_update.exit_code == 0, result_update.stderr
+
+    # Special transition from Error -> Uploaded, explicitly allowed by flag.
+    result_ignore_error = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            "--ignore-error-state",
+            sub_history_error_latest_uploaded,
+            "Uploaded",
+        ],
     )
-    assert (
-        runner.invoke(
-            cli, [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Uploaded"]
-        ).exit_code
-        == 0
-    )
-    assert (
-        runner.invoke(cli, [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Error"]).exit_code
-        == 0
-    )
-    assert (
-        runner.invoke(
-            cli,
-            [
-                *args_common,
-                "submission",
-                "update",
-                "--ignore-error-state",
-                sub_history_error_latest_uploaded,
-                "Uploaded",
-            ],
-        ).exit_code
-        == 0
-    )
+    assert result_ignore_error.exit_code == 0, result_ignore_error.stderr
 
     result_all = runner.invoke(cli, [*args_common, "list", "--json"])
     assert result_all.exit_code == 0, result_all.stderr
