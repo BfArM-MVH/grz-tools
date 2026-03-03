@@ -714,31 +714,36 @@ class SubmissionDb:
                     .nulls_first()
                 )
             )
-            # If filtering by state, apply limit after filtering to avoid dropping
-            # potential matches before filter evaluation.
-            if (state_filters is None) and (limit is not None):
-                statement = statement.limit(limit)
-            submissions = session.exec(statement).all()
-
-            if state_filters:
+            state_filter_values = tuple(state_filters or ())
+            if state_filter_values:
                 if state_filter_mode == SubmissionStateFilterModeEnum.LATEST:
-                    submissions = [
-                        submission
-                        for submission in submissions
-                        if (latest := submission.get_latest_state()) is not None and latest.state in state_filters
-                    ]
+                    latest_state = (
+                        select(SubmissionStateLog.state)
+                        .where(SubmissionStateLog.submission_id == Submission.id)
+                        .order_by(
+                            SubmissionStateLog.timestamp.desc(),  # type: ignore[attr-defined]
+                            SubmissionStateLog.id.desc(),  # type: ignore[union-attr]
+                        )  # tie-breaker
+                        .limit(1)
+                        .scalar_subquery()
+                    )
+                    statement = statement.where(latest_state.in_(state_filter_values))
                 elif state_filter_mode == SubmissionStateFilterModeEnum.ANY:
-                    submissions = [
-                        submission
-                        for submission in submissions
-                        if any(state.state in state_filters for state in submission.states)
-                    ]
+                    statement = statement.where(
+                        sa.exists(
+                            select(1).where(
+                                SubmissionStateLog.submission_id == Submission.id,
+                                SubmissionStateLog.state.in_(state_filter_values),  # type: ignore[attr-defined]
+                            )
+                        )
+                    )
                 else:
                     raise ValueError(f"Unknown state_filter_mode '{state_filter_mode}'")
 
-                if limit is not None:
-                    submissions = submissions[:limit]
+            if limit is not None:
+                statement = statement.limit(limit)
 
+            submissions = session.exec(statement).all()
             return submissions
 
     def list_processed_between(self, start: datetime.date, end: datetime.date) -> Sequence[Submission]:
