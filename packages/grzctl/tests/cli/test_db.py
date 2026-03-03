@@ -389,3 +389,120 @@ def test_submission_show_json(blank_database_config_path: Path):
         "genomic_study_subtype": metadata.submission.genomic_study_subtype,
         "states": [],
     }
+
+
+def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path):
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    sub_latest_error = "123456789_2025-07-01_b1b2c3d1"
+    sub_latest_qced = "123456789_2025-07-01_b1b2c3d2"
+    sub_latest_downloaded = "123456789_2025-07-01_b1b2c3d3"
+    sub_history_error_latest_uploaded = "123456789_2025-07-01_b1b2c3d4"
+    sub_no_state = "123456789_2025-07-01_b1b2c3d5"
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    for submission_id in [
+        sub_latest_error,
+        sub_latest_qced,
+        sub_latest_downloaded,
+        sub_history_error_latest_uploaded,
+        sub_no_state,
+    ]:
+        result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+        assert result_add.exit_code == 0, result_add.stderr
+
+    update_invocations = [
+        [*args_common, "submission", "update", sub_latest_error, "Error"],
+        [*args_common, "submission", "update", sub_latest_qced, "QCed"],
+        [*args_common, "submission", "update", sub_latest_downloaded, "Downloaded"],
+        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Uploaded"],
+        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Error"],
+    ]
+    for invoke_args in update_invocations:
+        result_update = runner.invoke(cli, invoke_args)
+        assert result_update.exit_code == 0, result_update.stderr
+
+    # Special transition from Error -> Uploaded, explicitly allowed by flag.
+    result_ignore_error = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            "--ignore-error-state",
+            sub_history_error_latest_uploaded,
+            "Uploaded",
+        ],
+    )
+    assert result_ignore_error.exit_code == 0, result_ignore_error.stderr
+
+    result_all = runner.invoke(cli, [*args_common, "list", "--json"])
+    assert result_all.exit_code == 0, result_all.stderr
+    parsed_all = json.loads(result_all.stdout)
+    assert {item["id"] for item in parsed_all} == {
+        sub_latest_error,
+        sub_latest_qced,
+        sub_latest_downloaded,
+        sub_history_error_latest_uploaded,
+        sub_no_state,
+    }
+
+    # default mode is latest
+    result_error_latest_default = runner.invoke(cli, [*args_common, "list", "--json", "--state", "error"])
+    assert result_error_latest_default.exit_code == 0, result_error_latest_default.stderr
+    parsed_error_latest_default = json.loads(result_error_latest_default.stdout)
+    assert {item["id"] for item in parsed_error_latest_default} == {sub_latest_error}
+    assert parsed_error_latest_default[0]["latest_state"]["state"] == "Error"
+
+    # any mode includes submissions that had Error in history but not as latest state
+    result_error_any = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "any"],
+    )
+    assert result_error_any.exit_code == 0, result_error_any.stderr
+    parsed_error_any = json.loads(result_error_any.stdout)
+    assert {item["id"] for item in parsed_error_any} == {sub_latest_error, sub_history_error_latest_uploaded}
+    history_match = next(filter(lambda item: item["id"] == sub_history_error_latest_uploaded, parsed_error_any))
+    assert history_match["latest_state"]["state"] == "Uploaded"
+
+    # filter mode parsing remains case-insensitive
+    result_error_any_upper = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "ANY"],
+    )
+    assert result_error_any_upper.exit_code == 0, result_error_any_upper.stderr
+    parsed_error_any_upper = json.loads(result_error_any_upper.stdout)
+    assert {item["id"] for item in parsed_error_any_upper} == {sub_latest_error, sub_history_error_latest_uploaded}
+
+    # multiple filters in default latest mode are OR-ed on latest state
+    result_multi_latest = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--state", "qced"],
+    )
+    assert result_multi_latest.exit_code == 0, result_multi_latest.stderr
+    parsed_multi_latest = json.loads(result_multi_latest.stdout)
+    assert {item["id"] for item in parsed_multi_latest} == {sub_latest_error, sub_latest_qced}
+
+    # multiple filters in any mode are OR-ed across all historic states
+    result_multi_any = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--state", "qced", "--filter-mode", "any"],
+    )
+    assert result_multi_any.exit_code == 0, result_multi_any.stderr
+    parsed_multi_any = json.loads(result_multi_any.stdout)
+    assert {item["id"] for item in parsed_multi_any} == {
+        sub_latest_error,
+        sub_history_error_latest_uploaded,
+        sub_latest_qced,
+    }
+
+    # "--state" supports repeated values
+    result_state_alias = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "downloaded"],
+    )
+    assert result_state_alias.exit_code == 0, result_state_alias.stderr
+    parsed_state_alias = json.loads(result_state_alias.stdout)
+    assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}

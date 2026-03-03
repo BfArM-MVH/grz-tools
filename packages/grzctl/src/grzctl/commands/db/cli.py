@@ -40,6 +40,7 @@ from grz_db.models.submission import (
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
+    SubmissionStateFilterModeEnum,
     SubmissionStateLog,
 )
 from grz_pydantic_models.common import StrictBaseModel
@@ -173,14 +174,36 @@ def upgrade(
 @db.command("list")
 @grzcli.output_json
 @limit
+@click.option(
+    "--state",
+    "state_filters",
+    type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False),
+    multiple=True,
+    help="Filter by submission state. Can be passed multiple times.",
+)
+@click.option(
+    "--filter-mode",
+    type=click.Choice(SubmissionStateFilterModeEnum.list(), case_sensitive=False),
+    default=SubmissionStateFilterModeEnum.LATEST.value,
+    show_default=True,
+    help="How --state is evaluated: 'latest' or 'any' state in history.",
+)
 @click.pass_context
-def list_submissions(ctx: click.Context, output_json: bool, limit: int):
+def list_submissions(
+    ctx: click.Context, output_json: bool, limit: int, state_filters: tuple[str, ...], filter_mode: str
+):
     """Lists all submissions in the database with their latest state."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db)
+    parsed_state_filters = tuple(SubmissionStateEnum(state) for state in state_filters) if state_filters else None
+    parsed_filter_mode = SubmissionStateFilterModeEnum(filter_mode)
 
     try:
-        submissions = db_service.list_submissions(limit=limit)
+        submissions = db_service.list_submissions(
+            limit=limit,
+            state_filters=parsed_state_filters,
+            state_filter_mode=parsed_filter_mode,
+        )
     except Exception as e:
         raise click.ClickException(str(e)) from e
 
@@ -188,7 +211,8 @@ def list_submissions(ctx: click.Context, output_json: bool, limit: int):
         console_err.print("[yellow]No submissions found in the database.[/yellow]")
         return
 
-    table = rich.table.Table(title="All Submissions")
+    table_title = "All Submissions" if not state_filters else f"Submissions ({', '.join(state_filters)})"
+    table = rich.table.Table(title=table_title)
     table.add_column("ID", style="dim", min_width=29, width=29)
     table.add_column("tanG", style="cyan")
     table.add_column("Pseudonym", style="magenta")
