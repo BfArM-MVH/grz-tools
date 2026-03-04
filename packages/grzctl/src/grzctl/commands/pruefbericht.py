@@ -8,14 +8,14 @@ import click
 import grz_common.cli as grzcli
 import requests
 from grz_common.workers.submission import Submission
-from grz_db.models.submission import SubmissionStateEnum
-from grz_pydantic_models.pruefbericht import LibraryType as PruefberichtLibraryType
-from grz_pydantic_models.pruefbericht import Pruefbericht, SubmittedCase
-from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissionMetadata
+from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
+from grz_pydantic_models.pruefbericht.v0 import LibraryType as PruefberichtLibraryType
+from grz_pydantic_models.pruefbericht.v0 import Pruefbericht, SubmittedCase
+from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissionMetadata, Relation
 from pydantic_core import to_jsonable_python
 
 from ..dbcontext import DbContext
-from ..models.config import PruefberichtConfig
+from ..models.config import DbConfig, PruefberichtConfig
 
 log = logging.getLogger(__name__)
 fail_or_pass = click.option(
@@ -62,29 +62,41 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
         response.raise_for_status()
 
 
+def _get_most_expensive_library_type(library_types: set[str]) -> PruefberichtLibraryType:
+    """
+    Determine the library type with the highest reimbursement value from a set of library type strings.
+
+    Args:
+        library_types: Set of library type strings
+
+    Returns:
+        The PruefberichtLibraryType with the highest reimbursement value
+    """
+    pruefbericht_library_types = {
+        str(PruefberichtLibraryType(library_type))
+        for library_type in library_types
+        if library_type in PruefberichtLibraryType
+    }
+
+    if not pruefbericht_library_types:
+        raise ValueError(
+            f"Submission contained ONLY library types ({', '.join(library_types)}) that cannot be submitted in the Prüfbericht. "
+            f"Valid types are {', '.join(PruefberichtLibraryType)}."
+        )
+
+    # enums sort by their definition order
+    most_expensive_library_type = sorted(pruefbericht_library_types)[-1]
+    return PruefberichtLibraryType(most_expensive_library_type)
+
+
 def get_pruefbericht_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryType:
     """
     Determine the singular representative library type of a submission to submit with the Prüfbericht.
     This should be library type of the index patient with the highest reimbursement value.
     """
     index_patient = metadata.index_donor
-
     index_patient_submission_library_types = {str(datum.library_type) for datum in index_patient.lab_data}
-
-    index_patient_pruefbericht_library_types = {
-        str(PruefberichtLibraryType(library_type))
-        for library_type in index_patient_submission_library_types
-        if library_type in PruefberichtLibraryType
-    }
-    if not index_patient_pruefbericht_library_types:
-        raise ValueError(
-            f"Submission contained ONLY library types ({', '.join(index_patient_submission_library_types)}) that cannot be submitted in the Prüfbericht. "
-            f"Valid types are {', '.join(PruefberichtLibraryType)}."
-        )
-    # enums sort by their definition order
-    most_expensive_library_type = sorted(index_patient_pruefbericht_library_types)[-1]
-
-    return PruefberichtLibraryType(most_expensive_library_type)
+    return _get_most_expensive_library_type(index_patient_submission_library_types)
 
 
 def _generate_pruefbericht_from_metadata(metadata: GrzSubmissionMetadata, failed: bool) -> Pruefbericht:
@@ -99,6 +111,68 @@ def _generate_pruefbericht_from_metadata(metadata: GrzSubmissionMetadata, failed
             dataCategory="genomic",
             libraryType=get_pruefbericht_library_type(metadata),
             coverageType=metadata.submission.coverage_type,
+            dataQualityCheckPassed=not failed,
+        )
+    )
+
+
+def _generate_pruefbericht_from_database(
+    submission_id: str, configuration: dict[str, Any], failed: bool
+) -> Pruefbericht:
+    """Generate Prüfbericht by fetching submission data from the database."""
+    config = DbConfig.model_validate(configuration)
+
+    if not config.db.database_url:
+        raise ValueError("database_url must be provided in configuration to fetch from database")
+
+    db = SubmissionDb(db_url=str(config.db.database_url), author=None, debug=False)
+    submission = db.get_submission(submission_id)
+
+    if submission is None:
+        raise ValueError(f"Submission with ID '{submission_id}' not found in database")
+
+    # Check if submission has the required fields populated
+    required_fields = [
+        "submission_date",
+        "submission_type",
+        "tan_g",
+        "submitter_id",
+        "data_node_id",
+        "disease_type",
+        "coverage_type",
+    ]
+
+    missing_fields = [field for field in required_fields if getattr(submission, field) is None]
+    if missing_fields:
+        raise ValueError(f"Submission {submission_id} is missing required fields: {', '.join(missing_fields)}")
+
+    # Get donors to determine library types
+    donors = db.get_donors(submission_id)
+    if not donors:
+        raise ValueError(f"No donors found for submission {submission_id}")
+
+    # Find index donor
+    index_donor = next((d for d in donors if d.relation == Relation.index_), None)
+    if index_donor is None:
+        raise ValueError(f"No index donor found for submission {submission_id}")
+
+    # Convert database library_types to strings and determine most expensive type
+    index_donor_library_types = {str(lt.value if hasattr(lt, "value") else lt) for lt in index_donor.library_types}
+
+    library_type = _get_most_expensive_library_type(index_donor_library_types)
+
+    # Generate the Prüfbericht
+    return Pruefbericht(
+        SubmittedCase=SubmittedCase(
+            submissionDate=submission.submission_date,
+            submissionType=submission.submission_type,
+            tan=submission.tan_g,
+            submitterId=submission.submitter_id,
+            dataNodeId=submission.data_node_id,
+            diseaseType=submission.disease_type,
+            dataCategory="genomic",
+            libraryType=library_type,
+            coverageType=submission.coverage_type,
             dataQualityCheckPassed=not failed,
         )
     )
@@ -142,6 +216,19 @@ def from_metadata(metadata_file, failed):
         metadata = GrzSubmissionMetadata.model_validate_json(f.read())
     pruefbericht = _generate_pruefbericht_from_metadata(metadata, failed)
     click.echo(pruefbericht.model_dump_json(indent=None, by_alias=True))
+
+
+@generate.command("from-database")
+@grzcli.submission_id
+@grzcli.configuration
+@fail_or_pass
+def from_database(submission_id, configuration, failed, config_file=None):
+    """Generate Prüfbericht from database using submission ID."""
+    try:
+        pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed)
+        click.echo(pruefbericht.model_dump_json(indent=None, by_alias=True))
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
 
 
 @pruefbericht.command()
