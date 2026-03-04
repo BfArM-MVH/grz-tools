@@ -327,3 +327,233 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
         ]
         with pytest.raises(ValueError, match="Refusing to submit a Prüfbericht with a redacted TAN"):
             runner.invoke(cli, submit_args, catch_exceptions=False)
+
+
+@pytest.fixture
+def pruefbericht_db_config(tmp_path):
+    """Create a test database config for pruefbericht tests."""
+    import json
+
+    db_path = tmp_path / "test.db"
+    db_url = f"sqlite:///{db_path}"
+
+    config = {"db": {"database_url": db_url, "author": {"name": "test_author"}}}
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config))
+
+    return {"db_path": db_path, "db_url": db_url, "config": config, "config_path": config_path}
+
+
+def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht_db_config):
+    """Test generating Prüfbericht from database."""
+    import datetime
+    import json
+
+    from grz_db.models.submission import Donor, SubmissionDb
+    from grz_pydantic_models.submission.metadata import (
+        LibraryType,
+        Relation,
+        SequenceSubtype,
+        SequenceType,
+    )
+    from grz_pydantic_models.submission.metadata.v1 import (
+        CoverageType,
+        DiseaseType,
+        SubmissionType,
+    )
+
+    # Use the fixture
+    db_url = pruefbericht_db_config["db_url"]
+    config_path = pruefbericht_db_config["config_path"]
+
+    db = SubmissionDb(db_url=db_url, author=None, debug=False)
+    db.initialize_schema()
+
+    db.add_submission(TEST_SUBMISSION_ID)
+    # Populate submission fields to match the mock data used in other tests
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_date", datetime.date(2024, 7, 15))
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_type", SubmissionType.test)
+    db.modify_submission(
+        TEST_SUBMISSION_ID, "tan_g", "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
+    )
+    db.modify_submission(TEST_SUBMISSION_ID, "submitter_id", "260914050")
+    db.modify_submission(TEST_SUBMISSION_ID, "data_node_id", "GRZK00007")
+    db.modify_submission(TEST_SUBMISSION_ID, "disease_type", DiseaseType.oncological)
+    db.modify_submission(TEST_SUBMISSION_ID, "coverage_type", CoverageType.GKV)
+
+    # Add index donor with library types
+    index_donor = Donor(
+        submission_id=TEST_SUBMISSION_ID,
+        pseudonym="test_donor",
+        relation=Relation.index_,
+        library_types={LibraryType.wes, LibraryType.panel},
+        sequence_types={SequenceType.dna},
+        sequence_subtypes={SequenceSubtype.germline},
+        mv_consented=True,
+        research_consented=True,
+    )
+    db.add_donor(index_donor)
+
+    # Test the from-database command
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    args = [
+        "pruefbericht",
+        "generate",
+        "from-database",
+        "--submission-id",
+        TEST_SUBMISSION_ID,
+        "--config-file",
+        str(config_path),
+    ]
+
+    result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+
+    # Verify the generated Prüfbericht matches expected values
+    pruefbericht_data = json.loads(result.output)
+    assert pruefbericht_data["SubmittedCase"]["submissionDate"] == "2024-07-15"
+    assert pruefbericht_data["SubmittedCase"]["submissionType"] == "test"
+    assert (
+        pruefbericht_data["SubmittedCase"]["tan"] == "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
+    )
+    assert pruefbericht_data["SubmittedCase"]["submitterId"] == "260914050"
+    assert pruefbericht_data["SubmittedCase"]["dataNodeId"] == "GRZK00007"
+    assert pruefbericht_data["SubmittedCase"]["diseaseType"] == "oncological"
+    assert pruefbericht_data["SubmittedCase"]["libraryType"] == "wes"  # Most expensive
+    assert pruefbericht_data["SubmittedCase"]["coverageType"] == "GKV"
+    assert pruefbericht_data["SubmittedCase"]["dataQualityCheckPassed"] is True
+
+
+def test_generate_from_database_missing_submission(pruefbericht_db_config):
+    """Test error when submission doesn't exist in database."""
+    from grz_db.models.submission import SubmissionDb
+
+    # Use the fixture
+    db_url = pruefbericht_db_config["db_url"]
+    config_path = pruefbericht_db_config["config_path"]
+
+    db = SubmissionDb(db_url=db_url, author=None, debug=False)
+    db.initialize_schema()
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    args = [
+        "pruefbericht",
+        "generate",
+        "from-database",
+        "--submission-id",
+        "nonexistent_id",
+        "--config-file",
+        str(config_path),
+    ]
+
+    result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert "not found in database" in result.output
+
+
+def test_generate_from_database_missing_fields(pruefbericht_db_config):
+    """Test error when submission has missing required fields."""
+    from grz_db.models.submission import SubmissionDb
+
+    # Use the fixture
+    db_url = pruefbericht_db_config["db_url"]
+    config_path = pruefbericht_db_config["config_path"]
+
+    db = SubmissionDb(db_url=db_url, author=None, debug=False)
+    db.initialize_schema()
+
+    # Add submission without populating required fields
+    db.add_submission(TEST_SUBMISSION_ID)
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    args = [
+        "pruefbericht",
+        "generate",
+        "from-database",
+        "--submission-id",
+        TEST_SUBMISSION_ID,
+        "--config-file",
+        str(config_path),
+    ]
+
+    result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert "missing required fields" in result.output
+
+
+def test_generate_from_database_no_index_donor(pruefbericht_db_config):
+    """Test error when no index donor exists."""
+    import datetime
+
+    from grz_db.models.submission import Donor, SubmissionDb
+    from grz_pydantic_models.submission.metadata import (
+        LibraryType,
+        Relation,
+        SequenceSubtype,
+        SequenceType,
+    )
+    from grz_pydantic_models.submission.metadata.v1 import (
+        CoverageType,
+        DiseaseType,
+        SubmissionType,
+    )
+
+    # Use the fixture
+    db_url = pruefbericht_db_config["db_url"]
+    config_path = pruefbericht_db_config["config_path"]
+
+    db = SubmissionDb(db_url=db_url, author=None, debug=False)
+    db.initialize_schema()
+    db.add_submission(TEST_SUBMISSION_ID)
+
+    # Populate all required fields (matching the pattern from test_generate_from_database)
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_date", datetime.date(2024, 7, 15))
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_type", SubmissionType.test)
+    db.modify_submission(
+        TEST_SUBMISSION_ID, "tan_g", "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
+    )
+    db.modify_submission(TEST_SUBMISSION_ID, "submitter_id", "260914050")
+    db.modify_submission(TEST_SUBMISSION_ID, "data_node_id", "GRZK00007")
+    db.modify_submission(TEST_SUBMISSION_ID, "disease_type", DiseaseType.oncological)
+    db.modify_submission(TEST_SUBMISSION_ID, "coverage_type", CoverageType.GKV)
+
+    # Add a non-index donor such as mother
+    donor = Donor(
+        submission_id=TEST_SUBMISSION_ID,
+        pseudonym="test_donor",
+        relation=Relation.mother,  # NOT index
+        library_types={LibraryType.wes},
+        sequence_types={SequenceType.dna},
+        sequence_subtypes={SequenceSubtype.germline},
+        mv_consented=True,
+        research_consented=True,
+    )
+    db.add_donor(donor)
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    args = [
+        "pruefbericht",
+        "generate",
+        "from-database",
+        "--submission-id",
+        TEST_SUBMISSION_ID,
+        "--config-file",
+        str(config_path),
+    ]
+
+    result = runner.invoke(cli, args, catch_exceptions=False)
+
+    assert result.exit_code != 0
+    assert "No index donor found" in result.output
