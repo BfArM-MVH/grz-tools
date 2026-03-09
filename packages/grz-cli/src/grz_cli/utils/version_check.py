@@ -30,7 +30,7 @@ def _select_active_policy(
     applicable = [p for p in policies if p.enforced_from <= now]
 
     if not applicable:
-        return min(policies, key=lambda p: p.enforced_from)
+        return None
 
     return max(applicable, key=lambda p: p.enforced_from)
 
