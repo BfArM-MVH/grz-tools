@@ -4,12 +4,43 @@ from __future__ import annotations
 
 import logging
 import shutil
+import json
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 from os import PathLike
 from pathlib import Path
+from typing import Any
+
+
+from grz_db.errors import SubmissionNotFoundError
+from grz_db.models.author import Author
+from grz_db.models.submission import Donor
+from grz_pydantic_models.submission.metadata import (
+    GrzSubmissionMetadata,
+    Relation,
+    REDACTED_TAN
+)
+from grzctl.commands.db.cli import (
+    get_submission_db_instance,
+    redact_metadata,
+    diff_metadata,
+    diff_donor,
+    SubmissionData,
+    DonorDiff,
+    DonorData
+)
+
+from grzctl.models.config import (
+    DbConfig,
+    ListConfig,
+    DownloadConfig
+)
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
+from ..transfer import init_s3_client
 from ..validation import UserInterruptException
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
@@ -17,6 +48,20 @@ from .upload import S3BotoUploadWorker
 
 log = logging.getLogger(__name__)
 
+# TODO: move to grz_db.models.author?
+def _initialise_author_from_dbconfig(db_config: DbConfig) -> Author:
+    author = None
+    if db_config.author:
+        key_path = Path(db_config.author.private_key_path)
+        if not key_path.exists():
+            raise FileNotFoundError(f"Author private key not found at: {key_path}")
+
+        author = Author(
+            name=db_config.author.name,
+            private_key_bytes=key_path.read_bytes(),
+            private_key_passphrase=db_config.author.private_key_passphrase,
+        )
+    return Author
 
 class Worker:
     """Worker class for handling submission processing"""
@@ -317,3 +362,97 @@ class Worker:
 
         self.__log.info("Downloading encrypted files...")
         download_worker.download(submission_id, EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir))
+
+
+    def populate(self, configuration,  submission_id: str, force: bool):
+        updates = False
+        # establish connection to s3; no check because connection established during download
+        s3_config = DownloadConfig.model_validate(configuration).s3
+        s3_client = init_s3_client(s3_config)
+
+        # get the metadata file object and extract the date
+        object_key = f"{submission_id}/metadata/metadata.json"
+        response = s3_client.head_object(Bucket= s3_config.bucket, Key= object_key)
+        submission_date = response["LastModified"].date()
+
+        # establish connection to database; no check because connection established via DbContext
+        db_config = DbConfig.model_validate(configuration).db
+        author = _initialise_author_from_dbconfig(db_config)
+        db = get_submission_db_instance(db_config.database_url, author=author)
+        submission = db.get_submission(submission_id)
+
+        # store entries of donors in database
+        donors_in_db_submission = {donor.pseudonym : donor for donor in db.get_donors(submission_id=submission_id)}
+
+        # parse metadata
+        metadata_file_path = self.metadata_dir / "metadata.json"
+        with open(metadata_file_path, encoding="utf-8") as metadata_file:
+            metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
+
+            metadata_file.seek(0)
+            metadata_content = json.load(metadata_file)
+            # redact tanG, local case id and potential tanG in the patient information
+            metadata_content = redact_metadata(metadata_content)
+            metadata_string = json.dumps(metadata_content)
+
+
+        # add the filesize; would be better with SubmissionMetadata but then without validation
+        # submission_size: int = sum([i.file_size_in_bytes for i in submission_metadata.files.values()])
+        submission_size: int = 0
+        for donor in metadata.donors:
+            for lab_datum in donor.lab_data:
+                if sequence_data := lab_datum.sequence_data:
+                    for file in sequence_data.files:
+                        submission_size += file.file_size_in_bytes
+
+        # populate submission metadata
+        submission_information = diff_metadata(submission, metadata, submission_size, submission_date, metadata_string)
+        if submission_information.change: updates = True
+
+        donors_in_metadata: list[str] = []
+        donor_diff = DonorDiff([], [], [], [], [])
+        for donor in metadata.donors:
+            donor_data = diff_donor(donor, donors_in_db_submission, submission_id)
+            donors_in_metadata.append(donor_data.name)
+            if donor_data.status != "unchanged":
+                updates = True
+                if donor_data.status == "new":
+                    donor_diff.added.append(donor_data.donor)
+                else:
+                    donor_diff.updated.append(donor_data.donor)
+            else:
+                donor_diff.unchanged.append(donor_data.donor)
+
+        donor_diff.deleted = [db_donor for db_donor in donors_in_db_submission.values() if db_donor.pseudonym not in donors_in_metadata]
+
+        if updates and not force:
+            raise RuntimeError(f"Changes in {object_key} detected. Re-run with --populate to commit them.")
+
+        if updates:
+            # goes below
+            if submission_information.update:
+                self.__log.info(f"Submission: {submission_id} - Updating fields: {', '.join(submission_information.update)} in database")
+            if submission_information.unchanged:
+                self.__log.info(f"Submission: {submission_id} - Not updating fields: {', '.join(submission_information.unchanged)} in database")
+            if donor_diff.unchanged:
+                self.__log.info(f"Submission: {submission_id} - Keep existing donor(s) in database: {','.join([i.pseudonym for i in donor_diff.unchanged])}")
+            if donor_diff.added:
+                self.__log.info(f"Submission: {submission_id} - Adding new donor(s) to database: {','.join([i.pseudonym for i in donor_diff.added])} from metadata.json")
+            if donor_diff.updated:
+                self.__log.info(f"Submission: {submission_id} - Modify existing donor(s) in database: {','.join([i.pseudonym for i in donor_diff.updated])} from metadata.json")
+            if donor_diff.deleted:
+                self.__log.info(f"Submission: {submission_id} - Drop existing donor(s) in db: {','.join([i.pseudonym for i in donor_diff.deleted])}")
+
+            # push to database
+            for key, unused, value in submission_information.db_ingest:
+                db.modify_submission(submission_id, key, value)
+            for donor in donor_diff.added:
+                db.add_donor(donor)
+            for donor in donor_diff.updated:
+                db.update_donor(donor)
+            for donor in donor_diff.deleted:
+                db.delete_donor(donor)
+        else:
+            self.__log.info(f"Submission: {submission_id} - No updates from metadata.json necessary")
+
+
