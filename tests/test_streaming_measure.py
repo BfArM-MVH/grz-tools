@@ -2,12 +2,12 @@ import io
 import os
 
 import pytest
-from grz_common.pipeline.components.perf import MeasuringReadStream, MeasuringWriteStream, MetricsRegistry
+from grz_common.pipeline.components.perf import MeasuringReadStream, MeasuringWriteStream, StreamMetricsRegistry
 
 
 @pytest.fixture
 def registry():
-    return MetricsRegistry()
+    return StreamMetricsRegistry()
 
 
 @pytest.fixture
@@ -39,8 +39,7 @@ def test_measuring_observer_chaining(registry, random_data):
     """
     sink = io.BytesIO()
 
-    observer = MeasuringWriteStream("test_observer", registry)
-    observer.sink = sink
+    observer = MeasuringWriteStream(sink, "test_observer", registry)
 
     bytes_written = observer.write(random_data)
     assert bytes_written == len(random_data)

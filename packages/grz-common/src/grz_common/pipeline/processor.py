@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from crypt4gh.keys import get_public_key
+from moto.kinesis.models import Stream
+
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
@@ -28,7 +30,7 @@ from .components import (
     TqdmObserver,
 )
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
-from .components.perf import MeasuringReadStream, MeasuringWriteStream, MetricsRegistry
+from .components.perf import StreamMetricsRegistry
 from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
 from .components.validation import BamValidator, ChecksumValidator, FastqValidator
 from .context import ConsistencyValidator, SubmissionContext
@@ -120,17 +122,6 @@ class SubmissionProcessor:
         if key not in self._target_s3_map:
             self._target_s3_map[key] = init_s3_client(s3_options=options, max_pool_connections=self._pool_size)
         return self._target_s3_map[key]
-
-    def _measure(self, stream: Any, name: str, registry: MetricsRegistry | None, is_observer: bool = False) -> Any:
-        """Conditionally wrap a stream with measuring instrumentation."""
-        if not self._enable_metrics or not registry:
-            return stream
-        if is_observer:
-            wrapper = MeasuringWriteStream(name, registry)
-            wrapper.sink = stream
-            return wrapper
-
-        return MeasuringReadStream(stream, name, registry)
 
     def run(self, submission_metadata: SubmissionMetadata):
         """
@@ -302,10 +293,10 @@ class SubmissionProcessor:
         dest_key = f"{self._submission_id}/files/{file_meta.encrypted_file_path()}"
 
         part_size = calculate_s3_part_size(file_meta.file_size_in_bytes, None)
-        metrics = MetricsRegistry() if self._enable_metrics else None
+        metrics = StreamMetricsRegistry(enabled=self._enable_metrics)
 
         checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
-        validation_chain = self._measure(checksum_validator, "3a_Checksum", metrics, is_observer=True)
+        validation_chain = checksum_validator | metrics.measure("3a_Checksum")
 
         format_validator: ObserverWithMetrics | None = None
         if file_meta.file_type == FileType.fastq:
@@ -316,8 +307,7 @@ class SubmissionProcessor:
             format_validator = BamValidator()
 
         if format_validator:
-            wrapped_format = self._measure(format_validator, "3b_Format", metrics, is_observer=True)
-            validation_chain = validation_chain | wrapped_format
+            validation_chain |= format_validator | metrics.measure("3b_Format")
 
         with (
             tqdm(  # type: ignore[call-overload]
@@ -329,25 +319,29 @@ class SubmissionProcessor:
             ) as pbar_local,
             ExitStack() as stack,
         ):
-            pipeline = S3Downloader(self._source_s3, self._source_s3_options.bucket, src_key)
-            pipeline = self._measure(pipeline, "1_Source", metrics)
-
-            pipeline = pipeline | Crypt4GHDecryptor(private_key=self._private_key)
-            pipeline = self._measure(pipeline, "2_Decrypt", metrics)
+            pipeline = (
+                S3Downloader(self._source_s3, self._source_s3_options.bucket, src_key)
+                | metrics.measure("1_Source")
+                | Crypt4GHDecryptor(private_key=self._private_key)
+                | metrics.measure("2_Decrypt")
+            )
 
             if self._should_qc:
                 path = Path(self.config.detailed_qc.local_storage) / self._submission_id / "files" / file_meta.file_path
                 path.parent.mkdir(parents=True, exist_ok=True)
+
                 writer = stack.enter_context(open(path, "wb"))
-                writer = self._measure(writer, "2b_Write", metrics, is_observer=True)
-                pipeline = pipeline | Tee(writer, threaded=self._background_tee)
+                writer = metrics.measure("2b_Write", writer)
 
-            pipeline = pipeline | Tee(validation_chain, threaded=self._background_tee)
+                pipeline |= Tee(writer, threaded=self._background_tee)
 
-            pipeline = pipeline | Crypt4GHEncryptor(recipient_pubkey=self._target_public_key)
-            pipeline = self._measure(pipeline, "4_Encrypt", metrics)
+            pipeline |= Tee(validation_chain, threaded=self._background_tee)
 
-            pipeline = pipeline | Tee(TqdmObserver([pbar_global, pbar_local]), threaded=self._background_tee)
+            pipeline = (
+                pipeline | Crypt4GHEncryptor(recipient_pubkey=self._target_public_key) | metrics.measure("4_Encrypt")
+            )
+
+            pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]), threaded=self._background_tee)
 
             uploader = S3MultipartUploader(
                 self._target_s3,
@@ -359,11 +353,12 @@ class SubmissionProcessor:
 
             pipeline >> uploader
 
+        # collect statistics
         stats = checksum_validator.metrics
         if format_validator:
             stats.update(format_validator.metrics)
 
-        if metrics:
+        if metrics.enabled:
             log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
 
         self.context.record_stats(file_meta.file_path, stats)
