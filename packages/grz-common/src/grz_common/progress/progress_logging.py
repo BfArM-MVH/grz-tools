@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 import typing
 from collections.abc import Callable
 from os import PathLike
@@ -36,6 +37,7 @@ class FileProgressLogger[T: State]:
         """
         self._file_path = Path(log_file_path)
         self._file_states = {}
+        self._lock = threading.RLock()
 
         # Read existing file states from the log file
         self.read()
@@ -48,7 +50,7 @@ class FileProgressLogger[T: State]:
         """
         if self._file_path.exists():
             if self._file_path.is_file():
-                with open(self._file_path) as fd:
+                with self._lock, open(self._file_path) as fd:
                     for row_dict in read_multiple_json(fd):
                         # Get index and cast them to the correct types
                         index = typing.cast(
@@ -70,11 +72,12 @@ class FileProgressLogger[T: State]:
 
         :param keep: List of tuples containing the file path and metadata of files to keep.
         """
-        self._file_path.unlink(missing_ok=True)
-        for file, file_metadata in keep:
-            state = self.get_state(file, file_metadata)
-            if state is not None:
-                self.set_state(file, file_metadata, state)
+        with self._lock:
+            self._file_path.unlink(missing_ok=True)
+            for file, file_metadata in keep:
+                state = self.get_state(file, file_metadata)
+                if state is not None:
+                    self.set_state(file, file_metadata, state)
 
     def _get_index(self, file_path: str | PathLike, size: int | None = None, mtime: float | None = None) -> Index:
         """
@@ -120,16 +123,17 @@ class FileProgressLogger[T: State]:
         """
         index = self._get_index(file_path, size=size, mtime=mtime)
 
-        # get stored state
-        stored_metadata, stored_data = self._file_states.get(index, (None, None))
-
-        # check if metadata matches
         if not isinstance(file_metadata, SubmissionFileMetadata):
             file_metadata = SubmissionFileMetadata(**file_metadata)
+
+        # get stored state
+        with self._lock:
+            stored_metadata, stored_data = self._file_states.get(index, (None, None))
 
         if stored_metadata and not isinstance(stored_metadata, SubmissionFileMetadata):
             stored_metadata = SubmissionFileMetadata(**stored_metadata)
 
+        # check if metadata matches
         if stored_metadata and file_metadata == stored_metadata:
             return copy.deepcopy(stored_data)
 
@@ -143,7 +147,6 @@ class FileProgressLogger[T: State]:
                 if not default:
                     raise ValueError("Default state must be provided if not callable")
                     # return None
-                default = typing.cast(T, default)
                 self.set_state(file_path, file_metadata, default, size=size, mtime=mtime)
                 return default
         else:
@@ -169,28 +172,27 @@ class FileProgressLogger[T: State]:
         :param mtime: The modification time of the file, if known.
         """
         index = self._get_index(file_path, size=size, mtime=mtime)
-
         if file_metadata and not isinstance(file_metadata, SubmissionFileMetadata):
             file_metadata = SubmissionFileMetadata(**file_metadata)
-        file_metadata = typing.cast(SubmissionFileMetadata, file_metadata)
 
-        # Update state in memory
-        self._file_states[index] = (file_metadata, state)
+        with self._lock:
+            # Update state in memory
+            self._file_states[index] = (file_metadata, state)
 
-        # Persist state to JSON log file
-        with open(self._file_path, "a", newline="") as fd:
-            # Append the new state row to the log file
-            json.dump(
-                {
-                    # index keys
-                    **{k: v for k, v in zip(self._index.keys(), index, strict=True)},
-                    # state
-                    "metadata": file_metadata.model_dump(by_alias=True),
-                    "state": state,
-                },
-                fd,
-            )
-            fd.write("\n")
+            # Persist state to JSON log file
+            with open(self._file_path, "a", newline="") as fd:
+                # Append the new state row to the log file
+                json.dump(
+                    {
+                        # index keys
+                        **{k: v for k, v in zip(self._index.keys(), index, strict=True)},
+                        # state
+                        "metadata": file_metadata.model_dump(by_alias=True),
+                        "state": state,
+                    },
+                    fd,
+                )
+                fd.write("\n")
 
     def num_entries(self) -> int:
         """
@@ -198,4 +200,5 @@ class FileProgressLogger[T: State]:
 
         :return: An integer representing the number of entries in the file_states dictionary
         """
-        return len(self._file_states)
+        with self._lock:
+            return len(self._file_states)
