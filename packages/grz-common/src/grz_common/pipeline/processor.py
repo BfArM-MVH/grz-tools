@@ -1,14 +1,12 @@
+import json
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import date
-from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from crypt4gh.keys import get_public_key
-from moto.kinesis.models import Stream
-
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
@@ -369,5 +367,7 @@ class SubmissionProcessor:
         redacted_metadata = submission_metadata.content.to_redacted_dict()
 
         self._target_s3.put_object(
-            Bucket=self._target_bucket, Key=dest_key, Body=BytesIO(str(redacted_metadata).encode("utf-8"))
+            Bucket=self._target_bucket,
+            Key=dest_key,
+            Body=json.dumps(redacted_metadata).encode("utf-8"),
         )
