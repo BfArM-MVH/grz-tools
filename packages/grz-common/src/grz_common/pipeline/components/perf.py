@@ -1,14 +1,16 @@
 import threading
 import time
 from collections.abc import Buffer
+from typing import Any
 
-from . import ReadStream, WriteStream
+from . import Readable, ReadStream, Writable, WriteStream
 
 
-class MetricsRegistry:
+class StreamMetricsRegistry:
     """Thread-safe registry to aggregate metrics."""
 
-    def __init__(self):
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
         self._lock = threading.Lock()
         self.metrics: dict[str, dict[str, float]] = {}
 
@@ -30,11 +32,45 @@ class MetricsRegistry:
                     stats.append(f"{name}: {mb:.2f}MB in {data['time']:.2f}s ({mb_s:.2f} MB/s)")
             return " | ".join(stats)
 
+    def measure(self, name: str, stream: Any = None) -> type | Any | None:
+        """Return a measuring wrapper for pipeline integration.
+
+        Without a stream, returns a class for use with ``|``::
+
+            pipeline |= metrics.measure("1_Source")
+            pipeline = pipeline | Encrypt(...) | metrics.measure("4_Encrypt")
+
+        With a stream, wraps it directly (for non-Pipeable objects like file handles)::
+
+            writer = metrics.measure("2b_Write", writer)
+
+        Returns None (or the original stream) when metrics are disabled,
+        which ``Pipeable.__or__`` treats as a no-op.
+        """
+        if not self.enabled:
+            return stream  # None for pipe usage, original stream for direct wrap
+
+        registry = self
+
+        class _MeasuringStage:
+            """Factory dispatching to MeasuringReadStream or MeasuringWriteStream."""
+
+            def __new__(cls, s: Any) -> Any:
+                if isinstance(s, Readable) and s.readable():
+                    return MeasuringReadStream(s, name, registry)
+                if isinstance(s, Writable) and s.writable():
+                    return MeasuringWriteStream(s, name, registry)
+                raise TypeError(f"Cannot measure stream of type {type(s).__name__}")
+
+        if stream is not None:
+            return _MeasuringStage(stream)
+        return _MeasuringStage
+
 
 class MeasuringReadStream(ReadStream):
     """Wraps a ReadStream to measure read latency and throughput (Pull)."""
 
-    def __init__(self, source, name: str, registry: MetricsRegistry):
+    def __init__(self, source: Readable | None, name: str, registry: StreamMetricsRegistry):
         super().__init__(source)
         self.name = name
         self.registry = registry
@@ -53,8 +89,8 @@ class MeasuringReadStream(ReadStream):
 class MeasuringWriteStream(WriteStream):
     """Wraps a WriteStream to measure processing time (Push)."""
 
-    def __init__(self, name: str, registry: MetricsRegistry):
-        super().__init__()
+    def __init__(self, sink: Writable | None, name: str, registry: StreamMetricsRegistry):
+        super().__init__(sink)
         self.name = name
         self.registry = registry
 

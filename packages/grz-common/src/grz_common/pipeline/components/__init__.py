@@ -83,10 +83,14 @@ class Pipeable:
         """
         Piping operator for chaining components.
 
-        1. self: Pipeable | Class -> Class(self)
-        2. self: Readable | other: ReadStream  -> other.set_source(self)
-        3. self: WriteStream | other: Writable -> self.set_sink(other)
+        0. self | None -> self
+        1. self | Class -> Class(self)
+        2. self: Readable | other: ReadStream  -> other, with other.source = self
+        3. self: WriteStream | other: Writable -> self, with self.sink = other
         """
+        if other is None:
+            return self
+
         if isinstance(other, type):
             return other(self)
 
