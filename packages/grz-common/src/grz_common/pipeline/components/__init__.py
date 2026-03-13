@@ -86,7 +86,9 @@ class Pipeable:
         0. self | None -> self
         1. self | Class -> Class(self)
         2. self: Readable | other: ReadStream  -> other, with other.source = self
+            -> other will read from self
         3. self: WriteStream | other: Writable -> self, with self.sink = other
+            -> self will write to other
         """
         if other is None:
             return self
@@ -94,15 +96,15 @@ class Pipeable:
         if isinstance(other, type):
             return other(self)
 
-        if isinstance(self, Readable) and self.readable() and hasattr(other, "source"):
+        if isinstance(self, Readable) and self.readable() and isinstance(other, ReadStream):
             other.source = self
             return other
 
-        if isinstance(self, WriteStream) and self.writable() and isinstance(other, Writable):
+        if isinstance(self, WriteStream) and isinstance(other, Writable) and other.writable():
             self.sink = other
             return self
 
-        raise TypeError(f"Operator '|' expects a Transformer or Observer, got {type(other)}")
+        raise TypeError(f"Operator '|' expects a pipeable object or type, got {type(other)}")
 
     def __rshift__(self, other: Writable) -> Writable:
         """
@@ -147,7 +149,15 @@ class ReadStream(io.BufferedIOBase, Pipeable):
 
         if not isinstance(source, Readable):
             raise TypeError(f"Source must be a readable object. Got: {type(source).__name__}")
-        self._source = source
+
+        if self._source is None:
+            self._source = source
+        elif isinstance(self._source, ReadStream):
+            self._source.source = source
+        else:
+            # TODO: Raise?
+            self._source = source
+
 
     def read(self, size: int | None = -1) -> bytes:
         if self._source is None:
@@ -181,14 +191,6 @@ class Transformer(ReadStream, metaclass=abc.ABCMeta):
 
     def read(self, size: int | None = -1) -> bytes:
         target_size = size if size is not None else -1
-
-        if not self._output_buffer:
-            chunk = self._fill_buffer()
-            if not chunk:
-                return b""
-            if target_size == -1 or len(chunk) == target_size:
-                return chunk
-            self._output_buffer.extend(chunk)
 
         while target_size == -1 or len(self._output_buffer) < target_size:
             chunk = self._fill_buffer()
@@ -229,6 +231,7 @@ class WriteStream(io.BufferedIOBase, Pipeable):
         elif isinstance(self._sink, WriteStream):
             self._sink.sink = sink
         else:
+            # TODO: Raise?
             self._sink = sink
 
     def write(self, data: Buffer) -> int:

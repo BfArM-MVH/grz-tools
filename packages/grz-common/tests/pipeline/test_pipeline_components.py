@@ -5,8 +5,90 @@ import hashlib
 from io import BytesIO
 
 import pytest
-from grz_common.pipeline.components import DataValidationError, ReadStream
+from grz_common.pipeline.components import DataValidationError, Observer, ReadStream, Transformer
 from grz_common.pipeline.components.validation import ChecksumValidator, FastqValidator
+
+
+class _CountingChunkTransformer(Transformer):
+    """Test helper that forwards bytes in fixed chunks and records pull count."""
+
+    def __init__(self, chunk_size: int = 2):
+        super().__init__()
+        self.chunk_size = chunk_size
+        self.read_calls = 0
+
+    def _fill_buffer(self) -> bytes:
+        self.read_calls += 1
+        if self.source is None:
+            return b""
+        return self.source.read(self.chunk_size)
+
+
+class _RecordingObserver(Observer):
+    """Test helper that records observed chunks while forwarding to its sink."""
+
+    def __init__(self):
+        super().__init__()
+        self.chunks: list[bytes] = []
+
+    def observe(self, chunk: bytes) -> None:
+        self.chunks.append(chunk)
+
+
+class TestPipeAssociativity:
+    def test_read_streams_associative(self):
+        x = ReadStream(BytesIO(b"abcdef"))
+        y = _CountingChunkTransformer(chunk_size=2)
+        z = _CountingChunkTransformer(chunk_size=2)
+        left = x | (y | z)
+
+        assert left is z
+        assert left.source is y
+        assert y.source is x
+
+        x2 = ReadStream(BytesIO(b"abcdef"))
+        y2 = _CountingChunkTransformer(chunk_size=2)
+        z2 = _CountingChunkTransformer(chunk_size=2)
+        right = x2 | y2 | z2
+
+        assert right is z2
+        assert right.source is y2
+        assert y2.source is x2
+
+        assert left.read() == right.read() == b"abcdef"
+
+        assert y.read_calls > 0
+        assert z.read_calls > 0
+        assert y.read_calls == y2.read_calls
+        assert z.read_calls == z2.read_calls
+
+    def test_write_streams_associative(self):
+        x = _RecordingObserver()
+        y = _RecordingObserver()
+        z = BytesIO()
+        left = x | (y | z)
+        left.write(b"ab")
+        left.write(b"c")
+
+        x2 = _RecordingObserver()
+        y2 = _RecordingObserver()
+        z2 = BytesIO()
+        right = x2 | y2 | z2
+        right.write(b"ab")
+        right.write(b"c")
+
+        assert left is x
+        assert right is x2
+        assert x.sink is y
+        assert y.sink is z
+        assert x2.sink is y2
+        assert y2.sink is z2
+        assert x.chunks == [b"ab", b"c"]
+        assert x2.chunks == [b"ab", b"c"]
+        assert y.chunks == [b"ab", b"c"]
+        assert y2.chunks == [b"ab", b"c"]
+        assert z.getvalue() == b"abc"
+        assert z2.getvalue() == b"abc"
 
 
 class TestFastqValidator:
