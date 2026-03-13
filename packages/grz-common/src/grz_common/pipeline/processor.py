@@ -233,7 +233,14 @@ class SubmissionProcessor:
             s3_size = head["ContentLength"]
             s3_mtime = head["LastModified"].timestamp()
         except Exception as e:
-            log.error(f"Failed to access source file {src_key}: {e}")
+            log.exception(
+                "Failed to access source file",
+                extra={
+                    "submission_id": self._submission_id,
+                    "file_path": file_meta.file_path,
+                    "src_key": src_key,
+                },
+            )
             self.context.add_error(f"Source access failed: {src_key}")
             self.progress_logger.set_state(
                 file_path_str,
@@ -269,7 +276,14 @@ class SubmissionProcessor:
             )
 
         except Exception as e:
-            log.error(f"Failed processing {file_meta.file_path}: {e}")
+            log.exception(
+                "Failed processing file",
+                extra={
+                    "submission_id": self._submission_id,
+                    "file_path": file_meta.file_path,
+                    "src_key": src_key,
+                },
+            )
             self.context.add_error(str(e))
             self.progress_logger.set_state(
                 file_path_str,
@@ -324,23 +338,27 @@ class SubmissionProcessor:
                 | metrics.measure("2_Decrypt")
             )
 
+            # tee to disk if should QC
             if self._should_qc:
                 path = Path(self.config.detailed_qc.local_storage) / self._submission_id / "files" / file_meta.file_path
                 path.parent.mkdir(parents=True, exist_ok=True)
 
-                writer = stack.enter_context(open(path, "wb"))
-                writer = metrics.measure("2b_Write", writer)
+                writer = stack.enter_context(open(path, "wb")) | metrics.measure("2b_Write")
 
                 pipeline |= Tee(writer, threaded=self._background_tee)
 
+            # validate
             pipeline |= Tee(validation_chain, threaded=self._background_tee)
 
-            pipeline = (
-                pipeline | Crypt4GHEncryptor(recipient_pubkey=self._target_public_key) | metrics.measure("4_Encrypt")
+            # re-encrypt
+            pipeline |= (
+                 Crypt4GHEncryptor(recipient_pubkey=self._target_public_key) | metrics.measure("4_Encrypt")
             )
 
+            # run progress bar
             pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]), threaded=self._background_tee)
 
+            # write to S3
             uploader = S3MultipartUploader(
                 self._target_s3,
                 self._target_bucket,
