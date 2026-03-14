@@ -1,8 +1,11 @@
+import logging
 import threading
 from collections import defaultdict
 from typing import Any, Self
 
 from grz_common.workers.submission import SubmissionMetadata
+
+log = logging.getLogger(__name__)
 
 
 class SubmissionContext:
@@ -70,4 +73,8 @@ class ReadPairConsistencyValidator:
         return True
 
     def check(self, path: str) -> bool:
-        return self.check_pair(self.partner_map.get(path), path)
+        partner = self.partner_map.get(path)
+        if partner is None:
+            log.debug(f"Partner for '{path}' not found")
+            return True
+        return self.check_pair(partner, path)
