@@ -147,6 +147,7 @@ class FileProgressLogger[T: State]:
                 if not default:
                     raise ValueError("Default state must be provided if not callable")
                     # return None
+                default = typing.cast(T, default)
                 self.set_state(file_path, file_metadata, default, size=size, mtime=mtime)
                 return default
         else:
@@ -174,6 +175,7 @@ class FileProgressLogger[T: State]:
         index = self._get_index(file_path, size=size, mtime=mtime)
         if file_metadata and not isinstance(file_metadata, SubmissionFileMetadata):
             file_metadata = SubmissionFileMetadata(**file_metadata)
+        file_metadata = typing.cast(SubmissionFileMetadata, file_metadata)
 
         with self._lock:
             # Update state in memory

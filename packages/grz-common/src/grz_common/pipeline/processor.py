@@ -303,7 +303,7 @@ class FilePipelineExecutor:
             validation_chain |= format_validator | metrics.measure("3b_Format")
 
         with (
-            tqdm(
+            tqdm(  # type: ignore[call-overload]
                 total=file_meta.file_size_in_bytes,
                 desc="Processing",
                 postfix={"file": file_name},
@@ -326,8 +326,8 @@ class FilePipelineExecutor:
                 path.parent.mkdir(parents=True, exist_ok=True)
 
                 writer = stack.enter_context(open(path, "wb"))
-                writer = metrics.measure("2b_Write", writer)
-                pipeline |= Tee(writer, threaded=self._background_tee)
+                writer_observer: Any = metrics.measure("2b_Write", writer)
+                pipeline |= Tee(writer_observer, threaded=self._background_tee)
 
             # add validation chain
             pipeline |= Tee(validation_chain, threaded=self._background_tee)

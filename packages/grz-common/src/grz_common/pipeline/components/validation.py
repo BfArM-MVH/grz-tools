@@ -3,19 +3,24 @@ import hashlib
 import logging
 import os
 import tempfile
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import pysam
 
 from . import DataIntegrityError, DataValidationError, ObserverWithMetrics
 
-try:
-    from isal import isal_zlib as zlib  # type: ignore[import-not-found]
-except ImportError:
+if TYPE_CHECKING:
     import zlib
+else:
+    try:
+        from isal import isal_zlib as zlib
+    except ImportError:
+        import zlib
+
 
 try:
-    from numba import jit  # type: ignore[import-not-found]
+    from numba import jit  # type: ignore[import-not-found, import-untyped]
 
     HAS_NUMBA = True
 except ImportError:
@@ -61,7 +66,9 @@ class FastqValidator(ObserverWithMetrics):
     def __init__(self, mean_read_length_threshold: float | None = None):
         super().__init__()
         self._decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        self._processor = self._process_chunk_numba if HAS_NUMBA else self._process_chunk_python
+        self._processor: Callable[[bytes], None] = (
+            self._process_chunk_numba if HAS_NUMBA else self._process_chunk_python
+        )
         self._threshold = mean_read_length_threshold
 
         self._line_state = 0
