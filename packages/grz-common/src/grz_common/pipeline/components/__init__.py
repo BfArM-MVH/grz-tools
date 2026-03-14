@@ -158,7 +158,6 @@ class ReadStream(io.BufferedIOBase, Pipeable):
             # TODO: Raise?
             self._source = source
 
-
     def read(self, size: int | None = -1) -> bytes:
         if self._source is None:
             raise StreamConfigurationError("Stream source not set. Use '|' to attach a source.")
