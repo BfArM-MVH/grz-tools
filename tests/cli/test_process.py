@@ -224,6 +224,53 @@ class TestGrzctlProcess:
             f"Encrypted files not found in consented archive. Keys: {consented_keys}"
         )
 
+    def test_process_archives_redacted_logs(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        initialized_db,
+        working_dir_path,
+    ):
+        submission_id = "260914050_2024-07-15_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        metadata_path = VALID_SUBMISSION_DIR / "metadata" / "metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        tan = metadata["submission"]["tanG"]
+        local_case_id = metadata["submission"]["localCaseId"]
+
+        logs_dir = working_dir_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        custom_log = logs_dir / "custom.log"
+        custom_log.write_text(f"tan={tan}\nlocalCaseId={local_case_id}\n", encoding="utf-8")
+
+        args = [
+            "process",
+            "--config-file",
+            str(temp_process_config_file_path),
+            "--submission-id",
+            submission_id,
+            "--output-dir",
+            str(working_dir_path),
+            "--no-submit-pruefbericht",
+            "--no-update-db",
+        ]
+
+        runner = click.testing.CliRunner()
+        cli = grzctl.cli.build_cli()
+        result = runner.invoke(cli, args, catch_exceptions=False)
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        archived_key = f"{submission_id}/logs/custom.log"
+        archived_keys = {o.key for o in s3_buckets["consented"].objects.all()}
+        assert archived_key in archived_keys
+
+        archived_log = s3_buckets["consented"].Object(archived_key).get()["Body"].read().decode("utf-8")
+        assert tan not in archived_log
+        assert local_case_id not in archived_log
+        assert "REDACTED_TAN_G" in archived_log
+        assert "REDACTED_LOCAL_CASE_ID" in archived_log
+
     def test_process_creates_correct_directory_structure(
         self,
         s3_buckets,

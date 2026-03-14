@@ -3,7 +3,7 @@
 import pytest
 from grz_common.pipeline.components import DataValidationError, ReadStream
 from grz_common.pipeline.components.validation import FastqValidator
-from grz_common.pipeline.context import ConsistencyValidator, SubmissionContext
+from grz_common.pipeline.context import ReadPairConsistencyValidator, SubmissionContext
 
 
 def run_validator(path: str, threshold: float = 0.0):
@@ -37,7 +37,7 @@ def test_paired_end_differing_line_numbers():
     context = SubmissionContext()
     context.record_stats(path1, stats1)
     context.record_stats(path2, stats2)
-    consistency = ConsistencyValidator(context)
+    consistency = ReadPairConsistencyValidator(context, {path1: path2, path2: path1})
     is_valid_pair = consistency.check_pair(path1, path2)
 
     assert is_valid_pair is False, "ConsistencyValidator should have rejected differing read counts"
@@ -59,9 +59,15 @@ def test_paired_end_all_checks_passed():
     context = SubmissionContext()
     context.record_stats(path1, stats1)
     context.record_stats(path2, stats2)
-    consistency = ConsistencyValidator(context)
+    consistency = ReadPairConsistencyValidator(context, {path1: path2, path2: path1})
     is_valid_pair = consistency.check_pair(path1, path2)
 
     # Verify line counts match
     assert stats1["line_count"] == stats2["line_count"]
     assert is_valid_pair
+
+    # verify partner_map
+    assert consistency.partner_map.get(path1) == path2
+    assert consistency.partner_map.get(path2) == path1
+    assert consistency.check(path1)
+    assert consistency.check(path2)

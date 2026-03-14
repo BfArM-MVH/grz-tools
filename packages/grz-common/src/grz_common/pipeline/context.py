@@ -1,6 +1,8 @@
 import threading
 from collections import defaultdict
-from typing import Any
+from typing import Any, Self
+
+from grz_common.workers.submission import SubmissionMetadata
 
 
 class SubmissionContext:
@@ -27,9 +29,23 @@ class SubmissionContext:
             return len(self._errors) > 0
 
 
-class ConsistencyValidator:
-    def __init__(self, context: SubmissionContext):
+class ReadPairConsistencyValidator:
+    def __init__(self, context: SubmissionContext, partner_map: dict[str, str]) -> None:
         self.context = context
+        self.partner_map = partner_map
+
+    @staticmethod
+    def get_partner_map(submission_metadata: SubmissionMetadata) -> dict[str, str]:
+        partner_map = {}
+        for _donor, _lab_datum, pairs, _thresholds in submission_metadata.iter_paired_end_fastqs():
+            for fq1, fq2 in pairs:
+                partner_map[fq1.file_path] = fq2.file_path
+                partner_map[fq2.file_path] = fq1.file_path
+        return partner_map
+
+    @classmethod
+    def from_submission_metadata(cls, context: SubmissionContext, submission_metadata: SubmissionMetadata) -> Self:
+        return cls(context, cls.get_partner_map(submission_metadata))
 
     def check_pair(self, path_a: str, path_b: str) -> bool:
         """
@@ -52,3 +68,6 @@ class ConsistencyValidator:
             self.context.add_error(msg)
             return False
         return True
+
+    def check(self, path: str) -> bool:
+        return self.check_pair(self.partner_map.get(path), path)

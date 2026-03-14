@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -98,14 +97,6 @@ def process(  # noqa: PLR0913
 
     submission_metadata = SubmissionMetadata(local_metadata_path)
 
-    # TODO see https://github.com/BfArM-MVH/grz-tools/pull/517
-    redact_patterns = []
-    if redact_logs:
-        redact_patterns.append((re.escape(submission_metadata.content.submission.tan_g), "REDACTED_TAN"))
-        redact_patterns.append(
-            (re.escape(submission_metadata.content.submission.local_case_id), "REDACTED_LOCAL_CASE_ID")
-        )
-
     # register submission in db if not yet registered
     if update_db and config.db:
         db_service = get_submission_db_instance(config.db.database_url)
@@ -122,7 +113,6 @@ def process(  # noqa: PLR0913
     processor = SubmissionProcessor(
         configuration=config,
         inbox=inbox,
-        redact_patterns=redact_patterns,
         status_file_path=status_file_path,
         threads=threads,
         max_concurrent_uploads=concurrent_uploads,
