@@ -63,30 +63,7 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
 
 
 def _get_most_expensive_library_type(library_types: set[str]) -> PruefberichtLibraryType:
-    """
-    Determine the library type with the highest reimbursement value from a set of library type strings.
-
-    Args:
-        library_types: Set of library type strings
-
-    Returns:
-        The PruefberichtLibraryType with the highest reimbursement value
-    """
-    pruefbericht_library_types = {
-        str(PruefberichtLibraryType(library_type))
-        for library_type in library_types
-        if library_type in PruefberichtLibraryType
-    }
-
-    if not pruefbericht_library_types:
-        raise ValueError(
-            f"Submission contained ONLY library types ({', '.join(library_types)}) that cannot be submitted in the Prüfbericht. "
-            f"Valid types are {', '.join(PruefberichtLibraryType)}."
-        )
-
-    # enums sort by their definition order
-    most_expensive_library_type = sorted(pruefbericht_library_types)[-1]
-    return PruefberichtLibraryType(most_expensive_library_type)
+    return PruefberichtLibraryType.most_expensive(library_types)
 
 
 def get_pruefbericht_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryType:
