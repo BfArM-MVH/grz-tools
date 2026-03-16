@@ -10,6 +10,7 @@ import click.testing
 import grzctl.cli
 import pytest
 import responses
+from grz_pydantic_models.pruefbericht.v0 import LibraryType
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from .. import mock_files
@@ -415,17 +416,18 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
 
     # Verify the generated Prüfbericht matches expected values
     pruefbericht_data = json.loads(result.output)
-    assert pruefbericht_data["SubmittedCase"]["submissionDate"] == "2024-07-15"
-    assert pruefbericht_data["SubmittedCase"]["submissionType"] == "test"
-    assert (
-        pruefbericht_data["SubmittedCase"]["tan"] == "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
-    )
-    assert pruefbericht_data["SubmittedCase"]["submitterId"] == "260914050"
-    assert pruefbericht_data["SubmittedCase"]["dataNodeId"] == "GRZK00007"
-    assert pruefbericht_data["SubmittedCase"]["diseaseType"] == "oncological"
-    assert pruefbericht_data["SubmittedCase"]["libraryType"] == "wes"  # Most expensive
-    assert pruefbericht_data["SubmittedCase"]["coverageType"] == "GKV"
-    assert pruefbericht_data["SubmittedCase"]["dataQualityCheckPassed"] is True
+    assert pruefbericht_data["SubmittedCase"] == {
+        "submissionDate": "2024-07-15",
+        "submissionType": "test",
+        "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+        "submitterId": "260914050",
+        "dataNodeId": "GRZK00007",
+        "diseaseType": "oncological",
+        "dataCategory": "genomic",
+        "libraryType": "wes",  # Most expensive
+        "coverageType": "GKV",
+        "dataQualityCheckPassed": True,
+    }
 
 
 def test_generate_from_database_missing_submission(pruefbericht_db_config):
@@ -557,3 +559,36 @@ def test_generate_from_database_no_index_donor(pruefbericht_db_config):
 
     assert result.exit_code != 0
     assert "No index donor found" in result.output
+
+
+class TestLibraryTypeMostExpensive:
+    def test_single_type_returned(self):
+        assert LibraryType.most_expensive({"wes"}) == LibraryType.wes
+
+    def test_most_expensive_is_wgs_lr(self):
+        assert LibraryType.most_expensive({"panel", "wes", "wgs", "wgs_lr"}) == LibraryType.wgs_lr
+
+    def test_most_expensive_excludes_none(self):
+        """'none' must never win over a real sequencing type."""
+        assert LibraryType.most_expensive({"panel", "none"}) == LibraryType.panel
+
+    def test_none_alone_is_valid(self):
+        assert LibraryType.most_expensive({"none"}) == LibraryType.none
+
+    def test_invalid_types_are_ignored(self):
+        assert LibraryType.most_expensive({"wgs", "invalid_type"}) == LibraryType.wgs
+
+    def test_all_invalid_raises(self):
+        with pytest.raises(ValueError, match="cannot be submitted"):
+            LibraryType.most_expensive({"invalid_type", "another_bad_one"})
+
+    def test_priority_ordering(self):
+        """Verify the full priority ladder explicitly."""
+        ordered = sorted(LibraryType, key=lambda lt: lt.reimbursement_priority)
+        assert ordered == [
+            LibraryType.none,
+            LibraryType.panel,
+            LibraryType.wes,
+            LibraryType.wgs,
+            LibraryType.wgs_lr,
+        ]
