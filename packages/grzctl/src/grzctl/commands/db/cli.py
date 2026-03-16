@@ -523,20 +523,6 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
-# TODO: identical part in to grz_common.workers.upload.py : S3BotoUploadWorker.archive()
-# TODO: identical function in grz_common.workers.worker.py; just here due to circular import because of get_submission_db_instance
-def redact_metadata(metadata_content: dict[str, Any]) -> dict[str, Any]:
-    # redact tanG as all zeros
-    metadata_content["submission"]["tanG"] = REDACTED_TAN
-    # redact local case ID
-    metadata_content["submission"]["localCaseId"] = ""
-
-    for donor in metadata_content["donors"]:
-        if donor["relation"] == "index":
-            # redact index donorPseudonym (which can be the tanG)
-            donor["donorPseudonym"] = "index"
-    return metadata_content
-
 def _prepare_submission_console_table(submission_data: list[tuple[str, Any, Any]]) -> rich.console.RenderableType:
     diff_table: rich.console.RenderableType
 
@@ -629,72 +615,6 @@ def diff_metadata(submission: Submission, metadata: GrzSubmissionMetadata, submi
 
     return submission_data
 
-# def _diff_metadata(
-#     submission: Submission, metadata: GrzSubmissionMetadata, submission_date: datetime, metadata_content: str, ignore_fields: set[str]
-# ) -> list[tuple[str, Any, Any]]:
-#     """Given a database submission and a metadata.json file, report changed fields and their before/after values if they are not in ignore_fields."""
-#     changes = []
-
-#     simple_fields = {
-#         "tan_g",
-#         "submission_date",
-#         "submission_type",
-#         "submitter_id",
-#         "coverage_type",
-#         "disease_type",
-#         "genomic_study_type",
-#         "genomic_study_subtype",
-#     }
-#     # submission_date is substracted from simple_fields when it is in ignore_fields
-#     for field in simple_fields - ignore_fields:
-#         if field == "tan_g" and metadata.submission.tan_g == REDACTED_TAN:
-#             raise ValueError(
-#                 "Refusing to populate a seemingly-redacted TAN (all zeros). "
-#                 "Add 'tan_g' to --ignore-field or use 'grzctl db submission modify' directly."
-#             )
-#         submission_attr = getattr(submission, field)
-#         metadata_attr = getattr(metadata.submission, field)
-#         if submission_attr != metadata_attr:
-#             changes.append((field, submission_attr, metadata_attr))
-    
-#     # when it's in ignore_fields, then it was provided and should be added
-#     if "submission_date" in ignore_fields:
-#         changes.append(("submission_date", getattr(submission, "submission_date"), submission_date))
-
-#     #  add the filesize
-#     submission_size: int = 0  
-#     for donor in metadata.donors:
-#         for lab_datum in donor.lab_data:
-#             if sequence_data := lab_datum.sequence_data:
-#                 for file in sequence_data.files:
-#                     submission_size += file.file_size_in_bytes
-#     if "submission_size" not in ignore_fields and submission.submission_size != submission_size:
-#         changes.append(("submission_size", submission.submission_size, submission_size))
-
-#     if "submission_metadata" not in ignore_fields and submission.submission_metadata != metadata_content:
-#         changes.append(("submission_metadata", submission.submission_metadata, metadata_content))
-
-#     # pseudonym (TODO: change after phase 0)
-#     if "pseudonym" not in ignore_fields and (submission.pseudonym != metadata.submission.local_case_id):
-#         if not metadata.submission.local_case_id:
-#             raise ValueError(
-#                 "Refusing to populate a seemingly-redacted local case ID (empty). "
-#                 "Add 'pseudonym' to --ignore-field or use 'grzctl db submission modify' directly."
-#             )
-#         changes.append(("pseudonym", submission.pseudonym, metadata.submission.local_case_id))
-
-#     # data node id
-#     if "data_node_id" not in ignore_fields and (submission.data_node_id != metadata.submission.genomic_data_center_id):
-#         changes.append(("data_node_id", submission.data_node_id, metadata.submission.genomic_data_center_id))
-
-#     # consent state
-#     consented = metadata.consents_to_research(date=date.today())
-#     if submission.consented != consented:
-#         changes.append(("consented", submission.consented, consented))
-
-#     return changes
-
-
 @dataclass
 class DonorDiff:
     added: list[Donor]
@@ -749,123 +669,6 @@ def diff_donor(donor: Donor, donors_in_db_submission: dict[str, Donor], submissi
             donor_data.changes.append((field, before, after))
 
     return donor_data
-
-# def _diff_donors(metadata: SubmissionMetadata, donors_in_db_submission: dict[str, Donor], submission_id: str):
-#     donor_data = SubmissionDonorData([], [], [], [])
-#     donors_pseudonym_metadata: list[str] = []
-
-#     for donor in metadata.content.donors:
-#         donor_metadata = Donor.model_validate(
-#             {
-#                 "submission_id": submission_id,
-#                 "pseudonym": "index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
-#                 "relation": Relation(donor.relation),
-#                 "library_types": {datum.library_type for datum in donor.lab_data},
-#                 "sequence_types": {datum.sequence_type for datum in donor.lab_data},
-#                 "sequence_subtypes": {datum.sequence_subtype for datum in donor.lab_data},
-#                 "mv_consented": donor.consents_to_mv(),
-#                 "research_consented": donor.consents_to_research(date=date.today()),
-#                 "research_consent_missing_justifications": {
-#                     consent.no_scope_justification
-#                     for consent in donor.research_consents
-#                     if consent.no_scope_justification is not None
-#                 }
-#                 if donor.research_consents
-#                 else None,
-#             }
-#         )
-#         donors_pseudonym_metadata.append(donor_metadata.pseudonym)
-#         donor_before = donors_in_db_submission.get(donor_metadata.pseudonym, None)
-#         if donor_before == donor_metadata:
-#             donor_data.unchanged.append(donor_metadata)
-#         elif donor_before is None:
-#             donor_data.db_ingest.append(donor_metadata)
-#             donor_data.change = True
-#         else:
-#             donor_data.update.append(donor_metadata)
-#             donor_data.change = True
-#     # build list of donors which are to be dropped from database because they are not in the downloaded sumbission anymore
-#     donor_data.delete = [db_donor for db_donor in donors_in_db_submission.values() if db_donor.pseudonym not in donors_pseudonym_metadata]
-#     if donor_data.delete: donor_data.change = True
-
-#     return donor_data
-
-# def _diff_donors(
-#     donors_in_submission: tuple[Donor, ...], submission_id: str, metadata: GrzSubmissionMetadata
-# ) -> _DonorDiff:
-#     pseudonym2before = {donor.pseudonym: donor for donor in donors_in_submission}
-
-#     added_donors = []
-#     updated_donors = []
-#     type Pseudonym = str
-#     pending_pseudonyms: set[Pseudonym] = set()
-#     donor_diff_tables: list[rich.console.RenderableType] = []
-#     for donor in metadata.donors:
-#         # we use submission ID passed to this function instead of metadata
-#         # because the tanG might be redacted and therefore the
-#         # metadata-calculated submission ID would change.
-#         # Also, we use model_validate here instead of __init__ because of:
-#         # https://github.com/fastapi/sqlmodel/issues/453
-#         donor_after = Donor.model_validate(
-#             {
-#                 "submission_id": submission_id,
-#                 "pseudonym": "index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
-#                 "relation": Relation(donor.relation),
-#                 "library_types": {datum.library_type for datum in donor.lab_data},
-#                 "sequence_types": {datum.sequence_type for datum in donor.lab_data},
-#                 "sequence_subtypes": {datum.sequence_subtype for datum in donor.lab_data},
-#                 "mv_consented": donor.consents_to_mv(),
-#                 "research_consented": donor.consents_to_research(date=date.today()),
-#                 "research_consent_missing_justifications": {
-#                     consent.no_scope_justification
-#                     for consent in donor.research_consents
-#                     if consent.no_scope_justification is not None
-#                 }
-#                 if donor.research_consents
-#                 else None,
-#             }
-#         )
-#         donor_before = pseudonym2before.get(donor_after.pseudonym, None)
-#         pending_pseudonyms.add(donor_after.pseudonym)
-#         change = "added"
-#         if donor_before == donor_after:
-#             continue
-#         if donor_before is None:
-#             added_donors.append(donor_after)
-#         else:
-#             updated_donors.append(donor_after)
-#             change = "updated"
-
-#         table_title = f"[green]Donor '{donor_after.pseudonym}' {change}[/green]"
-#         diff_table = rich.table.Table(title=table_title, min_width=len(table_title), title_justify="left")
-#         diff_table.add_column("Key")
-#         diff_table.add_column("Before")
-#         diff_table.add_column("After")
-#         for field in sorted(Donor.model_fields.keys() - {"submission_id", "pseudonym"}):
-#             before = getattr(donor_before, field, None)
-#             after = getattr(donor_after, field)
-#             if before != after:
-#                 diff_table.add_row(
-#                     field, _TEXT_MISSING if before is None else rich.pretty.Pretty(before), rich.pretty.Pretty(after)
-#                 )
-#         if diff_table.row_count:
-#             donor_diff_tables.append(diff_table)
-
-#     deleted_donors = tuple(
-#         filter(
-#             lambda donor: donor.pseudonym not in pending_pseudonyms,
-#             pseudonym2before.values(),
-#         )
-#     )
-#     for deleted_donor in deleted_donors:
-#         donor_diff_tables.append(rich.text.Text(f"Donor {deleted_donor.pseudonym} deleted", style="red"))
-
-#     return _DonorDiff(
-#         added=tuple(added_donors),
-#         updated=tuple(updated_donors),
-#         deleted=deleted_donors,
-#         diff_tables=tuple(donor_diff_tables),
-#     )
 
 @submission.command()
 @click.argument("submission_id", type=str)
@@ -923,11 +726,7 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, submiss
 
     with open(metadata_path, encoding="utf-8") as metadata_file:
         metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
-
-        metadata_file.seek(0)
-        metadata_content = json.load(metadata_file)
-        # redact tanG, local case id and potential tanG in the patient information
-        metadata_content = redact_metadata(metadata_content)
+        metadata_content = metadata.to_redacted_dict(False)
         metadata_string = json.dumps(metadata_content)
 
     # add the filesize; would be better with SubmissionMetadata but then without validation

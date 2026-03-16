@@ -389,12 +389,16 @@ class Worker:
         with open(metadata_file_path, encoding="utf-8") as metadata_file:
             metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
 
-            metadata_file.seek(0)
-            metadata_content = json.load(metadata_file)
+            # metadata_file.seek(0)
+            # metadata_content = json.load(metadata_file)
             # redact tanG, local case id and potential tanG in the patient information
-            metadata_content = redact_metadata(metadata_content)
-            metadata_string = json.dumps(metadata_content)
+            # metadata_content = redact_metadata(metadata_content)
+            # metadata_string = json.dumps(metadata_content)
 
+            metadata_content = metadata.to_redacted_dict(False)
+            metadata_string = json.dumps(metadata_content)
+            print(metadata_string)
+            exit()
 
         # add the filesize; would be better with SubmissionMetadata but then without validation
         # submission_size: int = sum([i.file_size_in_bytes for i in submission_metadata.files.values()])

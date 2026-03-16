@@ -34,7 +34,7 @@ def download(  # noqa: PLR0913
     threads,
     force,
     update_db,
-    populate
+    populate,
     **kwargs,
 ):
     """
@@ -68,6 +68,6 @@ def download(  # noqa: PLR0913
         enabled=update_db,
     ):
         worker_inst.download(config.s3, submission_id, force=force)
-        worker_inst.populate(configuration, submission_id, True)
+        worker_inst.populate(configuration, submission_id, populate)
 
     log.info("Download finished!")
