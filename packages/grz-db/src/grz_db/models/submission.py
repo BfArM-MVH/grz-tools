@@ -137,6 +137,9 @@ class SubmissionBase(SQLModel):
     genomic_study_type: GenomicStudyType | None = None
     genomic_study_subtype: GenomicStudySubtype | None = None
 
+    # boolean to exclude selected submissions from automatic processing of submissions for extended QC
+    selected_for_qc: bool | None = None
+
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""

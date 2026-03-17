@@ -384,6 +384,7 @@ def test_submission_show_json(blank_database_config_path: Path):
         "disease_type": metadata.submission.disease_type,
         "basic_qc_passed": None,
         "consented": metadata.consents_to_research(date=date.today()),
+        "selected_for_qc": None,
         "detailed_qc_passed": None,
         "genomic_study_type": metadata.submission.genomic_study_type,
         "genomic_study_subtype": metadata.submission.genomic_study_subtype,

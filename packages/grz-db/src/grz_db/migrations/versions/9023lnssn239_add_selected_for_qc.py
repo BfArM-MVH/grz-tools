@@ -1,0 +1,27 @@
+"""add selected_for_qc column
+
+Revision ID: 9023lnssn239
+Revises: 8aa6fc8d118a
+Create Date: 2026-03-17 08:33:43.113455+00:00
+
+"""
+
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "9023lnssn239"
+down_revision: str | Sequence[str] | None = "8aa6fc8d118a"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    """Upgrade schema."""
+    op.add_column("submissions", sa.Column("selected_for_qc", sa.Boolean(), nullable=True))
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    raise RuntimeError("Downgrades not supported.")

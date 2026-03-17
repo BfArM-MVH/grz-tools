@@ -945,6 +945,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         ("Genomic Study Subtype", "genomic_study_subtype"),
         ("Basic QC Passed", "basic_qc_passed"),
         ("Consented", "consented"),
+        ("Selected For QC", "selected_for_qc"),
         ("Detailed QC Passed", "detailed_qc_passed"),
     ):
         attr = getattr(submission, attr_name)
