@@ -20,6 +20,19 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column("submissions", sa.Column("selected_for_qc", sa.Boolean(), nullable=True))
+    op.execute(
+        sa.text(
+            """
+            UPDATE submissions
+            SET selected_for_qc = TRUE
+            WHERE id IN (
+                SELECT DISTINCT submission_id
+                FROM submission_states
+                WHERE state IN ('QCING', 'QCED')
+            )
+            """
+        )
+    )
 
 
 def downgrade() -> None:

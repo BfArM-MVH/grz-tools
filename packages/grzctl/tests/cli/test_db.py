@@ -6,7 +6,7 @@ import hashlib
 import importlib.resources
 import json
 import random
-from datetime import date
+from datetime import UTC, date, datetime
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
@@ -36,6 +36,21 @@ def test_all_migrations(blank_initial_database_config_path):
             sqlalchemy.insert(Submission),
             {"tan_g": tan_g, "pseudonym": pseudonym, "id": submission_id},
         )
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO submission_states (state, data, timestamp, submission_id, author_name, signature)
+                VALUES (:state, NULL, :timestamp, :submission_id, :author_name, :signature)
+                """
+            ),
+            {
+                "state": "QCING",
+                "timestamp": datetime.now(UTC),
+                "submission_id": submission_id,
+                "author_name": "alice",
+                "signature": "dummy",
+            },
+        )
         connection.commit()
 
     # ensure db command raises appropriate error before migration
@@ -55,6 +70,11 @@ def test_all_migrations(blank_initial_database_config_path):
     assert result_show.exit_code == 0, result_show.stderr
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert pseudonym in result_show.stdout, result_show.stdout
+
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submission = db.get_submission(submission_id)
+    assert submission is not None
+    assert submission.selected_for_qc is True
 
 
 def test_populate(blank_database_config_path: Path):
