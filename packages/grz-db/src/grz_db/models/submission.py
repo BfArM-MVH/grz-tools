@@ -512,7 +512,7 @@ class SubmissionDb:
         submitter_id: SubmitterId | None,
         start_date: datetime.date,
         end_date: datetime.date,
-    ) -> list[Submission]:
+    ) -> Sequence[Submission]:
         with self._get_session() as session:
             return session.exec(
                 select(Submission)
