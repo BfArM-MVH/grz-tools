@@ -62,10 +62,6 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
         response.raise_for_status()
 
 
-def _get_most_expensive_library_type(library_types: set[str]) -> PruefberichtLibraryType:
-    return PruefberichtLibraryType.most_expensive(library_types)
-
-
 def get_pruefbericht_library_type(metadata: GrzSubmissionMetadata) -> PruefberichtLibraryType:
     """
     Determine the singular representative library type of a submission to submit with the Prüfbericht.
@@ -73,7 +69,7 @@ def get_pruefbericht_library_type(metadata: GrzSubmissionMetadata) -> Pruefberic
     """
     index_patient = metadata.index_donor
     index_patient_submission_library_types = {str(datum.library_type) for datum in index_patient.lab_data}
-    return _get_most_expensive_library_type(index_patient_submission_library_types)
+    return PruefberichtLibraryType.most_expensive(index_patient_submission_library_types)
 
 
 def _generate_pruefbericht_from_metadata(metadata: GrzSubmissionMetadata, failed: bool) -> Pruefbericht:
@@ -136,7 +132,7 @@ def _generate_pruefbericht_from_database(
     # Convert database library_types to strings and determine most expensive type
     index_donor_library_types = {str(lt.value if hasattr(lt, "value") else lt) for lt in index_donor.library_types}
 
-    library_type = _get_most_expensive_library_type(index_donor_library_types)
+    library_type = PruefberichtLibraryType.most_expensive(index_donor_library_types)
 
     # Generate the Prüfbericht
     return Pruefbericht(
