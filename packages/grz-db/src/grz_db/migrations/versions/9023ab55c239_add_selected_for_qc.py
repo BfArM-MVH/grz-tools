@@ -1,6 +1,6 @@
 """add selected_for_qc column
 
-Revision ID: 9023lnssn239
+Revision ID: 9023ab55c239
 Revises: 8aa6fc8d118a
 Create Date: 2026-03-17 08:33:43.113455+00:00
 
@@ -11,7 +11,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "9023lnssn239"
+revision: str = "9023ab55c239"
 down_revision: str | Sequence[str] | None = "8aa6fc8d118a"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
