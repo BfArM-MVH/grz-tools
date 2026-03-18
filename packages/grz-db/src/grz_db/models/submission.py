@@ -896,17 +896,18 @@ class SubmissionDb:
             should_select = True
 
         # yes if we are under target percentage for submitter for the submission's quarter
-        submitter_submissions_quarter = self._list_submitter_qc_candidates(
-            submitter_id=submission.submitter_id,
-            start_date=submission_quarter_start,
-            end_date=submission_quarter_end,
-        )
-        if not should_select and self._is_under_qc_target(
-            submitter_submissions_quarter,
-            target_proportion,
-            period_label="quarter",
-        ):
-            should_select = True
+        if not should_select:
+            submitter_submissions_quarter = self._list_submitter_qc_candidates(
+                submitter_id=submission.submitter_id,
+                start_date=submission_quarter_start,
+                end_date=submission_quarter_end,
+            )
+            if self._is_under_qc_target(
+                submitter_submissions_quarter,
+                target_proportion,
+                period_label="quarter",
+            ):
+                should_select = True
 
         # randomly, but reproducibly, select submissions for a given submitter, quarter, block, and salt
         if not should_select:
