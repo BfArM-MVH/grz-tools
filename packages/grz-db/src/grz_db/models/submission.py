@@ -516,7 +516,7 @@ class SubmissionDb:
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
                 .where(Submission.submission_date.between(start_date, end_date))  # type: ignore[union-attr]
                 .where(Submission.submitter_id == submitter_id)
-                .order_by(Submission.submission_date)  # type: ignore[arg-type]
+                .order_by(Submission.submission_date, Submission.id)  # type: ignore[arg-type]
             ).all()
 
     def _is_under_qc_target(
@@ -547,20 +547,24 @@ class SubmissionDb:
         salt: str | None,
     ) -> bool:
         logger.debug("Randomly choosing whether to QC or not.")
+        if target_proportion <= 0:
+            return False
+
+        submission_ids = [submitter_submission.id for submitter_submission in submissions]
+        try:
+            absolute_index = submission_ids.index(submission.id)
+        except ValueError:
+            # if the submission ID isn't in the quarter list, it hasn't met the requirements to be detailed QCed
+            return False
+
         block_size = math.floor(1 / target_proportion)
-        block_index = len(submissions) // block_size
+        block_index = absolute_index // block_size
         submission_quarter, submission_year = date_to_quarter_year(submission.submission_date)  # type: ignore[arg-type]
         seed = f"{submission.submitter_id}-{submission_year}-{submission_quarter}-{block_index}-{salt}"
         rng = random.Random(seed)  # noqa: S311
 
         target_index_in_block = rng.randint(0, block_size - 1)
-        try:
-            current_index_in_block = [submitter_submission.id for submitter_submission in submissions].index(
-                submission.id
-            )
-        except ValueError:
-            # if the submission ID isn't in the quarter list, it hasn't met the requirements to be detailed QCed (e.g. passed basic QC)
-            return False
+        current_index_in_block = absolute_index % block_size
         return current_index_in_block == target_index_in_block
 
     def update_submission_state(
