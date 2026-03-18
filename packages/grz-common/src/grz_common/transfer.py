@@ -2,11 +2,15 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
+import logging
 from typing import TYPE_CHECKING
 
 import boto3
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
