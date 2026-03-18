@@ -238,6 +238,39 @@ class TestQcStrategy:
 
         assert should_run is False
 
+    def test_should_qc_counts_historical_qcing_or_qced_states(self, db: SubmissionDb):
+        target_percentage = 20.0
+        salt = "ratio-test"
+        base_date = datetime.date(2025, 12, 1)
+        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
+
+        historical_qc_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
+        _add_submission_with_history(
+            db,
+            historical_qc_submission_id,
+            SUBMITTER_ID,
+            base_date,
+            [*DEFAULT_HISTORY, "qcing", "qced", "cleaning", "cleaned"],
+            base_timestamp=start_time,
+            is_qced=True,
+        )
+
+        candidate_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
+        candidate_timestamp = start_time + datetime.timedelta(minutes=10)
+        _add_submission_with_history(
+            db,
+            candidate_submission_id,
+            SUBMITTER_ID,
+            base_date,
+            DEFAULT_HISTORY,
+            base_timestamp=candidate_timestamp,
+            is_qced=False,
+        )
+
+        should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
+
+        assert should_run is False
+
     def test_first_of_month_always_runs(self, db: SubmissionDb):
         """
         Test that the first (validated, initial) submission of a month is always QCed.

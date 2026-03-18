@@ -500,12 +500,7 @@ class SubmissionDb:
     def _submission_counts_as_selected_for_qc(self, submission: Submission) -> bool:
         if submission.selected_for_qc is True:
             return True
-        latest_state = submission.get_latest_state()
-        return (
-            latest_state.state in (SubmissionStateEnum.QCING, SubmissionStateEnum.QCED)
-            if latest_state is not None
-            else False
-        )
+        return any(state.state in (SubmissionStateEnum.QCING, SubmissionStateEnum.QCED) for state in submission.states)
 
     def _list_submitter_qc_candidates(
         self,
