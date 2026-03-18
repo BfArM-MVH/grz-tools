@@ -137,6 +137,9 @@ class SubmissionBase(SQLModel):
     genomic_study_type: GenomicStudyType | None = None
     genomic_study_subtype: GenomicStudySubtype | None = None
 
+    # boolean to exclude selected submissions from automatic processing of submissions for extended QC
+    selected_for_qc: bool | None = None
+
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""
@@ -490,6 +493,80 @@ class SubmissionDb:
                 session.rollback()
                 raise
 
+    def set_selected_for_qc(self, submission_id: str, selected_for_qc: bool) -> Submission:
+        value = "true" if selected_for_qc else "false"
+        return self.modify_submission(submission_id, "selected_for_qc", value)
+
+    def _submission_counts_as_selected_for_qc(self, submission: Submission) -> bool:
+        if submission.selected_for_qc is True:
+            return True
+        return any(state.state in (SubmissionStateEnum.QCING, SubmissionStateEnum.QCED) for state in submission.states)
+
+    def _list_submitter_qc_candidates(
+        self,
+        submitter_id: SubmitterId | None,
+        start_date: datetime.date,
+        end_date: datetime.date,
+    ) -> Sequence[Submission]:
+        with self._get_session() as session:
+            return session.exec(
+                select(Submission)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .where(Submission.submission_type == SubmissionType.initial)
+                .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
+                .where(Submission.submission_date.between(start_date, end_date))  # type: ignore[union-attr]
+                .where(Submission.submitter_id == submitter_id)
+                .order_by(Submission.submission_date, Submission.id)  # type: ignore[arg-type]
+            ).all()
+
+    def _is_under_qc_target(
+        self,
+        submissions: Sequence[Submission],
+        target_proportion: float,
+        period_label: str,
+    ) -> bool:
+        total_selected = sum(map(self._submission_counts_as_selected_for_qc, submissions))
+        logger.debug(
+            "Total submissions selected for QC for submitter in submission's %s: %s", period_label, total_selected
+        )
+        if period_label == "month":
+            return not total_selected
+
+        qc_ratio = total_selected / len(submissions)
+        logger.debug(f"Total submissions for submitter in submission's {period_label}: {len(submissions)}")
+        logger.debug(
+            f"Ratio of submissions selected for QC for submitter in submission's {period_label}: {qc_ratio:.2%}"
+        )
+        return qc_ratio <= target_proportion
+
+    def _is_randomly_selected_for_qc(
+        self,
+        submission: Submission,
+        submissions: Sequence[Submission],
+        target_proportion: float,
+        salt: str | None,
+    ) -> bool:
+        logger.debug("Randomly choosing whether to QC or not.")
+        if target_proportion <= 0:
+            return False
+
+        submission_ids = [submitter_submission.id for submitter_submission in submissions]
+        try:
+            absolute_index = submission_ids.index(submission.id)
+        except ValueError:
+            # if the submission ID isn't in the quarter list, it hasn't met the requirements to be detailed QCed
+            return False
+
+        block_size = math.floor(1 / target_proportion)
+        block_index = absolute_index // block_size
+        submission_quarter, submission_year = date_to_quarter_year(submission.submission_date)  # type: ignore[arg-type]
+        seed = f"{submission.submitter_id}-{submission_year}-{submission_quarter}-{block_index}-{salt}"
+        rng = random.Random(seed)  # noqa: S311
+
+        target_index_in_block = rng.randint(0, block_size - 1)
+        current_index_in_block = absolute_index % block_size
+        return current_index_in_block == target_index_in_block
+
     def update_submission_state(
         self,
         submission_id: str,
@@ -784,7 +861,7 @@ class SubmissionDb:
             change_requests = session.exec(statement).all()
             return change_requests
 
-    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:
+    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:  # noqa: C901
         """
         Determines whether or not a submission should go through detailed QC or not.
         """
@@ -802,6 +879,8 @@ class SubmissionDb:
         if submission_type != SubmissionType.initial:
             # only initial submissions matter for detailed QC selection
             return False
+        if submission.selected_for_qc is True:
+            return True
 
         submission_month = submission_date.month
         submission_quarter, submission_year = date_to_quarter_year(submission_date)
@@ -809,84 +888,40 @@ class SubmissionDb:
             quarter=submission_quarter, year=submission_year
         )
         _, days_in_submission_month = calendar.monthrange(submission_year, submission_month)
-
-        # used instead of a lambda below to type check properly (get_latest_state() can return None)
-        def latest_state_is_qcing(submission: Submission):
-            latest_state = submission.get_latest_state()
-            return latest_state.state == SubmissionStateEnum.QCING if latest_state is not None else False
+        should_select = False
 
         # yes if none QCed/QCing from submitter yet for the submission month
-        with self._get_session() as session:
-            submitter_submissions_month = session.exec(
-                select(Submission)
-                .options(selectinload(Submission.states))  # type: ignore[arg-type]
-                .where(Submission.submission_type == SubmissionType.initial)
-                .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
-                .where(
-                    Submission.submission_date.between(  # type: ignore[union-attr]
-                        datetime.date(year=submission_year, month=submission_month, day=1),
-                        datetime.date(year=submission_year, month=submission_month, day=days_in_submission_month),
-                    )
-                )
-                .where(Submission.submitter_id == submission.submitter_id)
-            ).all()
-            submitter_submissions_month_total_qced = sum(
-                map(lambda s: s.detailed_qc_passed is not None, submitter_submissions_month)
-            )
-            logger.debug(
-                f"Total QCed submissions for submitter in submission's month: {submitter_submissions_month_total_qced}"
-            )
-            submitter_submissions_month_total_qcing = sum(map(latest_state_is_qcing, submitter_submissions_month))
-            logger.debug(
-                f"Total QCing submissions for submitter in submission's month: {submitter_submissions_month_total_qcing}"
-            )
-            if not (submitter_submissions_month_total_qced + submitter_submissions_month_total_qcing):
-                return True
+        submitter_submissions_month = self._list_submitter_qc_candidates(
+            submitter_id=submission.submitter_id,
+            start_date=datetime.date(year=submission_year, month=submission_month, day=1),
+            end_date=datetime.date(year=submission_year, month=submission_month, day=days_in_submission_month),
+        )
+        if self._is_under_qc_target(submitter_submissions_month, target_proportion, period_label="month"):
+            should_select = True
 
         # yes if we are under target percentage for submitter for the submission's quarter
-        with self._get_session() as session:
-            submitter_submissions_quarter = session.exec(
-                select(Submission)
-                .options(selectinload(Submission.states))  # type: ignore[arg-type]
-                .where(Submission.submission_type == SubmissionType.initial)
-                .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
-                .where(Submission.submission_date.between(submission_quarter_start, submission_quarter_end))  # type: ignore[union-attr]
-                .where(Submission.submitter_id == submission.submitter_id)
-                .order_by(Submission.submission_date)  # type: ignore[arg-type]
-            ).all()
-            submitter_submissions_quarter_total_qced = sum(
-                map(lambda s: s.detailed_qc_passed is not None, submitter_submissions_quarter)
+        if not should_select:
+            submitter_submissions_quarter = self._list_submitter_qc_candidates(
+                submitter_id=submission.submitter_id,
+                start_date=submission_quarter_start,
+                end_date=submission_quarter_end,
             )
-            logger.debug(
-                f"Total QCed submissions for submitter in submission's quarter: {submitter_submissions_quarter_total_qced}"
-            )
-            submitter_submissions_quarter_total_qcing = sum(map(latest_state_is_qcing, submitter_submissions_quarter))
-            logger.debug(
-                f"Total QCing submissions for submitter in submission's quarter: {submitter_submissions_quarter_total_qcing}"
-            )
-            qc_ratio = (submitter_submissions_quarter_total_qced + submitter_submissions_quarter_total_qcing) / len(
-                submitter_submissions_quarter
-            )
-            logger.debug(
-                f"Total submissions for submitter in submission's quarter: {len(submitter_submissions_quarter)}"
-            )
-            logger.debug(f"Ratio of submissions QCing/QCed for submitter in submission's quarter: {qc_ratio:.2%}")
-            if qc_ratio <= target_proportion:
-                return True
+            if self._is_under_qc_target(
+                submitter_submissions_quarter,
+                target_proportion,
+                period_label="quarter",
+            ):
+                should_select = True
 
         # randomly, but reproducibly, select submissions for a given submitter, quarter, block, and salt
-        logger.debug("Randomly choosing whether to QC or not.")
-        block_size = math.floor(1 / target_proportion)
-        block_index = len(submitter_submissions_quarter) // block_size
-        seed = f"{submission.submitter_id}-{submission_year}-{submission_quarter}-{block_index}-{salt}"
-        rng = random.Random(seed)  # noqa: S311
-
-        target_index_in_block = rng.randint(0, block_size - 1)
-        try:
-            current_index_in_block = [submission.id for submission in submitter_submissions_quarter].index(
-                submission_id
+        if not should_select:
+            should_select = self._is_randomly_selected_for_qc(
+                submission=submission,
+                submissions=submitter_submissions_quarter,
+                target_proportion=target_proportion,
+                salt=salt,
             )
-        except ValueError:
-            # if the submission ID isn't in the quarter list, it hasn't met the requirements to be detailed QCed (e.g. passed basic QC)
-            return False
-        return current_index_in_block == target_index_in_block
+
+        if should_select:
+            self.set_selected_for_qc(submission_id, True)
+        return should_select
