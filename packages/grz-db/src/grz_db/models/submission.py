@@ -857,7 +857,7 @@ class SubmissionDb:
             change_requests = session.exec(statement).all()
             return change_requests
 
-    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:
+    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:  # noqa: C901
         """
         Determines whether or not a submission should go through detailed QC or not.
         """
