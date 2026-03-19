@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 import typing
 from collections.abc import Callable
 from os import PathLike
@@ -36,6 +37,7 @@ class FileProgressLogger[T: State]:
         """
         self._file_path = Path(log_file_path)
         self._file_states = {}
+        self._lock = threading.RLock()
 
         # Read existing file states from the log file
         self.read()
@@ -48,7 +50,7 @@ class FileProgressLogger[T: State]:
         """
         if self._file_path.exists():
             if self._file_path.is_file():
-                with open(self._file_path) as fd:
+                with self._lock, open(self._file_path) as fd:
                     for row_dict in read_multiple_json(fd):
                         # Get index and cast them to the correct types
                         index = typing.cast(
@@ -70,34 +72,40 @@ class FileProgressLogger[T: State]:
 
         :param keep: List of tuples containing the file path and metadata of files to keep.
         """
-        self._file_path.unlink(missing_ok=True)
-        for file, file_metadata in keep:
-            state = self.get_state(file, file_metadata)
-            if state is not None:
-                self.set_state(file, file_metadata, state)
+        with self._lock:
+            self._file_path.unlink(missing_ok=True)
+            for file, file_metadata in keep:
+                state = self.get_state(file, file_metadata)
+                if state is not None:
+                    self.set_state(file, file_metadata, state)
 
-    def _get_index(self, file_path: str | PathLike) -> Index:
+    def _get_index(self, file_path: str | PathLike, size: int | None = None, mtime: float | None = None) -> Index:
         """
-        Generates a unique index for a given file based on its name and modification time.
-
-        :param file_path: Path object representing the file.
-        :return: A tuple containing the file name and modification time.
+        Generates a unique index.
+        If size/mtime are provided, use them. Otherwise try to stat the local file.
+        Does NOT resolve to absolute path to preserve relative paths and S3 keys.
         """
-        file_path = Path(file_path).resolve()
+        path_str = str(file_path)
+        path_obj = Path(file_path)
 
-        if file_path.is_file():
-            return str(file_path), file_path.stat().st_mtime, file_path.stat().st_size
-        else:
-            return str(file_path), -1, -1  # catches files that do not exist
+        mtime_ = None
+        size_ = None
+        if path_obj.is_file():
+            mtime_ = path_obj.stat().st_mtime
+            size_ = path_obj.stat().st_size
 
-    # def get_index(self, file_path: Path, file_metadata: Dict) -> tuple:
-    #     return self._get_index(file_path, file_metadata)
+        mtime_ = mtime or mtime_ or -1.0
+        size_ = size or size_ or -1
+
+        return path_str, mtime_, size_
 
     def get_state(
         self,
         file_path: str | PathLike,
         file_metadata: dict | SubmissionFileMetadata,
         default: T | Callable[[Path, SubmissionFileMetadata], T] | None = None,
+        size: int | None = None,
+        mtime: float | None = None,
     ) -> T | None:
         """
         Retrieves the stored state of a file if it exists in the log.
@@ -109,36 +117,38 @@ class FileProgressLogger[T: State]:
             `Callable[[Path, SubmissionFileMetadata], T]`.
 
             The default state gets automatically saved as the state for this file in case there is no stored state.
+        :param size: The size of the file, if known.
+        :param mtime: The modification time of the file, if known.
         :return: A dictionary representing the file's state, or None if the file's state isn't logged.
         """
-        file_path = Path(file_path)
-        index = self._get_index(file_path)
+        index = self._get_index(file_path, size=size, mtime=mtime)
 
-        # get stored state
-        stored_metadata, stored_data = self._file_states.get(index, (None, None))
-
-        # check if metadata matches
         if not isinstance(file_metadata, SubmissionFileMetadata):
             file_metadata = SubmissionFileMetadata(**file_metadata)
+
+        # get stored state
+        with self._lock:
+            stored_metadata, stored_data = self._file_states.get(index, (None, None))
 
         if stored_metadata and not isinstance(stored_metadata, SubmissionFileMetadata):
             stored_metadata = SubmissionFileMetadata(**stored_metadata)
 
+        # check if metadata matches
         if stored_metadata and file_metadata == stored_metadata:
             return copy.deepcopy(stored_data)
 
         # metadata mismatch -> no valid stored state -
         if file_metadata and default:
             if callable(default):
-                state = default(file_path, file_metadata)
-                self.set_state(file_path, file_metadata, state)
+                state = default(Path(file_path), file_metadata)
+                self.set_state(file_path, file_metadata, state, size=size, mtime=mtime)
                 return state
             else:
                 if not default:
                     raise ValueError("Default state must be provided if not callable")
                     # return None
                 default = typing.cast(T, default)
-                self.set_state(file_path, file_metadata, default)
+                self.set_state(file_path, file_metadata, default, size=size, mtime=mtime)
                 return default
         else:
             return None
@@ -148,6 +158,8 @@ class FileProgressLogger[T: State]:
         file_path: str | PathLike,
         file_metadata: dict | SubmissionFileMetadata,
         state: T,
+        size: int | None = None,
+        mtime: float | None = None,
     ):
         """
         Log the state of a file:
@@ -157,31 +169,32 @@ class FileProgressLogger[T: State]:
         :param file_path: The path of the file whose state is being set.
         :param file_metadata: Submission file metadata to store
         :param state: A dictionary containing the file's state data to be logged.
+        :param size: The size of the file, if known.
+        :param mtime: The modification time of the file, if known.
         """
-        file_path = Path(file_path)
-        index = self._get_index(file_path)
-
+        index = self._get_index(file_path, size=size, mtime=mtime)
         if file_metadata and not isinstance(file_metadata, SubmissionFileMetadata):
             file_metadata = SubmissionFileMetadata(**file_metadata)
         file_metadata = typing.cast(SubmissionFileMetadata, file_metadata)
 
-        # Update state in memory
-        self._file_states[index] = (file_metadata, state)
+        with self._lock:
+            # Update state in memory
+            self._file_states[index] = (file_metadata, state)
 
-        # Persist state to JSON log file
-        with open(self._file_path, "a", newline="") as fd:
-            # Append the new state row to the log file
-            json.dump(
-                {
-                    # index keys
-                    **{k: v for k, v in zip(self._index.keys(), index, strict=True)},
-                    # state
-                    "metadata": file_metadata.model_dump(by_alias=True),
-                    "state": state,
-                },
-                fd,
-            )
-            fd.write("\n")
+            # Persist state to JSON log file
+            with open(self._file_path, "a", newline="") as fd:
+                # Append the new state row to the log file
+                json.dump(
+                    {
+                        # index keys
+                        **{k: v for k, v in zip(self._index.keys(), index, strict=True)},
+                        # state
+                        "metadata": file_metadata.model_dump(by_alias=True),
+                        "state": state,
+                    },
+                    fd,
+                )
+                fd.write("\n")
 
     def num_entries(self) -> int:
         """
@@ -189,4 +202,5 @@ class FileProgressLogger[T: State]:
 
         :return: An integer representing the number of entries in the file_states dictionary
         """
-        return len(self._file_states)
+        with self._lock:
+            return len(self._file_states)

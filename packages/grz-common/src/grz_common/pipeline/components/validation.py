@@ -1,0 +1,347 @@
+import contextlib
+import hashlib
+import logging
+import os
+import tempfile
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+import pysam
+
+from . import DataIntegrityError, DataValidationError, ObserverWithMetrics
+
+if TYPE_CHECKING:
+    import zlib
+else:
+    try:
+        from isal import isal_zlib as zlib
+    except ImportError:
+        import zlib
+
+
+try:
+    from numba import jit  # type: ignore[import-not-found, import-untyped]
+
+    HAS_NUMBA = True
+except ImportError:
+    HAS_NUMBA = False
+    jit = None
+
+log = logging.getLogger(__name__)
+
+
+class ChecksumValidator(ObserverWithMetrics):
+    """SHA256 Checksum Observer."""
+
+    def __init__(self, algorithm: str = "sha256", expected_checksum: str | None = None):
+        super().__init__()
+        self.expected = expected_checksum
+        self._hasher = hashlib.new(algorithm)
+        self._bytes_seen = 0
+
+    def observe(self, chunk: bytes) -> None:
+        self._bytes_seen += len(chunk)
+        self._hasher.update(chunk)
+
+    def close(self):
+        if self.closed:
+            return
+        try:
+            calculated = self._hasher.hexdigest()
+            if self.expected and calculated != self.expected:
+                raise DataValidationError(
+                    f"Checksum mismatch! Exp: {self.expected}, Got: {calculated}", stage=self.__class__.__name__
+                )
+        finally:
+            super().close()
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {"checksum": self._hasher.hexdigest(), "size": self._bytes_seen}
+
+
+class FastqValidator(ObserverWithMetrics):
+    """Validates a decompressed FASTQ stream."""
+
+    def __init__(self, mean_read_length_threshold: float | None = None):
+        super().__init__()
+        self._decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        self._processor: Callable[[bytes], None] = (
+            self._process_chunk_numba if HAS_NUMBA else self._process_chunk_python
+        )
+        self._threshold = mean_read_length_threshold
+
+        self._line_state = 0
+        self._total_read_len = 0
+        self._read_count = 0
+        self._current_seq_len = 0
+        self._current_line_len = 0
+        self._last_chunk_byte = 10  # b'\n'
+
+        if HAS_NUMBA:
+            log.debug("FastqValidator using Numba optimization.")
+
+    def observe(self, chunk: bytes) -> None:
+        try:
+            decompressed = self._decompressor.decompress(chunk)
+            if decompressed:
+                self._processor(decompressed)
+        except zlib.error as e:
+            raise DataIntegrityError(f"FASTQ Validator: GZIP error: {e}", stage=self.__class__.__name__, cause=e) from e
+
+    def _process_chunk_numba(self, chunk: bytes) -> None:
+        (
+            status,
+            self._line_state,
+            self._read_count,
+            self._total_read_len,
+            self._current_seq_len,
+            self._current_line_len,
+            self._last_chunk_byte,
+        ) = _validate_chunk_numba(
+            chunk,
+            self._line_state,
+            self._read_count,
+            self._total_read_len,
+            self._current_seq_len,
+            self._current_line_len,
+            self._last_chunk_byte,
+        )
+
+        if status == 1:
+            raise DataValidationError(
+                f"FASTQ Record {self._read_count + 1} Invalid: "
+                f"Seq len ({self._current_seq_len}) != Qual len (inconsistent)",
+                stage=self.__class__.__name__,
+            )
+
+    def _process_chunk_python(self, chunk: bytes) -> None:  # noqa: C901
+        start = 0
+        n_len = len(chunk)
+
+        while True:
+            pos = chunk.find(b"\n", start)
+
+            if pos == -1:
+                self._current_line_len += n_len - start
+                if n_len > 0:
+                    self._last_chunk_byte = chunk[-1]
+                break
+
+            self._current_line_len += pos - start
+
+            # Check for \r
+            is_cr = False
+            if pos > 0:
+                if chunk[pos - 1] == 13:  # b'\r'
+                    is_cr = True
+            elif self._last_chunk_byte == 13:
+                is_cr = True
+
+            final_len = self._current_line_len
+            if is_cr:
+                final_len -= 1
+
+            final_len = max(0, final_len)
+
+            if self._line_state == 1:
+                self._current_seq_len = final_len
+                self._total_read_len += final_len
+                self._line_state = 2
+
+            elif self._line_state == 3:
+                if final_len != self._current_seq_len:
+                    raise DataValidationError(
+                        f"FASTQ Record {self._read_count + 1} Invalid: "
+                        f"Seq len ({self._current_seq_len}) != Qual len ({final_len})",
+                        stage=self.__class__.__name__,
+                    )
+                self._read_count += 1
+                self._line_state = 0
+
+            else:
+                self._line_state += 1
+
+            self._current_line_len = 0
+            self._last_chunk_byte = 10
+            start = pos + 1
+
+    def close(self):
+        if self.closed:
+            return
+
+        try:
+            with contextlib.suppress(Exception):
+                final = self._decompressor.flush()
+                if final:
+                    self._processor(final)
+
+            if self._read_count == 0:
+                raise DataValidationError(
+                    "Invalid FASTQ: Counted zero reads. File may be empty.", stage=self.__class__.__name__
+                )
+
+            if self._current_line_len > 0:
+                raise DataValidationError(
+                    "Invalid FASTQ: Unexpected EOF (incomplete line). File may be truncated.",
+                    stage=self.__class__.__name__,
+                )
+
+            if self._line_state != 0:
+                raise DataValidationError(
+                    f"Invalid FASTQ: Unexpected EOF (incomplete record). Finished at state {self._line_state}.",
+                    stage=self.__class__.__name__,
+                )
+
+            if self._threshold is not None and self._read_count > 0:
+                mean_length = self._total_read_len / self._read_count
+                if mean_length < self._threshold:
+                    raise DataValidationError(
+                        f"Mean read length ({mean_length:.2f}) is below threshold ({self._threshold})",
+                        stage=self.__class__.__name__,
+                    )
+        finally:
+            super().close()
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {
+            "read_count": self._read_count,
+            "mean_read_length": (self._total_read_len / self._read_count) if self._read_count > 0 else 0,
+            "total_bases": self._total_read_len,
+            "line_count": self._read_count * 4,
+        }
+
+
+if HAS_NUMBA:
+
+    @jit(nopython=True, nogil=True, cache=True)
+    def _validate_chunk_numba(chunk_data, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte):  # noqa: C901, PLR0913
+        """
+        Validates a single chunk of FASTQ data using Numba.
+
+        :return: (status [0 on success, 1 on error], line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte)
+        """
+        n = len(chunk_data)
+
+        for i in range(n):
+            byte = chunk_data[i]
+
+            if byte != 10:  # not b'\n'
+                curr_line_len += 1
+                continue
+
+            # otherwise found newline
+            final_len = curr_line_len
+
+            # handle \r\n style newlines
+            if i > 0:
+                if chunk_data[i - 1] == 13:  # \r
+                    final_len -= 1
+            elif last_byte == 13:
+                final_len -= 1
+
+            # Clamp length to 0
+            final_len = max(final_len, 0)
+
+            if line_state == 0:
+                line_state = 1
+            elif line_state == 1:
+                curr_seq_len = final_len
+                total_len += final_len
+                line_state = 2
+            elif line_state == 2:
+                line_state = 3
+            elif line_state == 3:
+                if final_len != curr_seq_len:
+                    # quality length does not match sequence length
+                    return 1, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte
+
+                read_count += 1
+                line_state = 0
+
+            curr_line_len = 0
+
+        # update last_byte for next chunk
+        if n > 0:
+            last_byte = chunk_data[n - 1]
+
+        return 0, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte
+
+
+class BamValidator(ObserverWithMetrics):
+    """
+    Validates a BAM stream.
+    Writes to a temp file because pysam requires random access.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._temp = tempfile.NamedTemporaryFile(suffix=".bam", delete=False)  # noqa: SIM115
+        self._path = self._temp.name
+        self._bytes_seen = 0
+
+    def observe(self, chunk: bytes) -> None:
+        self._bytes_seen += len(chunk)
+        self._temp.write(chunk)
+
+    def close(self) -> None:  # noqa: C901
+        if self.closed:
+            return
+        try:
+            if not self._temp.closed:
+                self._temp.close()
+
+            if not os.path.exists(self._path):
+                raise DataValidationError(
+                    f"BAM Invalid: Temp file disappeared at {self._path}", stage=self.__class__.__name__
+                )
+
+            if os.path.getsize(self._path) == 0:
+                self._cleanup()
+                raise DataValidationError(
+                    "BAM Invalid: Stream resulted in an empty file.", stage=self.__class__.__name__
+                )
+
+            with pysam.AlignmentFile(self._path, "rb", check_sq=False) as bam:
+                header = bam.header.to_dict()
+
+                concerning_keys = header.keys() - {"HD"}
+                if concerning_keys:
+                    log.warning("Detected a header in BAM, ensure it contains no private information!")
+
+                secondary_warned = False
+                hard_clipped_warned = False
+
+                for read in bam.fetch(until_eof=True):
+                    if not secondary_warned and read.is_secondary:
+                        log.warning(
+                            "Detected secondary alignment in BAM. Consider filtering to save bandwidth and storage."
+                        )
+                        secondary_warned = True
+
+                    if not hard_clipped_warned and not read.is_secondary:
+                        stats = read.get_cigar_stats()
+                        # index 5 is the count of H (hard clip) ops
+                        if stats and len(stats) > 0 and stats[0][5] > 0:
+                            log.warning(
+                                "Detected hard-clipped bases in primary alignment. This is a loss of information from raw reads."
+                            )
+                            hard_clipped_warned = True
+
+        except Exception as e:
+            raise DataValidationError(f"BAM Invalid: {e}", stage=self.__class__.__name__, cause=e) from e
+
+        finally:
+            self._cleanup()
+            super().close()
+
+    def _cleanup(self):
+        """Helper to ensure file removal."""
+        if os.path.exists(self._path):
+            with contextlib.suppress(OSError):
+                os.unlink(self._path)
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {"size": self._bytes_seen}
