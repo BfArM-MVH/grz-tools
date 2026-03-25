@@ -2,31 +2,24 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
+import grz_common.cli as grzcli
 from grz_cli.models.config import ValidateConfig
-from grz_common.cli import (
-    config_file,
-    files_dir,
-    force,
-    logs_dir,
-    metadata_dir,
-    submission_dir,
-    threads,
-)
 from grz_common.workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
-@metadata_dir
-@files_dir
-@logs_dir
-@config_file
-@force
-@threads
+@grzcli.configuration
+@grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.files_dir
+@grzcli.logs_dir
+@grzcli.force
+@grzcli.threads
 @click.option(
     "--with-grz-check/--no-grz-check",
     "with_grz_check",
@@ -34,7 +27,17 @@ log = logging.getLogger(__name__)
     hidden=True,
     help="Whether to use grz-check to perform validation",
 )
-def validate(submission_dir, metadata_dir, files_dir, logs_dir, config_file, force, threads, with_grz_check):  # noqa: PLR0913
+def validate(
+    configuration: dict[str, Any],
+    submission_dir,
+    metadata_dir,
+    files_dir,
+    logs_dir,
+    force,
+    threads,
+    with_grz_check,
+    **kwargs,
+):
     """
     Validate the submission.
 
@@ -65,7 +68,7 @@ def validate(submission_dir, metadata_dir, files_dir, logs_dir, config_file, for
     else:
         raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 
-    config = ValidateConfig.from_path(config_file)
+    config = ValidateConfig.model_validate(configuration)
 
     log.info("Starting validation...")
 

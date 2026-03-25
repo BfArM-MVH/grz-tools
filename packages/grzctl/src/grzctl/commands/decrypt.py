@@ -3,33 +3,39 @@
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
-from grz_common.cli import (
-    config_file,
-    encrypted_files_dir,
-    files_dir,
-    force,
-    logs_dir,
-    metadata_dir,
-    submission_dir,
-)
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
+from grz_db.models.submission import SubmissionStateEnum
 
+from ..dbcontext import DbContext
 from ..models.config import DecryptConfig
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
-@metadata_dir
-@encrypted_files_dir
-@files_dir
-@logs_dir
-@config_file
-@force
-def decrypt(submission_dir, metadata_dir, encrypted_files_dir, files_dir, logs_dir, config_file, force):  # noqa: PLR0913
+@grzcli.configuration
+@grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.encrypted_files_dir
+@grzcli.files_dir
+@grzcli.logs_dir
+@grzcli.force
+@grzcli.update_db
+def decrypt(
+    configuration: dict[str, Any],
+    submission_dir,
+    metadata_dir,
+    encrypted_files_dir,
+    files_dir,
+    logs_dir,
+    force,
+    update_db,
+    **kwargs,
+):
     """
     Decrypt a submission.
 
@@ -66,7 +72,7 @@ def decrypt(submission_dir, metadata_dir, encrypted_files_dir, files_dir, logs_d
     else:
         raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 
-    config = DecryptConfig.from_path(config_file)
+    config = DecryptConfig.model_validate(configuration)
 
     grz_privkey_path = config.keys.grz_private_key_path
     if not grz_privkey_path:
@@ -84,6 +90,14 @@ def decrypt(submission_dir, metadata_dir, encrypted_files_dir, files_dir, logs_d
         log_dir=_logs_dir,
         encrypted_files_dir=_encrypted_files_dir,
     )
-    worker_inst.decrypt(grz_privkey_path, force=force)
+    submission_id = worker_inst.parse_encrypted_submission().submission_id
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.DECRYPTING,
+        end_state=SubmissionStateEnum.DECRYPTED,
+        enabled=update_db,
+    ):
+        worker_inst.decrypt(grz_privkey_path, force=force)
 
     log.info("Decryption successful!")

@@ -7,17 +7,18 @@ import sys
 from pathlib import Path
 
 import click
+import grz_common.cli as grzcli
 import rich.console
 import rich.table
 import rich.text
-from grz_common.cli import FILE_R_E, output_json, show_details, submission_dir
+from grz_common.cli import FILE_R_E
 from grz_common.workers.submission import GrzSubmissionMetadata, SubmissionMetadata
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
+@grzcli.submission_di
 @click.option(
     "--metadata-file",
     metavar="PATH",
@@ -25,14 +26,17 @@ log = logging.getLogger(__name__)
     required=False,
     help="Direct path to the metadata.json file.",
 )
-@output_json
-@show_details
+@grzcli.output_json
+@grzcli.show_details
 @click.option("--date", help="date for which to check consent validity in ISO format (default: today)")
 def consent(submission_dir, metadata_file, output_json, show_details, date):
     """
     Check if a submission is consented for research.
 
     Returns 'true' if consented, 'false' if not.
+    A submission is considered consented if all donors have consented for research, that is
+    the FHIR MII IG Consent profiles all have a "permit" provision for code 2.16.840.1.113883.3.1937.777.24.5.3.1
+    or 2.16.840.1.113883.3.1937.777.24.5.3.8
     """
     bundled_mode = submission_dir is not None
     granular_mode = metadata_file is not None
@@ -49,7 +53,12 @@ def consent(submission_dir, metadata_file, output_json, show_details, date):
 
     metadata = SubmissionMetadata(metadata_path).content
 
-    date = datetime.date.today() if date is None else datetime.date.fromisoformat(date)
+    date = (
+        datetime.datetime.combine(datetime.date.today(), datetime.time.min)
+        if date is None
+        else datetime.datetime.fromisoformat(date)
+    )
+
     consents = _gather_consent_information(metadata, date)
     overall_consent = metadata.consents_to_research(date)
 
@@ -81,7 +90,7 @@ def _print_rich_table(consents: dict[str, bool]):
     console.print(table)
 
 
-def _gather_consent_information(metadata: GrzSubmissionMetadata, date: datetime.date) -> dict[str, bool]:
+def _gather_consent_information(metadata: GrzSubmissionMetadata, date: datetime.datetime) -> dict[str, bool]:
     consents = {donor.donor_pseudonym: False for donor in metadata.donors}
     for donor in metadata.donors:
         consents[donor.donor_pseudonym] = donor.consents_to_research(date)

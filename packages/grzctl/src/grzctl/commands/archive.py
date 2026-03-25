@@ -2,24 +2,37 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
 from grz_common.cli import DIR_RW_C, config_file, logs_dir, submission_dir, threads
 from grz_common.workers.worker import Worker
+from grz_db.models.submission import SubmissionStateEnum
 
+from ..dbcontext import DbContext
 from ..models.config import ArchiveConfig
 
 log = logging.getLogger(__name__)
 
+import grz_common.cli as grzcli
+
 
 @click.command()
-@submission_dir
+@grzcli.configuration
+@grzcli.submission_dir
 @click.option("--metadata-dir", type=DIR_RW_C, required=False)
 @click.option("--encrypted-files-dir", type=DIR_RW_C, required=False)
-@logs_dir
-@config_file
-@threads
-def archive(submission_dir, metadata_dir, encrypted_files_dir, logs_dir, config_file, threads):  # noqa: PLR0913
+@grzcli.threads
+@grzcli.update_db
+def archive(
+    configuration: dict[str, Any],
+    submission_dir,
+    metadata_dir,
+    encrypted_files_dir,
+    threads,
+    update_db,
+    **kwargs,
+):
     """
     Archive a pre-staged submission directory from within a GRZ/GDC.
     This command expects a directory containing redacted metadata, redacted logs,
@@ -49,7 +62,7 @@ def archive(submission_dir, metadata_dir, encrypted_files_dir, logs_dir, config_
     else:
         raise click.UsageError("You must specify either '--submission-dir' or all explicit path options.")
 
-    config = ArchiveConfig.from_path(config_file)
+    config = ArchiveConfig.model_validate(configuration)
     log.info("Starting archival upload...")
 
     worker_inst = Worker(
@@ -59,6 +72,14 @@ def archive(submission_dir, metadata_dir, encrypted_files_dir, logs_dir, config_
         encrypted_files_dir=_encrypted_files_dir,
         threads=threads,
     )
-    worker_inst.archive(config.s3)
+    submission_id = worker_inst.parse_encrypted_submission().submission_id
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.ARCHIVING,
+        end_state=SubmissionStateEnum.ARCHIVED,
+        enabled=update_db,
+    ):
+        worker_inst.archive(config.s3)
 
     log.info("Archival finished!")

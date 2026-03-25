@@ -3,6 +3,7 @@
 import logging
 
 import click
+from grz_cli.utils.version_check import check_version_and_exit_if_needed
 
 from .encrypt import encrypt
 from .upload import upload
@@ -10,14 +11,16 @@ from .validate import validate
 
 log = logging.getLogger(__name__)
 
-from grz_common.cli import config_file, force, submission_dir, threads
+import grz_common.cli as grzcli
+
+from ..models.config import UploadConfig
 
 
 @click.command("submit")
-@submission_dir
-@config_file
-@threads
-@force
+@grzcli.submission_dir
+@grzcli.config_file
+@grzcli.threads
+@grzcli.force
 @click.pass_context
 def submit(ctx, submission_dir, config_file, threads, force):
     """
@@ -28,6 +31,9 @@ def submit(ctx, submission_dir, config_file, threads, force):
     2. Encrypt the submission
     3. Upload the encrypted submission
     """
+    config = UploadConfig.from_path(config_file)
+    check_version_and_exit_if_needed(config.s3)
+
     click.echo("Starting submission process...")
     ctx.invoke(
         validate,

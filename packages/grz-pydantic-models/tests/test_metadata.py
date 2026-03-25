@@ -2,6 +2,7 @@ import copy
 import importlib.resources
 import itertools
 import json
+import re
 from contextlib import nullcontext
 from datetime import date
 
@@ -282,6 +283,12 @@ def test_index_rna_with_dna(version: str):
     metadata["donors"][0]["labData"][-1]["sequenceType"] = "rna"
     metadata["donors"][0]["labData"][-1]["labDataName"] = metadata["donors"][0]["labData"][-2]["labDataName"] + " RNA"
 
+    # fix file checksums to be different
+    import hashlib
+
+    for file_idx, file in enumerate(metadata["donors"][0]["labData"][-1]["sequenceData"]["files"]):
+        file["fileChecksum"] = hashlib.sha256(hex(file_idx).encode("utf8")).hexdigest()
+
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
@@ -292,7 +299,7 @@ def test_lab_datum(version: str):
         .joinpath("example_metadata", "wes_tumor_germline", f"v{version}.json")
         .read_text()
     )
-    with pytest.raises(ValueError, match="Long read libraries can't be paired-end."):
+    with pytest.raises(ValueError, match=re.escape("Long read libraries can't be paired-end.")):
         metadata.donors[0].lab_data[0].library_type = "wes_lr"
 
 
@@ -319,6 +326,7 @@ def test_file_extensions():
     "case,valid",
     (
         ("minimal_consented", True),
+        ("minimal_consented_with_datetime", True),
         ("extra_consented", True),
         ("minimal_nonconsented", True),
         ("minimal_consented_expired", True),

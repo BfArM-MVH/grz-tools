@@ -4,14 +4,14 @@ import hashlib
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, time
 from enum import StrEnum
 from functools import cache
 from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import (
     AfterValidator,
@@ -340,18 +340,21 @@ class ResearchConsent(StrictBaseModel):
 
         return self
 
-    def consent_by_code(self, date: date) -> dict[str, bool]:
+    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
+        if isinstance(dt, date) and not isinstance(dt, datetime):
+            dt = datetime.combine(dt, time.min)
+
         code2consent: dict[str, bool] = {}
         if isinstance(self.scope, Consent) and (self.scope.provision is not None):
-            provisions = self.scope.provision.provision
-            for provision in provisions:
-                if provision.period.start <= date <= provision.period.end:
+            for provision in self.scope.provision.provision:
+                start = provision.period.start
+                end = provision.period.end
+                if start <= dt <= end:
                     for codeable_concept in provision.code:
                         for coding in codeable_concept.coding:
                             if provision.type == ProvisionType.PERMIT:
-                                code2consent[coding.code] = code2consent.get(coding.code, True)  # propagate prior deny
+                                code2consent[coding.code] = code2consent.get(coding.code, True)
                             else:
-                                # explicit deny overrides any prior/later permits for code
                                 code2consent[coding.code] = False
         return code2consent
 
@@ -1088,6 +1091,51 @@ class GrzSubmissionMetadata(StrictBaseModel):
     def consents_to_research(self, date: date) -> bool:
         return all(donor.consents_to_research(date) for donor in self.donors)
 
+    def create_redaction_patterns(self) -> list[tuple[str, str]]:
+        """
+        Create redaction patterns for tanG and localCaseId from this metadata.
+
+        Returns patterns for sensitive information that should be redacted
+        before archiving logs.
+
+        :returns: List of (pattern, replacement) tuples for log redaction
+        """
+        patterns: list[tuple[str, str]] = []
+        # only add tanG if it's not already redacted (all zeros)
+        if self.submission.tan_g and self.submission.tan_g != REDACTED_TAN:
+            patterns.append((self.submission.tan_g, "REDACTED_TAN_G"))
+        if self.submission.local_case_id:
+            patterns.append((self.submission.local_case_id, "REDACTED_LOCAL_CASE_ID"))
+        return patterns
+
+    def to_redacted_dict(self, archive_consented: bool) -> dict[str, Any]:
+        """
+        Create a redacted dictionary representation suitable for archiving.
+
+        Redacts:
+        - tanG (replaced with REDACTED_TAN constant)
+        - localCaseId (replaced with "REDACTED_LOCAL_CASE_ID")
+        - Index donor pseudonym (replaced with "index")
+
+        Also adds archive metadata indicating consent status.
+
+        :param archive_consented: Whether submission is going to consented archive
+        :returns: Redacted metadata dictionary
+        """
+        # get the base dictionary representation
+        metadata_dict = self.model_dump(mode="json", by_alias=True)
+
+        # redact sensitive fields
+        metadata_dict["submission"]["tanG"] = REDACTED_TAN
+        metadata_dict["submission"]["localCaseId"] = "REDACTED_LOCAL_CASE_ID"
+
+        # redact index donor pseudonym
+        for donor in metadata_dict.get("donors", []):
+            if donor.get("relation") == "index":
+                donor["donorPseudonym"] = "index"
+
+        return metadata_dict
+
     @field_validator("donors", mode="after")
     @classmethod
     def ensure_single_index_patient(cls, value: list[Donor]) -> list[Donor]:
@@ -1261,13 +1309,24 @@ class GrzSubmissionMetadata(StrictBaseModel):
                         if not checksum in checksums:
                             checksums.add(checksum)
                         else:
-                            log.warning(
-                                f"Encountered duplicate file checksum '{checksum}' "
-                                f"in '{lab_datum.lab_data_name}' "
-                                f"in donor '{donor.donor_pseudonym}'. "
-                                "This is highly unlikely, "
-                                "please ensure that the submission does not contain duplicate files."
-                            )
+                            match file.file_type:
+                                case FileType.fastq | FileType.bam:
+                                    raise ValueError(
+                                        f"Encountered duplicate file checksum '{checksum}' "
+                                        f"in '{lab_datum.lab_data_name}' "
+                                        f"in donor '{donor.donor_pseudonym}'. "
+                                        "Duplicate sequencing files are not allowed."
+                                    )
+                                case FileType.vcf:
+                                    log.warning(
+                                        f"Encountered duplicate file checksum '{checksum}' "
+                                        f"in '{lab_datum.lab_data_name}' "
+                                        f"in donor '{donor.donor_pseudonym}'. "
+                                        "This is highly unlikely, "
+                                        "please ensure that the submission does not contain duplicate files."
+                                    )
+                                case FileType.bed:
+                                    pass
 
         return self
 

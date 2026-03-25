@@ -6,6 +6,7 @@ import hashlib
 import importlib.resources
 import json
 import random
+from datetime import date
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
@@ -250,7 +251,7 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
         report_csv_file.write(
             dedent("""\
             sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
-            father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,wes,germline,tumor+germline,FAIL,19.94,30.0,30.0,-33.53333333333333,TOO LOW,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
+            father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,wes,germline,tumor+germline,FAIL,19.94,30.0,30.0,-33.53333333333333,THRESHOLD NOT MET,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
             index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
             index0_somatic0,index,Blut DNA Tumor,wes,somatic,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
             """)
@@ -268,6 +269,8 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
 
     results = db.get_detailed_qc_results(metadata.submission_id)
     assert len(results) == 3
+    father_result = next(r for r in results if r.lab_datum_id == "father1_germline0")
+    assert not father_result.mean_depth_of_coverage_passed_qc
 
 
 def test_update_error_confirm(blank_database_config_path: Path):
@@ -334,3 +337,174 @@ def test_list_sort(blank_database_config_path: Path):
     result_list_parsed = json.loads(result_list.stdout)
     for i, submission in enumerate(expected_ordering):
         assert submission["id"] == result_list_parsed[i]["id"]
+
+
+def test_submission_show_json(blank_database_config_path: Path):
+    """
+    `grzctl db submission show --json` should return machine-readable JSON
+    with submission metadata and state history.
+    """
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    metadata = GrzSubmissionMetadata.model_validate_json(
+        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    )
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    # add submission
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission
+    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
+        result_populate = runner.invoke(
+            cli,
+            [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"],
+        )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # show submission as JSON
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+
+    parsed = json.loads(result_show_json.stdout)
+
+    # structure checks
+    assert parsed == {
+        "id": metadata.submission_id,
+        "tan_g": metadata.submission.tan_g,
+        "pseudonym": metadata.submission.local_case_id,
+        "submission_date": metadata.submission.submission_date.isoformat()
+        if metadata.submission.submission_date
+        else None,
+        "submission_type": metadata.submission.submission_type,
+        "submitter_id": metadata.submission.submitter_id,
+        "data_node_id": metadata.submission.genomic_data_center_id,
+        "coverage_type": metadata.submission.coverage_type,
+        "disease_type": metadata.submission.disease_type,
+        "basic_qc_passed": None,
+        "consented": metadata.consents_to_research(date=date.today()),
+        "detailed_qc_passed": None,
+        "genomic_study_type": metadata.submission.genomic_study_type,
+        "genomic_study_subtype": metadata.submission.genomic_study_subtype,
+        "states": [],
+    }
+
+
+def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path):
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    sub_latest_error = "123456789_2025-07-01_b1b2c3d1"
+    sub_latest_qced = "123456789_2025-07-01_b1b2c3d2"
+    sub_latest_downloaded = "123456789_2025-07-01_b1b2c3d3"
+    sub_history_error_latest_uploaded = "123456789_2025-07-01_b1b2c3d4"
+    sub_no_state = "123456789_2025-07-01_b1b2c3d5"
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    for submission_id in [
+        sub_latest_error,
+        sub_latest_qced,
+        sub_latest_downloaded,
+        sub_history_error_latest_uploaded,
+        sub_no_state,
+    ]:
+        result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+        assert result_add.exit_code == 0, result_add.stderr
+
+    update_invocations = [
+        [*args_common, "submission", "update", sub_latest_error, "Error"],
+        [*args_common, "submission", "update", sub_latest_qced, "QCed"],
+        [*args_common, "submission", "update", sub_latest_downloaded, "Downloaded"],
+        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Uploaded"],
+        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Error"],
+    ]
+    for invoke_args in update_invocations:
+        result_update = runner.invoke(cli, invoke_args)
+        assert result_update.exit_code == 0, result_update.stderr
+
+    # Special transition from Error -> Uploaded, explicitly allowed by flag.
+    result_ignore_error = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            "--ignore-error-state",
+            sub_history_error_latest_uploaded,
+            "Uploaded",
+        ],
+    )
+    assert result_ignore_error.exit_code == 0, result_ignore_error.stderr
+
+    result_all = runner.invoke(cli, [*args_common, "list", "--json"])
+    assert result_all.exit_code == 0, result_all.stderr
+    parsed_all = json.loads(result_all.stdout)
+    assert {item["id"] for item in parsed_all} == {
+        sub_latest_error,
+        sub_latest_qced,
+        sub_latest_downloaded,
+        sub_history_error_latest_uploaded,
+        sub_no_state,
+    }
+
+    # default mode is latest
+    result_error_latest_default = runner.invoke(cli, [*args_common, "list", "--json", "--state", "error"])
+    assert result_error_latest_default.exit_code == 0, result_error_latest_default.stderr
+    parsed_error_latest_default = json.loads(result_error_latest_default.stdout)
+    assert {item["id"] for item in parsed_error_latest_default} == {sub_latest_error}
+    assert parsed_error_latest_default[0]["latest_state"]["state"] == "Error"
+
+    # any mode includes submissions that had Error in history but not as latest state
+    result_error_any = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "any"],
+    )
+    assert result_error_any.exit_code == 0, result_error_any.stderr
+    parsed_error_any = json.loads(result_error_any.stdout)
+    assert {item["id"] for item in parsed_error_any} == {sub_latest_error, sub_history_error_latest_uploaded}
+    history_match = next(filter(lambda item: item["id"] == sub_history_error_latest_uploaded, parsed_error_any))
+    assert history_match["latest_state"]["state"] == "Uploaded"
+
+    # filter mode parsing remains case-insensitive
+    result_error_any_upper = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "ANY"],
+    )
+    assert result_error_any_upper.exit_code == 0, result_error_any_upper.stderr
+    parsed_error_any_upper = json.loads(result_error_any_upper.stdout)
+    assert {item["id"] for item in parsed_error_any_upper} == {sub_latest_error, sub_history_error_latest_uploaded}
+
+    # multiple filters in default latest mode are OR-ed on latest state
+    result_multi_latest = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--state", "qced"],
+    )
+    assert result_multi_latest.exit_code == 0, result_multi_latest.stderr
+    parsed_multi_latest = json.loads(result_multi_latest.stdout)
+    assert {item["id"] for item in parsed_multi_latest} == {sub_latest_error, sub_latest_qced}
+
+    # multiple filters in any mode are OR-ed across all historic states
+    result_multi_any = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "error", "--state", "qced", "--filter-mode", "any"],
+    )
+    assert result_multi_any.exit_code == 0, result_multi_any.stderr
+    parsed_multi_any = json.loads(result_multi_any.stdout)
+    assert {item["id"] for item in parsed_multi_any} == {
+        sub_latest_error,
+        sub_history_error_latest_uploaded,
+        sub_latest_qced,
+    }
+
+    # "--state" supports repeated values
+    result_state_alias = runner.invoke(
+        cli,
+        [*args_common, "list", "--json", "--state", "downloaded"],
+    )
+    assert result_state_alias.exit_code == 0, result_state_alias.stderr
+    parsed_state_alias = json.loads(result_state_alias.stdout)
+    assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}

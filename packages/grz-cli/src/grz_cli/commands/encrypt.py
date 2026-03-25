@@ -4,17 +4,10 @@ import logging
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Any
 
 import click
-from grz_common.cli import (
-    config_file,
-    files_dir,
-    force,
-    logs_dir,
-    metadata_dir,
-    output_encrypted_files_dir,
-    submission_dir,
-)
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 
 from ..models.config import EncryptConfig
@@ -23,28 +16,29 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@submission_dir
-@metadata_dir
-@files_dir
-@output_encrypted_files_dir
-@logs_dir
-@config_file
-@force
+@grzcli.configuration
+@grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.files_dir
+@grzcli.output_encrypted_files_dir
+@grzcli.logs_dir
+@grzcli.force
 @click.option(
     "--check-validation-logs/--no-check-validation-logs",
     "check_validation_logs",
     default=True,
     help="Check validation logs before encrypting.",
 )
-def encrypt(  # noqa: PLR0913
+def encrypt(
+    configuration: dict[str, Any],
     submission_dir,
     metadata_dir,
     files_dir,
     output_encrypted_files_dir,
     logs_dir,
-    config_file,
     force,
     check_validation_logs,
+    **kwargs,
 ):
     """
     Encrypt a submission.
@@ -82,7 +76,7 @@ def encrypt(  # noqa: PLR0913
     else:
         raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 
-    config = EncryptConfig.from_path(config_file)
+    config = EncryptConfig.model_validate(configuration)
 
     submitter_privkey_path = config.keys.submitter_private_key_path
     if submitter_privkey_path == "":

@@ -1,0 +1,13 @@
+name: grz-tools
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  # common
+  - python >=3.12
+  - uv =0.8.5
+  # for grz-check
+  - rust =1.89.0
+  # for grz-db
+  - postgresql

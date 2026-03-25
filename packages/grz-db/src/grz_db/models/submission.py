@@ -68,6 +68,7 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     ENCRYPTED = "Encrypted"
     ARCHIVING = "Archiving"
     ARCHIVED = "Archived"
+    REPORTING = "Reporting"
     REPORTED = "Reported"
     QCING = "QCing"
     QCED = "QCed"
@@ -75,6 +76,13 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     CLEANED = "Cleaned"
     FINISHED = "Finished"
     ERROR = "Error"
+
+
+class SubmissionStateFilterModeEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Submission state filter mode enum."""
+
+    LATEST = "latest"
+    ANY = "any"
 
 
 class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
@@ -669,7 +677,12 @@ class SubmissionDb:
             submission = session.exec(statement).first()
             return submission
 
-    def list_submissions(self, limit: int | None) -> Sequence[Submission]:
+    def list_submissions(
+        self,
+        limit: int | None,
+        state_filters: Sequence[SubmissionStateEnum] | None = None,
+        state_filter_mode: SubmissionStateFilterModeEnum = SubmissionStateFilterModeEnum.LATEST,
+    ) -> Sequence[Submission]:
         """
         Lists all submissions in the database.
 
@@ -701,8 +714,35 @@ class SubmissionDb:
                     .nulls_first()
                 )
             )
+            state_filter_values = tuple(state_filters or ())
+            if state_filter_values:
+                if state_filter_mode == SubmissionStateFilterModeEnum.LATEST:
+                    latest_state = (
+                        select(SubmissionStateLog.state)
+                        .where(SubmissionStateLog.submission_id == Submission.id)
+                        .order_by(
+                            SubmissionStateLog.timestamp.desc(),  # type: ignore[attr-defined]
+                            SubmissionStateLog.id.desc(),  # type: ignore[union-attr]
+                        )  # tie-breaker
+                        .limit(1)
+                        .scalar_subquery()
+                    )
+                    statement = statement.where(latest_state.in_(state_filter_values))
+                elif state_filter_mode == SubmissionStateFilterModeEnum.ANY:
+                    statement = statement.where(
+                        sa.exists(
+                            select(1).where(
+                                SubmissionStateLog.submission_id == Submission.id,
+                                SubmissionStateLog.state.in_(state_filter_values),  # type: ignore[attr-defined]
+                            )
+                        )
+                    )
+                else:
+                    raise ValueError(f"Unknown state_filter_mode '{state_filter_mode}'")
+
             if limit is not None:
                 statement = statement.limit(limit)
+
             submissions = session.exec(statement).all()
             return submissions
 

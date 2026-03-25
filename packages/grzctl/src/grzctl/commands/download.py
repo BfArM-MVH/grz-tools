@@ -2,33 +2,48 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import click
-from grz_common.cli import DIR_RW_C, config_file, force, logs_dir, threads
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
+from grz_db.models.submission import SubmissionStateEnum
 
+from ..dbcontext import DbContext
 from ..models.config import DownloadConfig
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
+@grzcli.configuration
 @click.option("--submission-id", required=True, type=str, metavar="STRING", help="S3 submission ID")
 @click.option(
     "--output-dir",
     "output_dir_base",
     metavar="PATH",
-    type=DIR_RW_C,
+    type=grzcli.DIR_RW_C,
     required=False,
     help="Base output directory for all components.",
 )
-@click.option("--metadata-dir", type=DIR_RW_C, required=False)
-@click.option("--encrypted-files-dir", type=DIR_RW_C, required=False)
-@logs_dir
-@config_file
-@threads
-@force
-def download(submission_id, output_dir_base, metadata_dir, encrypted_files_dir, logs_dir, config_file, threads, force):  # noqa: PLR0913
+@click.option("--metadata-dir", type=grzcli.DIR_RW_C, required=False)
+@click.option("--encrypted-files-dir", type=grzcli.DIR_RW_C, required=False)
+@grzcli.logs_dir
+@grzcli.threads
+@grzcli.force
+@grzcli.update_db
+def download(  # noqa: PLR0913
+    configuration: dict[str, Any],
+    submission_id,
+    output_dir_base,
+    metadata_dir,
+    encrypted_files_dir,
+    logs_dir,
+    threads,
+    force,
+    update_db,
+    **kwargs,
+):
     """
     Download a submission from a GRZ.
     """
@@ -59,7 +74,7 @@ def download(submission_id, output_dir_base, metadata_dir, encrypted_files_dir, 
     else:
         raise click.UsageError("You must specify either '--output-dir' or all explicit path options.")
 
-    config = DownloadConfig.from_path(config_file)
+    config = DownloadConfig.model_validate(configuration)
 
     log.info("Starting download...")
 
@@ -70,6 +85,14 @@ def download(submission_id, output_dir_base, metadata_dir, encrypted_files_dir, 
         encrypted_files_dir=_encrypted_files_dir,
         threads=threads,
     )
-    worker_inst.download(config.s3, submission_id, force=force)
+
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.DOWNLOADING,
+        end_state=SubmissionStateEnum.DOWNLOADED,
+        enabled=update_db,
+    ):
+        worker_inst.download(config.s3, submission_id, force=force)
 
     log.info("Download finished!")

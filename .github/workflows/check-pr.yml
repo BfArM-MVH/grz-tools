@@ -27,6 +27,7 @@ jobs:
             grz-watchdog
             repo
             release
+            deps
             other
           requireScope: true
         env:
