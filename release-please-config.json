@@ -24,6 +24,10 @@
     "packages/grz-check": {
       "release-type": "rust",
       "package-name": "grz-check"
+    },
+    "packages/grz-watchdog": {
+      "release-type": "other",
+      "package-name": "grz-watchdog"
     }
   }
 }
