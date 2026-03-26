@@ -879,6 +879,9 @@ class SubmissionDb:
         if submission_type != SubmissionType.initial:
             # only initial submissions matter for detailed QC selection
             return False
+        if submission.basic_qc_passed is not True:
+            # only submissions that passed basic QC are eligible for detailed QC
+            raise ValueError("Submission did not pass basic QC and is therefore not eligible for detailed QC.")
         if submission.selected_for_qc is True:
             return True
 
