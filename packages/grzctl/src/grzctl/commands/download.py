@@ -22,6 +22,11 @@ log = logging.getLogger(__name__)
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db
+@click.option(
+    '--populate/--no-populate', 
+    default=True, 
+    help="Update the submission metadata with information from metadata.json and S3"
+)
 def download(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_id,
@@ -29,6 +34,7 @@ def download(  # noqa: PLR0913
     threads,
     force,
     update_db,
+    populate,
     **kwargs,
 ):
     """
@@ -60,7 +66,8 @@ def download(  # noqa: PLR0913
         start_state=SubmissionStateEnum.DOWNLOADING,
         end_state=SubmissionStateEnum.DOWNLOADED,
         enabled=update_db,
-    ):
+    ) as db_context:
         worker_inst.download(config.s3, submission_id, force=force)
+        worker_inst.populate(config.s3, db_context, submission_id, populate)
 
     log.info("Download finished!")

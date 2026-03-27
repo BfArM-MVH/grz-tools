@@ -15,6 +15,12 @@ The available operations can be browsed in the [Alembic documentation](https://a
 You may also find the other migration scripts under `versions/` useful as a reference.
 Finally, Alembic's migration script [tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html#create-a-migration-script) may also be useful as a guide.
 
+## Run a migration
+
+```
+grzctl db upgrade --revision TEXT
+```
+
 ## General Tips
 
 To easily find the appropriate SQLAlchemy column type for a migration operation, try the following in a REPL after adding the new fields to the particular object:

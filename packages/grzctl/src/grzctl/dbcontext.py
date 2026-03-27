@@ -49,19 +49,7 @@ class DbContext:
         try:
             db_config = DbConfig.model_validate(self.configuration).db
 
-            author = None
-            if db_config.author:
-                key_path = Path(db_config.author.private_key_path)
-                if not key_path.exists():
-                    raise FileNotFoundError(f"Author private key not found at: {key_path}")
-
-                author = Author(
-                    name=db_config.author.name,
-                    private_key_bytes=key_path.read_bytes(),
-                    private_key_passphrase=db_config.author.private_key_passphrase,
-                )
-
-            self.db = get_submission_db_instance(db_config.database_url, author=author)
+            self.db = get_submission_db_instance(db_config.database_url, author=self.author)
 
             if self.db:
                 self._check_prerequisites()
@@ -103,6 +91,25 @@ class DbContext:
                 log.error(f"Failed to write success state to DB: {db_exc}")
 
         return True
+
+    # TODO: move to grz_db.models.author?
+    @property
+    def author(self) -> Author:
+        db_config = DbConfig.model_validate(self.configuration).db
+
+        author = None
+        if db_config.author:
+            key_path = Path(db_config.author.private_key_path)
+            if not key_path.exists():
+                raise FileNotFoundError(f"Author private key not found at: {key_path}")
+
+            author = Author(
+                name=db_config.author.name,
+                private_key_bytes=key_path.read_bytes(),
+                private_key_passphrase=db_config.author.private_key_passphrase,
+            )
+
+        return author
 
     def _check_prerequisites(self):
         """

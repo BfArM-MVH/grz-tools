@@ -137,6 +137,9 @@ class SubmissionBase(SQLModel):
     genomic_study_type: GenomicStudyType | None = None
     genomic_study_subtype: GenomicStudySubtype | None = None
 
+    # extra fields
+    submission_size: int | None = Field(default=None)
+    submission_metadata: str | None = Field(default=None)
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""
@@ -489,6 +492,20 @@ class SubmissionDb:
             except Exception:
                 session.rollback()
                 raise
+
+    def update_submission_size(self, session: Session, submission_id: str, value: int) -> None:
+        submission = session.get(Submission, submission_id)
+        if submission is None:
+            raise SubmissionNotFoundError(submission_id)
+
+        submission.submission_size = value
+
+    def update_submission_date(self, session: Session, submission_id: str, value: datetime.date) -> None:
+        submission = session.get(Submission, submission_id)
+        if submission is None:
+            raise SubmissionNotFoundError(submission_id)
+
+        submission.submission_date = value
 
     def update_submission_state(
         self,
