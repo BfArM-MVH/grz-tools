@@ -561,10 +561,13 @@ class SubmissionData:
     db_ingest: list[tuple[str, Any, Any]]
     change: bool = False
 
-def diff_metadata(submission: Submission, metadata: GrzSubmissionMetadata, submission_size: int, submission_date: date | None, metadata_content: str, ignore_fields: set[str] = set()) -> SubmissionData:
+def diff_metadata(submission: Submission, metadata: GrzSubmissionMetadata, submission_size: int, submission_date: date | None, metadata_content: str, ignore_fields: set[str] | None = None) -> SubmissionData: # noqa: PLR0913
     submission_data = SubmissionData([], [], [])
+    if ignore_fields is None:
+        ignore_fields = set()
     # if date is not provided, fallback to metadata submission_date
-    if submission_date is None: metadata.submission.submission_date
+    if submission_date is None:
+        submission_date = metadata.submission.submission_date
 
     # refuse to ingest metadata when tan_g is redacted
     if metadata.submission.tan_g == REDACTED_TAN:
@@ -574,25 +577,24 @@ def diff_metadata(submission: Submission, metadata: GrzSubmissionMetadata, submi
         )
 
     # refuse to ingest metadata when local case ID is empty
-    if submission.pseudonym != metadata.submission.local_case_id:
-        if not metadata.submission.local_case_id:
-            raise ValueError(
-                "Refusing to populate a seemingly-redacted local case ID (empty). "
-                "Use 'grzctl db submission modify' directly."
-            )
+    if submission.pseudonym != metadata.submission.local_case_id and not metadata.submission.local_case_id:
+        raise ValueError(
+            "Refusing to populate a seemingly-redacted local case ID (empty). "
+            "Use 'grzctl db submission modify' directly."
+        )
 
     # taken from grzctl.commands.db.cli.popuplate; they have the same name in database and metadata.json
     simple_fields = {"tan_g", "submission_type", "submitter_id", "coverage_type", "disease_type", "genomic_study_type","genomic_study_subtype"}
 
-    for field in simple_fields - ignore_fields:
-        submission_info = getattr(submission, field)
-        metadata_info = getattr(metadata.submission, field)
+    for key in simple_fields - ignore_fields:
+        submission_info = getattr(submission, key)
+        metadata_info = getattr(metadata.submission, key)
         if submission_info != metadata_info:
-            submission_data.db_ingest.append((field, submission_info, metadata_info))
-            submission_data.update.append(field)
+            submission_data.db_ingest.append((key, submission_info, metadata_info))
+            submission_data.update.append(key)
             submission_data.change = True
         else:
-            submission_data.unchanged.append(field)
+            submission_data.unchanged.append(key)
 
     complex_fields = (
         ("pseudonym", metadata.submission.local_case_id),
@@ -603,15 +605,15 @@ def diff_metadata(submission: Submission, metadata: GrzSubmissionMetadata, submi
         ("submission_metadata", metadata_content)
     )
 
-    for field, value in complex_fields:
-        if field in ignore_fields: continue
-        submission_info = getattr(submission, field)
+    for key, value in complex_fields:
+        if key in ignore_fields: continue
+        submission_info = getattr(submission, key)
         if submission_info != value:
-            submission_data.db_ingest.append((field, submission_info, value))
-            submission_data.update.append(field)
+            submission_data.db_ingest.append((key, submission_info, value))
+            submission_data.update.append(key)
             submission_data.change = True
         else:
-            submission_data.unchanged.append(field)
+            submission_data.unchanged.append(key)
 
     return submission_data
 
@@ -654,7 +656,7 @@ def diff_donor(donor: Donor, donors_in_db_submission: dict[str, Donor], submissi
     )
     donor_data.name = donor_metadata.pseudonym
     donor_data.donor = donor_metadata
-    donor_before = donors_in_db_submission.get(donor_metadata.pseudonym, None)
+    donor_before = donors_in_db_submission.get(donor_metadata.pseudonym)
     if donor_before == donor_metadata:
         donor_data.status = "unchanged"
     elif donor_before is None:
@@ -690,7 +692,7 @@ def diff_donor(donor: Donor, donors_in_db_submission: dict[str, Donor], submissi
     multiple=True,
 )
 @click.pass_context
-def populate(ctx: click.Context, submission_id: str, metadata_path: str, submission_date: datetime | None, confirm: bool, ignore_field: tuple[str]):  # noqa: C901
+def populate(ctx: click.Context, submission_id: str, metadata_path: str, submission_date: datetime | None, confirm: bool, ignore_field: tuple[str]):  # noqa: PLR0913, PLR0915, PLR0912, C901
     updates: bool = False
     ignore_field = set(ignore_field)
 
@@ -730,12 +732,7 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, submiss
         metadata_string = json.dumps(metadata_content)
 
     # add the filesize; would be better with SubmissionMetadata but then without validation
-    submission_size: int = 0  
-    for donor in metadata.donors:
-        for lab_datum in donor.lab_data:
-            if sequence_data := lab_datum.sequence_data:
-                for file in sequence_data.files:
-                    submission_size += file.file_size_in_bytes
+    submission_size = metadata.get_submission_size()
 
     submission_information = diff_metadata(submission, metadata, submission_size, submission_date, metadata_string, ignore_field)
     diff_table_submission = _prepare_submission_console_table(submission_information.db_ingest)
@@ -784,105 +781,6 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, submiss
         for deleted_donor in donor_diff.deleted:
             db_service.delete_donor(deleted_donor)
         console_err.print("[green]Database populated successfully.[/green]")
-
-
-# @submission.command()
-# @click.argument("submission_id", type=str)
-# @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
-# # @click.argument("submission_date", metavar="submission_date (YYYY-MM-DD)", type=click.DateTime(formats=["%Y-%m-%d"]), default = None)
-# @click.option(
-#     "--submission_date",
-#     type=click.DateTime(formats=["%Y-%m-%d"]),
-#     default=None,
-#     help="Submission date of the submission; overwrites submissionDate in metadata.json",
-# )
-# @click.option(
-#     "--confirm/--no-confirm",
-#     default=True,
-#     help="Whether to confirm changes before committing to database. (Default: confirm)",
-# )
-# @click.option(
-#     "--ignore-field",
-#     help="Do not populate the given key from the metadata to the database. Can be specified multiple times to ignore multiple keys.",
-#     multiple=True,
-# )
-# @click.pass_context
-# def populate(ctx: click.Context, submission_id: str, metadata_path: str, submission_date: datetime | None, confirm: bool, ignore_field: tuple[str]):  # noqa: C901
-#     # TODO: add submission_size
-#     ignore_field = set(ignore_field)
-#     if submission_date is not None:
-#         ignore_field.add("submission_date")
-#     """Populate the submission database from a metadata JSON file."""
-#     log.debug("Ignored fields for populate: %s", ignore_field)
-
-#     db = ctx.obj["db_url"]
-#     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
-
-#     try:
-#         submission = db_service.get_submission(submission_id)
-#         if not submission:
-#             raise SubmissionNotFoundError(submission_id)
-#     except SubmissionNotFoundError as e:
-#         console_err.print(f"[red]Error: {e}[/red]")
-#         console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
-#         raise click.Abort() from e
-#     except Exception as e:
-#         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
-#         traceback.print_exc()
-#         raise click.ClickException(f"Failed to update submission state: {e}") from e
-
-#     with open(metadata_path, encoding="utf-8") as metadata_file:
-#         metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
-
-#         metadata_file.seek(0)
-#         metadata_content = json.load(metadata_file)
-#         # redact tanG, local case id and potential tanG in the patient information
-#         metadata_content = _redact_metadata(metadata_content)
-#         metadata_string = json.dumps(metadata_content)
-
-#     changes = _diff_metadata(submission, metadata, submission_date, metadata_string, ignore_field)
-
-#     # consent records
-#     donor_diff = _diff_donors(
-#         donors_in_submission=db_service.get_donors(submission_id=submission_id),
-#         submission_id=submission_id,
-#         metadata=metadata,
-#     )
-
-#     if not any(dataclasses.astuple(donor_diff)):
-#         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
-#         ctx.exit()
-
-#     diff_table: rich.console.RenderableType
-#     if changes:
-#         diff_table = rich.table.Table(title="Submission Metadata")
-#         diff_table.add_column("Key")
-#         diff_table.add_column("Before")
-#         diff_table.add_column("After")
-#         for key, before, after in sorted(changes, key=itemgetter(0)):
-#             diff_table.add_row(key, str(before) if before is not None else _TEXT_MISSING, str(after))
-#     else:
-#         diff_table = rich.padding.Padding(rich.text.Text("No changes to submission-level metadata."), pad=(0, 0, 1, 0))
-
-#     panel = rich.panel.Panel.fit(
-#         rich.console.Group(diff_table, *donor_diff.diff_tables, fit=True), title="Pending Changes"
-#     )
-#     console.print(panel)
-
-#     if not confirm or click.confirm(
-#         "Are you sure you want to commit these changes to the database?",
-#         default=False,
-#         show_default=True,
-#     ):
-#         for key, _before, after in changes:
-#             _ = db_service.modify_submission(submission_id, key=key, value=after)
-#         for added_donor in donor_diff.added:
-#             _ = db_service.add_donor(added_donor)
-#         for updated_donor in donor_diff.updated:
-#             _ = db_service.update_donor(updated_donor)
-#         for deleted_donor in donor_diff.deleted:
-#             db_service.delete_donor(deleted_donor)
-#         console_err.print("[green]Database populated successfully.[/green]")
 
 
 class QCStatus(StrEnum):

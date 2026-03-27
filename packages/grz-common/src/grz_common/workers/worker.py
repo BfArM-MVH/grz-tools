@@ -2,40 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
-import json
-from dataclasses import dataclass
-from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP
 from os import PathLike
 from pathlib import Path
-from typing import Any
 
-
-from grz_db.errors import SubmissionNotFoundError
-from grz_db.models.author import Author
-from grz_db.models.submission import Donor
-from grz_pydantic_models.submission.metadata import (
-    GrzSubmissionMetadata,
-    Relation,
-    REDACTED_TAN
-)
-from grzctl.commands.db.cli import (
-    get_submission_db_instance,
-    redact_metadata,
-    diff_metadata,
-    diff_donor,
-    SubmissionData,
-    DonorDiff,
-    DonorData
-)
-
-from grzctl.models.config import (
-    DbConfig,
-    ListConfig,
-    DownloadConfig
-)
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grzctl.commands.db.cli import DonorDiff, diff_donor, diff_metadata, get_submission_db_instance
+from grzctl.dbcontext import DbContext
+from grzctl.models.config import DbConfig
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
@@ -48,20 +24,6 @@ from .upload import S3BotoUploadWorker
 
 log = logging.getLogger(__name__)
 
-# TODO: move to grz_db.models.author?
-def _initialise_author_from_dbconfig(db_config: DbConfig) -> Author:
-    author = None
-    if db_config.author:
-        key_path = Path(db_config.author.private_key_path)
-        if not key_path.exists():
-            raise FileNotFoundError(f"Author private key not found at: {key_path}")
-
-        author = Author(
-            name=db_config.author.name,
-            private_key_bytes=key_path.read_bytes(),
-            private_key_passphrase=db_config.author.private_key_passphrase,
-        )
-    return Author
 
 class Worker:
     """Worker class for handling submission processing"""
@@ -364,21 +326,18 @@ class Worker:
         download_worker.download(submission_id, EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir))
 
 
-    def populate(self, configuration,  submission_id: str, force: bool):
-        updates = False
+    def populate(self, s3_options: S3Options, db_context: DbContext,  submission_id: str, force: bool): # noqa: PLR0915, PLR0912, C901
         # establish connection to s3; no check because connection established during download
-        s3_config = DownloadConfig.model_validate(configuration).s3
-        s3_client = init_s3_client(s3_config)
+        s3_client = init_s3_client(s3_options)
 
         # get the metadata file object and extract the date
         object_key = f"{submission_id}/metadata/metadata.json"
-        response = s3_client.head_object(Bucket= s3_config.bucket, Key= object_key)
+        response = s3_client.head_object(Bucket= s3_options.bucket, Key= object_key)
         submission_date = response["LastModified"].date()
 
         # establish connection to database; no check because connection established via DbContext
-        db_config = DbConfig.model_validate(configuration).db
-        author = _initialise_author_from_dbconfig(db_config)
-        db = get_submission_db_instance(db_config.database_url, author=author)
+        db_config = DbConfig.model_validate(db_context.configuration).db
+        db = get_submission_db_instance(db_config.database_url, author=db_context.author)
         submission = db.get_submission(submission_id)
 
         # store entries of donors in database
@@ -388,26 +347,10 @@ class Worker:
         metadata_file_path = self.metadata_dir / "metadata.json"
         with open(metadata_file_path, encoding="utf-8") as metadata_file:
             metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
-
-            # metadata_file.seek(0)
-            # metadata_content = json.load(metadata_file)
-            # redact tanG, local case id and potential tanG in the patient information
-            # metadata_content = redact_metadata(metadata_content)
-            # metadata_string = json.dumps(metadata_content)
-
             metadata_content = metadata.to_redacted_dict(False)
             metadata_string = json.dumps(metadata_content)
-            print(metadata_string)
-            exit()
 
-        # add the filesize; would be better with SubmissionMetadata but then without validation
-        # submission_size: int = sum([i.file_size_in_bytes for i in submission_metadata.files.values()])
-        submission_size: int = 0
-        for donor in metadata.donors:
-            for lab_datum in donor.lab_data:
-                if sequence_data := lab_datum.sequence_data:
-                    for file in sequence_data.files:
-                        submission_size += file.file_size_in_bytes
+        submission_size = metadata.get_submission_size()
 
         # populate submission metadata
         submission_information = diff_metadata(submission, metadata, submission_size, submission_date, metadata_string)
@@ -448,7 +391,7 @@ class Worker:
                 self.__log.info(f"Submission: {submission_id} - Drop existing donor(s) in db: {','.join([i.pseudonym for i in donor_diff.deleted])}")
 
             # push to database
-            for key, unused, value in submission_information.db_ingest:
+            for key, _, value in submission_information.db_ingest:
                 db.modify_submission(submission_id, key, value)
             for donor in donor_diff.added:
                 db.add_donor(donor)

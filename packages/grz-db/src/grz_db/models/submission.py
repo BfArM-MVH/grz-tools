@@ -6,7 +6,6 @@ import random
 import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from decimal import Decimal
 from operator import attrgetter
 from typing import Any, ClassVar, Optional
 
@@ -139,8 +138,8 @@ class SubmissionBase(SQLModel):
     genomic_study_subtype: GenomicStudySubtype | None = None
 
     # extra fields
-    submission_size: Optional[int] = Field(default=None)
-    submission_metadata: Optional[str] = Field(default=None)
+    submission_size: int | None = Field(default=None)
+    submission_metadata: str | None = Field(default=None)
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""

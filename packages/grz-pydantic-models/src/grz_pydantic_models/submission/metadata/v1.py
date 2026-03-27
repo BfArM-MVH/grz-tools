@@ -1392,6 +1392,15 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         return thresholds
 
+    def get_submission_size(self) -> int:
+        submission_size: int = 0
+        for donor in self.donors:
+            for lab_datum in donor.lab_data:
+                if sequence_data := lab_datum.sequence_data:
+                    for datafile in sequence_data.files:
+                        submission_size += datafile.file_size_in_bytes
+        return submission_size
+
     def get_thresholds(self) -> dict[tuple[str, str], thresholds_model.Thresholds | None]:
         """
         Get the thresholds for all lab data in the submission.
