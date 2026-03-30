@@ -235,9 +235,12 @@ fn validate_fastq_paired_paths(
             let file2 = File::open(r2_path)
                 .map_err(|e| format!("Failed to open R2 file: {e}"))?;
 
-            // Use 128KB buffer for better performance
-            let reader1 = BufReader::with_capacity(128 * 1024, file1);
-            let reader2 = BufReader::with_capacity(128 * 1024, file2);
+            // Auto-detect and decompress (e.g. .gz files) using niffler
+            let (reader1, _fmt1) = niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file1)))
+                .map_err(|e| format!("Failed to decompress R1 file: {e}"))?;
+            let (reader2, _fmt2) = niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file2)))
+                .map_err(|e| format!("Failed to decompress R2 file: {e}"))?;
+
             process_paired_readers(reader1, reader2, length_check)
         })
         .map_err(|e: String| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
