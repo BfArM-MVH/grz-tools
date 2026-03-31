@@ -29,7 +29,10 @@ from grz_db.errors import (
     DatabaseConfigurationError,
     DuplicateSubmissionError,
     DuplicateTanGError,
+    SubmissionBasicQCNotPassedError,
+    SubmissionDateIsNoneError,
     SubmissionNotFoundError,
+    SubmissionTypeIsNoneError,
 )
 from grz_db.models.author import Author
 from grz_db.models.submission import (
@@ -372,9 +375,12 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
     database_url = ctx.obj["db_url"]
     database = get_submission_db_instance(database_url)
 
-    click.echo(
-        str(database.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)).lower()
-    )
+    try:
+        result = database.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)
+        click.echo(str(result).lower())
+    except (SubmissionDateIsNoneError, SubmissionTypeIsNoneError, SubmissionBasicQCNotPassedError) as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
 
 
 def _build_submission_dict_from(

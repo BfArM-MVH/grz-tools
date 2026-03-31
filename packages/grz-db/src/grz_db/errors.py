@@ -19,6 +19,27 @@ class DuplicateTanGError(ValueError):
         super().__init__("Duplicate tanG")
 
 
+class SubmissionDateIsNoneError(ValueError):
+    """Exception for when a submission date is None."""
+
+    def __init__(self):
+        super().__init__("Submission date is None")
+
+
+class SubmissionTypeIsNoneError(ValueError):
+    """Exception for when a submission type is None."""
+
+    def __init__(self):
+        super().__init__("Submission type is None")
+
+
+class SubmissionBasicQCNotPassedError(ValueError):
+    """Exception for when a submission has not passed basic QC."""
+
+    def __init__(self, submission_id: str):
+        super().__init__(f"Submission with ID {submission_id} has not passed basic QC")
+
+
 class DatabaseConfigurationError(Exception):
     """Exception for database configuration issues."""
 

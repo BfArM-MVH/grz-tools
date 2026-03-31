@@ -42,7 +42,14 @@ from ..common import (
     ListableEnum,
     serialize_datetime_to_iso_z,
 )
-from ..errors import DuplicateSubmissionError, DuplicateTanGError, SubmissionNotFoundError
+from ..errors import (
+    DuplicateSubmissionError,
+    DuplicateTanGError,
+    SubmissionBasicQCNotPassedError,
+    SubmissionDateIsNoneError,
+    SubmissionNotFoundError,
+    SubmissionTypeIsNoneError,
+)
 from .author import Author
 from .base import BaseSignablePayload, VerifiableLog
 
@@ -369,6 +376,19 @@ class DetailedQCResult(SQLModel, table=True):
         return serialize_datetime_to_iso_z(ts)
 
 
+class QCQueueEntry(SQLModel, table=True):
+    """Queue of submissions that passed basic QC, ordered by pass timestamp."""
+
+    __tablename__ = "qc_queue"
+    __table_args__ = {"extend_existing": True}
+
+    submission_id: str = Field(foreign_key="submissions.id", primary_key=True, index=True)
+    basic_qc_passed_at: datetime.datetime = Field(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True),
+    )
+
+
 class SubmissionDb:
     """
     API entrypoint for managing submissions.
@@ -467,7 +487,7 @@ class SubmissionDb:
                 session.rollback()
                 raise
 
-    def modify_submission(self, submission_id: str, key: str, value: str) -> Submission:
+    def modify_submission(self, submission_id: str, key: str, value: str) -> Submission:  # noqa: C901
         if key not in SubmissionBase.model_fields:
             raise ValueError(f"Unknown column key '{key}'")
         elif key in SubmissionBase.immutable_fields:
@@ -479,6 +499,17 @@ class SubmissionDb:
                 raise SubmissionNotFoundError(submission_id)
 
             setattr(submission, key, value)
+            if key == "basic_qc_passed":
+                queue_entry = session.get(QCQueueEntry, submission_id)
+
+                if submission.basic_qc_passed is True and queue_entry is None:
+                    session.add(QCQueueEntry(submission_id=submission_id))
+                elif submission.basic_qc_passed is not True and queue_entry is not None:
+                    session.delete(queue_entry)
+
+                # Keep selection flag aligned with failed basic QC.
+                if submission.basic_qc_passed is False:
+                    submission.selected_for_qc = False
             session.add(submission)
             try:
                 session.commit()
@@ -500,7 +531,7 @@ class SubmissionDb:
     def _submission_counts_as_selected_for_qc(self, submission: Submission) -> bool:
         if submission.selected_for_qc is True:
             return True
-        return any(state.state in (SubmissionStateEnum.QCING, SubmissionStateEnum.QCED) for state in submission.states)
+        return any(state.state in (SubmissionStateEnum.QCING, SubmissionStateEnum.QCED) for state in submission.states)  # type: ignore[union-attr]
 
     def _list_submitter_qc_candidates(
         self,
@@ -512,11 +543,12 @@ class SubmissionDb:
             return session.exec(
                 select(Submission)
                 .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .join(QCQueueEntry, QCQueueEntry.submission_id == Submission.id)  # type: ignore[arg-type]
                 .where(Submission.submission_type == SubmissionType.initial)
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
                 .where(Submission.submission_date.between(start_date, end_date))  # type: ignore[union-attr]
                 .where(Submission.submitter_id == submitter_id)
-                .order_by(Submission.submission_date, Submission.id)  # type: ignore[arg-type]
+                .order_by(QCQueueEntry.basic_qc_passed_at, Submission.id)  # type: ignore[arg-type]
             ).all()
 
     def _is_under_qc_target(
@@ -872,18 +904,20 @@ class SubmissionDb:
             raise SubmissionNotFoundError(submission_id)
         submission_date = submission.submission_date
         if submission_date is None:
-            raise ValueError("Submission has no submission date set.")
+            raise SubmissionDateIsNoneError()
         submission_type = submission.submission_type
         if submission_type is None:
-            raise ValueError("Submission has no type set.")
+            raise SubmissionTypeIsNoneError()
         if submission_type != SubmissionType.initial:
             # only initial submissions matter for detailed QC selection
             return False
         if submission.basic_qc_passed is not True:
             # only submissions that passed basic QC are eligible for detailed QC
-            raise ValueError("Submission did not pass basic QC and is therefore not eligible for detailed QC.")
+            raise SubmissionBasicQCNotPassedError(submission_id)
         if submission.selected_for_qc is True:
             return True
+        if submission.selected_for_qc is False:
+            return False
 
         submission_month = submission_date.month
         submission_quarter, submission_year = date_to_quarter_year(submission_date)
@@ -925,6 +959,5 @@ class SubmissionDb:
                 salt=salt,
             )
 
-        if should_select:
-            self.set_selected_for_qc(submission_id, True)
+        self.set_selected_for_qc(submission_id, should_select)
         return should_select

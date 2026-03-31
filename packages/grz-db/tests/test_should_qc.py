@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from grz_db.errors import (
+    SubmissionBasicQCNotPassedError,
+    SubmissionDateIsNoneError,
+    SubmissionTypeIsNoneError,
+)
 from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum, SubmissionStateLog, SubmissionType
 from sqlmodel import Session
@@ -116,7 +121,7 @@ class TestQcStrategy:
 
         assert should_run is True
 
-    def test_should_qc_recomputes_when_selected_for_qc_is_false(self, db: SubmissionDb):
+    def test_should_qc_returns_existing_selected_for_qc_false(self, db: SubmissionDb):
         test_date = datetime.date(2025, 12, 1)
         base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
         submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
@@ -138,7 +143,7 @@ class TestQcStrategy:
             salt="any_salt",
         )
 
-        assert should_run is True
+        assert should_run is False
 
     def test_should_qc_persists_selected_for_qc_result(self, db: SubmissionDb):
         test_date = datetime.date(2025, 12, 1)
@@ -167,7 +172,7 @@ class TestQcStrategy:
         assert submission is not None
         assert submission.selected_for_qc is True
 
-    def test_should_qc_does_not_persist_false_result(self, db: SubmissionDb):
+    def test_should_qc_persists_false_result(self, db: SubmissionDb):
         target_percentage = 20.0
         salt = "ratio-test"
         base_date = datetime.date(2025, 12, 1)
@@ -202,7 +207,7 @@ class TestQcStrategy:
         assert should_run is False
         submission = db.get_submission(candidate_submission_id)
         assert submission is not None
-        assert submission.selected_for_qc is None
+        assert submission.selected_for_qc is False
 
     def test_should_qc_counts_existing_selected_for_qc_without_double_counting(self, db: SubmissionDb):
         target_percentage = 20.0
@@ -298,13 +303,15 @@ class TestQcStrategy:
 
     def test_quarterly_ratio_catchup(self, db: SubmissionDb):
         """
-        Tests that the quarterly target is met.
+        Tests that the quarter selection combines ratio catchup and random selection.
         Target: 20%.
         """
         target_percentage = 20.0
+        target_proportion = target_percentage / 100.0
         salt = "ratio-test"
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
+        block_size = math.floor(1 / target_proportion)
 
         submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
         _add_submission_with_history(
@@ -317,6 +324,8 @@ class TestQcStrategy:
             is_qced=True,
         )
 
+        qced_count = 1
+        total_count = 1
         for i in range(1, 10):
             submission_id = f"{SUBMITTER_ID}_{base_date}_{i:0>8}"
             submission_timestamp = start_time + datetime.timedelta(minutes=i * 10)
@@ -331,22 +340,34 @@ class TestQcStrategy:
                 is_qced=False,
             )
 
+            total_count += 1
+            current_ratio = qced_count / total_count
+            is_ratio_trigger = current_ratio <= target_proportion
+
+            absolute_index = i
+            block_index = absolute_index // block_size
+            seed = f"{SUBMITTER_ID}-{base_date.year}-4-{block_index}-{salt}"
+            rng = random.Random(seed)
+            target_index_in_block = rng.randint(0, block_size - 1)
+            is_random_trigger = (absolute_index % block_size) == target_index_in_block
+
+            expect_qc = is_ratio_trigger or is_random_trigger
             should_run = db.should_qc(submission_id, target_percentage, salt)
 
-            # Ratio hits 20% exactly at indices 4 (1/5) and 9 (2/10)
-            if i in (4, 9):
-                assert should_run is True, f"Index {i} should have been selected for QC (Ratio catchup)"
+            assert should_run is expect_qc, (
+                f"Index {i}: Expect={expect_qc}, Got={should_run}. "
+                f"(Ratio: {current_ratio:.3f} vs {target_proportion}, Stats: QCed={qced_count}, Total={total_count})"
+            )
 
+            if should_run:
                 _update_submission_state(
                     db, submission_id, SubmissionStateEnum.QCING, submission_timestamp + datetime.timedelta(minutes=1)
                 )
                 _update_submission_state(
                     db, submission_id, SubmissionStateEnum.QCED, submission_timestamp + datetime.timedelta(minutes=2)
                 )
-
                 db.modify_submission(submission_id, "detailed_qc_passed", "true")
-            else:
-                assert should_run is False, f"Index {i} should NOT have been selected for QC"
+                qced_count += 1
 
     @pytest.mark.parametrize("target_percentage", [1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 100.0])
     def test_random_selection(self, db: SubmissionDb, target_percentage: float):
@@ -452,3 +473,40 @@ class TestQcStrategy:
         expected = (absolute_index % block_size) == target_index_in_block
 
         assert db._is_randomly_selected_for_qc(submission, submissions, target_proportion, salt) is expected
+
+    def test_should_qc_raises_on_missing_submission_date(self, db: SubmissionDb):
+        """Verify SubmissionDateIsNoneError when submission_date is None."""
+        submission_id = f"{SUBMITTER_ID}_2025-12-01_00000000"
+        db.add_submission(submission_id)
+        db.modify_submission(submission_id, "submission_type", SubmissionType.initial.value)
+        db.modify_submission(submission_id, "basic_qc_passed", "true")
+
+        with pytest.raises(SubmissionDateIsNoneError):
+            db.should_qc(submission_id, 2.0, "salt")
+
+    def test_should_qc_raises_on_missing_submission_type(self, db: SubmissionDb):
+        """Verify SubmissionTypeIsNoneError when submission_type is None."""
+        submission_id = f"{SUBMITTER_ID}_2025-12-01_00000000"
+        db.add_submission(submission_id)
+        db.modify_submission(submission_id, "submission_date", "2025-12-01")
+        db.modify_submission(submission_id, "basic_qc_passed", "true")
+
+        with pytest.raises(SubmissionTypeIsNoneError):
+            db.should_qc(submission_id, 2.0, "salt")
+
+    def test_should_qc_raises_on_failed_basic_qc(self, db: SubmissionDb):
+        """Verify SubmissionBasicQCNotPassedError when basic_qc_passed is False."""
+        test_date = datetime.date(2025, 12, 1)
+        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+        _add_submission_with_history(
+            db,
+            submission_id,
+            SUBMITTER_ID,
+            test_date,
+            DEFAULT_HISTORY,
+            base_timestamp=datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC),
+        )
+        db.modify_submission(submission_id, "basic_qc_passed", "false")
+
+        with pytest.raises(SubmissionBasicQCNotPassedError):
+            db.should_qc(submission_id, 2.0, "salt")
