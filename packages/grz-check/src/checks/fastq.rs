@@ -113,6 +113,25 @@ impl FastqCheckProcessor {
     }
 }
 
+/// Validate FASTQ data from any Read source.
+/// This is the core validation logic, independent of file I/O.
+pub fn validate_fastq_data<R: Read>(
+    reader: R,
+    length_check: ReadLengthCheck,
+) -> Result<CheckOutcome, String> {
+    let mut fastq_reader = fastq::io::Reader::new(BufReader::new(reader));
+    let mut processor = FastqCheckProcessor::new(length_check);
+
+    for record_res in fastq_reader.records() {
+        processor.process_record(record_res, "record")?;
+        if !processor.is_ok() {
+            break;
+        }
+    }
+
+    Ok(processor.finalize())
+}
+
 pub fn check_single_fastq(
     path: &Path,
     length_check: ReadLengthCheck,
@@ -120,17 +139,7 @@ pub fn check_single_fastq(
     global_pb: &ProgressBar,
 ) -> FileReport {
     check_file(path, file_pb, global_pb, true, |reader| {
-        let mut fastq_reader = fastq::io::Reader::new(BufReader::new(reader));
-        let mut processor = FastqCheckProcessor::new(length_check);
-
-        for record_res in fastq_reader.records() {
-            processor.process_record(record_res, "record")?;
-            if !processor.is_ok() {
-                break;
-            }
-        }
-
-        Ok(processor.finalize())
+        validate_fastq_data(reader, length_check)
     })
 }
 

@@ -7,6 +7,7 @@ from importlib.metadata import version
 from os import PathLike
 from pathlib import Path
 from shutil import copyfile, which
+from unittest.mock import patch
 
 import boto3
 import grz_cli.models.config
@@ -468,3 +469,22 @@ def working_dir(tmpdir_factory: pytest.TempdirFactory):
 @pytest.fixture
 def working_dir_path(working_dir) -> Path:
     return Path(working_dir.strpath)
+
+
+@pytest.fixture(autouse=True)
+def protect_caplog_handler(caplog):
+    """
+    Prevent the application from removing the pytest LogCaptureHandler
+    during CLI execution.
+    """
+    import logging
+
+    original_remove_handler = logging.Logger.removeHandler
+
+    def safe_remove_handler(self, handler):
+        if handler is caplog.handler:
+            return
+        original_remove_handler(self, handler)
+
+    with patch.object(logging.Logger, "removeHandler", side_effect=safe_remove_handler, autospec=True):
+        yield
