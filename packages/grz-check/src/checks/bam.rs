@@ -22,8 +22,7 @@ pub fn validate_bam_data<R: Read>(reader: R) -> Result<CheckOutcome, String> {
         || !header.comments().is_empty()
     {
         warnings.push(
-            "Detected a header in BAM file, ensure it contains no private information!"
-                .to_string(),
+            "Detected a header in BAM file, ensure it contains no private information!".to_string(),
         );
     }
 
@@ -96,7 +95,9 @@ pub fn validate_bam_data<R: Read>(reader: R) -> Result<CheckOutcome, String> {
 }
 
 pub fn check_bam(path: &Path, file_pb: &ProgressBar, global_pb: &ProgressBar) -> FileReport {
-    check_file(path, file_pb, global_pb, false, |reader| validate_bam_data(reader))
+    check_file(path, file_pb, global_pb, false, |reader| {
+        validate_bam_data(reader)
+    })
 }
 
 #[derive(Debug)]

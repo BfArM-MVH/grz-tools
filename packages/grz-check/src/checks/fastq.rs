@@ -115,7 +115,10 @@ impl FastqCheckProcessor {
 
 /// Validate FASTQ data from any Read source.
 /// This is the core validation logic, independent of file I/O.
-pub fn validate_fastq_data<R: Read>(reader: R, length_check: ReadLengthCheck) -> Result<CheckOutcome, String> {
+pub fn validate_fastq_data<R: Read>(
+    reader: R,
+    length_check: ReadLengthCheck,
+) -> Result<CheckOutcome, String> {
     let mut fastq_reader = fastq::io::Reader::new(BufReader::new(reader));
     let mut processor = FastqCheckProcessor::new(length_check);
 

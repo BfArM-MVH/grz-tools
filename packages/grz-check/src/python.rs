@@ -8,7 +8,7 @@ use crate::checker::FileReport;
 use crate::checks::bam::validate_bam_data;
 use crate::checks::common::CheckOutcome;
 use crate::checks::fastq::{
-    check_single_fastq, process_paired_readers, validate_fastq_data, ReadLengthCheck,
+    ReadLengthCheck, check_single_fastq, process_paired_readers, validate_fastq_data,
 };
 
 /// Wrapper for Python file-like objects that implements Rust's Read trait.
@@ -20,7 +20,7 @@ pub struct PyFileLikeObject {
 impl PyFileLikeObject {
     /// Create a new PyFileLikeObject from a PyObject.
     /// The object must have a .read() method.
-    pub fn new(obj: &Bound<'_ , PyAny>) -> PyResult<Self> {
+    pub fn new(obj: &Bound<'_, PyAny>) -> PyResult<Self> {
         // Verify the object has a read method
         if !obj.hasattr("read")? {
             return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -230,16 +230,16 @@ fn validate_fastq_paired_paths(
 
     let (outcome1, outcome2, _pair_errors) = py
         .allow_threads(|| {
-            let file1 = File::open(r1_path)
-                .map_err(|e| format!("Failed to open R1 file: {e}"))?;
-            let file2 = File::open(r2_path)
-                .map_err(|e| format!("Failed to open R2 file: {e}"))?;
+            let file1 = File::open(r1_path).map_err(|e| format!("Failed to open R1 file: {e}"))?;
+            let file2 = File::open(r2_path).map_err(|e| format!("Failed to open R2 file: {e}"))?;
 
             // Auto-detect and decompress (e.g. .gz files) using niffler
-            let (reader1, _fmt1) = niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file1)))
-                .map_err(|e| format!("Failed to decompress R1 file: {e}"))?;
-            let (reader2, _fmt2) = niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file2)))
-                .map_err(|e| format!("Failed to decompress R2 file: {e}"))?;
+            let (reader1, _fmt1) =
+                niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file1)))
+                    .map_err(|e| format!("Failed to decompress R1 file: {e}"))?;
+            let (reader2, _fmt2) =
+                niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file2)))
+                    .map_err(|e| format!("Failed to decompress R2 file: {e}"))?;
 
             process_paired_readers(reader1, reader2, length_check)
         })
