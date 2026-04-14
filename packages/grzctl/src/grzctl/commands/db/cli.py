@@ -747,6 +747,7 @@ class QCStatus(StrEnum):
     PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
     TOO_LOW = "TOO LOW"
+    THRESHOLD_NOT_MET = "THRESHOLD NOT MET"
 
 
 class QCReportRow(StrictBaseModel):

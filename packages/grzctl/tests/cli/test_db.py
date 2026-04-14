@@ -271,7 +271,7 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
         report_csv_file.write(
             dedent("""\
             sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
-            father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,wes,germline,tumor+germline,FAIL,19.94,30.0,30.0,-33.53333333333333,TOO LOW,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
+            father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,wes,germline,tumor+germline,FAIL,19.94,30.0,30.0,-33.53333333333333,THRESHOLD NOT MET,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
             index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
             index0_somatic0,index,Blut DNA Tumor,wes,somatic,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
             """)
@@ -289,6 +289,8 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
 
     results = db.get_detailed_qc_results(metadata.submission_id)
     assert len(results) == 3
+    father_result = next(r for r in results if r.lab_datum_id == "father1_germline0")
+    assert not father_result.mean_depth_of_coverage_passed_qc
 
 
 def test_update_error_confirm(blank_database_config_path: Path):
