@@ -507,6 +507,7 @@ class SubmissionDb:
                     # Basic QC passed -> Ensure that submission is tracked in the in-depth QC queue
                     session.add(QCQueueEntry(submission_id=submission_id))
                 elif submission.basic_qc_passed is not True and queue_entry is not None:
+                    # Basic QC failed -> Ensure that submission is absent from the in-depth QC queue
                     session.delete(queue_entry)
 
                 # Keep selection flag aligned with failed basic QC.
