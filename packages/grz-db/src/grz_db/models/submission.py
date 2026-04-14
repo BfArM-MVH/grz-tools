@@ -500,6 +500,7 @@ class SubmissionDb:
 
             setattr(submission, key, value)
             if key == "basic_qc_passed":
+                # Basic QC state changed -> Align the in-depth QC queue to the new state
                 queue_entry = session.get(QCQueueEntry, submission_id)
 
                 if submission.basic_qc_passed is True and queue_entry is None:
