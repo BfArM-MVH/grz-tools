@@ -504,6 +504,7 @@ class SubmissionDb:
                 queue_entry = session.get(QCQueueEntry, submission_id)
 
                 if submission.basic_qc_passed is True and queue_entry is None:
+                    # Basic QC passed -> Ensure that submission is tracked in the in-depth QC queue
                     session.add(QCQueueEntry(submission_id=submission_id))
                 elif submission.basic_qc_passed is not True and queue_entry is not None:
                     session.delete(queue_entry)
