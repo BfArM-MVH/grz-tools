@@ -144,7 +144,7 @@ class SubmissionBase(SQLModel):
     genomic_study_type: GenomicStudyType | None = None
     genomic_study_subtype: GenomicStudySubtype | None = None
 
-    # boolean to exclude selected submissions from automatic processing of submissions for extended QC
+    # Database column indicating whether a submission is selected for in-depth QC (True/False) or not yet decided (None).
     selected_for_qc: bool | None = None
 
 
