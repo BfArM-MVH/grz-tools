@@ -24,7 +24,7 @@ dependencies = [
     "platformdirs >=4.3.6,<5",
     "grz-pydantic-models >=2.5,<3",
     "pysam ==0.23.*",
-    "rich ==13.*",
+    "rich >=13.0.0,<15",
     "requests >=2.32.3,<3",
     "grz-common >=1.5.0,<2",
 ]

@@ -11,17 +11,25 @@ import grz_common.cli as grzcli
 import rich.console
 import rich.table
 import rich.text
+from grz_common.cli import FILE_R_E
 from grz_common.workers.submission import GrzSubmissionMetadata, SubmissionMetadata
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.submission_dir
+@grzcli.submission_di
+@click.option(
+    "--metadata-file",
+    metavar="PATH",
+    type=FILE_R_E,
+    required=False,
+    help="Direct path to the metadata.json file.",
+)
 @grzcli.output_json
 @grzcli.show_details
 @click.option("--date", help="date for which to check consent validity in ISO format (default: today)")
-def consent(submission_dir, output_json, show_details, date):
+def consent(submission_dir, metadata_file, output_json, show_details, date):
     """
     Check if a submission is consented for research.
 
@@ -30,7 +38,20 @@ def consent(submission_dir, output_json, show_details, date):
     the FHIR MII IG Consent profiles all have a "permit" provision for code 2.16.840.1.113883.3.1937.777.24.5.3.1
     or 2.16.840.1.113883.3.1937.777.24.5.3.8
     """
-    metadata = SubmissionMetadata(Path(submission_dir) / "metadata" / "metadata.json").content
+    bundled_mode = submission_dir is not None
+    granular_mode = metadata_file is not None
+
+    if bundled_mode and granular_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with '--metadata-file'.")
+
+    if bundled_mode:
+        metadata_path = Path(submission_dir) / "metadata" / "metadata.json"
+    elif granular_mode:
+        metadata_path = Path(metadata_file)
+    else:
+        raise click.UsageError("You must specify either '--submission-dir' or '--metadata-file'.")
+
+    metadata = SubmissionMetadata(metadata_path).content
 
     date = (
         datetime.datetime.combine(datetime.date.today(), datetime.time.min)
