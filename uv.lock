@@ -977,6 +977,7 @@ fast = [
 lint = [
     { name = "boto3-stubs" },
     { name = "mypy" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "ruff" },
     { name = "types-boto3", extra = ["s3"] },
@@ -1035,6 +1036,7 @@ fast = [
 lint = [
     { name = "boto3-stubs", specifier = ">=1.36,<2" },
     { name = "mypy" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "ruff" },
     { name = "types-boto3", extras = ["s3"], specifier = ">=1.36,<2" },

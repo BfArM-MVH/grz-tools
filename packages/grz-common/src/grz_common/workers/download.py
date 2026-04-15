@@ -8,10 +8,11 @@ import itertools
 import logging
 import re
 from collections import OrderedDict
+from collections.abc import Iterable
 from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import botocore.handlers
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
@@ -234,12 +235,21 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
     s3_client = init_s3_client(s3_options)
     paginator = s3_client.get_paginator("list_objects_v2")
 
-    objects = itertools.chain.from_iterable(
-        page["Contents"] for page in paginator.paginate(Bucket=s3_options.bucket) if "Contents" in page
+    # cast the pages to a more specific type
+    pages = paginator.paginate(Bucket=s3_options.bucket)
+
+    # Use Dict[str, Any] for flexibility
+    objects: Iterable[dict[str, Any]] = itertools.chain.from_iterable(
+        cast(dict[str, Any], page).get("Contents", []) for page in pages
     )
-    objects_sorted = sorted(objects, key=itemgetter("Key"))
+
+    # filter safely
+    objects = filter(lambda obj: "/" in obj.get("Key", ""), objects)
+    objects_sorted = sorted(objects, key=lambda obj: obj.get("Key", ""))
+
     submission2objects = {
-        key: tuple(group) for key, group in itertools.groupby(objects_sorted, key=lambda o: o["Key"].split("/")[0])
+        key: tuple(group)
+        for key, group in itertools.groupby(objects_sorted, key=lambda obj: obj.get("Key", "").split("/")[0])
     }
 
     submissions = []
