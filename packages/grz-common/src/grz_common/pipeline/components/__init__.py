@@ -279,10 +279,10 @@ class PushToPullAdapter(io.RawIOBase):
     """
 
     def __init__(self, max_queue_size: int = 128):
-        self.queue = queue.Queue(maxsize=max_queue_size)
-        self.buffer = bytearray()
-        self.eof = False
-        self.exception = None
+        self.queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
+        self.buffer: bytearray = bytearray()
+        self.eof: bool = False
+        self.exception: Exception | None = None
 
     def readable(self) -> bool:
         return True
