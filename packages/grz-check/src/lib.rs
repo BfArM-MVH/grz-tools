@@ -12,7 +12,7 @@ pub mod sha256;
 pub mod python;
 
 // Re-export core types for library users
-pub use checker::{FileReport, Stats, PairReport};
-pub use checks::fastq::{ReadLengthCheck, SingleFastqJob, PairedFastqJob};
-pub use checks::bam::BamCheckJob;
+pub use checker::{FileReport, PairReport, Stats};
+pub use checks::bam::{BamCheckJob, validate_bam_data};
+pub use checks::fastq::{PairedFastqJob, ReadLengthCheck, SingleFastqJob, validate_fastq_data};
 pub use checks::raw::RawJob;
