@@ -1,0 +1,22 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "grz-check"
+version = "0.2.1"
+description = "Fast validation of sequencing files (FASTQ, BAM) powered by Rust"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "maturin"]
+
+[tool.maturin]
+features = ["python"]
+python-source = "python"
+module-name = "grz_check"
