@@ -1,31 +1,13 @@
-import contextlib
+import abc
 import hashlib
 import logging
-import os
-import tempfile
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+import queue
+import threading
+from typing import Any
 
-import pysam
+import grz_check
 
-from . import DataIntegrityError, DataValidationError, ObserverWithMetrics
-
-if TYPE_CHECKING:
-    import zlib
-else:
-    try:
-        from isal import isal_zlib as zlib
-    except ImportError:
-        import zlib
-
-
-try:
-    from numba import jit  # type: ignore[import-not-found, import-untyped]
-
-    HAS_NUMBA = True
-except ImportError:
-    HAS_NUMBA = False
-    jit = None
+from . import DataValidationError, ObserverWithMetrics, PipelineError, PushToPullAdapter
 
 log = logging.getLogger(__name__)
 
@@ -60,287 +42,131 @@ class ChecksumValidator(ObserverWithMetrics):
         return {"checksum": self._hasher.hexdigest(), "size": self._bytes_seen}
 
 
-class FastqValidator(ObserverWithMetrics):
-    """Validates a decompressed FASTQ stream."""
+class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
+    """Base class for validators delegating format validation to grz_check."""
 
-    def __init__(self, mean_read_length_threshold: float | None = None):
+    def __init__(self):
         super().__init__()
-        self._decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        self._processor: Callable[[bytes], None] = (
-            self._process_chunk_numba if HAS_NUMBA else self._process_chunk_python
-        )
-        self._threshold = mean_read_length_threshold
+        self.adapter = PushToPullAdapter()
+        self.report = None
+        self.exception = None
+        self.validation_thread = threading.Thread(target=self._run_validation_thread, daemon=True)
+        self.validation_thread.start()
 
-        self._line_state = 0
-        self._total_read_len = 0
-        self._read_count = 0
-        self._current_seq_len = 0
-        self._current_line_len = 0
-        self._last_chunk_byte = 10  # b'\n'
+    @abc.abstractmethod
+    def _invoke_grz_check(self) -> Any:
+        """Invoke the specific grz_check validation function. Returns a ValidationReport."""
+        pass
 
-        if HAS_NUMBA:
-            log.debug("FastqValidator using Numba optimization.")
+    @abc.abstractmethod
+    def _format_error_prefix(self) -> str:
+        """Prefix for error messages."""
+        pass
 
-    def observe(self, chunk: bytes) -> None:
+    def _run_validation_thread(self):
         try:
-            decompressed = self._decompressor.decompress(chunk)
-            if decompressed:
-                self._processor(decompressed)
-        except zlib.error as e:
-            raise DataIntegrityError(f"FASTQ Validator: GZIP error: {e}", stage=self.__class__.__name__, cause=e) from e
+            self.report = self._invoke_grz_check()
+        except Exception as exception:
+            self.exception = exception
 
-    def _process_chunk_numba(self, chunk: bytes) -> None:
-        (
-            status,
-            self._line_state,
-            self._read_count,
-            self._total_read_len,
-            self._current_seq_len,
-            self._current_line_len,
-            self._last_chunk_byte,
-        ) = _validate_chunk_numba(
-            chunk,
-            self._line_state,
-            self._read_count,
-            self._total_read_len,
-            self._current_seq_len,
-            self._current_line_len,
-            self._last_chunk_byte,
-        )
-
-        if status == 1:
-            raise DataValidationError(
-                f"FASTQ Record {self._read_count + 1} Invalid: "
-                f"Seq len ({self._current_seq_len}) != Qual len (inconsistent)",
-                stage=self.__class__.__name__,
-            )
-
-    def _process_chunk_python(self, chunk: bytes) -> None:  # noqa: C901
-        start = 0
-        n_len = len(chunk)
-
+    def _enqueue_chunk(self, chunk: bytes | None):
+        """Push a chunk to the adapter queue, monitoring thread health."""
         while True:
-            pos = chunk.find(b"\n", start)
-
-            if pos == -1:
-                self._current_line_len += n_len - start
-                if n_len > 0:
-                    self._last_chunk_byte = chunk[-1]
+            if self.exception:
+                raise self.exception
+            try:
+                self.adapter.queue.put(chunk, timeout=0.1)
                 break
-
-            self._current_line_len += pos - start
-
-            # Check for \r
-            is_cr = False
-            if pos > 0:
-                if chunk[pos - 1] == 13:  # b'\r'
-                    is_cr = True
-            elif self._last_chunk_byte == 13:
-                is_cr = True
-
-            final_len = self._current_line_len
-            if is_cr:
-                final_len -= 1
-
-            final_len = max(0, final_len)
-
-            if self._line_state == 1:
-                self._current_seq_len = final_len
-                self._total_read_len += final_len
-                self._line_state = 2
-
-            elif self._line_state == 3:
-                if final_len != self._current_seq_len:
-                    raise DataValidationError(
-                        f"FASTQ Record {self._read_count + 1} Invalid: "
-                        f"Seq len ({self._current_seq_len}) != Qual len ({final_len})",
-                        stage=self.__class__.__name__,
-                    )
-                self._read_count += 1
-                self._line_state = 0
-
-            else:
-                self._line_state += 1
-
-            self._current_line_len = 0
-            self._last_chunk_byte = 10
-            start = pos + 1
+            except queue.Full as e:
+                if not self.validation_thread.is_alive():
+                    if self.report and not self.report.is_valid:
+                        errors = "; ".join(self.report.errors)
+                        prefix = self._format_error_prefix()
+                        raise DataValidationError(f"{prefix}: {errors}", stage=self.__class__.__name__) from e
+                    raise PipelineError("Validation thread stopped unexpectedly", stage=self.__class__.__name__) from e
 
     def close(self):
         if self.closed:
             return
 
         try:
-            with contextlib.suppress(Exception):
-                final = self._decompressor.flush()
-                if final:
-                    self._processor(final)
+            if not self.exception and self.validation_thread.is_alive():
+                self._enqueue_chunk(None)  # signal EOF
 
-            if self._read_count == 0:
-                raise DataValidationError(
-                    "Invalid FASTQ: Counted zero reads. File may be empty.", stage=self.__class__.__name__
-                )
+            self.validation_thread.join()
 
-            if self._current_line_len > 0:
-                raise DataValidationError(
-                    "Invalid FASTQ: Unexpected EOF (incomplete line). File may be truncated.",
-                    stage=self.__class__.__name__,
-                )
+            if self.exception:
+                if isinstance(self.exception, PipelineError):
+                    raise self.exception
+                raise DataValidationError(str(self.exception), stage=self.__class__.__name__, cause=self.exception)
 
-            if self._line_state != 0:
-                raise DataValidationError(
-                    f"Invalid FASTQ: Unexpected EOF (incomplete record). Finished at state {self._line_state}.",
-                    stage=self.__class__.__name__,
-                )
+            if self.report:
+                if not self.report.is_valid:
+                    errors = "; ".join(self.report.errors)
+                    prefix = self._format_error_prefix()
+                    raise DataValidationError(f"{prefix}: {errors}", stage=self.__class__.__name__)
+                for warning in self.report.warnings:
+                    prefix = self._format_error_prefix().split()[0]
+                    log.warning(f"{prefix} Warning: {warning}")
 
-            if self._threshold is not None and self._read_count > 0:
-                mean_length = self._total_read_len / self._read_count
-                if mean_length < self._threshold:
-                    raise DataValidationError(
-                        f"Mean read length ({mean_length:.2f}) is below threshold ({self._threshold})",
-                        stage=self.__class__.__name__,
-                    )
         finally:
             super().close()
+
+
+class FastqValidator(GrzCheckValidator):
+    """Validates a FASTQ stream using grz_check bindings (handles decompression natively)."""
+
+    def __init__(self, mean_read_length_threshold: float | None = None):
+        self._threshold = mean_read_length_threshold
+        super().__init__()
+
+    def _invoke_grz_check(self) -> Any:
+        threshold = int(self._threshold) if self._threshold is not None else None
+        return grz_check.validate_fastq_single_stream(self.adapter, min_mean_read_length=threshold)
+
+    def _format_error_prefix(self) -> str:
+        return "FASTQ Invalid"
+
+    def observe(self, chunk: bytes) -> None:
+        self._enqueue_chunk(chunk)
 
     @property
     def metrics(self) -> dict[str, Any]:
+        if not self.report:
+            return {
+                "read_count": 0,
+                "mean_read_length": 0.0,
+                "total_bases": 0,
+                "line_count": 0,
+            }
+
+        read_count = self.report.num_records or 0
+        mean_len = self.report.mean_read_length or 0.0
+
         return {
-            "read_count": self._read_count,
-            "mean_read_length": (self._total_read_len / self._read_count) if self._read_count > 0 else 0,
-            "total_bases": self._total_read_len,
-            "line_count": self._read_count * 4,
+            "read_count": read_count,
+            "mean_read_length": mean_len,
+            "total_bases": int(read_count * mean_len),
+            "line_count": read_count * 4,
         }
 
 
-if HAS_NUMBA:
-
-    @jit(nopython=True, nogil=True, cache=True)
-    def _validate_chunk_numba(chunk_data, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte):  # noqa: C901, PLR0913
-        """
-        Validates a single chunk of FASTQ data using Numba.
-
-        :return: (status [0 on success, 1 on error], line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte)
-        """
-        n = len(chunk_data)
-
-        for i in range(n):
-            byte = chunk_data[i]
-
-            if byte != 10:  # not b'\n'
-                curr_line_len += 1
-                continue
-
-            # otherwise found newline
-            final_len = curr_line_len
-
-            # handle \r\n style newlines
-            if i > 0:
-                if chunk_data[i - 1] == 13:  # \r
-                    final_len -= 1
-            elif last_byte == 13:
-                final_len -= 1
-
-            # Clamp length to 0
-            final_len = max(final_len, 0)
-
-            if line_state == 0:
-                line_state = 1
-            elif line_state == 1:
-                curr_seq_len = final_len
-                total_len += final_len
-                line_state = 2
-            elif line_state == 2:
-                line_state = 3
-            elif line_state == 3:
-                if final_len != curr_seq_len:
-                    # quality length does not match sequence length
-                    return 1, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte
-
-                read_count += 1
-                line_state = 0
-
-            curr_line_len = 0
-
-        # update last_byte for next chunk
-        if n > 0:
-            last_byte = chunk_data[n - 1]
-
-        return 0, line_state, read_count, total_len, curr_seq_len, curr_line_len, last_byte
-
-
-class BamValidator(ObserverWithMetrics):
-    """
-    Validates a BAM stream.
-    Writes to a temp file because pysam requires random access.
-    """
+class BamValidator(GrzCheckValidator):
+    """Validates a BAM stream using grz_check bindings."""
 
     def __init__(self):
-        super().__init__()
-        self._temp = tempfile.NamedTemporaryFile(suffix=".bam", delete=False)  # noqa: SIM115
-        self._path = self._temp.name
         self._bytes_seen = 0
+        super().__init__()
+
+    def _invoke_grz_check(self) -> Any:
+        return grz_check.validate_bam_stream(self.adapter)
+
+    def _format_error_prefix(self) -> str:
+        return "BAM Invalid"
 
     def observe(self, chunk: bytes) -> None:
         self._bytes_seen += len(chunk)
-        self._temp.write(chunk)
-
-    def close(self) -> None:  # noqa: C901
-        if self.closed:
-            return
-        try:
-            if not self._temp.closed:
-                self._temp.close()
-
-            if not os.path.exists(self._path):
-                raise DataValidationError(
-                    f"BAM Invalid: Temp file disappeared at {self._path}", stage=self.__class__.__name__
-                )
-
-            if os.path.getsize(self._path) == 0:
-                self._cleanup()
-                raise DataValidationError(
-                    "BAM Invalid: Stream resulted in an empty file.", stage=self.__class__.__name__
-                )
-
-            with pysam.AlignmentFile(self._path, "rb", check_sq=False) as bam:
-                header = bam.header.to_dict()
-
-                concerning_keys = header.keys() - {"HD"}
-                if concerning_keys:
-                    log.warning("Detected a header in BAM, ensure it contains no private information!")
-
-                secondary_warned = False
-                hard_clipped_warned = False
-
-                for read in bam.fetch(until_eof=True):
-                    if not secondary_warned and read.is_secondary:
-                        log.warning(
-                            "Detected secondary alignment in BAM. Consider filtering to save bandwidth and storage."
-                        )
-                        secondary_warned = True
-
-                    if not hard_clipped_warned and not read.is_secondary:
-                        stats = read.get_cigar_stats()
-                        # index 5 is the count of H (hard clip) ops
-                        if stats and len(stats) > 0 and stats[0][5] > 0:
-                            log.warning(
-                                "Detected hard-clipped bases in primary alignment. This is a loss of information from raw reads."
-                            )
-                            hard_clipped_warned = True
-
-        except Exception as e:
-            raise DataValidationError(f"BAM Invalid: {e}", stage=self.__class__.__name__, cause=e) from e
-
-        finally:
-            self._cleanup()
-            super().close()
-
-    def _cleanup(self):
-        """Helper to ensure file removal."""
-        if os.path.exists(self._path):
-            with contextlib.suppress(OSError):
-                os.unlink(self._path)
+        self._enqueue_chunk(chunk)
 
     @property
     def metrics(self) -> dict[str, Any]:

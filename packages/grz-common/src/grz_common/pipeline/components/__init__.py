@@ -273,6 +273,66 @@ class ObserverWithMetrics(Observer, Metrics, metaclass=abc.ABCMeta):
     pass
 
 
+class PushToPullAdapter(io.RawIOBase):
+    """
+    File-like adapter that bridges pipeline push operations to pull ones.
+    """
+
+    def __init__(self, max_queue_size: int = 128):
+        self.queue = queue.Queue(maxsize=max_queue_size)
+        self.buffer = bytearray()
+        self.eof = False
+        self.exception = None
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int = -1) -> bytes:
+        if size == -1:
+            result = bytearray()
+            while True:
+                chunk = self._get_chunk()
+                if not chunk:
+                    break
+                result.extend(chunk)
+            return bytes(result)
+
+        result = bytearray()
+        while len(result) < size:
+            if not self.buffer:
+                chunk = self._get_chunk()
+                if not chunk:
+                    break
+                self.buffer.extend(chunk)
+
+            needed = size - len(result)
+            take = min(needed, len(self.buffer))
+            result.extend(self.buffer[:take])
+            del self.buffer[:take]
+
+        return bytes(result)
+
+    def _get_chunk(self) -> bytes:
+        if self.eof:
+            return b""
+        chunk = self.queue.get()
+        if chunk is None:
+            self.eof = True
+            self.queue.task_done()
+            return b""
+        if isinstance(chunk, Exception):
+            self.exception = chunk
+            self.queue.task_done()
+            raise chunk
+        self.queue.task_done()
+        return chunk
+
+    def throw(self, exception: Exception):
+        """Inject an exception directly into the queue to immediately alert and unblock the reading thread."""
+        with contextlib.suppress(queue.Full):
+            self.queue.put_nowait(exception)
+
+
 class Tee(ReadStream):
     """
     Branches the stream to an Observer.
