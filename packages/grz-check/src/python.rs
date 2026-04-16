@@ -12,7 +12,6 @@ use crate::checks::fastq::{
 };
 
 /// Wrapper for Python file-like objects that implements Rust's Read trait.
-/// This is a custom implementation compatible with PyO3 0.23's Bound API.
 pub struct PyFileLikeObject {
     obj: PyObject,
 }
@@ -27,8 +26,17 @@ impl PyFileLikeObject {
                 "Expected object with .read() method",
             ));
         }
+        // If the object has a mode attribute (e.g. file objects), verify it is opened in binary mode
+        if let Ok(mode) = obj.getattr("mode") {
+            let mode_str: String = mode.extract()?;
+            if !mode_str.contains('b') {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!("File must be opened in binary mode (e.g. 'rb'), got mode '{mode_str}'"),
+                ));
+            }
+        }
         Ok(Self {
-            obj: obj.clone().into_pyobject(obj.py())?.into(),
+            obj: obj.clone().unbind(),
         })
     }
 }
@@ -36,14 +44,19 @@ impl PyFileLikeObject {
 impl Read for PyFileLikeObject {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         Python::with_gil(|py| -> PyResult<usize> {
-            let result = self.obj.call_method1(py, "read", (buf.len(),))?;
-            let bytes = result.bind(py).downcast::<PyBytes>()?;
+            let result = self.obj.bind(py).call_method1("read", (buf.len(),))?;
+            let bytes = result.downcast::<PyBytes>()?;
             let data = bytes.as_bytes();
             let len = data.len();
             buf[..len].copy_from_slice(data);
             Ok(len)
         })
-        .map_err(|e: PyErr| io::Error::new(io::ErrorKind::Other, e.to_string()))
+        .map_err(|e: PyErr| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to read from Python file-like object: {e}"),
+            )
+        })
     }
 }
 
@@ -166,7 +179,10 @@ fn validate_fastq_single_stream(
     let length_check = parse_read_length_check(min_mean_read_length);
 
     let outcome = py
-        .allow_threads(|| validate_fastq_data(source, length_check))
+        .allow_threads(|| {
+            let reader = BufReader::with_capacity(128 * 1024, source);
+            validate_fastq_data(reader, length_check)
+        })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
     Ok(PyValidationReport::from(outcome))
@@ -285,7 +301,10 @@ fn validate_bam(py: Python, path: &str) -> PyResult<PyValidationReport> {
 #[pyfunction]
 fn validate_bam_stream(py: Python, source: PyFileLikeObject) -> PyResult<PyValidationReport> {
     let outcome = py
-        .allow_threads(|| validate_bam_data(source))
+        .allow_threads(|| {
+            let reader = BufReader::with_capacity(128 * 1024, source);
+            validate_bam_data(reader)
+        })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
     Ok(PyValidationReport::from(outcome))
@@ -339,7 +358,10 @@ fn calculate_stream_checksum<R: Read>(mut reader: R) -> Result<String, std::io::
 #[pyfunction]
 fn calculate_checksum_stream(py: Python, source: PyFileLikeObject) -> PyResult<String> {
     let checksum = py
-        .allow_threads(|| calculate_stream_checksum(source))
+        .allow_threads(|| {
+            let reader = BufReader::with_capacity(128 * 1024, source);
+            calculate_stream_checksum(reader)
+        })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
 
     Ok(checksum)
