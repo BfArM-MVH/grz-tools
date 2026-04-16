@@ -85,7 +85,7 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
 
     with open(config_data["db"]["author"]["private_key_path"], "rb") as f:
         pk_bytes = f.read()
-    author = Author(name="alice", private_key_bytes=pk_bytes, private_key_passphrase="")
+    author = Author(name="alice", private_key_bytes=pk_bytes, private_key_passphrase="test")
 
     db = SubmissionDb(db_url=db_config.db.database_url, author=author)
 

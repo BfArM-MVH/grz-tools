@@ -508,3 +508,173 @@ def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path)
     assert result_state_alias.exit_code == 0, result_state_alias.stderr
     parsed_state_alias = json.loads(result_state_alias.stdout)
     assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}
+
+
+def test_update_with_failure_reason(blank_database_config_path: Path):
+    """Test CLI update command with failure reason option."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}, catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+
+    # Add submission
+    result = runner.invoke(cli, [*args_common, "submission", "add", "123456789_2025-01-01_12345678"])
+    assert result.exit_code == 0, result.stderr
+
+    # Update with failure reason
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            "123456789_2025-01-01_12345678",
+            "Error",
+            "--failure-reason",
+            "duplicate tang",  # ← "duplicate tang"
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    # Check that the failure reason was stored
+    import yaml
+    from grzctl.commands.db.cli import get_submission_db_instance
+    from grzctl.models.config import DbConfig
+
+    with open(blank_database_config_path) as f:
+        config_dict = yaml.safe_load(f)
+    db_config = DbConfig.model_validate(config_dict).db
+    db_service = get_submission_db_instance(db_config.database_url)
+    submission = db_service.get_submission("123456789_2025-01-01_12345678")
+    assert submission is not None
+    latest_state = submission.get_latest_state()
+    assert latest_state is not None
+    assert latest_state.failure_reason is not None
+    assert latest_state.failure_reason.value == "Duplicate TanG"  # ← "Duplicate TanG"
+
+
+def test_update_with_all_failure_reasons(blank_database_config_path: Path):
+    """Test CLI update with all possible failure reasons."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    cli = grzctl.cli.build_cli()
+
+    # Add submission
+    result = runner.invoke(cli, [*args_common, "submission", "add", "123456789_2025-01-01_11111111"])
+    assert result.exit_code == 0
+
+    failure_reasons = ["duplicate tang", "missing data", "decryption error", "network error"]  # ← failure reasons
+
+    for reason in failure_reasons:
+        # Reset to non-error state first
+        runner.invoke(
+            cli,
+            [*args_common, "submission", "update", "123456789_2025-01-01_11111111", "Uploaded", "--ignore-error-state"],
+        )
+
+        # Update to error with specific reason
+        result = runner.invoke(
+            cli,
+            [
+                *args_common,
+                "submission",
+                "update",
+                "123456789_2025-01-01_11111111",
+                "Error",
+                "--failure-reason",
+                reason,
+            ],
+        )
+        assert result.exit_code == 0
+
+
+def test_failure_reason_case_insensitive_cli(blank_database_config_path: Path):
+    """Test CLI accepts case insensitive failure reasons."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    cli = grzctl.cli.build_cli()
+
+    # Add submission
+    result = runner.invoke(cli, [*args_common, "submission", "add", "123456789_2025-01-01_22222222"])
+    assert result.exit_code == 0
+
+    # Test various case combinations (these should be normalized by the CLI to match enum)
+    test_cases = [
+        "duplicate tang",
+        "missing data",
+        "decryption error",
+        "network error",
+    ]  # ← case insensitive test cases
+
+    for case in test_cases:
+        # Reset state first
+        runner.invoke(
+            cli,
+            [*args_common, "submission", "update", "123456789_2025-01-01_22222222", "Uploaded", "--ignore-error-state"],
+        )
+
+        result = runner.invoke(
+            cli,
+            [*args_common, "submission", "update", "123456789_2025-01-01_22222222", "Error", "--failure-reason", case],
+        )
+        assert result.exit_code == 0
+
+
+def test_failure_reason_end_to_end(blank_database_config_path: Path):
+    """Test complete failure reason workflow."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    cli = grzctl.cli.build_cli()
+    submission_id = "123456789_2025-01-01_33333333"
+
+    # Create submission
+    result = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result.exit_code == 0
+
+    # Update to error with failure reason
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            submission_id,
+            "Error",
+            "--failure-reason",
+            "Missing Data",
+        ],  # ← "Missing Data"
+    )
+    assert result.exit_code == 0
+
+    # Show submission details
+    result = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
+    assert result.exit_code == 0
+
+    # List submissions
+    result = runner.invoke(cli, [*args_common, "list", "--json"])
+    assert result.exit_code == 0
+
+
+def test_invalid_failure_reason_cli(blank_database_config_path: Path):
+    """Test CLI rejects invalid failure reasons."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    cli = grzctl.cli.build_cli()  # ← ADD THIS LINE
+
+    # Try invalid failure reason
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            "123456789_2025-01-01_test111",
+            "Error",
+            "--failure-reason",
+            "Invalid Reason",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "Invalid value" in result.output

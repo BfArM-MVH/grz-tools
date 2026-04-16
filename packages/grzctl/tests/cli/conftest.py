@@ -28,7 +28,7 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
             private_key.private_bytes(
                 encoding=cryptser.Encoding.PEM,
                 format=cryptser.PrivateFormat.OpenSSH,
-                encryption_algorithm=cryptser.NoEncryption(),
+                encryption_algorithm=cryptser.BestAvailableEncryption(b"test"),
             )
         )
 
@@ -52,7 +52,7 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
             "author": {
                 "name": "alice",
                 "private_key_path": str(private_key_path.resolve()),
-                "private_key_passphrase": "",
+                "private_key_passphrase": "test",
             },
             "known_public_keys": str(public_key_path.resolve()),
         }
