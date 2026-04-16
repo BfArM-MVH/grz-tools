@@ -27,8 +27,7 @@ from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     DatabaseConfigurationError,
-    DuplicateSubmissionError,
-    DuplicateTanGError,
+    SubmissionError,
     SubmissionNotFoundError,
 )
 from grz_db.models.author import Author
@@ -88,7 +87,7 @@ def db(
     config = DbConfig.model_validate(configuration)
     db_config = config.db
     if not db_config:
-        raise ValueError("DB config not found")
+        raise DatabaseConfigurationError("DB config not found")
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:
@@ -97,7 +96,7 @@ def db(
     elif key := db_config.author.private_key:
         private_key_bytes = key.encode("utf-8")
     else:
-        raise ValueError("Either private_key or private_key_path must be provided.")
+        raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
     KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])
@@ -373,9 +372,12 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
     database_url = ctx.obj["db_url"]
     database = get_submission_db_instance(database_url)
 
-    click.echo(
-        str(database.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)).lower()
-    )
+    try:
+        result = database.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)
+        click.echo(str(result).lower())
+    except SubmissionError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
 
 
 def _build_submission_dict_from(
@@ -425,7 +427,7 @@ def add(ctx: click.Context, submission_id: str):
     try:
         db_submission = db_service.add_submission(submission_id)
         console_err.print(f"[green]Submission '{db_submission.id}' added successfully.[/green]")
-    except (DuplicateSubmissionError, DuplicateTanGError) as e:
+    except SubmissionError as e:
         console_err.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
     except Exception as e:
@@ -986,6 +988,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         ("Genomic Study Subtype", "genomic_study_subtype"),
         ("Basic QC Passed", "basic_qc_passed"),
         ("Consented", "consented"),
+        ("Selected For QC", "selected_for_qc"),
         ("Detailed QC Passed", "detailed_qc_passed"),
     ):
         attr = getattr(submission, attr_name)
