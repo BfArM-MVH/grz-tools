@@ -3,6 +3,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
@@ -60,6 +61,8 @@ class DbContext:
         except (ValidationError, KeyError) as e:
             log.warning(f"DB Configuration invalid or missing. State updates skipped. ({e})")
             self.db = None
+        except SubmissionNotFoundError:
+            raise
         except Exception as e:
             log.error(f"Failed to connect to DB: {e}. State updates skipped.")
             log.error(traceback.format_exc())
@@ -97,19 +100,21 @@ class DbContext:
     def author(self) -> Author:
         db_config = DbConfig.model_validate(self.configuration).db
 
-        author = None
-        if db_config.author:
-            key_path = Path(db_config.author.private_key_path)
-            if not key_path.exists():
-                raise FileNotFoundError(f"Author private key not found at: {key_path}")
+        if not db_config.author:
+            raise ValueError("Author configuration is missing")
 
-            author = Author(
-                name=db_config.author.name,
-                private_key_bytes=key_path.read_bytes(),
-                private_key_passphrase=db_config.author.private_key_passphrase,
-            )
+        if db_config.author.private_key_path is None:
+            raise ValueError("Author private key path is required but was None")
 
-        return author
+        key_path = Path(db_config.author.private_key_path)
+        if not key_path.exists():
+            raise FileNotFoundError(f"Author private key not found at: {key_path}")
+
+        return Author(
+            name=db_config.author.name,
+            private_key_bytes=key_path.read_bytes(),
+            private_key_passphrase=db_config.author.private_key_passphrase,
+        )
 
     def _check_prerequisites(self):
         """

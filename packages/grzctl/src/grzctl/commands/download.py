@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 @click.option(
     '--populate/--no-populate', 
     default=True, 
-    help="Update the submission metadata with information from metadata.json and S3"
+    help="Update the submission metadata with information from metadata.json and S3. If combined with --force, will overwrite information in db without asking."
 )
 def download(  # noqa: PLR0913
     configuration: dict[str, Any],
@@ -67,7 +67,9 @@ def download(  # noqa: PLR0913
         end_state=SubmissionStateEnum.DOWNLOADED,
         enabled=update_db,
     ) as db_context:
-        worker_inst.download(config.s3, submission_id, force=force)
-        worker_inst.populate(config.s3, db_context, submission_id, populate)
+        # worker_inst.download(config.s3, submission_id, force=force)
+        log.info("POPULATE")
+        if populate:
+            worker_inst.populate(config.s3, db_context, submission_id, force)
 
     log.info("Download finished!")

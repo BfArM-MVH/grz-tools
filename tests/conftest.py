@@ -13,6 +13,7 @@ import grzctl.models.config
 import numpy as np
 import psycopg
 import pytest
+import yaml
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from moto import mock_aws
@@ -335,6 +336,21 @@ def identifiers_config_model(identifiers_config_content):
 @pytest.fixture
 def pruefbericht_config_model(pruefbericht_config_content):
     return grzctl.models.config.PruefberichtConfig(**pruefbericht_config_content)
+
+
+@pytest.fixture
+def temp_s3_db_config_file_path(temp_data_dir_path, s3_config_model, db_config_model) -> Path:
+    config_file = temp_data_dir_path / "config.db_s3.yaml"
+
+    combined = {
+        **s3_config_model.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True),
+        **db_config_model.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True),
+    }
+
+    with open(config_file, "w") as fd:
+        yaml.safe_dump(combined, fd, sort_keys=False)
+
+    return config_file
 
 
 @pytest.fixture

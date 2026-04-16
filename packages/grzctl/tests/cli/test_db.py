@@ -59,9 +59,15 @@ def test_all_migrations(blank_initial_database_config_path):
 
 def test_populate(blank_database_config_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    # metadata = GrzSubmissionMetadata.model_validate_json(
+    #     (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    # )
+
+    metadata_path = str(importlib.resources.files(test_resources) / "metadata.json")
+    with open(metadata_path, encoding="utf-8") as metadata_file:
+        metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
+        metadata_content = metadata.to_redacted_dict(False)
+        metadata_string = json.dumps(metadata_content)
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
@@ -92,6 +98,44 @@ def test_populate(blank_database_config_path: Path):
     assert {
         consent.no_scope_justification for consent in meta_father.research_consents
     } == db_father.research_consent_missing_justifications
+
+    assert submission.submission_metadata == metadata_string
+
+    assert submission.submission_size == metadata.get_submission_size()
+
+def test_populate_date(blank_database_config_path: Path):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    changed_date = date(2026,1,1)
+    # metadata = GrzSubmissionMetadata.model_validate_json(
+    #     (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    # )
+
+    metadata_path = str(importlib.resources.files(test_resources) / "metadata.json")
+    with open(metadata_path, encoding="utf-8") as metadata_file:
+        metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
+        result_populate = runner.invoke(
+            cli, [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm", "--submission_date", changed_date.strftime("%Y-%m-%d")]
+        )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+    # shorter than tanG and less likely to be truncated in various terminal widths
+    assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    submission = db.get_submission(metadata.submission_id)
+    assert submission.submission_date == changed_date
 
 
 def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
@@ -130,6 +174,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
     """
     rng = random.Random()
     rng.seed(42)
+    changed_date = date(2026,1,1)
 
     args_common = ["db", "--config-file", blank_database_config_path]
     runner = click.testing.CliRunner()
@@ -198,6 +243,8 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
             "tan_g",
             "--ignore-field",
             "pseudonym",
+            "--submission_date",
+            changed_date.strftime("%Y-%m-%d")
         ],
     )
     assert result_repopulate_s1.exit_code == 0, result_repopulate_s1.stderr
@@ -217,9 +264,11 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
     assert not donors_s1[1].research_consented
     assert donors_s1[1].research_consent_missing_justifications == {"other patient-related reason"}
 
+    submission_s1 = db.get_submission(metadata_s1.submission_id)
+    assert submission_s1.submission_date == changed_date
+
     donors_s2 = sorted(db.get_donors(metadata_s2.submission_id), key=attrgetter("pseudonym"))
     assert len(donors_s2) == 2, "Expected two donors in submission 2"
-
 
 def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
@@ -344,9 +393,15 @@ def test_submission_show_json(blank_database_config_path: Path):
     """
     args_common = ["db", "--config-file", blank_database_config_path]
 
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    # metadata = GrzSubmissionMetadata.model_validate_json(
+        # (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    # )
+
+    metadata_path = str(importlib.resources.files(test_resources) / "metadata.json")
+    with open(metadata_path, encoding="utf-8") as metadata_file:
+        metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
+        metadata_content = metadata.to_redacted_dict(False)
+        metadata_string = json.dumps(metadata_content)
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -377,7 +432,9 @@ def test_submission_show_json(blank_database_config_path: Path):
         "submission_date": metadata.submission.submission_date.isoformat()
         if metadata.submission.submission_date
         else None,
+        "submission_size": metadata.get_submission_size(),
         "submission_type": metadata.submission.submission_type,
+        "submission_metadata": metadata_string,
         "submitter_id": metadata.submission.submitter_id,
         "data_node_id": metadata.submission.genomic_data_center_id,
         "coverage_type": metadata.submission.coverage_type,

@@ -326,7 +326,9 @@ class Worker:
         download_worker.download(submission_id, EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir))
 
 
-    def populate(self, s3_options: S3Options, db_context: DbContext,  submission_id: str, force: bool): # noqa: PLR0915, PLR0912, C901
+    def populate(self, s3_options: S3Options, db_context: DbContext, submission_id: str, force_populate: bool): # noqa: PLR0915, PLR0912, C901
+        updates: bool = False
+        updates_notnull: bool = False
         # establish connection to s3; no check because connection established during download
         s3_client = init_s3_client(s3_options)
 
@@ -338,7 +340,13 @@ class Worker:
         # establish connection to database; no check because connection established via DbContext
         db_config = DbConfig.model_validate(db_context.configuration).db
         db = get_submission_db_instance(db_config.database_url, author=db_context.author)
+        # that part is not necessary because it is called in context with DBcontext and that requires an added submission_id to the database
         submission = db.get_submission(submission_id)
+        if not submission:
+            self.__log.warning(f"Submission {submission_id} does not exist. Creating ...")
+            submission = db.add_submission(submission_id)
+            self.__log.info(f"Submission {submission_id} added to database. Force populate")
+            force_populate = True # Submission does not exist, first time populate is required
 
         # store entries of donors in database
         donors_in_db_submission = {donor.pseudonym : donor for donor in db.get_donors(submission_id=submission_id)}
@@ -350,11 +358,17 @@ class Worker:
             metadata_content = metadata.to_redacted_dict(False)
             metadata_string = json.dumps(metadata_content)
 
-        submission_size = metadata.get_submission_size()
+        submission_size = metadata.get_submission_size() + 1
 
         # populate submission metadata
         submission_information = diff_metadata(submission, metadata, submission_size, submission_date, metadata_string)
-        if submission_information.change: updates = True
+        if submission_information.new:
+            self.__log.info(f"Submission {submission_id} metadata fields were set to default None: Indicates first time populate. Force populate")
+            force_populate = True
+        if submission_information.change:
+            updates = True
+        if submission_information.change_notnull:
+            updates_notnull = True
 
         donors_in_metadata: list[str] = []
         donor_diff = DonorDiff([], [], [], [], [])
@@ -372,10 +386,13 @@ class Worker:
 
         donor_diff.deleted = [db_donor for db_donor in donors_in_db_submission.values() if db_donor.pseudonym not in donors_in_metadata]
 
-        if updates and not force:
-            raise RuntimeError(f"Changes in {object_key} detected. Re-run with --populate to commit them.")
+        print(updates_notnull)
+        if updates_notnull and not force_populate:
+            raise RuntimeError(f"Changes after initial populate in {object_key} detected and --force not set. Re-run download with --force and --populate to commit them.")
+        if updates and not force_populate:
+            raise RuntimeError(f"Changes in {object_key} detected. Re-run download with --force and --populate to commit them.")
 
-        if updates:
+        if updates and force_populate:
             # goes below
             if submission_information.update:
                 self.__log.info(f"Submission: {submission_id} - Updating fields: {', '.join(submission_information.update)} in database")
@@ -393,12 +410,12 @@ class Worker:
             # push to database
             for key, _, value in submission_information.db_ingest:
                 db.modify_submission(submission_id, key, value)
-            for donor in donor_diff.added:
-                db.add_donor(donor)
-            for donor in donor_diff.updated:
-                db.update_donor(donor)
-            for donor in donor_diff.deleted:
-                db.delete_donor(donor)
+            for added_donor in donor_diff.added:
+                db.add_donor(added_donor)
+            for updated_donor in donor_diff.updated:
+                db.update_donor(updated_donor)
+            for deleted_donor in donor_diff.deleted:
+                db.delete_donor(deleted_donor)
         else:
             self.__log.info(f"Submission: {submission_id} - No updates from metadata.json necessary")
 

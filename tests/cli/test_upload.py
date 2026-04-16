@@ -41,9 +41,11 @@ def test_upload_download_submission(
     working_dir_path,
     tmpdir_factory,
     temp_s3_config_file_path,
+    temp_s3_db_config_file_path,
     remote_bucket,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
+    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
 
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
     shutil.copytree(
@@ -81,7 +83,7 @@ def test_upload_download_submission(
             temp_s3_config_file_path,
         ]
 
-        runner = CliRunner()
+        runner = CliRunner(env=env)
         cli = grz_cli.cli.build_cli()
         result = runner.invoke(cli, upload_args, catch_exceptions=False)
 
@@ -95,6 +97,16 @@ def test_upload_download_submission(
 
         assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
 
+        cli = grzctl.cli.build_cli()
+
+        init_args = [
+            "db",
+            "--config-file",
+            str(temp_s3_db_config_file_path),
+            "init"
+            ]
+        runner.invoke(cli, init_args, catch_exceptions=False)
+
         # download
         download_dir = tmpdir_factory.mktemp("submission_download")
         download_dir_path = Path(download_dir.strpath)
@@ -107,9 +119,10 @@ def test_upload_download_submission(
             "--output-dir",
             str(download_dir_path),
             "--config-file",
-            temp_s3_config_file_path,
+            str(temp_s3_db_config_file_path),
+            "--populate",
+            "--force"
         ]
-        cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, download_args, catch_exceptions=False)
 
         assert result.exit_code == 0, result.output
