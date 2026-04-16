@@ -327,7 +327,19 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
 
 @db.command("tui")
 @click.pass_context
-def tui(ctx: click.Context):
+@click.option(
+    "--quarter",
+    type=click.IntRange(min=1, max=4),
+    default=None,
+    help="Quarter (1-4) for the 'Detailed QC by LE' overview panel (default: current quarter).",
+)
+@click.option(
+    "--year",
+    type=click.IntRange(min=2024, max=9999),
+    default=None,
+    help="Year for the selected --quarter in the 'Detailed QC by LE' overview panel (default: current year).",
+)
+def tui(ctx: click.Context, quarter: int | None, year: int | None):
     """Starts the interactive terminal user interface to the database."""
     db_url = ctx.obj["db_url"]
     public_keys = ctx.obj["public_keys"]
@@ -345,7 +357,7 @@ def tui(ctx: click.Context):
     textual_handler.setFormatter(logging.Formatter(fmt=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT))
     root_logger.addHandler(textual_handler)
 
-    app = DatabaseBrowser(database=database, public_keys=public_keys)
+    app = DatabaseBrowser(database=database, public_keys=public_keys, quarter=quarter, year=year)
     app.run()
 
 
