@@ -37,6 +37,7 @@ from grz_db.models.submission import (
     ChangeRequestLog,
     DetailedQCResult,
     Donor,
+    FailureReasonEnum,
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
@@ -432,21 +433,21 @@ def add(ctx: click.Context, submission_id: str):
         raise click.ClickException(f"Failed to add submission: {e}") from e
 
 
-@submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
-@click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
-@click.option("--ignore-error-state/--confirm-error-state")
-@click.pass_context
-def update(ctx: click.Context, submission_id: str, state_str: str, data_json: str | None, ignore_error_state: bool):  # noqa: C901
-    """Update a submission to the given state. Optionally accepts additional JSON data to associate with the log entry."""
-    db = ctx.obj["db_url"]
-    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+def _parse_update_args(
+    state_str: str, data_json: str | None, failure_reason: str | None
+) -> tuple[SubmissionStateEnum, dict | None, FailureReasonEnum | None]:
+    """Parse and validate arguments for the update command."""
     try:
         state_enum = SubmissionStateEnum(state_str)
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid state value '{state_str}'.[/red]")
         raise click.Abort() from e
+
+    failure_reason_enum = None
+    if failure_reason:
+        failure_reason_enum = FailureReasonEnum(failure_reason)
 
     parsed_data = None
     if data_json:
@@ -455,25 +456,62 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
         except json.JSONDecodeError as e:
             console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
             raise click.Abort() from e
+
+    return state_enum, parsed_data, failure_reason_enum
+
+
+def _check_error_state_transition(
+    submission: Submission, state_enum: SubmissionStateEnum, ignore_error_state: bool
+) -> None:
+    """Check if transitioning from error state requires confirmation."""
+    latest_state = submission.get_latest_state()
+    latest_state_is_error = latest_state is not None and latest_state.state == SubmissionStateEnum.ERROR
+    if (
+        latest_state_is_error
+        and not ignore_error_state
+        and not click.confirm(
+            f"Submission is currently in an 'Error' state. Are you sure you want to set it to '{state_enum}'?",
+            default=False,
+            show_default=True,
+        )
+    ):
+        console_err.print(f"[yellow]Not modifying state of errored submission '{submission.id}'.[/yellow]")
+        raise click.Abort()
+
+
+@submission.command()
+@click.option(
+    "--failure-reason",
+    type=click.Choice([r.lower() for r in FailureReasonEnum.list()], case_sensitive=False),
+    help="Reason for failure (when state is Error)",
+)
+@click.option("--ignore-error-state/--confirm-error-state")
+@click.argument("submission_id", type=str)
+@click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
+@click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.pass_context
+def update(  # noqa: PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    state_str: str,
+    data_json: str | None,
+    failure_reason: str | None,
+    ignore_error_state: bool,
+):
+    """Update a submission to the given state. Optionally accepts additional JSON data to associate with the log entry."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    state_enum, parsed_data, failure_reason_enum = _parse_update_args(state_str, data_json, failure_reason)
+
     try:
         submission = db_service.get_submission(submission_id)
         if not submission:
             raise SubmissionNotFoundError(submission_id)
-        latest_state = submission.get_latest_state()
-        latest_state_is_error = latest_state is not None and latest_state.state == SubmissionStateEnum.ERROR
-        if (
-            latest_state_is_error
-            and not ignore_error_state
-            and not click.confirm(
-                f"Submission is currently in an 'Error' state. Are you sure you want to set it to '{state_enum}'?",
-                default=False,
-                show_default=True,
-            )
-        ):
-            console_err.print(f"[yellow]Not modifying state of errored submission '{submission_id}'.[/yellow]")
-            ctx.exit()
 
-        new_state_log = db_service.update_submission_state(submission_id, state_enum, parsed_data)
+        _check_error_state_transition(submission, state_enum, ignore_error_state)
+
+        new_state_log = db_service.update_submission_state(submission_id, state_enum, parsed_data, failure_reason_enum)
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
         )
@@ -921,7 +959,9 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
             signature_status, verifying_key_comment = _verify_signature(
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
-            state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
+            state_dict = state_log.model_dump(
+                mode="json", include={"id", "timestamp", "state", "data", "failure_reason"}
+            )
             state_dict["data_steward"] = state_log.author_name
             state_dict["data_steward_signature"] = signature_status
             state_dict["signature_key_comment"] = verifying_key_comment
@@ -959,6 +999,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         state_table.add_column("Log ID", style="dim", width=12)
         state_table.add_column("Timestamp (UTC)", style="yellow")
         state_table.add_column("State", style="green")
+        state_table.add_column("Failure Reason", style="red")
         state_table.add_column("Data", style="cyan", overflow="ellipsis")
         state_table.add_column("Data Steward", style="magenta")
         state_table.add_column("Signature Status")
@@ -968,6 +1009,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
             data_str = json.dumps(state_log.data) if state_log.data else ""
             state = state_log.state.value
             state_str = f"[red]{state}[/red]" if state == SubmissionStateEnum.ERROR else state
+            failure_reason_str = state_log.failure_reason.value if state_log.failure_reason else ""
             data_steward_str = state_log.author_name
             signature_status, verifying_key_comment = _verify_signature(
                 ctx.obj["public_keys"], data_steward_str, state_log
@@ -978,6 +1020,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 str(state_log.id),
                 state_log.timestamp.isoformat(),
                 state_str,
+                failure_reason_str,
                 data_str,
                 data_steward_str,
                 signature_status_str,
