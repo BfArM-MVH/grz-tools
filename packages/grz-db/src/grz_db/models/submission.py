@@ -39,7 +39,6 @@ from sqlmodel import DateTime, Field, Relationship, Session, SQLModel, create_en
 
 from ..common import (
     CaseInsensitiveStrEnum,
-    ListableEnum,
     serialize_datetime_to_iso_z,
 )
 from ..errors import DuplicateSubmissionError, DuplicateTanGError, SubmissionNotFoundError
@@ -53,7 +52,7 @@ class OutdatedDatabaseSchemaError(Exception):
     pass
 
 
-class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+class SubmissionStateEnum(CaseInsensitiveStrEnum):  # type: ignore[misc]
     """Submission state enum."""
 
     UPLOADING = "Uploading"
@@ -78,7 +77,7 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     ERROR = "Error"
 
 
-class SubmissionStateFilterModeEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+class SubmissionStateFilterModeEnum(CaseInsensitiveStrEnum):
     """Submission state filter mode enum."""
 
     LATEST = "latest"
@@ -110,6 +109,15 @@ class SemicolonSeparatedStringSet(sa.types.TypeDecorator):
 
     def process_result_value(self, value: str | None, dialect: sa.engine.Dialect) -> set[str] | None:
         return None if value is None else set(value.split(";"))
+
+
+class FailureReasonEnum(CaseInsensitiveStrEnum):
+    """Failure reason enum with controlled vocabulary."""
+
+    DUPLICATE_TANG = "Duplicate TanG"
+    MISSING_DATA = "Missing Data"
+    DECRYPTION_ERROR = "Decryption Error"
+    NETWORK_ERROR = "Network Error"
 
 
 class SubmissionBase(SQLModel):
@@ -182,6 +190,10 @@ class SubmissionStateLogBase(SQLModel):
     model_config = ConfigDict(  # type: ignore
         populate_by_name=True,
     )
+    failure_reason: FailureReasonEnum | None = Field(
+        default=None,
+        sa_column=Column(Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e], python_type=str)),
+    )
 
     @field_serializer("timestamp")
     def serialize_timestamp(self, ts: datetime.datetime) -> str:
@@ -228,7 +240,7 @@ class SubmissionCreate(SubmissionBase):
     id: str
 
 
-class ChangeRequestEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+class ChangeRequestEnum(CaseInsensitiveStrEnum):
     """Change request enum."""
 
     MODIFY = "Modify"
@@ -495,6 +507,7 @@ class SubmissionDb:
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
+        failure_reason: FailureReasonEnum | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -515,7 +528,11 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             state_log_payload = SubmissionStateLogPayload(
-                submission_id=submission_id, author_name=self._author.name, state=state, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                state=state,
+                data=data,
+                failure_reason=failure_reason,
             )
             signature = state_log_payload.sign(self._author.private_key())
 

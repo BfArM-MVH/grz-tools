@@ -38,14 +38,10 @@ class CaseInsensitiveStrEnum(enum.StrEnum):
         """
         return hash(self.value.casefold())
 
-
-class ListableEnum(enum.StrEnum):
-    """Mixin for enum classes whose members can be listed."""
-
     @classmethod
     def list(cls) -> list[str]:
         """Returns a list of enum members."""
-        return list(map(lambda c: c.value, cls))
+        return [m.value for m in cls]
 
 
 def serialize_datetime_to_iso_z(dt: datetime.datetime) -> str:
