@@ -1,7 +1,7 @@
 """Add failure_reason column to submission_states
 
 Revision ID: c063b408d262
-Revises: 8aa6fc8d118a
+Revises: 9023ab55c239, f3a9c7d2e481
 Create Date: 2026-04-13 09:51:49.819155+00:00
 
 """
@@ -14,7 +14,7 @@ from grz_db.models.submission import FailureReasonEnum
 
 # revision identifiers, used by Alembic.
 revision: str = "c063b408d262"
-down_revision: str | Sequence[str] | None = "8aa6fc8d118a"
+down_revision: str | Sequence[str] | None = ("9023ab55c239", "f3a9c7d2e481")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
