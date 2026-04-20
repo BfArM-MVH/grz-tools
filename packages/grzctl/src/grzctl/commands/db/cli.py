@@ -36,7 +36,7 @@ from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
-    FieldDiff,
+    Donor,
     Submission,
     SubmissionBase,
     SubmissionDb,
@@ -44,6 +44,7 @@ from grz_db.models.submission import (
     SubmissionStateEnum,
     SubmissionStateFilterModeEnum,
     SubmissionStateLog,
+    FailureReasonEnum,
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
@@ -467,9 +468,21 @@ def add(ctx: click.Context, submission_id: str):
 @click.argument("submission_id", type=str)
 @click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.option(
+    "--failure-reason",
+    type=click.Choice(FailureReasonEnum.list(), case_sensitive=False),
+    help="Failure reason when state is ERROR.",
+)
 @click.option("--ignore-error-state/--confirm-error-state")
 @click.pass_context
-def update(ctx: click.Context, submission_id: str, state_str: str, data_json: str | None, ignore_error_state: bool):  # noqa: C901
+def update(  # noqa: C901, PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    state_str: str,
+    data_json: str | None,
+    ignore_error_state: bool,
+    failure_reason: str | None,
+):
     """Update a submission to the given state. Optionally accepts additional JSON data to associate with the log entry."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -478,7 +491,6 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid state value '{state_str}'.[/red]")
         raise click.Abort() from e
-
     parsed_data = None
     if data_json:
         try:
@@ -504,18 +516,22 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             console_err.print(f"[yellow]Not modifying state of errored submission '{submission_id}'.[/yellow]")
             ctx.exit()
 
+        failure_reason_enum = None
+        if failure_reason:
+            failure_reason_enum = FailureReasonEnum(failure_reason)
         new_state_log = db_service.update_submission_state(
             submission_id,
             state_enum,
             parsed_data,
+            failure_reason=failure_reason_enum,
             grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
         )
+
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
         )
         if new_state_log.data:
             console_err.print(f"  Data: {new_state_log.data}")
-
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
         console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
@@ -915,8 +931,9 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
             state_dict = state_log.model_dump(
-                mode="json", include={"id", "timestamp", "state", "data", "grzctl_versions"}
+                mode="json", include={"id", "timestamp", "state", "data", "grzctl_versions", "failure_reason"}
             )
+
             state_dict["data_steward"] = state_log.author_name
             state_dict["data_steward_signature"] = signature_status
             state_dict["signature_key_comment"] = verifying_key_comment
@@ -956,6 +973,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         state_table.add_column("Log ID", style="dim", width=12)
         state_table.add_column("Timestamp (UTC)", style="yellow")
         state_table.add_column("State", style="green")
+        state_table.add_column("Failure Reason", style="red", min_width=15)
         state_table.add_column("Data", style="cyan", overflow="ellipsis")
         state_table.add_column("Dependency Versions", style="blue")
         state_table.add_column("Data Steward", style="magenta")
@@ -976,6 +994,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 str(state_log.id),
                 state_log.timestamp.isoformat(),
                 state_str,
+                state_log.failure_reason.value if state_log.failure_reason else "",
                 data_str,
                 json.dumps(state_log.grzctl_versions) if state_log.grzctl_versions else _TEXT_MISSING,
                 data_steward_str,

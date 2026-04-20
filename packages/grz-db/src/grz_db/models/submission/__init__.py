@@ -246,6 +246,18 @@ class Submission(SubmissionBase, table=True):
             }
         )
 
+class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Failure reason enum for submissions in ERROR state."""
+
+    DUPLICATE_TANG = "duplicate_tang"
+    INCOMPLETE_SUBMISSION = "incomplete_submission"
+    DECRYPTION_ERROR = "decryption_error"
+    NETWORK_ERROR = "network_error"
+    VALIDATION_ERROR = "validation_error"
+    FILE_NOT_FOUND = "file_not_found"
+    ENCRYPTION_ERROR = "encryption_error"
+    UPLOAD_ERROR = "upload_error"
+    UNKNOWN = "unknown"
 
 class SubmissionStateLogBase(SQLModel):
     """
@@ -261,6 +273,13 @@ class SubmissionStateLogBase(SQLModel):
         default=None,
         description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
         sa_column=Column(JSON),
+    )
+    failure_reason: FailureReasonEnum | None = Field(
+        default=None,
+        sa_column=Column(
+            Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e]),
+            nullable=True,
+        ),
     )
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
@@ -300,7 +319,6 @@ class SubmissionStateLog(SubmissionStateLogBase, VerifiableLog[SubmissionStateLo
     signature: str
 
     submission: Submission | None = Relationship(back_populates="states")
-
 
 class SubmissionStateLogCreate(SubmissionStateLogBase):
     """Submission state log create model."""
@@ -748,6 +766,7 @@ class SubmissionDb:
         state: SubmissionStateEnum,
         data: dict | None = None,
         grzctl_versions: dict[str, str] | None = None,
+        failure_reason: FailureReasonEnum | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -774,6 +793,7 @@ class SubmissionDb:
                 state=state,
                 data=data,
                 grzctl_versions=grzctl_versions,
+                failure_reason=failure_reason,
             )
             signature = state_log_payload.sign(self._author.private_key())
 
