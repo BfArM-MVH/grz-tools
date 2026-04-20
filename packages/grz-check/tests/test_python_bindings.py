@@ -14,16 +14,7 @@ import grz_check
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BAM = REPO_ROOT / "tests" / "resources" / "reads" / "valid_HiFi.bam"
 
-FASTQ_BYTES = (
-    b"@read1\n"
-    b"ACGTACGTACGT\n"
-    b"+\n"
-    b"IIIIIIIIIIII\n"
-    b"@read2\n"
-    b"TTGGCCAATTGG\n"
-    b"+\n"
-    b"JJJJJJJJJJJJ\n"
-)
+FASTQ_BYTES = b"@read1\nACGTACGTACGT\n+\nIIIIIIIIIIII\n@read2\nTTGGCCAATTGG\n+\nJJJJJJJJJJJJ\n"
 
 
 @pytest.fixture
@@ -84,9 +75,7 @@ def test_validate_fastq_paired_path_and_stream_agree(tmp_path: Path) -> None:
     r2.write_bytes(FASTQ_BYTES)
 
     p1, p2 = grz_check.validate_fastq_paired(r1, r2)
-    s1, s2 = grz_check.validate_fastq_paired(
-        io.BytesIO(FASTQ_BYTES), io.BytesIO(FASTQ_BYTES)
-    )
+    s1, s2 = grz_check.validate_fastq_paired(io.BytesIO(FASTQ_BYTES), io.BytesIO(FASTQ_BYTES))
     assert p1.num_records == s1.num_records == 2
     assert p2.num_records == s2.num_records == 2
     assert p1.is_valid == s1.is_valid
