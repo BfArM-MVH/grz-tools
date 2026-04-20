@@ -280,6 +280,7 @@ class SubmissionStateLogBase(SQLModel):
             Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e]),
             nullable=True,
         ),
+    )
     grzctl_versions: dict[str, str] | None = Field(
         default=None,
         description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
