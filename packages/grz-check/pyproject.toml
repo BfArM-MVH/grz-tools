@@ -18,6 +18,7 @@ dev = ["pytest", "maturin"]
 
 [dependency-groups]
 test = ["pytest >=8,<9"]
+dev = ["tox >=4.23", "tox-uv"]
 
 [tool.maturin]
 features = ["python"]
