@@ -26,13 +26,16 @@ impl PyFileLikeObject {
                 "Expected object with .read() method",
             ));
         }
-        // If the object has a mode attribute (e.g. file objects), verify it is opened in binary mode
+        // If the object has a string mode attribute (e.g. files opened with open()), verify
+        // it is binary. Skip non-string modes: gzip.GzipFile exposes an integer mode, and
+        // io.BytesIO has no mode attribute at all — both are valid binary sources.
         if let Ok(mode) = obj.getattr("mode") {
-            let mode_str: String = mode.extract()?;
-            if !mode_str.contains('b') {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "File must be opened in binary mode (e.g. 'rb'), got mode '{mode_str}'"
-                )));
+            if let Ok(mode_str) = mode.extract::<String>() {
+                if !mode_str.contains('b') {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "File must be opened in binary mode (e.g. 'rb'), got mode '{mode_str}'"
+                    )));
+                }
             }
         }
         Ok(Self {
