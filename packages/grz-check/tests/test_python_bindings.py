@@ -7,9 +7,8 @@ import hashlib
 import io
 from pathlib import Path
 
-import pytest
-
 import grz_check
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BAM = REPO_ROOT / "tests" / "resources" / "reads" / "valid_HiFi.bam"
