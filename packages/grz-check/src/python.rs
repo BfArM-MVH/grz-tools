@@ -30,9 +30,9 @@ impl PyFileLikeObject {
         if let Ok(mode) = obj.getattr("mode") {
             let mode_str: String = mode.extract()?;
             if !mode_str.contains('b') {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    format!("File must be opened in binary mode (e.g. 'rb'), got mode '{mode_str}'"),
-                ));
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "File must be opened in binary mode (e.g. 'rb'), got mode '{mode_str}'"
+                )));
             }
         }
         Ok(Self {
