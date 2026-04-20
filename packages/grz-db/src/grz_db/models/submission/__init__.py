@@ -247,22 +247,33 @@ class Submission(SubmissionBase, table=True):
         )
 
 
+class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Failure reason enum for submissions in ERROR state."""
+
+    DUPLICATE_TANG = "duplicatedtanG"
+    INCOMPLETE_SUBMISSION = "incompletesubmission"
+    DECRYPTION_ERROR = "decryptionerror"
+    NETWORK_ERROR = "networkerror"
+
+
 class SubmissionStateLogBase(SQLModel):
     """
     Submission state log base model.
     Holds state information for each submission.
-    Timestamped.
-    Can optionally have associated JSON data.
+    Timestamped. Can optionally have associated JSON data
+    and a failure reason for submissions in an ERROR state.
     """
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    failure_reason: FailureReasonEnum | None = Field(default=None)
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
     model_config = ConfigDict(  # type: ignore
+        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
 
@@ -737,6 +748,7 @@ class SubmissionDb:
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
+        failure_reason: FailureReasonEnum | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -757,7 +769,11 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             state_log_payload = SubmissionStateLogPayload(
-                submission_id=submission_id, author_name=self._author.name, state=state, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                state=state,
+                data=data,
+                failure_reason=failure_reason,
             )
             signature = state_log_payload.sign(self._author.private_key())
 
