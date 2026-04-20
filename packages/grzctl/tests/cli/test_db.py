@@ -1202,3 +1202,74 @@ def test_submission_grzctl_version_different_versions(
         # Verify grzctl_versions structure (not checking specific versions due to import-time binding)
         assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
         assert "grzctl" in state["grzctl_versions"], f"grzctl missing in grzctl_versions for state {i}"
+def test_failure_reason_migration(blank_initial_database_config_path):
+    """Test the failure_reason migration works correctly."""
+    # Set up test data before migration
+    config = DbConfig.from_path(blank_initial_database_config_path)
+
+    if not config.db.database_url.startswith("sqlite:///"):
+        pytest.skip("Test uses sqlite3 directly and only works with SQLite")
+
+    submission_id = "123456789_2024-11-08_d0f805c5"
+
+    with sqlite3.connect(config.db.database_url[len("sqlite:///") :]) as connection:
+        connection.execute(
+            "INSERT INTO submissions(id) VALUES(:id)",
+            {"id": submission_id},
+        )
+
+    # Test CLI commands fail before migration
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    args_common = ["db", "--config-file", blank_initial_database_config_path]
+
+    result_premature = runner.invoke(cli, [*args_common, "list"])
+    assert result_premature.exit_code != 0
+    assert "Database not at latest schema" in result_premature.stderr
+
+    # Run the migration
+    result_upgrade = runner.invoke(cli, [*args_common, "upgrade"])
+    assert result_upgrade.exit_code == 0, result_upgrade.stderr
+
+    # Test that failure_reason functionality works
+    result_update = runner.invoke(
+        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryptionerror"]
+    )
+    assert result_update.exit_code == 0, result_update.stderr
+
+    # Verify the failure reason was stored
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+    assert "decryptionerror" in result_show.stdout
+
+
+def test_submission_show_json_includes_failure_reason(blank_database_config_path: Path):
+    """Submission show --json should include failure_reason in state history."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    submission_id = "123456789_2025-01-01_00000000"
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_update = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            submission_id,
+            "Error",
+            "--failure-reason",
+            "decryptionerror",
+        ],
+    )
+    assert result_update.exit_code == 0, result_update.stderr
+
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", "--json", submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+
+    parsed = json.loads(result_show.stdout)
+    error_state = next(s for s in parsed["states"] if s["state"] == "Error")
+    assert error_state["failure_reason"] == "decryptionerror"
