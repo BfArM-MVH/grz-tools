@@ -1,3 +1,4 @@
+import contextlib
 import shutil
 from unittest.mock import MagicMock, patch
 
@@ -5,6 +6,7 @@ import click.testing
 import pytest
 import sqlalchemy
 import yaml
+from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import Submission, SubmissionStateEnum
 from grzctl.cli import build_cli
 from grzctl.models.config import DbConfig
@@ -98,16 +100,79 @@ def get_state_history(engine, submission_id) -> list[SubmissionStateEnum]:
         return [log.state for log in sorted(submission.states, key=lambda x: x.id)]
 
 
+@contextlib.contextmanager
+def mock_command(command_spec, submission_id):
+    """
+    Patch the Worker class and/or extra callable described by *command_spec*, then yield
+    ``(mock_worker_instance, mock_extra)`` so callers can make assertions on them.
+
+    Uses ExitStack so every patch is registered individually and all are torn down
+    automatically when the ``with`` block exits, regardless of exceptions.
+    """
+    with contextlib.ExitStack() as stack:
+        mock_worker = None
+        mock_extra = None
+
+        if "worker_patch" in command_spec:
+            # Patch the Worker *class* so that Worker(...) returns our mock instance.
+            mock_worker_cls = stack.enter_context(patch(command_spec["worker_patch"]))
+            mock_worker = mock_worker_cls.return_value
+
+            # Whichever parse_* method the command calls must return a submission
+            # whose ID matches the one we put in the DB.
+            mock_submission = MagicMock()
+            mock_submission.metadata.content.submission_id = submission_id
+            mock_submission.submission_id = submission_id
+
+            if command_spec["id_source"] == "submission":
+                mock_worker.parse_submission.return_value = mock_submission
+            elif command_spec["id_source"] == "encrypted_submission":
+                mock_worker.parse_encrypted_submission.return_value = mock_submission
+
+        if "extra_patch" in command_spec:
+            # Some commands invoke a standalone callable (e.g. validate.callback,
+            # _clean_submission_from_bucket) instead of a Worker method.
+            mock_extra = stack.enter_context(patch(command_spec["extra_patch"]))
+
+        yield mock_worker, mock_extra
+
+
+def build_args(
+    command_spec,
+    submission_dir=None,
+    output_dir=None,
+    submission_id=None,
+    config_path=None,
+    extra_flags=(),
+):
+    """Translate a command_spec cmd list (with placeholders) into a concrete argv list."""
+    args = []
+    for arg in command_spec["cmd"]:
+        if arg == "SUBMISSION_DIR":
+            args.append(str(submission_dir))
+        elif arg == "OUTPUT_DIR":
+            args.append(str(output_dir))
+        elif arg == "SUBMISSION_ID":
+            args.append(submission_id)
+        else:
+            args.append(arg)
+    if config_path:
+        args.extend(["--config-file", str(config_path)])
+    args.extend(extra_flags)
+    return args
+
+
 @pytest.mark.parametrize(
     "command_spec",
     [
         {
-            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.archive.Worker",
-            "id_source": "encrypted_submission",
-            "initial_state": SubmissionStateEnum.ENCRYPTED,
-            "intermediate_state": SubmissionStateEnum.ARCHIVING,
-            "expected_state": SubmissionStateEnum.ARCHIVED,
+            "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR"],
+            "worker_patch": "grzctl.commands.download.Worker",
+            "id_source": "arg",
+            "initial_state": None,
+            "intermediate_state": SubmissionStateEnum.DOWNLOADING,
+            "expected_state": SubmissionStateEnum.DOWNLOADED,
+            "skip_populate": True,
         },
         {
             "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR"],
@@ -145,6 +210,14 @@ def get_state_history(engine, submission_id) -> list[SubmissionStateEnum]:
             "expected_state": SubmissionStateEnum.ENCRYPTED,
         },
         {
+            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.archive.Worker",
+            "id_source": "encrypted_submission",
+            "initial_state": SubmissionStateEnum.ENCRYPTED,
+            "intermediate_state": SubmissionStateEnum.ARCHIVING,
+            "expected_state": SubmissionStateEnum.ARCHIVED,
+        },
+        {
             "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it"],
             "extra_patch": "grzctl.commands.clean._clean_submission_from_bucket",
             "id_source": "arg",
@@ -155,7 +228,7 @@ def get_state_history(engine, submission_id) -> list[SubmissionStateEnum]:
         },
     ],
 )
-def test_db_wrappers(  # noqa: C901
+def test_db_wrappers(
     command_spec,
     db_engine,
     full_config_path,
@@ -186,43 +259,16 @@ def test_db_wrappers(  # noqa: C901
         initial_state=command_spec["initial_state"],
     )
 
-    args = []
-    for arg in command_spec["cmd"]:
-        if arg == "SUBMISSION_DIR":
-            args.append(str(submission_dir))
-        elif arg == "OUTPUT_DIR":
-            args.append(str(output_dir))
-        elif arg == "SUBMISSION_ID":
-            args.append(submission_id)
-        else:
-            args.append(arg)
+    args = build_args(
+        command_spec,
+        submission_dir=submission_dir,
+        output_dir=output_dir,
+        submission_id=submission_id,
+        config_path=full_config_path,
+        extra_flags=["--update-db"],
+    )
 
-    args.extend(["--config-file", str(full_config_path), "--update-db"])
-
-    worker_patcher = None
-    extra_patcher = None
-    mock_worker = None
-    mock_extra = None
-
-    try:
-        if "worker_patch" in command_spec:
-            worker_patcher = patch(command_spec["worker_patch"])
-            mock_worker_cls = worker_patcher.start()
-            mock_worker = mock_worker_cls.return_value
-
-            mock_submission = MagicMock()
-            mock_submission.metadata.content.submission_id = submission_id
-            mock_submission.submission_id = submission_id
-
-            if command_spec["id_source"] == "submission":
-                mock_worker.parse_submission.return_value = mock_submission
-            elif command_spec["id_source"] == "encrypted_submission":
-                mock_worker.parse_encrypted_submission.return_value = mock_submission
-
-        if "extra_patch" in command_spec:
-            extra_patcher = patch(command_spec["extra_patch"])
-            mock_extra = extra_patcher.start()
-
+    with mock_command(command_spec, submission_id) as (mock_worker, mock_extra):
         result = runner.invoke(cli, args)
 
         assert result.exit_code == 0, f"Command failed: {result.output}"
@@ -240,11 +286,176 @@ def test_db_wrappers(  # noqa: C901
         if command_spec["initial_state"]:
             assert history[-3] == command_spec["initial_state"]
 
-    finally:
-        if extra_patcher:
-            extra_patcher.stop()
-        if worker_patcher:
-            worker_patcher.stop()
+
+@pytest.mark.parametrize(
+    "command_spec",
+    [
+        {
+            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.decrypt.Worker",
+            "id_source": "encrypted_submission",
+        },
+        {
+            "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.validate.Worker",
+            "extra_patch": "grzctl.commands.validate.validate_module.validate.callback",
+            "id_source": "submission",
+        },
+        {
+            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.encrypt.Worker",
+            "extra_patch": "grzctl.commands.encrypt.encrypt_module.encrypt.callback",
+            "id_source": "submission",
+        },
+        {
+            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.archive.Worker",
+            "id_source": "encrypted_submission",
+        },
+        {
+            "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it"],
+            "extra_patch": "grzctl.commands.clean._clean_submission_from_bucket",
+            "id_source": "arg",
+        },
+    ],
+)
+def test_db_wrappers_submission_not_in_db(
+    command_spec,
+    db_engine,
+    full_config_path,
+    test_metadata,
+    tmp_path,
+):
+    """Test that commands fail with SubmissionNotFoundError when the submission has not been added to the DB yet."""
+    runner = click.testing.CliRunner()
+    cli = build_cli()
+
+    parsed_metadata, _ = test_metadata
+    submission_id = parsed_metadata.submission_id
+
+    submission_dir = tmp_path / "submission"
+    submission_dir.mkdir()
+    for d in ["metadata", "files", "logs", "encrypted_files"]:
+        (submission_dir / d).mkdir()
+    output_dir = tmp_path / "output"
+
+    # Deliberately skip adding the submission to the DB
+
+    args = build_args(
+        command_spec,
+        submission_dir=submission_dir,
+        output_dir=output_dir,
+        submission_id=submission_id,
+        config_path=full_config_path,
+        extra_flags=["--update-db"],
+    )
+
+    with mock_command(command_spec, submission_id):
+        result = runner.invoke(cli, args)
+
+        assert result.exit_code != 0, (
+            f"Expected command '{command_spec['cmd'][0]}' to fail when submission is not in DB, "
+            f"but it succeeded. Output: {result.output}"
+        )
+        assert isinstance(result.exception, SubmissionNotFoundError), (
+            f"Expected SubmissionNotFoundError, got {type(result.exception)}: {result.exception}"
+        )
+
+
+@pytest.mark.parametrize(
+    "command_spec",
+    [
+        {
+            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.decrypt.Worker",
+            "id_source": "encrypted_submission",
+            "wrong_state": SubmissionStateEnum.ENCRYPTED,  # expected: DOWNLOADED
+            "intermediate_state": SubmissionStateEnum.DECRYPTING,
+            "expected_state": SubmissionStateEnum.DECRYPTED,
+        },
+        {
+            "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.validate.Worker",
+            "extra_patch": "grzctl.commands.validate.validate_module.validate.callback",
+            "id_source": "submission",
+            "wrong_state": SubmissionStateEnum.ENCRYPTED,  # expected: DECRYPTED
+            "intermediate_state": SubmissionStateEnum.VALIDATING,
+            "expected_state": SubmissionStateEnum.VALIDATED,
+        },
+        {
+            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.encrypt.Worker",
+            "extra_patch": "grzctl.commands.encrypt.encrypt_module.encrypt.callback",
+            "id_source": "submission",
+            "wrong_state": SubmissionStateEnum.DOWNLOADED,  # expected: VALIDATED
+            "intermediate_state": SubmissionStateEnum.ENCRYPTING,
+            "expected_state": SubmissionStateEnum.ENCRYPTED,
+        },
+        {
+            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.archive.Worker",
+            "id_source": "encrypted_submission",
+            "wrong_state": SubmissionStateEnum.DOWNLOADED,  # expected: ENCRYPTED
+            "intermediate_state": SubmissionStateEnum.ARCHIVING,
+            "expected_state": SubmissionStateEnum.ARCHIVED,
+        },
+    ],
+)
+def test_db_wrappers_wrong_initial_state(
+    command_spec,
+    db_engine,
+    full_config_path,
+    test_metadata,
+    tmp_path,
+):
+    """
+    Test that commands still run (with a warning) when the submission is in an unexpected state.
+    The DbContext only logs a warning for mismatched states and does not block execution.
+    The state transition (intermediate → expected) should still be recorded.
+    """
+    runner = click.testing.CliRunner()
+    cli = build_cli()
+
+    parsed_metadata, metadata_path_fixture = test_metadata
+    submission_id = parsed_metadata.submission_id
+
+    submission_dir = tmp_path / "submission"
+    submission_dir.mkdir()
+    for d in ["metadata", "files", "logs", "encrypted_files"]:
+        (submission_dir / d).mkdir()
+    shutil.copy(metadata_path_fixture, submission_dir / "metadata" / "metadata.json")
+
+    # Add submission with a wrong/unexpected initial state
+    setup_db_state(
+        runner,
+        cli,
+        full_config_path,
+        submission_id,
+        metadata_path_fixture,
+        initial_state=command_spec["wrong_state"],
+    )
+
+    args = build_args(
+        command_spec,
+        submission_dir=submission_dir,
+        submission_id=submission_id,
+        config_path=full_config_path,
+        extra_flags=["--update-db"],
+    )
+
+    with mock_command(command_spec, submission_id):
+        result = runner.invoke(cli, args)
+
+        # The command should still succeed — wrong state is only a warning, not a hard failure
+        assert result.exit_code == 0, (
+            f"Command '{command_spec['cmd'][0]}' unexpectedly failed with wrong initial state. Output: {result.output}"
+        )
+
+        history = get_state_history(db_engine, submission_id)
+        assert history[-1] == command_spec["expected_state"], f"Unexpected final state: {history}"
+        assert history[-2] == command_spec["intermediate_state"], f"Unexpected intermediate state: {history}"
+        # The wrong state should be present earlier in history
+        assert command_spec["wrong_state"] in history, f"Wrong state not found in history: {history}"
 
 
 def test_pruefbericht_wrapper(db_engine, full_config_path, test_metadata, tmp_path):

@@ -122,6 +122,7 @@ def test_upload_download_submission(
             str(download_dir_path),
             "--config-file",
             str(temp_s3_db_config_file_path),
+            "--no-update-db",
             "--populate",
         ]
         result = runner.invoke(cli, download_args, catch_exceptions=False)

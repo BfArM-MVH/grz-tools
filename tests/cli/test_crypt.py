@@ -88,6 +88,7 @@ def test_decrypt_submission(working_dir_path, temp_keys_config_file_path):
         str(working_dir_path),
         "--config-file",
         temp_keys_config_file_path,
+        "--no-update-db",
     ]
     runner = CliRunner()
     cli = grzctl.cli.build_cli()
@@ -148,6 +149,7 @@ def test_encrypt_decrypt_submission(
         str(working_dir_path),
         "--config-file",
         temp_keys_config_file_path,
+        "--no-update-db",
     ]
 
     runner = CliRunner()

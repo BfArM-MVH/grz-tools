@@ -65,6 +65,10 @@ def download(  # noqa: PLR0913
         submission_id=submission_id,
         start_state=SubmissionStateEnum.DOWNLOADING,
         end_state=SubmissionStateEnum.DOWNLOADED,
+        expected_prior_states={
+            None,
+            SubmissionStateEnum.UPLOADED,
+        },
         enabled=update_db,
     ) as db_context:
         worker_inst.download(config.s3, submission_id, force=force)
