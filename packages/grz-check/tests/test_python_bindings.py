@@ -73,21 +73,21 @@ def test_validate_fastq_gzip_filelike_raw() -> None:
 
 
 def test_validate_fastq_buffer_protocol_bytes() -> None:
-    """bytes objects go through the PyBuffer fast path (no .read() loop)."""
+    """Verify bytes input uses the PyBuffer fast path (no .read() loop)."""
     report = grz_check.validate_fastq(FASTQ_BYTES)
     assert report.is_valid
     assert report.num_records == 2
 
 
 def test_validate_fastq_buffer_protocol_bytearray() -> None:
-    """bytearray goes through PyBuffer (buffer protocol)."""
+    """Verify bytearray input goes through PyBuffer (buffer protocol)."""
     report = grz_check.validate_fastq(bytearray(FASTQ_BYTES))
     assert report.is_valid
     assert report.num_records == 2
 
 
 def test_validate_fastq_buffer_protocol_memoryview() -> None:
-    """memoryview goes through PyBuffer."""
+    """Verify memoryview input goes through PyBuffer."""
     report = grz_check.validate_fastq(memoryview(FASTQ_BYTES))
     assert report.is_valid
     assert report.num_records == 2
