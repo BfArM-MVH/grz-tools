@@ -107,6 +107,16 @@ def test_upload_download_submission(
             ]
         runner.invoke(cli, init_args, catch_exceptions=False)
 
+        add_args = [
+            "db",
+            "--config-file",
+            str(temp_s3_db_config_file_path),
+            "submission",
+            "add",
+            submission_id,
+        ]
+        runner.invoke(cli, add_args, catch_exceptions=False)
+
         # download
         download_dir = tmpdir_factory.mktemp("submission_download")
         download_dir_path = Path(download_dir.strpath)
@@ -121,7 +131,6 @@ def test_upload_download_submission(
             "--config-file",
             str(temp_s3_db_config_file_path),
             "--populate",
-            "--force"
         ]
         result = runner.invoke(cli, download_args, catch_exceptions=False)
 

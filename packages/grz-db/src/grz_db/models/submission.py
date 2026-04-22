@@ -31,7 +31,7 @@ from grz_pydantic_models.submission.metadata import (
     Tan,
 )
 from pydantic import ConfigDict, field_serializer, field_validator
-from sqlalchemy import JSON, Column, Enum
+from sqlalchemy import JSON, BigInteger, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -138,7 +138,7 @@ class SubmissionBase(SQLModel):
     genomic_study_subtype: GenomicStudySubtype | None = None
 
     # extra fields
-    submission_size: int | None = Field(default=None)
+    submission_size: int | None = Field(default=None, sa_type=BigInteger)
     submission_metadata: str | None = Field(default=None)
 
 class Submission(SubmissionBase, table=True):

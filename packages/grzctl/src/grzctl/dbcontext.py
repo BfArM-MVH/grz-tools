@@ -95,7 +95,6 @@ class DbContext:
 
         return True
 
-    # TODO: move to grz_db.models.author?
     @property
     def author(self) -> Author:
         db_config = DbConfig.model_validate(self.configuration).db

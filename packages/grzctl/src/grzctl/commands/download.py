@@ -67,9 +67,7 @@ def download(  # noqa: PLR0913
         end_state=SubmissionStateEnum.DOWNLOADED,
         enabled=update_db,
     ) as db_context:
-        # worker_inst.download(config.s3, submission_id, force=force)
-        log.info("POPULATE")
-        if populate:
-            worker_inst.populate(config.s3, db_context, submission_id, force)
+        worker_inst.download(config.s3, submission_id, force=force)
+        if populate: worker_inst.populate(config.s3, db_context.db, submission_id, force_populate=force)
 
     log.info("Download finished!")
