@@ -7,18 +7,18 @@ File-based validation (paths as strings):
     >>> report = grz_check.validate_fastq("sample.fastq.gz", min_mean_read_length=30)
     >>> print(f"Valid: {report.is_valid}, Records: {report.num_records}")
 
-Stream-based validation (any file-like object with .read() method):
-    >>> import gzip
+Stream-based validation. FASTQ inputs are transparently decompressed
+(gzip/bgzip) on the Rust side via niffler — no need to wrap with gzip.open():
     >>> import grz_check
-    >>> with gzip.open("sample.fastq.gz", "rb") as f:
+    >>> with open("sample.fastq.gz", "rb") as f:
     ...     report = grz_check.validate_fastq(f, min_mean_read_length=30)
     >>> print(f"Valid: {report.is_valid}, Records: {report.num_records}")
 
-Stream-based functions work with any object implementing the read trait:
-    - file objects (open())
-    - gzip streams (gzip.open())
+Accepted stream sources:
+    - file objects (open(..., "rb"))
+    - raw bytes / bytearray / memoryview (buffer protocol, avoids .read() loop)
     - BytesIO (io.BytesIO)
-    - Custom stream classes with .read() method
+    - any binary object with .read()
 """
 
 from __future__ import annotations

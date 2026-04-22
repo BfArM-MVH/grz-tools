@@ -1,7 +1,8 @@
+use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use sha2::{Digest, Sha256};
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Cursor, Read};
 use std::path::PathBuf;
 
 use crate::checker::FileReport;
@@ -10,6 +11,8 @@ use crate::checks::common::CheckOutcome;
 use crate::checks::fastq::{
     ReadLengthCheck, check_single_fastq, process_paired_readers, validate_fastq_data,
 };
+
+const STREAM_BUF_SIZE: usize = 4 * 1024 * 1024; // 4 MB
 
 /// Wrapper for Python file-like objects that implements Rust's Read trait.
 pub struct PyFileLikeObject {
@@ -63,10 +66,39 @@ impl Read for PyFileLikeObject {
     }
 }
 
-impl<'py> FromPyObject<'py> for PyFileLikeObject {
-    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        Self::new(obj)
+/// Extract bytes from a Python object supporting the buffer protocol.
+/// Handles bytes/bytearray/memoryview, plus any object exposing Py_buffer
+/// (e.g. numpy arrays, array.array). Returns None if no buffer is available.
+fn extract_buffer_bytes(obj: &Bound<'_, PyAny>) -> PyResult<Option<Vec<u8>>> {
+    // Fast path: PyBytes avoids the buffer protocol machinery
+    if let Ok(bytes) = obj.downcast::<PyBytes>() {
+        return Ok(Some(bytes.as_bytes().to_vec()));
     }
+
+    // Buffer protocol path: works for bytearray, memoryview, numpy, array.array, etc.
+    // This pulls the memory once into a Vec; no repeated .read() calls on the Python side.
+    if let Ok(buffer) = PyBuffer::<u8>::get(obj) {
+        return Ok(Some(buffer.to_vec(obj.py())?));
+    }
+
+    Ok(None)
+}
+
+/// Represents a Python input that has been extracted from GIL-bound references.
+/// This is Send-safe and can be used inside allow_threads.
+enum StreamInput {
+    /// Data extracted via buffer protocol (bytes, bytearray, memoryview).
+    Buffer(Vec<u8>),
+    /// File-like object with .read() method.
+    FileLike(PyFileLikeObject),
+}
+
+/// Try to extract a Python object as a buffer-protocol object, falling back to file-like.
+fn extract_stream_input(obj: &Bound<'_, PyAny>) -> PyResult<StreamInput> {
+    if let Some(data) = extract_buffer_bytes(obj)? {
+        return Ok(StreamInput::Buffer(data));
+    }
+    Ok(StreamInput::FileLike(PyFileLikeObject::new(obj)?))
 }
 
 /// Validation report exposed to Python
@@ -133,16 +165,34 @@ fn noop_progress_bar() -> indicatif::ProgressBar {
     indicatif::ProgressBar::hidden()
 }
 
+/// Open a StreamInput as a decompressed FASTQ reader.
+/// Uses niffler for transparent gzip/bgzip detection and decompression.
+/// The returned reader has a single 4 MB BufReader layer for noodles' line-based parsing.
+fn open_fastq_reader(input: StreamInput) -> Result<Box<dyn BufRead>, String> {
+    let raw: Box<dyn Read> = match input {
+        StreamInput::Buffer(data) => Box::new(Cursor::new(data)),
+        StreamInput::FileLike(file_like) => Box::new(file_like),
+    };
+    let (decompressed, _format) = niffler::get_reader(raw)
+        .map_err(|e| format!("Failed to detect or decompress stream format: {e}"))?;
+    Ok(Box::new(BufReader::with_capacity(
+        STREAM_BUF_SIZE,
+        decompressed,
+    )))
+}
+
+/// Open a StreamInput as a BAM reader.
+/// No niffler decompression — noodles BAM reader handles bgzf internally.
+fn open_bam_reader(input: StreamInput) -> Box<dyn Read> {
+    match input {
+        StreamInput::Buffer(data) => Box::new(Cursor::new(data)),
+        StreamInput::FileLike(file_like) => {
+            Box::new(BufReader::with_capacity(STREAM_BUF_SIZE, file_like))
+        }
+    }
+}
+
 /// Validate a single-end FASTQ file from a path
-///
-/// This is a thin wrapper around the Rust file-based validation.
-///
-/// Args:
-///     path: Path to the FASTQ file
-///     min_mean_read_length: Minimum mean read length required (>0), or -1/None to skip check
-///
-/// Returns:
-///     ValidationReport with validation results
 #[pyfunction]
 #[pyo3(signature = (path, min_mean_read_length=None))]
 fn validate_fastq_single(
@@ -162,59 +212,53 @@ fn validate_fastq_single(
     Ok(PyValidationReport::from(report))
 }
 
-/// Validate a single-end FASTQ from a Python file-like object
+/// Validate a single-end FASTQ from a Python stream or buffer.
 ///
-/// This is a thin wrapper around `validate_fastq_data` from the Rust library.
-///
-/// Args:
-///     source: File-like object with .read() method (e.g., io.BytesIO, gzip.open(), open())
-///     min_mean_read_length: Minimum mean read length required (>0), or -1/None to skip check
-///
-/// Returns:
-///     ValidationReport with validation results
+/// Accepts bytes/bytearray/memoryview (zero-copy extraction) or any file-like
+/// object with .read(). Compression format (gzip, bgzip) is detected and
+/// decompressed transparently — no need to wrap in gzip.open().
 #[pyfunction]
 #[pyo3(signature = (source, min_mean_read_length=None))]
 fn validate_fastq_single_stream(
     py: Python,
-    source: PyFileLikeObject,
+    source: &Bound<'_, PyAny>,
     min_mean_read_length: Option<i64>,
 ) -> PyResult<PyValidationReport> {
     let length_check = parse_read_length_check(min_mean_read_length);
+    let input = extract_stream_input(source)?;
 
     let outcome = py
         .allow_threads(|| {
-            let reader = BufReader::with_capacity(128 * 1024, source);
-            validate_fastq_data(reader, length_check)
+            let mut reader = open_fastq_reader(input)?;
+            validate_fastq_data(&mut reader, length_check)
         })
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
+        .map_err(|e: String| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
     Ok(PyValidationReport::from(outcome))
 }
 
-/// Validate paired-end FASTQ from Python file-like objects (stream-based)
+/// Validate paired-end FASTQ from Python streams or buffers.
 ///
-/// This is a thin wrapper around `process_paired_readers` from the Rust library.
-///
-/// Args:
-///     r1: File-like object with .read() method (e.g., io.BytesIO, gzip.open())
-///     r2: File-like object with .read() method
-///     min_mean_read_length: Minimum mean read length (>0), or -1/None to skip
+/// Accepts bytes/bytearray/memoryview (zero-copy extraction) or any file-like
+/// object with .read(). Compression format (gzip, bgzip) is detected and
+/// decompressed transparently — no need to wrap in gzip.open().
 #[pyfunction]
 #[pyo3(signature = (r1, r2, min_mean_read_length=None))]
 fn validate_fastq_paired_stream(
     py: Python,
-    r1: PyFileLikeObject,
-    r2: PyFileLikeObject,
+    r1: &Bound<'_, PyAny>,
+    r2: &Bound<'_, PyAny>,
     min_mean_read_length: Option<i64>,
 ) -> PyResult<(PyValidationReport, PyValidationReport)> {
     let length_check = parse_read_length_check(min_mean_read_length);
+    let input1 = extract_stream_input(r1)?;
+    let input2 = extract_stream_input(r2)?;
 
     let (outcome1, outcome2, _pair_errors) = py
         .allow_threads(|| {
-            // Use 128KB buffer for better performance
-            let reader1 = BufReader::with_capacity(128 * 1024, r1);
-            let reader2 = BufReader::with_capacity(128 * 1024, r2);
-            process_paired_readers(reader1, reader2, length_check)
+            let mut reader1 = open_fastq_reader(input1)?;
+            let mut reader2 = open_fastq_reader(input2)?;
+            process_paired_readers(&mut reader1, &mut reader2, length_check)
         })
         .map_err(|e: String| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
@@ -225,16 +269,6 @@ fn validate_fastq_paired_stream(
 }
 
 /// Validate paired-end FASTQ files from paths
-///
-/// This opens the files and validates them using the same logic as `validate_fastq_paired`.
-///
-/// Args:
-///     r1_path: Path to the first FASTQ file (R1)
-///     r2_path: Path to the second FASTQ file (R2)
-///     min_mean_read_length: Minimum mean read length (>0), or -1/None to skip
-///
-/// Returns:
-///     Tuple of (r1_report, r2_report) ValidationReports
 #[pyfunction]
 #[pyo3(signature = (r1_path, r2_path, min_mean_read_length=None))]
 fn validate_fastq_paired_paths(
@@ -252,13 +286,13 @@ fn validate_fastq_paired_paths(
             let file1 = File::open(r1_path).map_err(|e| format!("Failed to open R1 file: {e}"))?;
             let file2 = File::open(r2_path).map_err(|e| format!("Failed to open R2 file: {e}"))?;
 
-            // Auto-detect and decompress (e.g. .gz files) using niffler
-            let (reader1, _fmt1) =
-                niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file1)))
-                    .map_err(|e| format!("Failed to decompress R1 file: {e}"))?;
-            let (reader2, _fmt2) =
-                niffler::get_reader(Box::new(BufReader::with_capacity(128 * 1024, file2)))
-                    .map_err(|e| format!("Failed to decompress R2 file: {e}"))?;
+            let (decompressed1, _fmt1) = niffler::get_reader(Box::new(file1))
+                .map_err(|e| format!("Failed to decompress R1 file: {e}"))?;
+            let (decompressed2, _fmt2) = niffler::get_reader(Box::new(file2))
+                .map_err(|e| format!("Failed to decompress R2 file: {e}"))?;
+
+            let reader1 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed1);
+            let reader2 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed2);
 
             process_paired_readers(reader1, reader2, length_check)
         })
@@ -271,14 +305,6 @@ fn validate_fastq_paired_paths(
 }
 
 /// Validate a BAM file from a path
-///
-/// This is a thin wrapper around the Rust file-based validation.
-///
-/// Args:
-///     path: Path to the BAM file
-///
-/// Returns:
-///     ValidationReport with validation results
 #[pyfunction]
 fn validate_bam(py: Python, path: &str) -> PyResult<PyValidationReport> {
     let path = PathBuf::from(path);
@@ -292,21 +318,18 @@ fn validate_bam(py: Python, path: &str) -> PyResult<PyValidationReport> {
     Ok(PyValidationReport::from(report))
 }
 
-/// Validate a BAM file from a Python file-like object
+/// Validate a BAM file from a Python stream or buffer.
 ///
-/// This is a thin wrapper around `validate_bam_data` from the Rust library.
-///
-/// Args:
-///     source: File-like object with .read() method (e.g., io.BytesIO, open())
-///
-/// Returns:
-///     ValidationReport with validation results
+/// Accepts bytes/bytearray/memoryview (zero-copy extraction) or any file-like
+/// object with .read(). Noodles handles bgzf decompression internally.
 #[pyfunction]
-fn validate_bam_stream(py: Python, source: PyFileLikeObject) -> PyResult<PyValidationReport> {
+fn validate_bam_stream(py: Python, source: &Bound<'_, PyAny>) -> PyResult<PyValidationReport> {
+    let input = extract_stream_input(source)?;
+
     let outcome = py
         .allow_threads(|| {
-            let reader = BufReader::with_capacity(128 * 1024, source);
-            validate_bam_data(reader)
+            let mut reader = open_bam_reader(input);
+            validate_bam_data(&mut reader)
         })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
 
@@ -318,7 +341,7 @@ fn calculate_file_checksum(path: &std::path::Path) -> Result<String, std::io::Er
     use std::fs::File;
 
     let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, file);
     let mut hasher = Sha256::new();
 
     std::io::copy(&mut reader, &mut hasher)?;
@@ -327,12 +350,6 @@ fn calculate_file_checksum(path: &std::path::Path) -> Result<String, std::io::Er
 }
 
 /// Calculate SHA256 checksum of a file
-///
-/// Args:
-///     path: Path to the file
-///
-/// Returns:
-///     Hex-encoded SHA256 checksum string
 #[pyfunction]
 fn calculate_checksum(py: Python, path: &str) -> PyResult<String> {
     let path = PathBuf::from(path);
@@ -351,19 +368,21 @@ fn calculate_stream_checksum<R: Read>(mut reader: R) -> Result<String, std::io::
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// Calculate SHA256 checksum from a Python file-like object
+/// Calculate SHA256 checksum from a Python stream or buffer.
 ///
-/// Args:
-///     source: File-like object with .read() method
-///
-/// Returns:
-///     Hex-encoded SHA256 checksum string
+/// Accepts bytes/bytearray/memoryview (zero-copy extraction) or any file-like
+/// object with .read(). Computes checksum on raw (uncompressed) bytes.
 #[pyfunction]
-fn calculate_checksum_stream(py: Python, source: PyFileLikeObject) -> PyResult<String> {
+fn calculate_checksum_stream(py: Python, source: &Bound<'_, PyAny>) -> PyResult<String> {
+    let input = extract_stream_input(source)?;
+
     let checksum = py
-        .allow_threads(|| {
-            let reader = BufReader::with_capacity(128 * 1024, source);
-            calculate_stream_checksum(reader)
+        .allow_threads(|| match input {
+            StreamInput::Buffer(data) => calculate_stream_checksum(Cursor::new(data)),
+            StreamInput::FileLike(file_like) => {
+                let reader = BufReader::with_capacity(STREAM_BUF_SIZE, file_like);
+                calculate_stream_checksum(reader)
+            }
         })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
 

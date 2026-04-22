@@ -56,6 +56,58 @@ def test_validate_fastq_gzip_stream() -> None:
     assert report.num_records == 2
 
 
+def test_validate_fastq_gzip_raw_bytes() -> None:
+    """Niffler on the Rust side decompresses gzip transparently — no gzip.open() needed."""
+    gz_bytes = gzip.compress(FASTQ_BYTES)
+    report = grz_check.validate_fastq(io.BytesIO(gz_bytes))
+    assert report.is_valid
+    assert report.num_records == 2
+
+
+def test_validate_fastq_gzip_filelike_raw() -> None:
+    """Passing a raw binary file handle to a .gz file — niffler decompresses transparently."""
+    gz_bytes = gzip.compress(FASTQ_BYTES)
+    report = grz_check.validate_fastq(io.BytesIO(gz_bytes))
+    assert report.is_valid
+    assert report.num_records == 2
+
+
+def test_validate_fastq_buffer_protocol_bytes() -> None:
+    """bytes objects go through the PyBuffer fast path (no .read() loop)."""
+    report = grz_check.validate_fastq(FASTQ_BYTES)
+    assert report.is_valid
+    assert report.num_records == 2
+
+
+def test_validate_fastq_buffer_protocol_bytearray() -> None:
+    """bytearray goes through PyBuffer (buffer protocol)."""
+    report = grz_check.validate_fastq(bytearray(FASTQ_BYTES))
+    assert report.is_valid
+    assert report.num_records == 2
+
+
+def test_validate_fastq_buffer_protocol_memoryview() -> None:
+    """memoryview goes through PyBuffer."""
+    report = grz_check.validate_fastq(memoryview(FASTQ_BYTES))
+    assert report.is_valid
+    assert report.num_records == 2
+
+
+def test_validate_fastq_buffer_protocol_gzipped_bytes() -> None:
+    """Gzipped bytes via buffer protocol: niffler auto-detects and decompresses."""
+    gz_bytes = gzip.compress(FASTQ_BYTES)
+    report = grz_check.validate_fastq(gz_bytes)
+    assert report.is_valid
+    assert report.num_records == 2
+
+
+def test_checksum_buffer_protocol_bytes() -> None:
+    """Checksum over raw bytes via buffer protocol."""
+    data = b"hello grz-check\n"
+    expected = hashlib.sha256(data).hexdigest()
+    assert grz_check.calculate_checksum(data) == expected
+
+
 def test_validate_fastq_min_length_pass(fastq_file: Path) -> None:
     report = grz_check.validate_fastq(fastq_file, min_mean_read_length=5)
     assert report.is_valid

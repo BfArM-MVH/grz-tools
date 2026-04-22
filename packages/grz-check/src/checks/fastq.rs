@@ -4,7 +4,7 @@ use indicatif::ProgressBar;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use noodles::fastq;
-use std::io::{BufReader, Read};
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Copy, Clone)]
@@ -113,13 +113,13 @@ impl FastqCheckProcessor {
     }
 }
 
-/// Validate FASTQ data from any Read source.
+/// Validate FASTQ data from any BufRead source.
 /// This is the core validation logic, independent of file I/O.
-pub fn validate_fastq_data<R: Read>(
+pub fn validate_fastq_data<R: BufRead>(
     reader: R,
     length_check: ReadLengthCheck,
 ) -> Result<CheckOutcome, String> {
-    let mut fastq_reader = fastq::io::Reader::new(BufReader::new(reader));
+    let mut fastq_reader = fastq::io::Reader::new(reader);
     let mut processor = FastqCheckProcessor::new(length_check);
 
     for record_res in fastq_reader.records() {
@@ -149,11 +149,11 @@ pub fn process_paired_readers<R1, R2>(
     length_check: ReadLengthCheck,
 ) -> Result<(CheckOutcome, CheckOutcome, Vec<String>), String>
 where
-    R1: Read,
-    R2: Read,
+    R1: BufRead,
+    R2: BufRead,
 {
-    let mut fq1_reader = fastq::io::Reader::new(BufReader::new(reader1));
-    let mut fq2_reader = fastq::io::Reader::new(BufReader::new(reader2));
+    let mut fq1_reader = fastq::io::Reader::new(reader1);
+    let mut fq2_reader = fastq::io::Reader::new(reader2);
 
     let mut fq1_processor = FastqCheckProcessor::new(length_check);
     let mut fq2_processor = FastqCheckProcessor::new(length_check);

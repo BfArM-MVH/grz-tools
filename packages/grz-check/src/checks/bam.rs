@@ -3,13 +3,13 @@ use crate::checks::common::{CheckOutcome, check_file};
 use indicatif::ProgressBar;
 use noodles::bam;
 use noodles::sam::alignment::record::cigar::op::Kind;
-use std::io::{BufReader, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Validate BAM data from any Read source.
 /// This is the core validation logic, independent of file I/O.
 pub fn validate_bam_data<R: Read>(reader: R) -> Result<CheckOutcome, String> {
-    let mut bam_reader = bam::io::Reader::new(BufReader::new(reader));
+    let mut bam_reader = bam::io::Reader::new(reader);
     let header = match bam_reader.read_header() {
         Ok(h) => h,
         Err(e) => return Err(format!("Failed to read BAM header: {e}")),
