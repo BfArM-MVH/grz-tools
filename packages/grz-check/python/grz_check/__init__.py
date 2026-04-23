@@ -1,39 +1,22 @@
-"""grz-check: Fast validation of sequencing files (FASTQ, BAM)
+"""grz-check: Fast validation of sequencing files (FASTQ, BAM).
 
-This module provides native Python bindings to the Rust grz-check validator.
+Native Python bindings to the Rust grz-check validator.
 
-File-based validation (paths as strings):
-    >>> import grz_check
-    >>> report = grz_check.validate_fastq("sample.fastq.gz", min_mean_read_length=30)
-    >>> print(f"Valid: {report.is_valid}, Records: {report.num_records}")
+Examples:
+    Recommended for production (large files, parallel validation) — mmap
+    the file. Works for .fastq.gz too; the Rust side decompresses on the fly:
 
-Stream-based validation. FASTQ inputs are transparently decompressed
-(gzip/bgzip) on the Rust side via niffler — no need to wrap with gzip.open():
-    >>> import grz_check
-    >>> with open("sample.fastq.gz", "rb") as f:
-    ...     report = grz_check.validate_fastq(f, min_mean_read_length=30)
-    >>> print(f"Valid: {report.is_valid}, Records: {report.num_records}")
+        >>> import mmap, grz_check
+        >>> with open("huge.fastq.gz", "rb") as f, \\
+        ...      mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        ...     report = grz_check.validate_fastq(mm, min_mean_read_length=30)
 
-Accepted stream sources:
-    - file objects (open(..., "rb"))
-    - read-only buffer-protocol objects: bytes, memoryview(bytes),
-      mmap opened with access=mmap.ACCESS_READ (zero-copy; the Rust side
-      reads directly from Python-owned memory — no intermediate Vec)
-    - BytesIO (io.BytesIO)
-    - any binary object with .read()
+    Simpler alternative — pass a path. Slower but fine for small files:
 
-Writable buffers (bytearray, mmap(ACCESS_WRITE), memoryview of bytearray)
-are rejected with BufferError. Validation releases the GIL so multiple files
-can be checked in parallel; accepting a mutable buffer would be a data race.
-Callers holding a bytearray should pass ``bytes(ba)``.
+        >>> report = grz_check.validate_fastq("sample.fastq.gz", min_mean_read_length=30)
 
-For very large files, mmap gives the best of both worlds — the OS handles
-demand-paging so resident memory stays proportional to the working set:
-
-    >>> import mmap, grz_check
-    >>> with open("huge.fastq", "rb") as f, \\
-    ...      mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-    ...     report = grz_check.validate_fastq(mm)
+Any binary file-like object with ``.read()`` also works but is slower.
+Writable buffers (``bytearray``, ``mmap`` opened for writing) are rejected.
 """
 
 from __future__ import annotations
@@ -74,7 +57,10 @@ def validate_fastq(source, *, min_mean_read_length=None):
     """Validate a single-end FASTQ file.
 
     Args:
-        source: Path to the FASTQ file (str/PathLike) or a binary file-like object with .read() method.
+        source: Path (str/PathLike), read-only buffer (bytes, memoryview, mmap
+            ACCESS_READ — zero-copy), or a binary file-like object. For large
+            files and parallel workloads, prefer ``mmap.mmap(f.fileno(), 0,
+            access=mmap.ACCESS_READ)`` — works for .gz too; see module docs.
         min_mean_read_length: Minimum mean read length required (>0), or None to skip check.
 
     Returns:
@@ -101,8 +87,9 @@ def validate_fastq_paired(r1, r2, *, min_mean_read_length=None):
     """Validate paired-end FASTQ files.
 
     Args:
-        r1: Path (str/PathLike) or binary file-like object for read 1.
-        r2: Path (str/PathLike) or binary file-like object for read 2.
+        r1: Read 1 as path (str/PathLike), read-only buffer, or file-like.
+        r2: Read 2 as path (str/PathLike), read-only buffer, or file-like.
+            For large files prefer mmap for both — see module docs.
         min_mean_read_length: Minimum mean read length required (>0), or None to skip check.
 
     Returns:
