@@ -1,11 +1,10 @@
-import logging
 import datetime
+import logging
 
 import click.testing
 import grzctl.cli
-import pytest
-
 import grzctl.commands.db.tui as db_tui
+import pytest
 
 
 @pytest.fixture
