@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import mmap
 from pathlib import Path
 
 import grz_check
@@ -99,6 +100,48 @@ def test_validate_fastq_buffer_protocol_gzipped_bytes() -> None:
     report = grz_check.validate_fastq(gz_bytes)
     assert report.is_valid
     assert report.num_records == 2
+
+
+def test_validate_fastq_mmap_zero_copy(fastq_file: Path) -> None:
+    """mmap(ACCESS_READ) must validate via the zero-copy buffer-protocol path."""
+    with open(fastq_file, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        report = grz_check.validate_fastq(mm)
+    assert report.is_valid
+    assert report.num_records == 2
+    assert report.mean_read_length == pytest.approx(12.0)
+
+
+def test_validate_fastq_paired_mmap_zero_copy(tmp_path: Path) -> None:
+    """Paired-end mmap inputs: two independent zero-copy views."""
+    r1 = tmp_path / "r1.fastq"
+    r2 = tmp_path / "r2.fastq"
+    r1.write_bytes(FASTQ_BYTES)
+    r2.write_bytes(FASTQ_BYTES)
+    with open(r1, "rb") as f1, open(r2, "rb") as f2, \
+         mmap.mmap(f1.fileno(), 0, access=mmap.ACCESS_READ) as m1, \
+         mmap.mmap(f2.fileno(), 0, access=mmap.ACCESS_READ) as m2:
+        rep1, rep2 = grz_check.validate_fastq_paired(m1, m2)
+    assert rep1.is_valid and rep2.is_valid
+    assert rep1.num_records == 2 and rep2.num_records == 2
+
+
+def test_validate_fastq_non_contiguous_buffer_rejected() -> None:
+    """Strided memoryviews must be rejected with PyBufferError, not silently mishandled."""
+    # Step-slicing a 1-D memoryview gives strides=(2,) which is not C-contiguous.
+    strided = memoryview(bytearray(FASTQ_BYTES * 2))[::2]
+    assert not strided.c_contiguous
+    with pytest.raises(BufferError, match="C-contiguous"):
+        grz_check.validate_fastq(strided)
+
+
+def test_checksum_mmap_matches_bytes(tmp_path: Path) -> None:
+    """SHA256 over mmap must equal SHA256 over the same bytes."""
+    data = b"some arbitrary bytes for checksumming\n" * 100
+    path = tmp_path / "data.bin"
+    path.write_bytes(data)
+    expected = hashlib.sha256(data).hexdigest()
+    with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        assert grz_check.calculate_checksum(mm) == expected
 
 
 def test_checksum_buffer_protocol_bytes() -> None:

@@ -16,9 +16,18 @@ Stream-based validation. FASTQ inputs are transparently decompressed
 
 Accepted stream sources:
     - file objects (open(..., "rb"))
-    - raw bytes / bytearray / memoryview (buffer protocol, avoids .read() loop)
+    - raw bytes / bytearray / memoryview / mmap (buffer protocol, zero-copy —
+      the Rust side reads directly from Python-owned memory, no intermediate Vec)
     - BytesIO (io.BytesIO)
     - any binary object with .read()
+
+For very large files, mmap gives the best of both worlds — the OS handles
+demand-paging so resident memory stays proportional to the working set:
+
+    >>> import mmap, grz_check
+    >>> with open("huge.fastq", "rb") as f, \\
+    ...      mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+    ...     report = grz_check.validate_fastq(mm)
 """
 
 from __future__ import annotations
