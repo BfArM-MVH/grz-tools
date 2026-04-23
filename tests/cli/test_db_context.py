@@ -76,12 +76,15 @@ def setup_db_state(
                 str(metadata_path),
                 "--no-confirm",
             ],
+            catch_exceptions=False,
         )
         assert result.exit_code == 0, f"Setup populate failed: {result.output}"
 
     if initial_state:
         result = runner.invoke(
-            cli, ["db", "--config-file", str(config_file), "submission", "update", submission_id, initial_state.value]
+            cli,
+            ["db", "--config-file", str(config_file), "submission", "update", submission_id, initial_state.value],
+            catch_exceptions=False,
         )
         assert result.exit_code == 0, f"Setup update state failed: {result.output}"
 
