@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SEARCH_LIMIT = 20
 
 
+def _resolve_quarter_year(today: datetime.date, quarter: int | None, year: int | None) -> tuple[int, int]:
+    default_quarter, default_year = date_to_quarter_year(today)
+    resolved_quarter = quarter if quarter is not None else default_quarter
+    resolved_year = year if year is not None else default_year
+    return resolved_quarter, resolved_year
+
+
 class SubmissionCountByStateTable(Static):
     def on_mount(self) -> None:
         self.loading = True
@@ -121,9 +128,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
             submission_qc_states = session.exec(statement).all()
 
         today = datetime.date.today()
-        default_quarter, default_year = date_to_quarter_year(today)
-        resolved_year = year if year is not None else default_year
-        resolved_quarter = quarter if quarter is not None else default_quarter
+        resolved_quarter, resolved_year = _resolve_quarter_year(today, quarter, year)
         quarter_start_date, quarter_end_date = quarter_date_bounds(year=resolved_year, quarter=resolved_quarter)
         logger.debug("Quarter: %s to %s", quarter_start_date, quarter_end_date)
         rows = []
@@ -139,7 +144,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
             for _, submission_date, detailed_qc_passed in group:
                 if detailed_qc_passed is not None:
                     qced += 1
-                # current quarter
+                # resolved quarter
                 if (
                     (submission_date is not None)
                     and (submission_date.year == resolved_year)
