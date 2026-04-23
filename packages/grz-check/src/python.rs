@@ -69,8 +69,8 @@ impl Read for PyFileLikeObject {
 /// Represents a Python input ready to be consumed by the Rust validator.
 /// `Send`-safe so it can cross `py.allow_threads` boundaries.
 enum StreamInput {
-    /// Zero-copy view into a Python buffer-protocol object
-    /// (bytes, bytearray, memoryview, mmap, numpy u8 arrays, array.array('B', …)).
+    /// Zero-copy view into a read-only Python buffer
+    /// (bytes, memoryview over bytes, mmap opened with ACCESS_READ).
     /// The underlying memory is never copied into a Rust `Vec`.
     PyBuf(PyBuffer<u8>),
     /// File-like object with .read() method.
@@ -78,13 +78,25 @@ enum StreamInput {
 }
 
 /// Try to extract a Python object as a buffer-protocol object, falling back to file-like.
-/// Buffer-protocol inputs are held as a zero-copy `PyBuffer<u8>` view; the Rust side
-/// reads directly from Python-owned memory via a `Cursor` over the buffer's slice.
+///
+/// Only **read-only** buffers are accepted. We release the GIL during validation
+/// (`py.allow_threads`) so the validator can run in parallel across worker threads;
+/// a writable buffer (bytearray, mmap ACCESS_WRITE) could be mutated by another
+/// Python thread while we read from it, which would be a data race. Users who have
+/// bytes in a bytearray should pass `bytes(ba)` or open the backing file with
+/// `mmap(..., access=mmap.ACCESS_READ)` instead.
 fn extract_stream_input(obj: &Bound<'_, PyAny>) -> PyResult<StreamInput> {
     if let Ok(buffer) = PyBuffer::<u8>::get(obj) {
+        if !buffer.readonly() {
+            return Err(PyErr::new::<pyo3::exceptions::PyBufferError, _>(
+                "Writable buffers (bytearray, memoryview of bytearray, mmap ACCESS_WRITE) are not supported; \
+                 pass bytes, memoryview(bytes), or mmap(..., access=mmap.ACCESS_READ) instead",
+            ));
+        }
         if !buffer.is_c_contiguous() {
             return Err(PyErr::new::<pyo3::exceptions::PyBufferError, _>(
-                "Buffer must be C-contiguous (flat, no strides); strided or multi-dimensional views are not supported",
+                "Input buffer must be a contiguous byte sequence; \
+                 strided or multi-dimensional views (e.g. arr[::2], arr[:, 0]) are not supported",
             ));
         }
         return Ok(StreamInput::PyBuf(buffer));
@@ -103,10 +115,17 @@ fn extract_stream_input(obj: &Bound<'_, PyAny>) -> PyResult<StreamInput> {
 /// buffers (bytearray, mmap ACCESS_WRITE) must not be concurrently mutated
 /// from other OS threads for the duration of the borrow.
 unsafe fn buffer_as_slice(buffer: &PyBuffer<u8>) -> &[u8] {
+    let ptr = buffer.buf_ptr() as *const u8;
+    let len = buffer.item_count();
+    // PEP 3118 allows a null buf for zero-length buffers; `from_raw_parts` requires
+    // a non-null pointer even when len == 0, so handle that case explicitly.
+    if len == 0 || ptr.is_null() {
+        return &[];
+    }
     // SAFETY: see function doc. `PyBuffer<u8>` is constructed via PyBuffer::<u8>::get
     // which guarantees itemsize == 1 and format 'B'; `is_c_contiguous` is checked at
     // extraction time, so the buffer is a flat u8 run of `item_count()` bytes.
-    unsafe { std::slice::from_raw_parts(buffer.buf_ptr() as *const u8, buffer.item_count()) }
+    unsafe { std::slice::from_raw_parts(ptr, len) }
 }
 
 /// Validation report exposed to Python
@@ -176,26 +195,28 @@ fn noop_progress_bar() -> indicatif::ProgressBar {
 /// Run `f` with a `BufRead` over `input`, applying niffler auto-decompression
 /// (gzip / bgzip / bzip2 / xz / zstd) transparently.
 ///
-/// For `PyBuf` inputs this is zero-copy: the Rust side constructs a
-/// `Cursor<&[u8]>` directly over Python-owned memory — no bytes are copied
-/// into a `Vec` first. A single 4 MB outer `BufReader` is kept for noodles'
-/// line-based FASTQ parser.
+/// For `PyBuf` inputs the Python → Rust boundary is zero-copy: `buffer_as_slice`
+/// produces `Cursor<&[u8]>` directly over Python-owned memory — bytes are never
+/// copied into a `Vec`. The outer `BufReader` exists only because
+/// `niffler::get_reader` returns `Box<dyn Read>` (not `BufRead`) and noodles'
+/// FASTQ parser requires `BufRead` for line-based scanning; so for *compressed*
+/// FASTQ we re-buffer in 4 MB chunks inside Rust (unavoidable — the 4 MB is
+/// amortised across the whole file). The BAM path needs no niffler and feeds
+/// `Cursor` straight to the parser — see `validate_bam_stream`.
 fn with_fastq_reader<F, T>(input: StreamInput, f: F) -> Result<T, String>
 where
     F: FnOnce(&mut dyn BufRead) -> Result<T, String>,
 {
     match input {
         StreamInput::PyBuf(buffer) => {
-            // SAFETY: `buffer` outlives `reader` below (local binding order);
-            // see `buffer_as_slice` doc for the non-mutation contract.
+            // SAFETY: `buffer` is bound before `reader` and `slice` borrows from it,
+            // so LIFO drop order keeps it alive past the last slice use — see
+            // `buffer_as_slice` doc for the non-mutation contract.
             let slice = unsafe { buffer_as_slice(&buffer) };
             let (decompressed, _format) = niffler::get_reader(Box::new(Cursor::new(slice)))
                 .map_err(|e| format!("Failed to detect or decompress stream format: {e}"))?;
             let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed);
-            let result = f(&mut reader);
-            drop(reader);
-            drop(buffer);
-            result
+            f(&mut reader)
         }
         StreamInput::FileLike(file_like) => {
             let (decompressed, _format) = niffler::get_reader(Box::new(file_like))
@@ -246,7 +267,7 @@ fn validate_fastq_single_stream(
         .allow_threads(|| {
             with_fastq_reader(input, |reader| validate_fastq_data(reader, length_check))
         })
-        .map_err(|e: String| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
     Ok(PyValidationReport::from(outcome))
 }
@@ -277,7 +298,7 @@ fn validate_fastq_paired_stream(
                 })
             })
         })
-        .map_err(|e: String| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
     let r1_report = PyValidationReport::from(outcome1);
     let r2_report = PyValidationReport::from(outcome2);
@@ -313,7 +334,7 @@ fn validate_fastq_paired_paths(
 
             process_paired_readers(reader1, reader2, length_check)
         })
-        .map_err(|e: String| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
     let r1_report = PyValidationReport::from(outcome1);
     let r2_report = PyValidationReport::from(outcome2);
@@ -347,19 +368,18 @@ fn validate_bam_stream(py: Python, source: &Bound<'_, PyAny>) -> PyResult<PyVali
     let outcome = py
         .allow_threads(|| match input {
             StreamInput::PyBuf(buffer) => {
-                // SAFETY: `buffer` lives through the end of this arm, so the
-                // slice (and Cursor borrowing it) remain valid for validate_bam_data.
+                // SAFETY: `buffer` is bound before the slice/cursor, so LIFO drop
+                // order keeps it alive past the last slice use — see
+                // `buffer_as_slice` doc for the non-mutation contract.
                 let slice = unsafe { buffer_as_slice(&buffer) };
-                let result = validate_bam_data(&mut Cursor::new(slice));
-                drop(buffer);
-                result
+                validate_bam_data(&mut Cursor::new(slice))
             }
             StreamInput::FileLike(file_like) => {
                 let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, file_like);
                 validate_bam_data(&mut reader)
             }
         })
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e))?;
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
     Ok(PyValidationReport::from(outcome))
 }

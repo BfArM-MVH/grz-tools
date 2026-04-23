@@ -16,10 +16,16 @@ Stream-based validation. FASTQ inputs are transparently decompressed
 
 Accepted stream sources:
     - file objects (open(..., "rb"))
-    - raw bytes / bytearray / memoryview / mmap (buffer protocol, zero-copy —
-      the Rust side reads directly from Python-owned memory, no intermediate Vec)
+    - read-only buffer-protocol objects: bytes, memoryview(bytes),
+      mmap opened with access=mmap.ACCESS_READ (zero-copy; the Rust side
+      reads directly from Python-owned memory — no intermediate Vec)
     - BytesIO (io.BytesIO)
     - any binary object with .read()
+
+Writable buffers (bytearray, mmap(ACCESS_WRITE), memoryview of bytearray)
+are rejected with BufferError. Validation releases the GIL so multiple files
+can be checked in parallel; accepting a mutable buffer would be a data race.
+Callers holding a bytearray should pass ``bytes(ba)``.
 
 For very large files, mmap gives the best of both worlds — the OS handles
 demand-paging so resident memory stays proportional to the working set:

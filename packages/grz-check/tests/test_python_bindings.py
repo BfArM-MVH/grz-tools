@@ -80,11 +80,12 @@ def test_validate_fastq_buffer_protocol_bytes() -> None:
     assert report.num_records == 2
 
 
-def test_validate_fastq_buffer_protocol_bytearray() -> None:
-    """Verify bytearray input goes through PyBuffer (buffer protocol)."""
-    report = grz_check.validate_fastq(bytearray(FASTQ_BYTES))
-    assert report.is_valid
-    assert report.num_records == 2
+def test_validate_fastq_writable_buffer_rejected() -> None:
+    """Writable buffers (bytearray, mmap ACCESS_WRITE) are rejected so the
+    GIL-released validation path stays sound — another Python thread could
+    otherwise mutate the bytes while the validator reads them."""
+    with pytest.raises(BufferError, match="Writable buffers"):
+        grz_check.validate_fastq(bytearray(FASTQ_BYTES))
 
 
 def test_validate_fastq_buffer_protocol_memoryview() -> None:
@@ -111,6 +112,16 @@ def test_validate_fastq_mmap_zero_copy(fastq_file: Path) -> None:
     assert report.mean_read_length == pytest.approx(12.0)
 
 
+def test_validate_fastq_mmap_gzipped(tmp_path: Path) -> None:
+    """mmap over a gzipped FASTQ — niffler auto-decompresses on the Rust side."""
+    gz = tmp_path / "reads.fastq.gz"
+    gz.write_bytes(gzip.compress(FASTQ_BYTES))
+    with open(gz, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        report = grz_check.validate_fastq(mm)
+    assert report.is_valid
+    assert report.num_records == 2
+
+
 def test_validate_fastq_paired_mmap_zero_copy(tmp_path: Path) -> None:
     """Paired-end mmap inputs: two independent zero-copy views."""
     r1 = tmp_path / "r1.fastq"
@@ -127,10 +138,12 @@ def test_validate_fastq_paired_mmap_zero_copy(tmp_path: Path) -> None:
 
 def test_validate_fastq_non_contiguous_buffer_rejected() -> None:
     """Strided memoryviews must be rejected with PyBufferError, not silently mishandled."""
-    # Step-slicing a 1-D memoryview gives strides=(2,) which is not C-contiguous.
-    strided = memoryview(bytearray(FASTQ_BYTES * 2))[::2]
+    # Step-slicing a 1-D memoryview over immutable bytes → strided + read-only,
+    # so the contiguity check fires (not the writable-buffer check).
+    strided = memoryview(bytes(FASTQ_BYTES * 2))[::2]
+    assert strided.readonly
     assert not strided.c_contiguous
-    with pytest.raises(BufferError, match="C-contiguous"):
+    with pytest.raises(BufferError, match="contiguous byte sequence"):
         grz_check.validate_fastq(strided)
 
 
