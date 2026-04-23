@@ -359,22 +359,24 @@ class Donor(SQLModel, table=True):
         submission_id: str,
         donor: MetadataDonor,
     ) -> Self:
-        return cls(
-            submission_id=submission_id,
-            pseudonym="index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
-            relation=Relation(donor.relation),
-            library_types={datum.library_type for datum in donor.lab_data},
-            sequence_types={datum.sequence_type for datum in donor.lab_data},
-            sequence_subtypes={datum.sequence_subtype for datum in donor.lab_data},
-            mv_consented=donor.consents_to_mv(),
-            research_consented=donor.consents_to_research(date=datetime.date.today()),
-            research_consent_missing_justifications={
-                consent.no_scope_justification
-                for consent in donor.research_consents
-                if consent.no_scope_justification is not None
-            }
-            if donor.research_consents
-            else None,
+        return cls.model_validate(
+            dict(
+                submission_id=submission_id,
+                pseudonym="index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
+                relation=Relation(donor.relation),
+                library_types={datum.library_type for datum in donor.lab_data},
+                sequence_types={datum.sequence_type for datum in donor.lab_data},
+                sequence_subtypes={datum.sequence_subtype for datum in donor.lab_data},
+                mv_consented=donor.consents_to_mv(),
+                research_consented=donor.consents_to_research(date=datetime.date.today()),
+                research_consent_missing_justifications={
+                    consent.no_scope_justification
+                    for consent in donor.research_consents
+                    if consent.no_scope_justification is not None
+                }
+                if donor.research_consents
+                else None,
+            )
         )
 
 
