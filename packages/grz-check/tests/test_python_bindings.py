@@ -83,7 +83,8 @@ def test_validate_fastq_buffer_protocol_bytes() -> None:
 def test_validate_fastq_writable_buffer_rejected() -> None:
     """Writable buffers (bytearray, mmap ACCESS_WRITE) are rejected so the
     GIL-released validation path stays sound — another Python thread could
-    otherwise mutate the bytes while the validator reads them."""
+    otherwise mutate the bytes while the validator reads them.
+    """
     with pytest.raises(BufferError, match="Writable buffers"):
         grz_check.validate_fastq(bytearray(FASTQ_BYTES))
 
@@ -113,7 +114,7 @@ def test_validate_fastq_mmap_zero_copy(fastq_file: Path) -> None:
 
 
 def test_validate_fastq_mmap_gzipped(tmp_path: Path) -> None:
-    """mmap over a gzipped FASTQ — niffler auto-decompresses on the Rust side."""
+    """Memory-mapped gzipped FASTQ — niffler auto-decompresses on the Rust side."""
     gz = tmp_path / "reads.fastq.gz"
     gz.write_bytes(gzip.compress(FASTQ_BYTES))
     with open(gz, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
@@ -128,9 +129,12 @@ def test_validate_fastq_paired_mmap_zero_copy(tmp_path: Path) -> None:
     r2 = tmp_path / "r2.fastq"
     r1.write_bytes(FASTQ_BYTES)
     r2.write_bytes(FASTQ_BYTES)
-    with open(r1, "rb") as f1, open(r2, "rb") as f2, \
-         mmap.mmap(f1.fileno(), 0, access=mmap.ACCESS_READ) as m1, \
-         mmap.mmap(f2.fileno(), 0, access=mmap.ACCESS_READ) as m2:
+    with (
+        open(r1, "rb") as f1,
+        open(r2, "rb") as f2,
+        mmap.mmap(f1.fileno(), 0, access=mmap.ACCESS_READ) as m1,
+        mmap.mmap(f2.fileno(), 0, access=mmap.ACCESS_READ) as m2,
+    ):
         rep1, rep2 = grz_check.validate_fastq_paired(m1, m2)
     assert rep1.is_valid and rep2.is_valid
     assert rep1.num_records == 2 and rep2.num_records == 2
