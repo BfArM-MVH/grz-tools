@@ -10,6 +10,7 @@ from operator import attrgetter
 from typing import Any, ClassVar, Optional, Self
 
 import sqlalchemy as sa
+import sqlalchemy.dialects.postgresql as sa_psql
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
@@ -159,7 +160,10 @@ class SubmissionBase(SQLModel):
 
     # extra fields
     submission_size: int | None = Field(default=None, sa_type=BigInteger)
-    submission_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    submission_metadata: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql")),
+    )
 
 
 class Submission(SubmissionBase, table=True):

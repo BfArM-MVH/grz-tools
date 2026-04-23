@@ -9,6 +9,7 @@ Create Date: 2026-02-12 14:58:52.096841+00:00
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+import sqlalchemy.dialects.postgresql as sa_psql
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -21,7 +22,10 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column("submissions", sa.Column("submission_size", sa.Integer(), nullable=True))
-    op.add_column("submissions", sa.Column("submission_metadata", sa.JSON(), nullable=True))
+    op.add_column(
+        "submissions",
+        sa.Column("submission_metadata", sa.JSON().with_variant(sa_psql.JSONB, "postgresql"), nullable=True),
+    )
 
 
 def downgrade() -> None:
