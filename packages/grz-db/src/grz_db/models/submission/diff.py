@@ -135,26 +135,32 @@ class DonorDiff(Diff["DbDonor"]):
         # lazy import to avoid import cycle
         from grz_db.models.submission import Donor as DbDonor  # noqa: PLC0415
 
-        instance = cast(cls, super().classify(old_value, new_value))
-        if instance.state != DiffState.UNCHANGED:
+        # Keep `result` as `Self` so the return type is correct; use `donor` (cast to the
+        # concrete DonorDiff) for attribute access that the parent class doesn't expose.
+        result = super().classify(old_value, new_value)
+        donor = cast("DonorDiff", result)
+
+        if donor.state != DiffState.UNCHANGED:
             for f in sorted(DbDonor.model_fields.keys() - {"submission_id", "pseudonym"}):
-                instance.changes.append(
+                donor.changes.append(
                     FieldDiff.classify_field(str(f), getattr(old_value, str(f), None), getattr(new_value, str(f), None))
                 )
 
         match (old_value, new_value):
             case (None, None):
-                instance.pseudonym = None
+                donor.pseudonym = None
             case (None, _):
-                instance.pseudonym = new_value.pseudonym
+                donor.pseudonym = cast("DbDonor", new_value).pseudonym
             case (_, None):
-                instance.pseudonym = old_value.pseudonym
+                donor.pseudonym = cast("DbDonor", old_value).pseudonym
             case (_, _):
-                if old_value.pseudonym != new_value.pseudonym:
-                    raise ValueError(f"Pseudonym mismatch: '{old_value.pseudonym}' != '{new_value.pseudonym}'")
-                instance.pseudonym = old_value.pseudonym
+                old_donor = cast("DbDonor", old_value)
+                new_donor = cast("DbDonor", new_value)
+                if old_donor.pseudonym != new_donor.pseudonym:
+                    raise ValueError(f"Pseudonym mismatch: '{old_donor.pseudonym}' != '{new_donor.pseudonym}'")
+                donor.pseudonym = old_donor.pseudonym
 
-        return instance
+        return result
 
 
 @dataclass

@@ -542,16 +542,17 @@ def _prepare_submission_console_table(submission_diff: "SubmissionDiffCollection
     """
     pending = [d for d in submission_diff.pending if d.key != "submission_metadata"]
     if pending:
-        diff_table: rich.console.RenderableType = rich.table.Table(title="Submission Metadata")
-        diff_table.add_column("Key")
-        diff_table.add_column("Before")
-        diff_table.add_column("After")
+        diff_table_tbl = rich.table.Table(title="Submission Metadata")
+        diff_table_tbl.add_column("Key")
+        diff_table_tbl.add_column("Before")
+        diff_table_tbl.add_column("After")
         for field_diff in sorted(pending, key=lambda d: d.key):
-            diff_table.add_row(
+            diff_table_tbl.add_row(
                 field_diff.key,
                 str(field_diff.diff.before) if field_diff.diff.before is not None else _TEXT_MISSING,
                 str(field_diff.diff.after),
             )
+        diff_table: rich.console.RenderableType = diff_table_tbl
     else:
         diff_table = rich.padding.Padding(rich.text.Text("No changes to submission-level metadata."), pad=(0, 0, 0, 0))
     return diff_table
@@ -666,7 +667,7 @@ def populate(  # noqa: C901, PLR0913
     diff_tables: list[rich.console.RenderableType] = []
     for donor_diff in donors_diff.added + donors_diff.updated:
         diff_tables.append(
-            _prepare_donor_console_table(donor_diff.changes, donor_diff.after.pseudonym, donor_diff.state)
+            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
         )
     for donor_diff in donors_diff.deleted:
         diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))

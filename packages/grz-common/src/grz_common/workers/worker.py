@@ -395,16 +395,14 @@ class Worker:
         # check for destructive changes
         if not force and (len(submission_diff.deleted) + len(submission_diff.updated)) > 0:
             raise RuntimeError(
-                "Would update/delete existing submission data in the database, but `force` not set.",
-                submission_id=submission_id,
-                submission_diff=submission_diff,
+                f"Would update/delete existing submission data in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, submission_diff={submission_diff!r}"
             )
 
-        if not force and (len(submission_diff.deleted) + len(submission_diff.updated)) > 0:
+        if not force and (len(donors_diff.deleted) + len(donors_diff.updated)) > 0:
             raise RuntimeError(
-                "Would update/delete existing donors in the database, but `force` not set.",
-                submission_id=submission_id,
-                donors_diff=donors_diff,
+                f"Would update/delete existing donors in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, donors_diff={donors_diff!r}"
             )
 
         # commit pending changes to the database
