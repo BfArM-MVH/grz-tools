@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Iterable
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -110,19 +111,7 @@ class DbContext:
         try:
             db_config = DbConfig.model_validate(self.configuration).db
 
-            author = None
-            if db_config.author:
-                key_path = Path(db_config.author.private_key_path)
-                if not key_path.exists():
-                    raise FileNotFoundError(f"Author private key not found at: {key_path}")
-
-                author = Author(
-                    name=db_config.author.name,
-                    private_key_bytes=key_path.read_bytes(),
-                    private_key_passphrase=db_config.author.private_key_passphrase,
-                )
-
-            self.db = get_submission_db_instance(db_config.database_url, author=author)
+            self.db = get_submission_db_instance(db_config.database_url, author=self.author)
 
             # Check if the state transition is valid.
             self._check_prerequisites()
@@ -163,6 +152,26 @@ class DbContext:
                 log.error(f"Failed to write success state to DB: {db_exc}")
 
         return True
+
+    @cached_property
+    def author(self) -> Author:
+        db_config = DbConfig.model_validate(self.configuration).db
+
+        if not db_config.author:
+            raise ValueError("Author configuration is missing")
+
+        if db_config.author.private_key_path is None:
+            raise ValueError("Author private key path is required but was None")
+
+        key_path = Path(db_config.author.private_key_path)
+        if not key_path.exists():
+            raise FileNotFoundError(f"Author private key not found at: {key_path}")
+
+        return Author(
+            name=db_config.author.name,
+            private_key_bytes=key_path.read_bytes(),
+            private_key_passphrase=db_config.author.private_key_passphrase,
+        )
 
     def _check_prerequisites(self):
         """
