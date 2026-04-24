@@ -61,11 +61,6 @@ class DbContext:
     :param submission_id: Submission ID to operate on.
     :param start_state: State written to the DB when entering the context.
     :param end_state: State written to the DB when exiting the context successfully.
-    :param expected_prior_states: Iterable of states considered valid preconditions.
-        Pass ``None`` (the default) to derive the expected prior state automatically
-          from the state preceding ``start_state`` in ``SubmissionStateEnum``.
-        Include ``None`` as an *element* to allow the submission to be absent from
-          the DB; it will then be created on the fly.
     :param enabled: Set to ``False`` to skip all DB interactions (useful when no DB
         is configured).
     """
@@ -76,7 +71,6 @@ class DbContext:
         submission_id: str,
         start_state: SubmissionStateEnum,
         end_state: SubmissionStateEnum,
-        expected_prior_states: Iterable[SubmissionStateEnum | None] | None = None,
         enabled: bool = True,
     ):
         self.configuration = configuration
@@ -84,24 +78,20 @@ class DbContext:
         self.start_state = start_state
         self.end_state = end_state
         self.enabled = enabled
-        self._expected_prior_states = set(expected_prior_states) if expected_prior_states else None
         self.db: SubmissionDb | None = None
 
-    @property
+    @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
-        if self._expected_prior_states is None:
-            # determine expected prior state based on order of enums
-            members = list(SubmissionStateEnum)
-            start_index = members.index(self.start_state)
+        # determine expected prior state based on order of enums
+        members = list(SubmissionStateEnum)
+        start_index = members.index(self.start_state)
 
-            if start_index == 0:
-                # first state in the enum, no prior state expected
-                return {None}
-            else:
-                # return previous state in the enum as expected prior state
-                return {members[start_index - 1]}
+        if start_index == 0:
+            # first state in the enum, no prior state expected
+            return {None}
         else:
-            return self._expected_prior_states
+            # return previous state in the enum as expected prior state
+            return {members[start_index - 1]}
 
     def __enter__(self):
         """Initializes DB connection, checks prerequisites, and sets the initial state."""
@@ -191,7 +181,7 @@ class DbContext:
         if current_state not in self.expected_prior_states:
             log.warning(
                 f"Submission {self.submission_id} is currently in state '{current_state}'. "
-                f"Expected any of '{self._expected_prior_states}' before updating to '{self.start_state.name}'."
+                f"Expected any of '{self.expected_prior_states}' before updating to '{self.start_state.name}'."
             )
 
         history = submission.states
