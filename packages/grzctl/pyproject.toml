@@ -79,5 +79,6 @@ test = [
     "numpy",
     "grz-common",
     "grzctl",
-    "grz-cli"
+    "grz-cli",
+    "grz-pydantic-models-testing",
 ]

@@ -8,6 +8,7 @@ members = [
     "grz-common",
     "grz-db",
     "grz-pydantic-models",
+    "grz-pydantic-models-testing",
     "grz-tools",
     "grzctl",
 ]
@@ -904,6 +905,7 @@ dev = [
     { name = "tox-uv" },
 ]
 test = [
+    { name = "grz-pydantic-models-testing" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
@@ -919,11 +921,23 @@ dev = [
     { name = "tox-uv" },
 ]
 test = [
+    { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
     { name = "pytest-sugar" },
 ]
+
+[[package]]
+name = "grz-pydantic-models-testing"
+version = "0.1.0"
+source = { editable = "packages/grz-pydantic-models-testing" }
+dependencies = [
+    { name = "grz-pydantic-models" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" }]
 
 [[package]]
 name = "grz-tools"
@@ -934,6 +948,7 @@ dependencies = [
     { name = "grz-common" },
     { name = "grz-db" },
     { name = "grz-pydantic-models" },
+    { name = "grz-pydantic-models-testing" },
     { name = "grzctl" },
 ]
 
@@ -942,6 +957,7 @@ test = [
     { name = "grz-cli" },
     { name = "grz-common" },
     { name = "grz-db" },
+    { name = "grz-pydantic-models-testing" },
     { name = "grzctl" },
     { name = "moto", extra = ["s3"] },
     { name = "numpy" },
@@ -974,6 +990,7 @@ test = [
     { name = "grz-cli" },
     { name = "grz-common" },
     { name = "grz-db" },
+    { name = "grz-pydantic-models-testing" },
     { name = "grzctl" },
     { name = "moto", extra = ["s3"] },
     { name = "numpy" },
@@ -994,6 +1011,8 @@ requires-dist = [
     { name = "grz-db", editable = "packages/grz-db" },
     { name = "grz-db", marker = "extra == 'test'", editable = "packages/grz-db" },
     { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
+    { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },
+    { name = "grz-pydantic-models-testing", marker = "extra == 'test'", editable = "packages/grz-pydantic-models-testing" },
     { name = "grzctl", editable = "packages/grzctl" },
     { name = "grzctl", marker = "extra == 'test'", editable = "packages/grzctl" },
     { name = "moto", extras = ["s3"], marker = "extra == 'test'", specifier = ">=5.0.16,<6" },
@@ -1028,6 +1047,7 @@ test = [
     { name = "grz-cli", editable = "packages/grz-cli" },
     { name = "grz-common", editable = "packages/grz-common" },
     { name = "grz-db", editable = "packages/grz-db" },
+    { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },
     { name = "grzctl", editable = "packages/grzctl" },
     { name = "moto", extras = ["s3"] },
     { name = "numpy" },
@@ -1071,6 +1091,7 @@ dev = [
 test = [
     { name = "grz-cli" },
     { name = "grz-common" },
+    { name = "grz-pydantic-models-testing" },
     { name = "grzctl" },
     { name = "moto", extra = ["s3"] },
     { name = "numpy" },
@@ -1112,6 +1133,7 @@ dev = [
 test = [
     { name = "grz-cli", editable = "packages/grz-cli" },
     { name = "grz-common", editable = "packages/grz-common" },
+    { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },
     { name = "grzctl", editable = "packages/grzctl" },
     { name = "moto", extras = ["s3"] },
     { name = "numpy" },

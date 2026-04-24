@@ -9,10 +9,9 @@ from datetime import date
 import pytest
 from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata, ResearchConsent
+from grz_pydantic_models_testing import example_metadata, example_research_consent
 from packaging.version import Version
 from pydantic import ValidationError
-
-from . import resources
 
 TESTED_VERSIONS = ["1.2.1", "1.3.0"]
 
@@ -32,9 +31,7 @@ TESTED_VERSIONS = ["1.2.1", "1.3.0"]
     ),
 )
 def test_examples(dataset: str, version: str):
-    metadata_str = (
-        importlib.resources.files(resources).joinpath("example_metadata", dataset, f"v{version}.json").read_text()
-    )
+    metadata_str = importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
 
@@ -42,11 +39,7 @@ def test_wgs_trio_special_consent():
     """
     Broad Consent obtained before 2025-06-15 for non-index donors is allowed to stand in for mvConsent if missing
     """
-    metadata_str = (
-        importlib.resources.files(resources)
-        .joinpath("example_metadata", "wgs_trio", "v1.1.7.earlyBCException.json")
-        .read_text()
-    )
+    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.1.7.earlyBCException.json").read_text()
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
     # only non-index donors can have the special researchConsent exemption
@@ -69,7 +62,7 @@ def test_wgs_trio_no_vcf(version):
     VCFs were downgraded from required to recommended for all submissions.
     """
     metadata_str = (
-        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", f"v{version}.json").read_text()
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
     )
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
@@ -89,8 +82,8 @@ def test_wgs_tumor_germline_missing_dna(version):
     Ensure that both tumor and germline DNA lab data are required for WGS tumor-germline submissions.
     """
     metadata_str = (
-        importlib.resources.files(resources)
-        .joinpath("example_metadata", "wgs_tumor_germline", f"v{version}.json")
+        importlib.resources.files(example_metadata)
+        .joinpath("wgs_tumor_germline", f"v{version}.json")
         .read_text()
     )
 
@@ -176,7 +169,7 @@ def test_wgs_tumor_germline_missing_dna(version):
 def test_wgs_trio_1_3_fail_empty_consent_list(version: str):
     """As of v1.3, empty consent lists are no longer allowed."""
     metadata_str = (
-        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", f"v{version}.json").read_text()
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
     )
     metadata = json.loads(metadata_str)
     metadata["donors"][0]["researchConsents"] = []
@@ -191,7 +184,7 @@ def test_wgs_trio_1_3_fail_empty_consent_list(version: str):
 def test_wgs_trio_1_3_fail_malformed_consent(version: str):
     """As of v1.3, non-empty scope or noScopeJustification must be provided."""
     metadata_str = (
-        importlib.resources.files(resources).joinpath("example_metadata", "wgs_trio", f"v{version}.json").read_text()
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
     )
     metadata = json.loads(metadata_str)
 
@@ -230,7 +223,7 @@ def test_wgs_trio_1_3_fail_malformed_consent(version: str):
 def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
     """BAM files should only be allowed in *_lr lab data"""
     metadata = json.loads(
-        importlib.resources.files(resources).joinpath("example_metadata", dataset, f"v{version}.json").read_text()
+        importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
     )
     # add a BAM file
     metadata["donors"][0]["labData"][0]["sequenceData"]["files"].append(
@@ -252,8 +245,8 @@ def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
 def test_index_rna_without_dna(version: str):
     """Donors can only have RNA data if DNA data also present."""
     metadata = json.loads(
-        importlib.resources.files(resources)
-        .joinpath("example_metadata", "wes_tumor_germline", f"v{version}.json")
+        importlib.resources.files(example_metadata)
+        .joinpath("wes_tumor_germline", f"v{version}.json")
         .read_text()
     )
     # reduce to a single lab datum
@@ -272,8 +265,8 @@ def test_index_rna_without_dna(version: str):
 def test_index_rna_with_dna(version: str):
     """Donors can only have RNA data if DNA data also present."""
     metadata = json.loads(
-        importlib.resources.files(resources)
-        .joinpath("example_metadata", "wes_tumor_germline", f"v{version}.json")
+        importlib.resources.files(example_metadata)
+        .joinpath("wes_tumor_germline", f"v{version}.json")
         .read_text()
     )
     # duplicate the last lab datum
@@ -295,8 +288,8 @@ def test_index_rna_with_dna(version: str):
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_lab_datum(version: str):
     metadata = GrzSubmissionMetadata.model_validate_json(
-        importlib.resources.files(resources)
-        .joinpath("example_metadata", "wes_tumor_germline", f"v{version}.json")
+        importlib.resources.files(example_metadata)
+        .joinpath("wes_tumor_germline", f"v{version}.json")
         .read_text()
     )
     with pytest.raises(ValueError, match=re.escape("Long read libraries can't be paired-end.")):
@@ -339,7 +332,7 @@ def test_research_consent_parse(case: str, valid: bool):
 
     with expectation:
         Consent.model_validate_json(
-            importlib.resources.files(resources).joinpath("example_research_consent", f"{case}.json").read_text()
+            importlib.resources.files(example_research_consent).joinpath(f"{case}.json").read_text()
         )
 
 
@@ -360,7 +353,7 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
     consents = []
     for case in cases:
         consent = Consent.model_validate_json(
-            importlib.resources.files(resources).joinpath("example_research_consent", f"{case}.json").read_text()
+            importlib.resources.files(example_research_consent).joinpath(f"{case}.json").read_text()
         )
         consents.append(ResearchConsent(schemaVersion="2025.0.1", scope=consent))
 
@@ -370,9 +363,7 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
 def test_research_consent_subprovisions_deny_permit():
     """Within one research consent's subprovisions, deny before permit should return a non-consented state."""
     consent_raw = json.loads(
-        importlib.resources.files(resources)
-        .joinpath("example_research_consent", "minimal_nonconsented.json")
-        .read_text()
+        importlib.resources.files(example_research_consent).joinpath("minimal_nonconsented.json").read_text()
     )
 
     # add a permit subprovision object for same consent object, after the deny subprovision
@@ -390,9 +381,7 @@ def test_research_consent_subprovisions_deny_permit():
 def test_research_consents_deny_permit():
     """Having two research consents, where deny comes before permit, should return a non-consented state."""
     consent_raw = json.loads(
-        importlib.resources.files(resources)
-        .joinpath("example_research_consent", "minimal_nonconsented.json")
-        .read_text()
+        importlib.resources.files(example_research_consent).joinpath("minimal_nonconsented.json").read_text()
     )
     consent1 = Consent.model_validate_json(json.dumps(consent_raw))
 
@@ -408,7 +397,7 @@ def test_research_consents_deny_permit():
 def test_research_consent_no_subprovisions():
     """Consent objects are allowed to have no provisions under the root."""
     consent_json_raw = json.loads(
-        importlib.resources.files(resources).joinpath("example_research_consent", "minimal_consented.json").read_text()
+        importlib.resources.files(example_research_consent).joinpath("minimal_consented.json").read_text()
     )
     del consent_json_raw["provision"]["provision"]
     Consent.model_validate_json(json.dumps(consent_json_raw))
