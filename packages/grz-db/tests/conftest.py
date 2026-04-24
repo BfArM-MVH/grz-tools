@@ -15,9 +15,7 @@ from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 _GRZ_PYDANTIC_MODELS_SPEC = importlib.util.find_spec("grz_pydantic_models")
 assert _GRZ_PYDANTIC_MODELS_SPEC is not None and _GRZ_PYDANTIC_MODELS_SPEC.origin is not None
 _GRZ_PYDANTIC_MODELS_ROOT = Path(_GRZ_PYDANTIC_MODELS_SPEC.origin).parents[2]
-_MOCK_METADATA_PATH = (
-    _GRZ_PYDANTIC_MODELS_ROOT / "tests/resources/example_metadata/wes_tumor_germline/v1.2.1.json"
-)
+_MOCK_METADATA_PATH = _GRZ_PYDANTIC_MODELS_ROOT / "tests/resources/example_metadata/wes_tumor_germline/v1.2.1.json"
 
 
 @pytest.fixture(scope="session")
