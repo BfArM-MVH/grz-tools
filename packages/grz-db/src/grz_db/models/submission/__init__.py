@@ -191,6 +191,41 @@ class Submission(SubmissionBase, table=True):
         states = sorted(states, key=attrgetter("timestamp"))
         return states[-1] if states else None
 
+    @classmethod
+    def from_metadata(
+        cls,
+        submission_id: str,
+        metadata: "GrzSubmissionMetadata",
+        submission_date: datetime.date | None,
+    ) -> "Submission":
+        """Construct a Submission populated with values derived from parsed metadata.
+
+        Only the fields that can be sourced from metadata are set; system-managed
+        fields (e.g. ``basic_qc_passed``, ``selected_for_qc``) are left at their
+        defaults so that ``model_fields_set`` reliably indicates which fields to
+        compare during a diff.
+        """
+        return cls.model_validate(
+            {
+                "id": submission_id,
+                "tan_g": metadata.submission.tan_g,
+                "submission_type": metadata.submission.submission_type,
+                "submitter_id": metadata.submission.submitter_id,
+                "coverage_type": metadata.submission.coverage_type,
+                "disease_type": metadata.submission.disease_type,
+                "genomic_study_type": metadata.submission.genomic_study_type,
+                "genomic_study_subtype": metadata.submission.genomic_study_subtype,
+                "pseudonym": metadata.submission.local_case_id,
+                "data_node_id": metadata.submission.genomic_data_center_id,
+                "consented": metadata.consents_to_research(date=datetime.date.today()),
+                "submission_size": metadata.get_submission_size(),
+                "submission_date": submission_date
+                if submission_date is not None
+                else metadata.submission.submission_date,
+                "submission_metadata": metadata.to_redacted_dict(),
+            }
+        )
+
 
 class SubmissionStateLogBase(SQLModel):
     """
@@ -565,6 +600,37 @@ class SubmissionDb:
             except IntegrityError as e:
                 session.rollback()
                 if "UNIQUE constraint failed: submissions.tanG" in str(e) and key == "tan_g":
+                    raise DuplicateTanGError() from e
+                raise
+            except Exception:
+                session.rollback()
+                raise
+
+    def update_submission(self, submission: Submission) -> Submission:
+        """
+        Persists changes made to a Submission object back to the database.
+
+        :param submission: The Submission instance with updated field values.
+        :return: The updated Submission instance.
+        """
+        with self._get_session() as session:
+            db_submission = session.get(Submission, submission.id)
+            if db_submission is None:
+                raise SubmissionNotFoundError(submission.id)
+
+            for field in SubmissionBase.model_fields:
+                if field in SubmissionBase.immutable_fields:
+                    continue
+                setattr(db_submission, field, getattr(submission, field))
+
+            session.add(db_submission)
+            try:
+                session.commit()
+                session.refresh(db_submission)
+                return db_submission
+            except IntegrityError as e:
+                session.rollback()
+                if "UNIQUE constraint failed: submissions.tanG" in str(e):
                     raise DuplicateTanGError() from e
                 raise
             except Exception:
@@ -1012,7 +1078,7 @@ class SubmissionDb:
     def _diff_metadata(
         self,
         submission_id: str,
-        metadata: GrzSubmissionMetadata,
+        metadata: "GrzSubmissionMetadata",
         submission_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
     ) -> SubmissionDiffCollection:
@@ -1022,7 +1088,7 @@ class SubmissionDb:
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
         :param submission_date: Explicit submission date; falls back to the value in *metadata* when ``None``.
         :param ignore_fields: Field names to skip entirely during the comparison.
-        :returns: A :class:`SubmissionDiff` instance summarising all detected differences.
+        :returns: A :class:`SubmissionDiffCollection` instance summarising all detected differences.
         """
         db_submission = self.get_submission(submission_id)
         if db_submission is None:
@@ -1030,30 +1096,12 @@ class SubmissionDb:
 
         if ignore_fields is None:
             ignore_fields = set()
-        if submission_date is None:
-            submission_date = metadata.submission.submission_date
 
-        all_fields: dict[str, Any] = {
-            "tan_g": metadata.submission.tan_g,
-            "submission_type": metadata.submission.submission_type,
-            "submitter_id": metadata.submission.submitter_id,
-            "coverage_type": metadata.submission.coverage_type,
-            "disease_type": metadata.submission.disease_type,
-            "genomic_study_type": metadata.submission.genomic_study_type,
-            "genomic_study_subtype": metadata.submission.genomic_study_subtype,
-            "pseudonym": metadata.submission.local_case_id,
-            "data_node_id": metadata.submission.genomic_data_center_id,
-            "consented": metadata.consents_to_research(date=datetime.date.today()),
-            "submission_size": metadata.get_submission_size(),
-            "submission_date": submission_date,
-            "submission_metadata": metadata.to_redacted_dict(),
-        }
+        fresh_submission = Submission.from_metadata(submission_id, metadata, submission_date)
 
         result = SubmissionDiffCollection()
-        for key, new_value in all_fields.items():
-            if key in ignore_fields:
-                continue
-            field_diff = FieldDiff.classify_field(key, getattr(db_submission, key), new_value)
+        for key in fresh_submission.model_fields_set - (ignore_fields or set()):
+            field_diff = FieldDiff.classify_field(key, getattr(db_submission, key), getattr(fresh_submission, key))
             result.append(field_diff)
 
         return result
@@ -1061,7 +1109,7 @@ class SubmissionDb:
     def _diff_donors(
         self,
         submission_id: str,
-        metadata: GrzSubmissionMetadata,
+        metadata: "GrzSubmissionMetadata",
     ) -> DonorsDiffCollection:
         """Diff all donors in *metadata* against the current database state.
 
@@ -1088,7 +1136,7 @@ class SubmissionDb:
     def diff(
         self,
         submission_id: str,
-        metadata: GrzSubmissionMetadata,
+        metadata: "GrzSubmissionMetadata",
         submission_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
     ) -> tuple[SubmissionDiffCollection, DonorsDiffCollection]:

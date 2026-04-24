@@ -1,8 +1,11 @@
+import datetime
+
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from grz_db.models.author import Author
-from grz_db.models.submission import SubmissionDb
+from grz_db.models.submission import Submission, SubmissionDb
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 TWO_TB = 2 * 1024**4  # 2,199,023,255,552 bytes
 SUBMISSION_ID = "123456789_2024-01-01_abcdef01"
@@ -34,7 +37,8 @@ def submission(db: SubmissionDb):
 
 def test_submission_size_can_store_2tb(db: SubmissionDb, submission) -> None:
     """submission_size uses BigInteger and must be able to store values >= 2 TB."""
-    db.modify_submission(submission_id=SUBMISSION_ID, key="submission_size", value=TWO_TB)
+    submission.submission_size = TWO_TB
+    db.update_submission(submission)
 
     result = db.get_submission(SUBMISSION_ID)
     assert result is not None
@@ -52,8 +56,41 @@ def test_submission_metadata_json_roundtrip(db: SubmissionDb, submission) -> Non
         "list_field": [1, "two", 3.0],
         "nested": {"a": 1, "b": [2, 3]},
     }
-    db.modify_submission(submission_id=SUBMISSION_ID, key="submission_metadata", value=metadata)
+
+    submission.submission_metadata = metadata
+    db.update_submission(submission)
 
     result = db.get_submission(SUBMISSION_ID)
     assert result is not None
     assert result.submission_metadata == metadata
+
+
+def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata) -> None:
+    """Submission.from_metadata must map every metadata field correctly and leave system fields unset."""
+    explicit_date = datetime.date(2025, 3, 1)
+    submission = Submission.from_metadata(SUBMISSION_ID, metadata, explicit_date)
+
+    # --- fields that must be populated from the metadata object ---
+    assert submission.id == SUBMISSION_ID
+    assert submission.tan_g == metadata.submission.tan_g
+    assert submission.submission_type == metadata.submission.submission_type
+    assert submission.submitter_id == metadata.submission.submitter_id
+    assert submission.coverage_type == metadata.submission.coverage_type
+    assert submission.disease_type == metadata.submission.disease_type
+    assert submission.genomic_study_type == metadata.submission.genomic_study_type
+    assert submission.genomic_study_subtype == metadata.submission.genomic_study_subtype
+    assert submission.pseudonym == metadata.submission.local_case_id
+    assert submission.data_node_id == metadata.submission.genomic_data_center_id
+    assert submission.submission_date == explicit_date  # explicit date takes precedence
+    assert submission.submission_size == metadata.get_submission_size()
+    assert submission.submission_metadata == metadata.to_redacted_dict()
+
+    # --- explicit date is preferred over the metadata date ---
+    submission_fallback = Submission.from_metadata(SUBMISSION_ID, metadata, None)
+    assert submission_fallback.submission_date == metadata.submission.submission_date
+
+    # --- system-managed fields must not be in model_fields_set ---
+    system_fields = {"basic_qc_passed", "detailed_qc_passed", "selected_for_qc"}
+    assert system_fields.isdisjoint(submission.model_fields_set), (
+        f"System fields unexpectedly set: {system_fields & submission.model_fields_set}"
+    )
