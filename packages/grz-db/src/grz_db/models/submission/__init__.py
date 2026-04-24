@@ -228,7 +228,7 @@ class Submission(SubmissionBase, table=True):
         return cls.model_validate(
             {
                 "id": submission_id,
-                "tan_g": metadata.submission.tan_g,
+                "tanG": metadata.submission.tan_g,
                 "submission_type": metadata.submission.submission_type,
                 "submitter_id": metadata.submission.submitter_id,
                 "coverage_type": metadata.submission.coverage_type,
