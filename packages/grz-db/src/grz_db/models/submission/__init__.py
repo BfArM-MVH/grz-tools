@@ -571,20 +571,6 @@ class SubmissionDb:
                 session.rollback()
                 raise
 
-    def update_submission_size(self, session: Session, submission_id: str, value: int) -> None:
-        submission = session.get(Submission, submission_id)
-        if submission is None:
-            raise SubmissionNotFoundError(submission_id)
-
-        submission.submission_size = value
-
-    def update_submission_date(self, session: Session, submission_id: str, value: datetime.date) -> None:
-        submission = session.get(Submission, submission_id)
-        if submission is None:
-            raise SubmissionNotFoundError(submission_id)
-
-        submission.submission_date = value
-
     def set_selected_for_qc(self, submission_id: str, selected_for_qc: bool) -> Submission:
         value = "true" if selected_for_qc else "false"
         return self.modify_submission(submission_id, "selected_for_qc", value)
