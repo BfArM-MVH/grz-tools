@@ -186,6 +186,26 @@ class Submission(SubmissionBase, table=True):
 
     changes: list["ChangeRequestLog"] = Relationship(back_populates="submission")
 
+    def diff(
+        self,
+        other: "Submission",
+        ignore_fields: set[str] | None = None,
+    ) -> "SubmissionDiffCollection":
+        """Compare this submission against *other* and return all detected differences.
+
+        :param other: The new submission state to compare against.
+        :param ignore_fields: Field names to skip entirely during the comparison.
+        :returns: A :class:`SubmissionDiffCollection` summarising all detected differences.
+        :raises ValueError: If an immutable field has changed.
+        """
+        result = SubmissionDiffCollection()
+        for key in other.model_fields_set - (ignore_fields or set()):
+            field_diff = FieldDiff.classify_field(key, getattr(self, key), getattr(other, key))
+            if key in other.immutable_fields and field_diff.diff.state != DiffState.UNCHANGED:
+                raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
+            result.append(field_diff)
+        return result
+
     def get_latest_state(self, filter_to_type: SubmissionStateEnum | None = None) -> Optional["SubmissionStateLog"]:
         states = filter(lambda state: state.state == filter_to_type, self.states) if filter_to_type else self.states
         states = sorted(states, key=attrgetter("timestamp"))
@@ -195,7 +215,7 @@ class Submission(SubmissionBase, table=True):
     def from_metadata(
         cls,
         submission_id: str,
-        metadata: "GrzSubmissionMetadata",
+        metadata: GrzSubmissionMetadata,
         submission_date: datetime.date | None,
     ) -> "Submission":
         """Construct a Submission populated with values derived from parsed metadata.
@@ -1078,7 +1098,7 @@ class SubmissionDb:
     def _diff_metadata(
         self,
         submission_id: str,
-        metadata: "GrzSubmissionMetadata",
+        metadata: GrzSubmissionMetadata,
         submission_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
     ) -> SubmissionDiffCollection:
@@ -1090,26 +1110,21 @@ class SubmissionDb:
         :param ignore_fields: Field names to skip entirely during the comparison.
         :returns: A :class:`SubmissionDiffCollection` instance summarising all detected differences.
         """
-        db_submission = self.get_submission(submission_id)
-        if db_submission is None:
+        current_submission = self.get_submission(submission_id)
+        if current_submission is None:
             raise SubmissionNotFoundError(submission_id)
 
         if ignore_fields is None:
             ignore_fields = set()
 
-        fresh_submission = Submission.from_metadata(submission_id, metadata, submission_date)
+        new_submission = Submission.from_metadata(submission_id, metadata, submission_date)
 
-        result = SubmissionDiffCollection()
-        for key in fresh_submission.model_fields_set - (ignore_fields or set()):
-            field_diff = FieldDiff.classify_field(key, getattr(db_submission, key), getattr(fresh_submission, key))
-            result.append(field_diff)
-
-        return result
+        return current_submission.diff(new_submission, ignore_fields)
 
     def _diff_donors(
         self,
         submission_id: str,
-        metadata: "GrzSubmissionMetadata",
+        metadata: GrzSubmissionMetadata,
     ) -> DonorsDiffCollection:
         """Diff all donors in *metadata* against the current database state.
 
@@ -1136,7 +1151,7 @@ class SubmissionDb:
     def diff(
         self,
         submission_id: str,
-        metadata: "GrzSubmissionMetadata",
+        metadata: GrzSubmissionMetadata,
         submission_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
     ) -> tuple[SubmissionDiffCollection, DonorsDiffCollection]:
