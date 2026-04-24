@@ -11,10 +11,11 @@ import sqlalchemy
 from click.testing import CliRunner
 from grz_db.models.submission import Submission
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.report import date_to_quarter_year
 from grzctl.models.config import DbConfig
 
-from .. import resources as test_resources
+TEST_METADATA_PATH = importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 
 
 def test_quarter_determination():
@@ -73,7 +74,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     cli = grzctl.cli.build_cli()
 
     # add and populate first submission to database
-    s1_metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    s1_metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
     s1_metadata = GrzSubmissionMetadata.model_validate(s1_metadata_raw)
     s1_metadata_raw["submission"]["submissionType"] = "initial"
     result_add1 = runner.invoke(
@@ -113,7 +114,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     assert result_modify1.exit_code == 0, result_modify1.output
 
     # add a single test submission from another submitter that fails detailed QC
-    s2_metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    s2_metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
     s2_metadata_raw["submission"]["submitterId"] = "987654321"
     s2_metadata_raw["submission"]["genomicStudyType"] = "single"
     s2_metadata_raw["submission"]["tanG"] = "d92f44b998916af883c7d4df8a94f06a9f3bf66e3e1c94753a5c310043b2cb24"
@@ -195,7 +196,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     assert result_qc_populate2.exit_code == 0, result_qc_populate2.output
 
     # add correction submission that revokes consent of index patient in first submission, and add deletion change request for original submission
-    s3_metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    s3_metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
     s3_metadata_raw["submission"]["submissionType"] = "correction"
     s3_metadata_raw["submission"]["tanG"] = "e8bd8d543a8590d9baf7302dad693ecd77fe12a8760f92ce7be4dddb15681788"
     s3_metadata_raw["donors"][0]["researchConsents"][0]["scope"]["provision"]["provision"] = []
