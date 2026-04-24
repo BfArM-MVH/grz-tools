@@ -12,7 +12,7 @@ from grz_db.models.submission import (
     SubmissionDb,
     SubmissionDiffCollection,
 )
-from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
@@ -385,7 +385,7 @@ class Worker:
 
         if metadata.submission.tan_g == REDACTED_TAN:
             raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.json ({metadata_file_path}).")
-        if not metadata.submission.local_case_id or metadata.submission.local_case_id == "REDACTED_LOCAL_CASE_ID":
+        if not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID:
             raise ValueError(
                 f"Submission {submission_id} has missing or redacted local_case_id in metadata.json ({metadata_file_path})."
             )

@@ -43,6 +43,7 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
@@ -649,7 +650,7 @@ def populate(  # noqa: C901, PLR0913
             "Add 'tan_g' to ignore fields and/or use 'grzctl db submission modify' directly."
         )
     if (
-        not metadata.submission.local_case_id or metadata.submission.local_case_id == "REDACTED_LOCAL_CASE_ID"
+        not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
     ) and "pseudonym" not in ignore_field:
         raise ValueError(
             f"Submission {submission_id} has missing or redacted local_case_id in metadata.json: {metadata_path}. "
