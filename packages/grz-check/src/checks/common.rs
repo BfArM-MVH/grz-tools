@@ -53,6 +53,12 @@ pub fn setup_file_reader(
     Ok((buffered, hasher))
 }
 
+/// Check a file using the given validation logic.
+///
+/// This function handles:
+/// 1. Setting up a file reader with progress tracking
+/// 2. Running the validation logic on the reader
+/// 3. Collecting results and errors
 pub fn check_file<F>(
     path: &Path,
     file_pb: &ProgressBar,
