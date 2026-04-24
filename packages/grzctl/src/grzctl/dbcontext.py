@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Iterable
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -65,7 +64,7 @@ class DbContext:
         is configured).
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         configuration: dict[str, Any],
         submission_id: str,
