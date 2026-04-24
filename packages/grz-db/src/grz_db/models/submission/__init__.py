@@ -1151,7 +1151,7 @@ class SubmissionDb:
         donors_diff: DonorsDiffCollection | None = None,
     ) -> None:
         """Write all pending metadata and donor diffs to the database.
-        Can be optained by calling :func:`diff`
+        Can be obtained by calling :func:`diff`
 
         :param db: Database service instance to write to.
         :param submission_id: ID of the submission being updated.
