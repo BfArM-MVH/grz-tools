@@ -188,9 +188,9 @@ class Submission(SubmissionBase, table=True):
 
     def diff(
         self,
-        other: "Submission",
+        other: Self,
         ignore_fields: set[str] | None = None,
-    ) -> "SubmissionDiffCollection":
+    ) -> SubmissionDiffCollection:
         """Compare this submission against *other* and return all detected differences.
 
         :param other: The new submission state to compare against.
@@ -217,7 +217,7 @@ class Submission(SubmissionBase, table=True):
         submission_id: str,
         metadata: GrzSubmissionMetadata,
         submission_date: datetime.date | None,
-    ) -> "Submission":
+    ) -> Self:
         """Construct a Submission populated with values derived from parsed metadata.
 
         Only the fields that can be sourced from metadata are set; system-managed
