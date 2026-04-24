@@ -21,7 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column("submissions", sa.Column("submission_size", sa.Integer(), nullable=True))
+    op.add_column("submissions", sa.Column("submission_size", sa.BigInteger(), nullable=True))
     op.add_column(
         "submissions",
         sa.Column("submission_metadata", sa.JSON().with_variant(sa_psql.JSONB, "postgresql"), nullable=True),
