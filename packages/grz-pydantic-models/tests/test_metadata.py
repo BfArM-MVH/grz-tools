@@ -39,7 +39,9 @@ def test_wgs_trio_special_consent():
     """
     Broad Consent obtained before 2025-06-15 for non-index donors is allowed to stand in for mvConsent if missing
     """
-    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.1.7.earlyBCException.json").read_text()
+    metadata_str = (
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.1.7.earlyBCException.json").read_text()
+    )
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
     # only non-index donors can have the special researchConsent exemption
@@ -61,9 +63,7 @@ def test_wgs_trio_no_vcf(version):
     """
     VCFs were downgraded from required to recommended for all submissions.
     """
-    metadata_str = (
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
     metadata = json.loads(metadata_str)
@@ -82,9 +82,7 @@ def test_wgs_tumor_germline_missing_dna(version):
     Ensure that both tumor and germline DNA lab data are required for WGS tumor-germline submissions.
     """
     metadata_str = (
-        importlib.resources.files(example_metadata)
-        .joinpath("wgs_tumor_germline", f"v{version}.json")
-        .read_text()
+        importlib.resources.files(example_metadata).joinpath("wgs_tumor_germline", f"v{version}.json").read_text()
     )
 
     ### tumor+germline
@@ -168,9 +166,7 @@ def test_wgs_tumor_germline_missing_dna(version):
 )
 def test_wgs_trio_1_3_fail_empty_consent_list(version: str):
     """As of v1.3, empty consent lists are no longer allowed."""
-    metadata_str = (
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
     metadata = json.loads(metadata_str)
     metadata["donors"][0]["researchConsents"] = []
     with pytest.raises(ValidationError):
@@ -183,9 +179,7 @@ def test_wgs_trio_1_3_fail_empty_consent_list(version: str):
 )
 def test_wgs_trio_1_3_fail_malformed_consent(version: str):
     """As of v1.3, non-empty scope or noScopeJustification must be provided."""
-    metadata_str = (
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
     metadata = json.loads(metadata_str)
 
     # scope, if provided, must be a valid consent object
@@ -222,9 +216,7 @@ def test_wgs_trio_1_3_fail_malformed_consent(version: str):
 )
 def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
     """BAM files should only be allowed in *_lr lab data"""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
-    )
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
     # add a BAM file
     metadata["donors"][0]["labData"][0]["sequenceData"]["files"].append(
         {
@@ -245,9 +237,7 @@ def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
 def test_index_rna_without_dna(version: str):
     """Donors can only have RNA data if DNA data also present."""
     metadata = json.loads(
-        importlib.resources.files(example_metadata)
-        .joinpath("wes_tumor_germline", f"v{version}.json")
-        .read_text()
+        importlib.resources.files(example_metadata).joinpath("wes_tumor_germline", f"v{version}.json").read_text()
     )
     # reduce to a single lab datum
     metadata["donors"][0]["labData"] = [metadata["donors"][0]["labData"][0]]
@@ -265,9 +255,7 @@ def test_index_rna_without_dna(version: str):
 def test_index_rna_with_dna(version: str):
     """Donors can only have RNA data if DNA data also present."""
     metadata = json.loads(
-        importlib.resources.files(example_metadata)
-        .joinpath("wes_tumor_germline", f"v{version}.json")
-        .read_text()
+        importlib.resources.files(example_metadata).joinpath("wes_tumor_germline", f"v{version}.json").read_text()
     )
     # duplicate the last lab datum
     metadata["donors"][0]["labData"].append(copy.deepcopy(metadata["donors"][0]["labData"][-1]))
@@ -288,9 +276,7 @@ def test_index_rna_with_dna(version: str):
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_lab_datum(version: str):
     metadata = GrzSubmissionMetadata.model_validate_json(
-        importlib.resources.files(example_metadata)
-        .joinpath("wes_tumor_germline", f"v{version}.json")
-        .read_text()
+        importlib.resources.files(example_metadata).joinpath("wes_tumor_germline", f"v{version}.json").read_text()
     )
     with pytest.raises(ValueError, match=re.escape("Long read libraries can't be paired-end.")):
         metadata.donors[0].lab_data[0].library_type = "wes_lr"
