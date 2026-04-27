@@ -21,12 +21,20 @@ log = logging.getLogger(__name__)
 @grzcli.force
 @grzcli.threads
 @grzcli.update_db
+@click.option(
+    "--mmap/--no-mmap",
+    "mmap",
+    default=True,
+    hidden=True,
+    help="Whether to use mmap based validation.",
+)
 def validate(
     configuration: dict[str, Any],
     submission_dir,
     force,
     threads,
     update_db,
+    mmap,
     **kwargs,
 ):
     """
@@ -58,5 +66,6 @@ def validate(
             submission_dir=submission_dir,
             force=force,
             threads=threads,
+            mmap=mmap,
             **kwargs,
         )
