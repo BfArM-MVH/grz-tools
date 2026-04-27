@@ -18,9 +18,10 @@ import sqlalchemy
 import yaml
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
+from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.models.config import DbConfig
 
-from .. import resources as test_resources
+TEST_METADATA_PATH = importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 
 
 def test_all_migrations(blank_initial_database_config_path):
@@ -79,16 +80,14 @@ def test_all_migrations(blank_initial_database_config_path):
 
 def test_populate(blank_database_config_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
     result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
 
-    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
+    with importlib.resources.as_file(TEST_METADATA_PATH) as metadata_path:
         result_populate = runner.invoke(
             cli, [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"]
         )
@@ -116,9 +115,7 @@ def test_populate(blank_database_config_path: Path):
 
 def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
 
     # compute submission ID _before_ tanG is redacted (changing the property return value)
     submission_id = metadata.submission_id
@@ -155,7 +152,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
-    metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
 
     # first submission
     metadata_raw["submission"]["submitterId"] = "123456789"
@@ -243,9 +240,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
 
 def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
@@ -253,7 +248,7 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
     assert result_add.exit_code == 0, result_add.stderr
 
     # populate submission + donors first to satisfy foreign key constraints
-    metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
 
     metadata_dump_path = tmp_path / "metadata.json"
     with open(metadata_dump_path, "w") as metadata_file:
@@ -296,9 +291,7 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
 def test_update_error_confirm(blank_database_config_path: Path):
     """Database should confirm before updating a submission from an Error state."""
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -366,9 +359,7 @@ def test_submission_show_json(blank_database_config_path: Path):
     """
     args_common = ["db", "--config-file", blank_database_config_path]
 
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -378,7 +369,7 @@ def test_submission_show_json(blank_database_config_path: Path):
     assert result_add.exit_code == 0, result_add.stderr
 
     # populate submission
-    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
+    with importlib.resources.as_file(TEST_METADATA_PATH) as metadata_path:
         result_populate = runner.invoke(
             cli,
             [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"],
