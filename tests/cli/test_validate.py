@@ -4,24 +4,15 @@ import shutil
 from pathlib import Path
 
 import grz_cli.cli
-import pytest
 from click.testing import CliRunner
 from grz_common.workers.submission import SubmissionValidationError
 
 
-@pytest.mark.parametrize("grz_check_flag", ["--with-grz-check", "--no-grz-check"])
 def test_validate_submission(
     temp_identifiers_config_file_path,
     working_dir_path,
-    grz_check_flag,
     caplog,
 ):
-    have_grz_check = shutil.which("grz-check") is not None
-
-    if (grz_check_flag == "--with-grz-check") and not have_grz_check:
-        # explicitly note when skipping this when grz-check not available instead of silently falling back
-        pytest.skip(reason="grz-check not installed")
-
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
@@ -33,7 +24,6 @@ def test_validate_submission(
         temp_identifiers_config_file_path,
         "--submission-dir",
         str(working_dir_path),
-        grz_check_flag,
     ]
 
     runner = CliRunner()
@@ -41,21 +31,13 @@ def test_validate_submission(
     with caplog.at_level(logging.INFO):
         result = runner.invoke(cli, testargs, catch_exceptions=False)
         assert result.exit_code == 0, result.output
-
-        if grz_check_flag == "--no-grz-check":
-            assert "Starting checksum validation (fallback)..." in caplog.text
-        else:
-            assert "Starting file validation with `grz-check`..." in caplog.text
+        assert "Starting file validation with `grz-check`..." in caplog.text
     caplog.clear()
 
     # check if re-validation is skipped
     with caplog.at_level(logging.INFO):
         result = runner.invoke(cli, testargs, catch_exceptions=False)
-
-        if grz_check_flag == "--no-grz-check":
-            assert "Starting checksum validation (fallback)..." in caplog.text
-        else:
-            assert "Starting file validation with `grz-check`..." in caplog.text
+        assert "Starting file validation with `grz-check`..." in caplog.text
 
     # test if command has correctly checked for:
     # - mismatched md5sums

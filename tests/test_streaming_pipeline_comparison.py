@@ -113,7 +113,6 @@ class TestManualCliVsStreamingPipeline:
                 str(working_dir),
                 "--config-file",
                 config_file,
-                "--no-grz-check",  # Use fallback validation
             ],
             catch_exceptions=False,
         )

@@ -20,20 +20,12 @@ log = logging.getLogger(__name__)
 @grzcli.submission_dir
 @grzcli.force
 @grzcli.threads
-@click.option(
-    "--with-grz-check/--no-grz-check",
-    "with_grz_check",
-    default=True,
-    hidden=True,
-    help="Whether to use grz-check to perform validation",
-)
 @grzcli.update_db
-def validate(  # noqa: PLR0913
+def validate(
     configuration: dict[str, Any],
     submission_dir,
     force,
     threads,
-    with_grz_check,
     update_db,
     **kwargs,
 ):
@@ -66,6 +58,5 @@ def validate(  # noqa: PLR0913
             submission_dir=submission_dir,
             force=force,
             threads=threads,
-            with_grz_check=with_grz_check,
             **kwargs,
         )
