@@ -7,6 +7,7 @@ from unittest import mock
 
 import grz_cli.cli
 import grzctl.cli
+import pytest
 from click.testing import CliRunner
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission, SubmissionValidationError
@@ -215,3 +216,96 @@ def test_upload_aborts_if_encryption_log_missing(
     # Ensure it really did fail
     objects_in_bucket = list(remote_bucket_with_version.objects.all())
     assert len(objects_in_bucket) == 1, "Upload should not have happened!"
+
+
+def test_upload_workflow_succeeds_with_symlink_in_files_dir(
+    working_dir_path,
+    temp_identifiers_config_file_path,
+    temp_keys_config_file_path,
+    temp_s3_config_file_path,
+    remote_bucket_with_version,
+):
+    """
+    End-to-end smoke test for LE submissions where `files/` contains symlinks.
+
+    We intentionally use `--no-grz-check` here to exercise the Python fallback
+    validation path in a deterministic way.
+    """
+    submission_dir = Path("tests/mock_files/submissions/valid_submission")
+
+    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+
+    # Replace one submission file with a symlink pointing to data outside the submission directory.
+    symlink_path = working_dir_path / "files" / "target_regions.bed"
+    external_dir = working_dir_path / "real_data"
+    external_dir.mkdir(parents=True, exist_ok=True)
+    external_target = external_dir / symlink_path.name
+
+    shutil.move(symlink_path, external_target)
+    try:
+        symlink_path.symlink_to(external_target)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip(f"Symlinks not supported in this environment: {e}")
+
+    runner = CliRunner()
+    cli = grz_cli.cli.build_cli()
+    config_args = [
+        "--config-file",
+        str(temp_identifiers_config_file_path),
+        "--config-file",
+        str(temp_keys_config_file_path),
+        "--config-file",
+        str(temp_s3_config_file_path),
+    ]
+
+    # validate (fallback)
+    result = runner.invoke(
+        cli,
+        [
+            "validate",
+            "--submission-dir",
+            str(working_dir_path),
+            "--no-grz-check",
+            *config_args,
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+
+    # encrypt (must read the symlinked input file)
+    result = runner.invoke(
+        cli,
+        [
+            "encrypt",
+            "--submission-dir",
+            str(working_dir_path),
+            *config_args,
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+
+    # upload (must not fail due to symlink usage earlier)
+    with mock.patch(
+        "grz_common.models.s3.S3Options.__getattr__",
+        lambda self, name: None if name == "endpoint_url" else AttributeError,
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "upload",
+                "--submission-dir",
+                str(working_dir_path),
+                *config_args,
+            ],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0, result.output
+
+    submission_id = result.stdout.strip()
+    assert submission_id, "Expected `grz-cli upload` to output a submission id."
+
+    objects_in_bucket = {obj.key for obj in remote_bucket_with_version.objects.all()}
+    assert f"{submission_id}/metadata/metadata.json" in objects_in_bucket
+    assert f"{submission_id}/files/target_regions.bed.c4gh" in objects_in_bucket
