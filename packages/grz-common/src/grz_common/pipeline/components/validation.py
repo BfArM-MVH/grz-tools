@@ -122,7 +122,7 @@ class FastqValidator(GrzCheckValidator):
 
     def _invoke_grz_check(self) -> Any:
         threshold = int(self._threshold) if self._threshold is not None else None
-        return grz_check.validate_fastq_single_stream(self.adapter, min_mean_read_length=threshold)
+        return grz_check.validate_fastq(self.adapter, min_mean_read_length=threshold)
 
     def _format_error_prefix(self) -> str:
         return "FASTQ Invalid"
@@ -159,7 +159,7 @@ class BamValidator(GrzCheckValidator):
         super().__init__()
 
     def _invoke_grz_check(self) -> Any:
-        return grz_check.validate_bam_stream(self.adapter)
+        return grz_check.validate_bam(self.adapter)
 
     def _format_error_prefix(self) -> str:
         return "BAM Invalid"
