@@ -87,7 +87,7 @@ where
     let checksum = match Arc::try_unwrap(hasher) {
         Ok(mutex) => {
             let final_hasher = mutex.into_inner().unwrap();
-            Some(format!("{:x}", final_hasher.finalize()))
+            Some(hex::encode(final_hasher.finalize()))
         }
         Err(_) => {
             let mut final_report = FileReport::new(path, outcome.stats, vec![], outcome.warnings);
