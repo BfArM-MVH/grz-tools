@@ -415,7 +415,7 @@ class Submission:
 
         with (
             concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor,
-            tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,
+            tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,  # type: ignore[call-overload]
         ):
             futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
 

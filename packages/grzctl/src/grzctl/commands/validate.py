@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
     hidden=True,
     help="Whether to use mmap based validation.",
 )
-def validate(
+def validate(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_dir,
     force,
