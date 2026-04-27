@@ -19,6 +19,7 @@ members = [
     "packages/grz-db",
     "packages/grz-pydantic-models",
     "packages/grz-pydantic-models-testing",
+    "packages/grz-check",
 ]
 
 [tool.uv.sources]
@@ -28,6 +29,7 @@ grzctl = { workspace = true }
 grz-db = { workspace = true }
 grz-pydantic-models = { workspace = true }
 grz-pydantic-models-testing = { workspace = true }
+grz-check = { workspace = true }
 
 [project.optional-dependencies]
 test = [
@@ -46,6 +48,7 @@ test = [
     "grz-db",
     "grzctl",
     "grz-pydantic-models-testing",
+    "grz-check",
 ]
 
 [dependency-groups]
@@ -68,6 +71,7 @@ test = [
     "grz-db",
     "grzctl",
     "grz-pydantic-models-testing",
+    "grz-check",
 ]
 lint = [
     "ruff",
