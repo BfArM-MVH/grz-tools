@@ -390,10 +390,19 @@ class Submission:
 
             return paths, metas, reports
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor:
+        total_bytes_to_process = sum(
+            meta.file_size_in_bytes for task in tasks for meta in task[2] if meta.file_size_in_bytes
+        )
+
+        with (
+            concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor,
+            tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,
+        ):
             futures = [executor.submit(_execute_task, *t) for t in tasks]
             for future in concurrent.futures.as_completed(futures):
                 paths, metas, reports = future.result()
+                pbar.set_postfix({"file": ", ".join(p.name for p in paths)})
+
                 for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
                     checksum_issues = []
                     status = getattr(report, "status", "OK")
@@ -429,6 +438,9 @@ class Submission:
                         integrity_passed = status == "OK" and not errors
                         seq_data_state = ValidationState(errors=errors, validation_passed=integrity_passed)
                         seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
+
+                task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
+                pbar.update(task_bytes)
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
