@@ -3,7 +3,6 @@ Tests for grzctl db subcommand
 """
 
 import hashlib
-import importlib.resources
 import json
 import random
 from datetime import UTC, date, datetime
@@ -18,10 +17,7 @@ import sqlalchemy
 import yaml
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
-from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.models.config import DbConfig
-
-TEST_METADATA_PATH = importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 
 
 def test_all_migrations(blank_initial_database_config_path):
@@ -78,19 +74,18 @@ def test_all_migrations(blank_initial_database_config_path):
     assert submission.selected_for_qc is True
 
 
-def test_populate(blank_database_config_path: Path):
+def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
     result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
 
-    with importlib.resources.as_file(TEST_METADATA_PATH) as metadata_path:
-        result_populate = runner.invoke(
-            cli, [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"]
-        )
+    result_populate = runner.invoke(
+        cli, [*args_common, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"]
+    )
     assert result_populate.exit_code == 0, result_populate.stderr
 
     result_show = runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
@@ -117,32 +112,29 @@ def test_populate(blank_database_config_path: Path):
     assert submission.submission_size == metadata.get_submission_size()
 
 
-def test_populate_date(blank_database_config_path: Path):
+def test_populate_date(blank_database_config_path: Path, test_metadata_path: Path):
     db_args = ["db", "--config-file", blank_database_config_path]
     changed_date = date(2026, 1, 1)
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
     result_add = runner.invoke(cli, [*db_args, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
 
-    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
-        result_populate = runner.invoke(
-            cli,
-            [
-                *db_args,
-                "submission",
-                "populate",
-                metadata.submission_id,
-                str(metadata_path),
-                "--no-confirm",
-                "--submission_date",
-                changed_date.strftime("%Y-%m-%d"),
-            ],
-        )
+    result_populate = runner.invoke(
+        cli,
+        [
+            *db_args,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission_date",
+            changed_date.strftime("%Y-%m-%d"),
+        ],
+    )
     assert result_populate.exit_code == 0, result_populate.stderr
 
     result_show = runner.invoke(cli, [*db_args, "submission", "show", metadata.submission_id])
@@ -157,9 +149,9 @@ def test_populate_date(blank_database_config_path: Path):
     assert submission.submission_date == changed_date
 
 
-def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
+def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path, test_metadata_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     # compute submission ID _before_ tanG is redacted (changing the property return value)
     submission_id = metadata.submission_id
@@ -183,7 +175,7 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
         )
 
 
-def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
+def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
     """
     Repopulating a database should work, including when:
     - two donors from different submitters have the same pseudonym.
@@ -197,7 +189,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
-    metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
+    metadata_raw = json.loads(test_metadata_path.read_text())
 
     # first submission
     metadata_raw["submission"]["submitterId"] = "123456789"
@@ -288,9 +280,9 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
     assert len(donors_s2) == 2, "Expected two donors in submission 2"
 
 
-def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
+def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
@@ -298,7 +290,7 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
     assert result_add.exit_code == 0, result_add.stderr
 
     # populate submission + donors first to satisfy foreign key constraints
-    metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
+    metadata_raw = json.loads(test_metadata_path.read_text())
 
     metadata_dump_path = tmp_path / "metadata.json"
     with open(metadata_dump_path, "w") as metadata_file:
@@ -338,10 +330,10 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
     assert not father_result.mean_depth_of_coverage_passed_qc
 
 
-def test_update_error_confirm(blank_database_config_path: Path):
+def test_update_error_confirm(blank_database_config_path: Path, test_metadata_path: Path):
     """Database should confirm before updating a submission from an Error state."""
     args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -402,14 +394,14 @@ def test_list_sort(blank_database_config_path: Path):
         assert submission["id"] == result_list_parsed[i]["id"]
 
 
-def test_submission_show_json(blank_database_config_path: Path):
+def test_submission_show_json(blank_database_config_path: Path, test_metadata_path: Path):
     """
     `grzctl db submission show --json` should return machine-readable JSON
     with submission metadata and state history.
     """
     args_common = ["db", "--config-file", blank_database_config_path]
 
-    metadata = GrzSubmissionMetadata.model_validate_json(TEST_METADATA_PATH.read_text())
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -419,11 +411,10 @@ def test_submission_show_json(blank_database_config_path: Path):
     assert result_add.exit_code == 0, result_add.stderr
 
     # populate submission
-    with importlib.resources.as_file(TEST_METADATA_PATH) as metadata_path:
-        result_populate = runner.invoke(
-            cli,
-            [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"],
-        )
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"],
+    )
     assert result_populate.exit_code == 0, result_populate.stderr
 
     # show submission as JSON

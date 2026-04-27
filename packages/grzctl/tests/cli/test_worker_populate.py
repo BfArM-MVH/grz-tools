@@ -6,7 +6,6 @@ These are integration-style tests that exercise Worker.populate directly
 same SQLite/PostgreSQL fixtures as the CLI tests.
 """
 
-import importlib.resources
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -20,8 +19,6 @@ from grz_db.models.submission import SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, DonorsDiffCollection, SubmissionDiffCollection
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
-
-from .. import resources as test_resources
 
 # S3 endpoint is the same across every test - declare it once.
 # model_construct skips Pydantic validation; endpoint_url is never
@@ -65,7 +62,7 @@ def _fake_s3_client(submission_date: date = date(2025, 9, 15)) -> MagicMock:
 
 
 @pytest.fixture
-def worker_ctx(tmp_path: Path, blank_database_config_path: Path) -> SimpleNamespace:
+def worker_ctx(tmp_path: Path, blank_database_config_path: Path, test_metadata_path: Path) -> SimpleNamespace:
     """Worker + SubmissionDb wired up for populate tests.
 
     The submission is registered in the database (``db.add_submission``) but not yet
@@ -78,7 +75,7 @@ def worker_ctx(tmp_path: Path, blank_database_config_path: Path) -> SimpleNamesp
       ``worker.populate`` will read next
     - ``submission_id`` - str
     """
-    metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    metadata_raw = json.loads(test_metadata_path.read_text())
     worker, db = _make_populate_worker(tmp_path, blank_database_config_path, metadata_raw)
     metadata = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
     submission_id = metadata.submission_id
