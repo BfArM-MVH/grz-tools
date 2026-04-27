@@ -439,14 +439,7 @@ class TestProcessVsManualWorkflow:
 
         result = runner.invoke(
             cli,
-            [
-                "decrypt",
-                "--submission-dir",
-                str(working_dir),
-                "--config-file",
-                config_file,
-                "--no-update-db"
-            ],
+            ["decrypt", "--submission-dir", str(working_dir), "--config-file", config_file, "--no-update-db"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, f"Decrypt failed: {result.output}"
