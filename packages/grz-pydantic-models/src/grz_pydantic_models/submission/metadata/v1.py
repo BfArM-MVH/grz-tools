@@ -31,6 +31,7 @@ from .versioning import Version
 
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
 REDACTED_TAN = "0" * 64
+REDACTED_LOCAL_CASE_ID = "REDACTED_LOCAL_CASE_ID"
 
 log = logging.getLogger(__name__)
 
@@ -1105,21 +1106,18 @@ class GrzSubmissionMetadata(StrictBaseModel):
         if self.submission.tan_g and self.submission.tan_g != REDACTED_TAN:
             patterns.append((self.submission.tan_g, "REDACTED_TAN_G"))
         if self.submission.local_case_id:
-            patterns.append((self.submission.local_case_id, "REDACTED_LOCAL_CASE_ID"))
+            patterns.append((self.submission.local_case_id, REDACTED_LOCAL_CASE_ID))
         return patterns
 
-    def to_redacted_dict(self, archive_consented: bool) -> dict[str, Any]:
+    def to_redacted_dict(self) -> dict[str, Any]:
         """
         Create a redacted dictionary representation suitable for archiving.
 
         Redacts:
         - tanG (replaced with REDACTED_TAN constant)
-        - localCaseId (replaced with "REDACTED_LOCAL_CASE_ID")
+        - localCaseId (replaced with REDACTED_LOCAL_CASE_ID constant)
         - Index donor pseudonym (replaced with "index")
 
-        Also adds archive metadata indicating consent status.
-
-        :param archive_consented: Whether submission is going to consented archive
         :returns: Redacted metadata dictionary
         """
         # get the base dictionary representation
@@ -1127,7 +1125,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         # redact sensitive fields
         metadata_dict["submission"]["tanG"] = REDACTED_TAN
-        metadata_dict["submission"]["localCaseId"] = "REDACTED_LOCAL_CASE_ID"
+        metadata_dict["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
 
         # redact index donor pseudonym
         for donor in metadata_dict.get("donors", []):
@@ -1391,6 +1389,15 @@ class GrzSubmissionMetadata(StrictBaseModel):
             )
 
         return thresholds
+
+    def get_submission_size(self) -> int:
+        submission_size: int = 0
+        for donor in self.donors:
+            for lab_datum in donor.lab_data:
+                if sequence_data := lab_datum.sequence_data:
+                    for datafile in sequence_data.files:
+                        submission_size += datafile.file_size_in_bytes
+        return submission_size
 
     def get_thresholds(self) -> dict[tuple[str, str], thresholds_model.Thresholds | None]:
         """
