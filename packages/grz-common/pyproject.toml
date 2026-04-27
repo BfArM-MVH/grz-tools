@@ -23,6 +23,7 @@ dependencies = [
     "pydantic-settings >=2.11.0,<3",
     "platformdirs >=4.3.6,<5",
     "grz-pydantic-models >=2.2.0",
+    "grz-check >=0.2.1",
     "pysam ==0.23.*",
     "rich ==13.*",
     "requests >=2.32.3,<3",
