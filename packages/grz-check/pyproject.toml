@@ -7,7 +7,7 @@ name = "grz-check"
 version = "0.2.1"
 description = "Fast validation of sequencing files (FASTQ, BAM) powered by Rust"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Rust",
