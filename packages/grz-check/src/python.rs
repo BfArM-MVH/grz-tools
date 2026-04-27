@@ -214,10 +214,9 @@ where
 #[pyo3(signature = (path, min_mean_read_length=None))]
 fn validate_fastq_single(
     py: Python,
-    path: &str,
+    path: PathBuf,
     min_mean_read_length: Option<i64>,
 ) -> PyResult<PyValidationReport> {
-    let path = PathBuf::from(path);
     let length_check = parse_read_length_check(min_mean_read_length);
 
     let report = py.allow_threads(|| {
@@ -283,8 +282,8 @@ fn validate_fastq_paired_stream(
 #[pyo3(signature = (r1_path, r2_path, min_mean_read_length=None))]
 fn validate_fastq_paired_paths(
     py: Python,
-    r1_path: &str,
-    r2_path: &str,
+    r1_path: PathBuf,
+    r2_path: PathBuf,
     min_mean_read_length: Option<i64>,
 ) -> PyResult<(PyValidationReport, PyValidationReport)> {
     use std::fs::File;
@@ -293,8 +292,8 @@ fn validate_fastq_paired_paths(
 
     let (outcome1, outcome2, _pair_errors) = py
         .allow_threads(|| {
-            let file1 = File::open(r1_path).map_err(|e| format!("Failed to open R1 file: {e}"))?;
-            let file2 = File::open(r2_path).map_err(|e| format!("Failed to open R2 file: {e}"))?;
+            let file1 = File::open(&r1_path).map_err(|e| format!("Failed to open R1 file: {e}"))?;
+            let file2 = File::open(&r2_path).map_err(|e| format!("Failed to open R2 file: {e}"))?;
 
             let (decompressed1, _fmt1) = niffler::get_reader(Box::new(file1))
                 .map_err(|e| format!("Failed to decompress R1 file: {e}"))?;
@@ -316,9 +315,7 @@ fn validate_fastq_paired_paths(
 
 /// Validate a BAM file from a path
 #[pyfunction]
-fn validate_bam(py: Python, path: &str) -> PyResult<PyValidationReport> {
-    let path = PathBuf::from(path);
-
+fn validate_bam(py: Python, path: PathBuf) -> PyResult<PyValidationReport> {
     let report = py.allow_threads(|| {
         let pb = noop_progress_bar();
         let main_pb = noop_progress_bar();
@@ -365,9 +362,7 @@ fn calculate_file_checksum(path: &std::path::Path) -> Result<String, std::io::Er
 
 /// Calculate SHA256 checksum of a file
 #[pyfunction]
-fn calculate_checksum(py: Python, path: &str) -> PyResult<String> {
-    let path = PathBuf::from(path);
-
+fn calculate_checksum(py: Python, path: PathBuf) -> PyResult<String> {
     let checksum = py
         .allow_threads(|| calculate_file_checksum(&path))
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;

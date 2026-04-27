@@ -67,7 +67,7 @@ def validate_fastq(source, *, min_mean_read_length=None):
         ValidationReport with validation results.
     """
     if isinstance(source, (str, os.PathLike)):
-        return _validate_fastq_single(str(source), min_mean_read_length=min_mean_read_length)
+        return _validate_fastq_single(source, min_mean_read_length=min_mean_read_length)
     return _validate_fastq_single_stream(source, min_mean_read_length=min_mean_read_length)
 
 
@@ -96,7 +96,7 @@ def validate_fastq_paired(r1, r2, *, min_mean_read_length=None):
         Tuple of (r1_report, r2_report) ValidationReports.
     """
     if isinstance(r1, (str, os.PathLike)):
-        return _validate_fastq_paired_paths(str(r1), str(r2), min_mean_read_length=min_mean_read_length)
+        return _validate_fastq_paired_paths(r1, r2, min_mean_read_length=min_mean_read_length)
     return _validate_fastq_paired_stream(r1, r2, min_mean_read_length=min_mean_read_length)
 
 
@@ -118,7 +118,7 @@ def validate_bam(source):
         ValidationReport with validation results.
     """
     if isinstance(source, (str, os.PathLike)):
-        return _validate_bam(str(source))
+        return _validate_bam(source)
     return _validate_bam_stream(source)
 
 
@@ -140,5 +140,5 @@ def calculate_checksum(source):
         Hex-encoded SHA256 checksum string.
     """
     if isinstance(source, (str, os.PathLike)):
-        return _calculate_checksum(str(source))
+        return _calculate_checksum(source)
     return _calculate_checksum_stream(source)
