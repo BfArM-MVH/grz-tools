@@ -233,8 +233,10 @@ def test_upload_aborts_if_encryption_log_missing(
     assert len(objects_in_bucket) == 1, "Upload should not have happened!"
 
 
+@pytest.mark.parametrize("grz_check_flag", ["--no-grz-check", "--with-grz-check"])
 def test_upload_workflow_succeeds_with_symlink_in_files_dir(
     working_dir_path,
+    grz_check_flag,
     temp_identifiers_config_file_path,
     temp_keys_config_file_path,
     temp_s3_config_file_path,
@@ -243,9 +245,11 @@ def test_upload_workflow_succeeds_with_symlink_in_files_dir(
     """
     End-to-end smoke test for LE submissions where `files/` contains symlinks.
 
-    We intentionally use `--no-grz-check` here to exercise the Python fallback
-    validation path in a deterministic way.
+    Runs both with and without `grz-check` (when available).
     """
+    if (grz_check_flag == "--with-grz-check") and (shutil.which("grz-check") is None):
+        pytest.skip(reason="grz-check not installed")
+
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
@@ -274,14 +278,14 @@ def test_upload_workflow_succeeds_with_symlink_in_files_dir(
         str(temp_s3_config_file_path),
     ]
 
-    # validate (fallback)
+    # validate
     result = runner.invoke(
         cli,
         [
             "validate",
             "--submission-dir",
             str(working_dir_path),
-            "--no-grz-check",
+            grz_check_flag,
             *config_args,
         ],
         catch_exceptions=False,
