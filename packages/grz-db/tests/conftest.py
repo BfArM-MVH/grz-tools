@@ -1,27 +1,21 @@
 """Shared fixtures for grz-db tests."""
 
-import importlib.util
+import importlib.resources
 import json
-from pathlib import Path
 from shutil import which
 
 import psycopg
 import pytest
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 
-# Resolve the grz-pydantic-models package root, then navigate to its test resources.
-# spec.origin  →  .../packages/grz-pydantic-models/src/grz_pydantic_models/__init__.py
-# parents[2]   →  .../packages/grz-pydantic-models/
-_GRZ_PYDANTIC_MODELS_SPEC = importlib.util.find_spec("grz_pydantic_models")
-assert _GRZ_PYDANTIC_MODELS_SPEC is not None and _GRZ_PYDANTIC_MODELS_SPEC.origin is not None
-_GRZ_PYDANTIC_MODELS_ROOT = Path(_GRZ_PYDANTIC_MODELS_SPEC.origin).parents[2]
-_MOCK_METADATA_PATH = _GRZ_PYDANTIC_MODELS_ROOT / "tests/resources/example_metadata/wes_tumor_germline/v1.2.1.json"
+TEST_METADATA_PATH = importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 
 
 @pytest.fixture(scope="session")
 def metadata() -> GrzSubmissionMetadata:
     """Load the wes_tumor_germline v1.2.1 example from grz-pydantic-models' own test resources."""
-    with _MOCK_METADATA_PATH.open() as fh:
+    with TEST_METADATA_PATH.open() as fh:
         return GrzSubmissionMetadata(**json.load(fh))
 
 
