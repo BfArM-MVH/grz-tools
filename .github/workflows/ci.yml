@@ -59,6 +59,7 @@ jobs:
           # Define dependency graph (source package name -> space-separated list of dependent package names)
           declare -A DEPENDENCY_GRAPH
           DEPENDENCY_GRAPH["grz-pydantic-models"]="grz-cli grzctl grz-common grz-db"
+          DEPENDENCY_GRAPH["grz-pydantic-models-testing"]="grz-pydantic-models grzctl grz-db"
           DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl"
           DEPENDENCY_GRAPH["grz-db"]="grzctl"
           DEPENDENCY_GRAPH["grz-cli"]="grzctl"
