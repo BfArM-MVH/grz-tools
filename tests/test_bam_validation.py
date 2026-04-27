@@ -28,7 +28,7 @@ def test_hard_clipped_primary(caplog):
         with open(bam_path, "rb") as f:
             ReadStream(f) >> validator
 
-    assert "Detected hard-clipped bases in primary alignment" in caplog.text
+    assert "primary alignment(s) with hard-clipped bases" in caplog.text
 
 
 def test_secondary(caplog):
@@ -39,6 +39,6 @@ def test_secondary(caplog):
         validator = BamValidator()
         with open(bam_path, "rb") as f:
             ReadStream(f) >> validator
-    assert "Detected secondary alignment in BAM" in caplog.text
+    assert "File contains 1 secondary alignment" in caplog.text
     # hard-clipped bases are fine in secondaries
-    assert "Detected hard-clipped bases in primary alignment" not in caplog.text
+    assert "primary alignment(s) with hard-clipped bases" not in caplog.text

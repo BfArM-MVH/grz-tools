@@ -23,7 +23,7 @@ def test_single_end_line_count_not_multiple_of_4():
     with pytest.raises(DataValidationError) as excinfo:
         run_validator(path, threshold=75)
 
-    assert "incomplete record" in str(excinfo.value).lower()
+    assert "failed to parse record" in str(excinfo.value).lower()
 
 
 def test_paired_end_differing_line_numbers():
