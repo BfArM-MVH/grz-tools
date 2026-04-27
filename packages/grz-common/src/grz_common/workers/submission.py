@@ -282,7 +282,11 @@ class Submission:
         return retval
 
     def validate_files(  # noqa: C901, PLR0912, PLR0915
-        self, checksum_progress_file: str | PathLike, seq_data_progress_file: str | PathLike, threads: int | None
+        self,
+        checksum_progress_file: str | PathLike,
+        seq_data_progress_file: str | PathLike,
+        threads: int | None,
+        use_mmap: bool = False,
     ) -> Generator[str, None, None]:
         """
         Validates submission files using `grz-check` and populates both progress logs.
@@ -351,6 +355,11 @@ class Submission:
             yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
             return
 
+        # pre-calculate total bytes
+        total_bytes_to_process = sum(
+            meta.file_size_in_bytes for task in tasks for meta in task[2] if meta.file_size_in_bytes
+        )
+
         # grz-check doesn't return a validation report for raw file processing / plain checksums
         class ChecksumReport:
             def __init__(self, checksum, errors=None, status="OK"):
@@ -359,7 +368,18 @@ class Submission:
                 self.warnings = []
                 self.status = status
 
-        def _execute_task(task_type, paths, metas, kwargs):
+        class TqdmFileReader:
+            def __init__(self, file_obj, pbar):
+                self._file = file_obj
+                self._pbar = pbar
+
+            def read(self, size=-1):
+                data = self._file.read(size)
+                if data:
+                    self._pbar.update(len(data))
+                return data
+
+        def _execute_task(task_type, paths, metas, kwargs, pbar):
             reports = []
             try:
                 with ExitStack() as stack:
@@ -370,8 +390,11 @@ class Submission:
                             sources.append(str(p))
                         else:
                             f = stack.enter_context(open(p, "rb"))
-                            mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
-                            sources.append(mm)
+                            if not use_mmap:
+                                sources.append(TqdmFileReader(f, pbar))
+                            else:
+                                mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
+                                sources.append(mm)
 
                     if task_type == "fastq_paired":
                         reports = grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs)
@@ -390,18 +413,16 @@ class Submission:
 
             return paths, metas, reports
 
-        total_bytes_to_process = sum(
-            meta.file_size_in_bytes for task in tasks for meta in task[2] if meta.file_size_in_bytes
-        )
-
         with (
             concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor,
             tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,
         ):
-            futures = [executor.submit(_execute_task, *t) for t in tasks]
+            futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
+
             for future in concurrent.futures.as_completed(futures):
                 paths, metas, reports = future.result()
-                pbar.set_postfix({"file": ", ".join(p.name for p in paths)})
+
+                pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
 
                 for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
                     checksum_issues = []
@@ -439,8 +460,9 @@ class Submission:
                         seq_data_state = ValidationState(errors=errors, validation_passed=integrity_passed)
                         seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
 
-                task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
-                pbar.update(task_bytes)
+                if use_mmap:
+                    task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
+                    pbar.update(task_bytes)
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 

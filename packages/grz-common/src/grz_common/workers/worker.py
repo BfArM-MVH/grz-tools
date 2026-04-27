@@ -97,12 +97,13 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False):
+    def validate(self, identifiers: IdentifiersModel, force: bool = False, mmap: bool = False):
         """
         Validate this submission
 
         :param identifiers: IdentifiersModel containing GRZ and LE identifiers.
         :param force: Force validation of already validated files
+        :param mmap: Whether to stream or mmap the files to validate
         :raises SubmissionValidationError: if the validation fails
         """
         submission = self.parse_submission()
@@ -128,6 +129,7 @@ class Worker:
                     checksum_progress_file=self.progress_file_checksum_validation,
                     seq_data_progress_file=self.progress_file_sequencing_data_validation,
                     threads=self._threads,
+                    use_mmap=mmap,
                 )
             )
             if errors:

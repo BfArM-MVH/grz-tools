@@ -17,11 +17,19 @@ log = logging.getLogger(__name__)
 @grzcli.submission_dir
 @grzcli.force
 @grzcli.threads
+@click.option(
+    "--mmap/--no-mmap",
+    "mmap",
+    default=True,
+    hidden=True,
+    help="Whether to use mmap based validation.",
+)
 def validate(
     configuration: dict[str, Any],
     submission_dir,
     force,
     threads,
+    mmap,
     **kwargs,
 ):
     """
@@ -43,6 +51,6 @@ def validate(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-    worker_inst.validate(identifiers=config.identifiers, force=force)
+    worker_inst.validate(identifiers=config.identifiers, force=force, mmap=mmap)
 
     log.info("Validation finished!")
