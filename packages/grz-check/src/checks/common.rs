@@ -5,9 +5,12 @@ use anyhow::Context;
 use indicatif::ProgressBar;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+const READ_BUF_SIZE: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Default)]
 pub struct CheckOutcome {
     pub stats: Option<Stats>,
@@ -15,7 +18,7 @@ pub struct CheckOutcome {
     pub warnings: Vec<String>,
 }
 
-type ReaderAndHasher = (Box<dyn Read>, Arc<Mutex<Sha256>>);
+type ReaderAndHasher = (Box<dyn BufRead>, Arc<Mutex<Sha256>>);
 
 pub fn setup_file_reader(
     path: &Path,
@@ -32,21 +35,30 @@ pub fn setup_file_reader(
         .with_context(|| format!("Failed to open file for reading: {}", path.display()))?;
 
     let hasher = Arc::new(Mutex::new(Sha256::new()));
-    let hashing_reader = SharedHashingReader::new(BufReader::new(file), hasher.clone());
+    let hashing_reader = SharedHashingReader::new(file, hasher.clone());
     let progress_reader =
         DualProgressReader::new(hashing_reader, file_pb.clone(), global_pb.clone());
 
-    let reader: Box<dyn Read> = if decompress {
-        let (decompressed_reader, _) = niffler::get_reader(Box::new(progress_reader))
+    let decompressed: Box<dyn Read> = if decompress {
+        let (r, _) = niffler::get_reader(Box::new(progress_reader))
             .with_context(|| format!("Failed to decompress file: {}", path.display()))?;
-        decompressed_reader
+        r
     } else {
         Box::new(progress_reader)
     };
 
-    Ok((reader, hasher))
+    let buffered: Box<dyn BufRead> =
+        Box::new(BufReader::with_capacity(READ_BUF_SIZE, decompressed));
+
+    Ok((buffered, hasher))
 }
 
+/// Check a file using the given validation logic.
+///
+/// This function handles:
+/// 1. Setting up a file reader with progress tracking
+/// 2. Running the validation logic on the reader
+/// 3. Collecting results and errors
 pub fn check_file<F>(
     path: &Path,
     file_pb: &ProgressBar,
@@ -55,7 +67,7 @@ pub fn check_file<F>(
     logic: F,
 ) -> FileReport
 where
-    F: FnOnce(&mut dyn Read) -> Result<CheckOutcome, String>,
+    F: FnOnce(&mut dyn BufRead) -> Result<CheckOutcome, String>,
 {
     let (mut reader, hasher) = match setup_file_reader(path, file_pb, global_pb, decompress) {
         Ok(setup) => setup,
