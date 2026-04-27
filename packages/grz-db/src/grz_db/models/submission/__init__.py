@@ -7,9 +7,10 @@ import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional, Self
 
 import sqlalchemy as sa
+import sqlalchemy.dialects.postgresql as sa_psql
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
@@ -21,6 +22,7 @@ from grz_pydantic_models.submission.metadata import (
     GenomicDataCenterId,
     GenomicStudySubtype,
     GenomicStudyType,
+    GrzSubmissionMetadata,
     LibraryType,
     Relation,
     ResearchConsentNoScopeJustification,
@@ -30,19 +32,20 @@ from grz_pydantic_models.submission.metadata import (
     SubmitterId,
     Tan,
 )
+from grz_pydantic_models.submission.metadata.v1 import Donor as MetadataDonor
 from pydantic import ConfigDict, field_serializer, field_validator
-from sqlalchemy import JSON, Column, Enum
+from sqlalchemy import JSON, BigInteger, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import DateTime, Field, Relationship, Session, SQLModel, create_engine, select
 
-from ..common import (
+from ...common import (
     CaseInsensitiveStrEnum,
     ListableEnum,
     serialize_datetime_to_iso_z,
 )
-from ..errors import (
+from ...errors import (
     DuplicateSubmissionError,
     DuplicateTanGError,
     SubmissionBasicQCNotPassedError,
@@ -50,8 +53,16 @@ from ..errors import (
     SubmissionNotFoundError,
     SubmissionTypeIsNoneError,
 )
-from .author import Author
-from .base import BaseSignablePayload, VerifiableLog
+from ..author import Author
+from ..base import BaseSignablePayload, VerifiableLog
+from .diff import (  # noqa: F401
+    Diff,
+    DiffState,
+    DonorDiff,
+    DonorsDiffCollection,
+    FieldDiff,
+    SubmissionDiffCollection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +158,13 @@ class SubmissionBase(SQLModel):
     # Database column indicating whether a submission is selected for in-depth QC (True/False) or not yet decided (None).
     selected_for_qc: bool | None = None
 
+    # extra fields
+    submission_size: int | None = Field(default=None, sa_type=BigInteger)
+    submission_metadata: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql")),
+    )
+
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""
@@ -168,10 +186,65 @@ class Submission(SubmissionBase, table=True):
 
     changes: list["ChangeRequestLog"] = Relationship(back_populates="submission")
 
+    def diff(
+        self,
+        other: Self,
+        ignore_fields: set[str] | None = None,
+    ) -> SubmissionDiffCollection:
+        """Compare this submission against *other* and return all detected differences.
+
+        :param other: The new submission state to compare against.
+        :param ignore_fields: Field names to skip entirely during the comparison.
+        :returns: A :class:`SubmissionDiffCollection` summarising all detected differences.
+        :raises ValueError: If an immutable field has changed.
+        """
+        result = SubmissionDiffCollection()
+        for key in other.model_fields_set - (ignore_fields or set()):
+            field_diff = FieldDiff.classify_field(key, getattr(self, key), getattr(other, key))
+            if key in other.immutable_fields and field_diff.diff.state != DiffState.UNCHANGED:
+                raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
+            result.append(field_diff)
+        return result
+
     def get_latest_state(self, filter_to_type: SubmissionStateEnum | None = None) -> Optional["SubmissionStateLog"]:
         states = filter(lambda state: state.state == filter_to_type, self.states) if filter_to_type else self.states
         states = sorted(states, key=attrgetter("timestamp"))
         return states[-1] if states else None
+
+    @classmethod
+    def from_metadata(
+        cls,
+        submission_id: str,
+        metadata: GrzSubmissionMetadata,
+        submission_date: datetime.date | None,
+    ) -> Self:
+        """Construct a Submission populated with values derived from parsed metadata.
+
+        Only the fields that can be sourced from metadata are set; system-managed
+        fields (e.g. ``basic_qc_passed``, ``selected_for_qc``) are left at their
+        defaults so that ``model_fields_set`` reliably indicates which fields to
+        compare during a diff.
+        """
+        return cls.model_validate(
+            {
+                "id": submission_id,
+                "tanG": metadata.submission.tan_g,
+                "submission_type": metadata.submission.submission_type,
+                "submitter_id": metadata.submission.submitter_id,
+                "coverage_type": metadata.submission.coverage_type,
+                "disease_type": metadata.submission.disease_type,
+                "genomic_study_type": metadata.submission.genomic_study_type,
+                "genomic_study_subtype": metadata.submission.genomic_study_subtype,
+                "pseudonym": metadata.submission.local_case_id,
+                "data_node_id": metadata.submission.genomic_data_center_id,
+                "consented": metadata.consents_to_research(date=datetime.date.today()),
+                "submission_size": metadata.get_submission_size(),
+                "submission_date": submission_date
+                if submission_date is not None
+                else metadata.submission.submission_date,
+                "submission_metadata": metadata.to_redacted_dict(),
+            }
+        )
 
 
 class SubmissionStateLogBase(SQLModel):
@@ -335,6 +408,32 @@ class Donor(SQLModel, table=True):
     def validate_and_coerce_justifications(cls, v: set | None) -> set | None:
         return coerce_empty_set_to_none(v)
 
+    @classmethod
+    def from_donor_metadata(
+        cls,
+        submission_id: str,
+        donor: MetadataDonor,
+    ) -> Self:
+        return cls.model_validate(
+            dict(
+                submission_id=submission_id,
+                pseudonym="index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
+                relation=Relation(donor.relation),
+                library_types={datum.library_type for datum in donor.lab_data},
+                sequence_types={datum.sequence_type for datum in donor.lab_data},
+                sequence_subtypes={datum.sequence_subtype for datum in donor.lab_data},
+                mv_consented=donor.consents_to_mv(),
+                research_consented=donor.consents_to_research(date=datetime.date.today()),
+                research_consent_missing_justifications={
+                    consent.no_scope_justification
+                    for consent in donor.research_consents
+                    if consent.no_scope_justification is not None
+                }
+                if donor.research_consents
+                else None,
+            )
+        )
+
 
 class DetailedQCResult(SQLModel, table=True):
     """Detailed QC pipeline result model."""
@@ -487,7 +586,7 @@ class SubmissionDb:
                 session.rollback()
                 raise
 
-    def modify_submission(self, submission_id: str, key: str, value: str) -> Submission:  # noqa: C901
+    def modify_submission(self, submission_id: str, key: str, value: Any) -> Submission:  # noqa: C901
         if key not in SubmissionBase.model_fields:
             raise ValueError(f"Unknown column key '{key}'")
         elif key in SubmissionBase.immutable_fields:
@@ -521,6 +620,37 @@ class SubmissionDb:
             except IntegrityError as e:
                 session.rollback()
                 if "UNIQUE constraint failed: submissions.tanG" in str(e) and key == "tan_g":
+                    raise DuplicateTanGError() from e
+                raise
+            except Exception:
+                session.rollback()
+                raise
+
+    def update_submission(self, submission: Submission) -> Submission:
+        """
+        Persists changes made to a Submission object back to the database.
+
+        :param submission: The Submission instance with updated field values.
+        :return: The updated Submission instance.
+        """
+        with self._get_session() as session:
+            db_submission = session.get(Submission, submission.id)
+            if db_submission is None:
+                raise SubmissionNotFoundError(submission.id)
+
+            for field in SubmissionBase.model_fields:
+                if field in SubmissionBase.immutable_fields:
+                    continue
+                setattr(db_submission, field, getattr(submission, field))
+
+            session.add(db_submission)
+            try:
+                session.commit()
+                session.refresh(db_submission)
+                return db_submission
+            except IntegrityError as e:
+                session.rollback()
+                if "UNIQUE constraint failed: submissions.tanG" in str(e):
                     raise DuplicateTanGError() from e
                 raise
             except Exception:
@@ -868,13 +998,13 @@ class SubmissionDb:
                 select(SubmissionStateLog.submission_id)
                 .where(SubmissionStateLog.state.in_([SubmissionStateEnum.REPORTED, SubmissionStateEnum.QCED]))  # type: ignore[attr-defined]
                 .where(SubmissionStateLog.timestamp.between(start, end))  # type: ignore[attr-defined]
+                .distinct()
                 .subquery()
             )
             statement = (
                 select(Submission)
                 .options(selectinload(Submission.states))  # type: ignore[arg-type]
                 .join(reported_within_window, Submission.id == reported_within_window.c.submission_id)  # type: ignore[arg-type]
-                .distinct()
             )
             submissions = session.exec(statement).all()
             return submissions
@@ -964,3 +1094,95 @@ class SubmissionDb:
 
         self.set_selected_for_qc(submission_id, should_select)
         return should_select
+
+    def _diff_metadata(
+        self,
+        submission_id: str,
+        metadata: GrzSubmissionMetadata,
+        submission_date: datetime.date | None,
+        ignore_fields: set[str] | None = None,
+    ) -> SubmissionDiffCollection:
+        """Compare a submission's current database state against fresh metadata.
+
+        :param submission_id: Submission ID to look up.
+        :param metadata: Parsed metadata from the submission's ``metadata.json``.
+        :param submission_date: Explicit submission date; falls back to the value in *metadata* when ``None``.
+        :param ignore_fields: Field names to skip entirely during the comparison.
+        :returns: A :class:`SubmissionDiffCollection` instance summarising all detected differences.
+        """
+        current_submission = self.get_submission(submission_id)
+        if current_submission is None:
+            raise SubmissionNotFoundError(submission_id)
+
+        if ignore_fields is None:
+            ignore_fields = set()
+
+        new_submission = Submission.from_metadata(submission_id, metadata, submission_date)
+
+        return current_submission.diff(new_submission, ignore_fields)
+
+    def _diff_donors(
+        self,
+        submission_id: str,
+        metadata: GrzSubmissionMetadata,
+    ) -> DonorsDiffCollection:
+        """Diff all donors in *metadata* against the current database state.
+
+        :param submission_id: Submission ID to look up donors for.
+        :param metadata: Parsed metadata from the submission's ``metadata.json``.
+        :returns: A fully populated :class:`DonorDiff`.
+        """
+        donors_in_db_submission = {donor.pseudonym: donor for donor in self.get_donors(submission_id=submission_id)}
+        donors_in_metadata = {
+            (d := Donor.from_donor_metadata(submission_id, donor)).pseudonym: d for donor in metadata.donors
+        }
+
+        result = DonorsDiffCollection()
+
+        for pseudonym in donors_in_db_submission.keys() | donors_in_metadata.keys():
+            donor_before = donors_in_db_submission.get(pseudonym)
+            donor_after = donors_in_metadata.get(pseudonym)
+
+            diff = DonorDiff.classify(donor_before, donor_after)
+            result.append(diff)
+
+        return result
+
+    def diff(
+        self,
+        submission_id: str,
+        metadata: GrzSubmissionMetadata,
+        submission_date: datetime.date | None,
+        ignore_fields: set[str] | None = None,
+    ) -> tuple[SubmissionDiffCollection, DonorsDiffCollection]:
+        submission_diff = self._diff_metadata(submission_id, metadata, submission_date, ignore_fields)
+        donor_diff = self._diff_donors(submission_id, metadata)
+        return submission_diff, donor_diff
+
+    def commit_changes(
+        self,
+        submission_id: str,
+        submission_diff: SubmissionDiffCollection | None = None,
+        donors_diff: DonorsDiffCollection | None = None,
+    ) -> None:
+        """Write all pending metadata and donor diffs to the database.
+        Can be obtained by calling :func:`diff`
+
+        :param db: Database service instance to write to.
+        :param submission_id: ID of the submission being updated.
+        :param submission_diff: Diff result from :func:`diff_metadata`.
+        :param donors_diff: Diff result from :func:`build_donor_diff`.
+        """
+        if submission_diff is not None:
+            for field_diff in submission_diff.pending:
+                self.modify_submission(submission_id, field_diff.key, field_diff.diff.after)
+        if donors_diff is not None:
+            for donor_diff in donors_diff.added:
+                assert donor_diff.after is not None, "Added NoneType donor, this should not happen"  # noqa: S101
+                self.add_donor(donor_diff.after)
+            for donor_diff in donors_diff.updated:
+                assert donor_diff.after is not None, "Updated NoneType donor, this should not happen"  # noqa: S101
+                self.update_donor(donor_diff.after)
+            for donor_diff in donors_diff.deleted:
+                assert donor_diff.before is not None, "Removed NoneType donor, this should not happen"  # noqa: S101
+                self.delete_donor(donor_diff.before)
