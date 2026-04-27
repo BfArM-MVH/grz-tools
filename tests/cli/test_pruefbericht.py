@@ -418,7 +418,7 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
     assert result.exit_code == 0, result.output
 
     # Verify the generated Prüfbericht matches expected values
-    pruefbericht_data = json.loads(result.output)
+    pruefbericht_data = json.loads(result.stdout)
     assert pruefbericht_data["SubmittedCase"] == {
         "submissionDate": "2024-07-15",
         "submissionType": "test",

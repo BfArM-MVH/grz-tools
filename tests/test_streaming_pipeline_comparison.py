@@ -94,6 +94,7 @@ class TestManualCliVsStreamingPipeline:
                 str(working_dir),
                 "--config-file",
                 config_file,
+                "--no-update-db",
             ],
             catch_exceptions=False,
         )
@@ -113,6 +114,7 @@ class TestManualCliVsStreamingPipeline:
                 "--config-file",
                 config_file,
                 "--no-grz-check",  # Use fallback validation
+                "--no-update-db",
             ],
             catch_exceptions=False,
         )
@@ -137,6 +139,7 @@ class TestManualCliVsStreamingPipeline:
                 "--config-file",
                 config_file,
                 "--no-check-validation-logs",
+                "--no-update-db",
             ],
             catch_exceptions=False,
         )

@@ -445,6 +445,7 @@ class TestProcessVsManualWorkflow:
                 str(working_dir),
                 "--config-file",
                 config_file,
+                "--no-update-db"
             ],
             catch_exceptions=False,
         )
