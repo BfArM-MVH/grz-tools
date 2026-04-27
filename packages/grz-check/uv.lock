@@ -40,7 +40,6 @@ wheels = [
 
 [[package]]
 name = "grz-check"
-version = "0.2.1"
 source = { editable = "." }
 
 [package.optional-dependencies]

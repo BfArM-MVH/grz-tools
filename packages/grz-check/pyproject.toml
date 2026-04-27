@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "grz-check"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Fast validation of sequencing files (FASTQ, BAM) powered by Rust"
 readme = "README.md"
 requires-python = ">=3.12"
