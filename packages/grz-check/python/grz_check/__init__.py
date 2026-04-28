@@ -33,6 +33,8 @@ from .grz_check import validate_fastq_paired_paths as _validate_fastq_paired_pat
 from .grz_check import validate_fastq_paired_stream as _validate_fastq_paired_stream
 from .grz_check import validate_fastq_single as _validate_fastq_single
 from .grz_check import validate_fastq_single_stream as _validate_fastq_single_stream
+from .grz_check import validate_raw as _validate_raw
+from .grz_check import validate_raw_stream as _validate_raw_stream
 
 __all__ = [
     "ValidationReport",
@@ -40,6 +42,7 @@ __all__ = [
     "validate_bam",
     "validate_fastq",
     "validate_fastq_paired",
+    "validate_raw",
 ]
 
 __version__ = "0.2.1"
@@ -68,7 +71,9 @@ def validate_fastq(source, *, min_mean_read_length=None) -> ValidationReport:
     """
     if isinstance(source, (str, os.PathLike)):
         return _validate_fastq_single(source, min_mean_read_length=min_mean_read_length)
-    return _validate_fastq_single_stream(source, min_mean_read_length=min_mean_read_length)
+    report = _validate_fastq_single_stream(source, min_mean_read_length=min_mean_read_length)
+    report.path = str(getattr(source, "name", ""))
+    return report
 
 
 @typing.overload
@@ -97,7 +102,10 @@ def validate_fastq_paired(r1, r2, *, min_mean_read_length=None) -> tuple[Validat
     """
     if isinstance(r1, (str, os.PathLike)):
         return _validate_fastq_paired_paths(r1, r2, min_mean_read_length=min_mean_read_length)
-    return _validate_fastq_paired_stream(r1, r2, min_mean_read_length=min_mean_read_length)
+    report1, report2 = _validate_fastq_paired_stream(r1, r2, min_mean_read_length=min_mean_read_length)
+    report1.path = str(getattr(r1, "name", ""))
+    report2.path = str(getattr(r2, "name", ""))
+    return report1, report2
 
 
 @typing.overload
@@ -119,7 +127,33 @@ def validate_bam(source) -> ValidationReport:
     """
     if isinstance(source, (str, os.PathLike)):
         return _validate_bam(source)
-    return _validate_bam_stream(source)
+    report = _validate_bam_stream(source)
+    report.path = str(getattr(source, "name", ""))
+    return report
+
+
+@typing.overload
+def validate_raw(source: str | os.PathLike) -> ValidationReport: ...
+
+
+@typing.overload
+def validate_raw(source: typing.BinaryIO) -> ValidationReport: ...
+
+
+def validate_raw(source) -> ValidationReport:
+    """Validate a raw file (calculates SHA256 checksum).
+
+    Args:
+        source: Path to the file (str/PathLike) or a binary file-like object.
+
+    Returns:
+        ValidationReport populated with the SHA256 checksum.
+    """
+    if isinstance(source, (str, os.PathLike)):
+        return _validate_raw(source)
+    report = _validate_raw_stream(source)
+    report.path = str(getattr(source, "name", ""))
+    return report
 
 
 @typing.overload

@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const READ_BUF_SIZE: usize = 4 * 1024 * 1024;
+pub(crate) const READ_BUF_SIZE: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct CheckOutcome {

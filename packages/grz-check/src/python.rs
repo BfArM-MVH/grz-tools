@@ -1,18 +1,18 @@
 use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
 use sha2::{Digest, Sha256};
 use std::io::{self, BufRead, BufReader, Cursor, Read};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use crate::checker::FileReport;
-use crate::checks::bam::validate_bam_data;
-use crate::checks::common::CheckOutcome;
+use crate::checks::bam::{check_bam, validate_bam_data};
+use crate::checks::common::{CheckOutcome, READ_BUF_SIZE};
 use crate::checks::fastq::{
     ReadLengthCheck, check_single_fastq, process_paired_readers, validate_fastq_data,
 };
 
-const STREAM_BUF_SIZE: usize = 4 * 1024 * 1024; // 4 MB
+const STREAM_BUF_SIZE: usize = READ_BUF_SIZE;
 
 /// sha2 dropped std::io::Write implementation, so we work around it.
 struct HashWriter<'a, D>(&'a mut D);
@@ -72,8 +72,7 @@ impl Read for PyFileLikeObject {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         Python::attach(|py| -> PyResult<usize> {
             let result = self.obj.bind(py).call_method1("read", (buf.len(),))?;
-            let bytes = result.downcast::<PyBytes>()?;
-            let data = bytes.as_bytes();
+            let data: &[u8] = result.extract()?;
             let len = data.len();
             buf[..len].copy_from_slice(data);
             Ok(len)
@@ -134,7 +133,7 @@ unsafe fn buffer_as_slice(buffer: &PyBuffer<u8>) -> &[u8] {
 #[pyclass(name = "ValidationReport", from_py_object)]
 #[derive(Clone)]
 pub struct PyValidationReport {
-    #[pyo3(get)]
+    #[pyo3(get, set)]
     pub path: String,
     #[pyo3(get)]
     pub num_records: Option<u64>,
@@ -194,35 +193,58 @@ fn noop_progress_bar() -> indicatif::ProgressBar {
     indicatif::ProgressBar::hidden()
 }
 
-/// Set up a decompression pipeline over `input` and run `f` on the result.
-///                                                                           
-/// The pipeline unzips the input if needed (niffler autodetects the format)
-/// and then wraps the decompressed stream in a BufReader. The buffer is      
-/// important because downstream parsers read one line at a time, which is    
-/// faster with batching.                                          
-///                                                                           
-/// The variable `input` can be either Python in-memory buffers or a file-like object
-/// this function is typically called in conjunction with validate_fastq_data
-fn with_fastq_reader<F, T>(input: StreamInput, f: F) -> Result<T, String>
+struct StreamHasher<R> {
+    inner: R,
+    hasher: Arc<Mutex<Sha256>>,
+}
+
+impl<R: Read> Read for StreamHasher<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n > 0 {
+            self.hasher.lock().unwrap().update(&buf[..n]);
+        }
+        Ok(n)
+    }
+}
+
+fn with_fastq_reader<F, T>(input: StreamInput, f: F) -> Result<(T, String), String>
 where
     F: FnOnce(&mut dyn BufRead) -> Result<T, String>,
 {
-    match input {
+    let hasher = Arc::new(Mutex::new(Sha256::new()));
+
+    let result = match input {
         StreamInput::PyBuf(buffer) => {
             // The buffer is dropped after the reader, so the slice stays valid.
             let slice = unsafe { buffer_as_slice(&buffer) };
-            let (decompressed, _format) = niffler::get_reader(Box::new(Cursor::new(slice)))
+            let hash_reader = StreamHasher {
+                inner: Cursor::new(slice),
+                hasher: hasher.clone(),
+            };
+            let (decompressed, _) = niffler::get_reader(Box::new(hash_reader))
                 .map_err(|e| format!("Failed to detect or decompress stream format: {e}"))?;
             let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed);
-            f(&mut reader)
+            f(&mut reader)?
         }
         StreamInput::FileLike(file_like) => {
-            let (decompressed, _format) = niffler::get_reader(Box::new(file_like))
+            let hash_reader = StreamHasher {
+                inner: file_like,
+                hasher: hasher.clone(),
+            };
+            let (decompressed, _) = niffler::get_reader(Box::new(hash_reader))
                 .map_err(|e| format!("Failed to detect or decompress stream format: {e}"))?;
             let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed);
-            f(&mut reader)
+            f(&mut reader)?
         }
-    }
+    };
+
+    let final_hash = match Arc::try_unwrap(hasher) {
+        Ok(mutex) => hex::encode(mutex.into_inner().unwrap().finalize()),
+        Err(_) => return Err("Failed to finalize checksum: hasher is still in use.".to_string()),
+    };
+
+    Ok((result, final_hash))
 }
 
 /// Validate a single-end FASTQ file from a path
@@ -255,11 +277,15 @@ fn validate_fastq_single_stream(
     let length_check = parse_read_length_check(min_mean_read_length);
     let input = extract_stream_input(source)?;
 
-    let outcome = py
-        .detach(|| with_fastq_reader(input, |reader| validate_fastq_data(reader, length_check)))
+    let (outcome, checksum) = py
+        .detach(|| -> Result<_, String> {
+            with_fastq_reader(input, |reader| validate_fastq_data(reader, length_check))
+        })
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
-    Ok(PyValidationReport::from(outcome))
+    let mut report = PyValidationReport::from(outcome);
+    report.sha256 = Some(checksum);
+    Ok(report)
 }
 
 /// Validate paired-end FASTQ from mmaps or file-like objects.
@@ -275,8 +301,8 @@ fn validate_fastq_paired_stream(
     let input1 = extract_stream_input(r1)?;
     let input2 = extract_stream_input(r2)?;
 
-    let (outcome1, outcome2, pair_errors) = py
-        .detach(|| {
+    let (inner_res, hash1) = py
+        .detach(|| -> Result<_, String> {
             with_fastq_reader(input1, |reader1| {
                 with_fastq_reader(input2, |reader2| {
                     process_paired_readers(reader1, reader2, length_check)
@@ -285,8 +311,14 @@ fn validate_fastq_paired_stream(
         })
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
+    let ((outcome1, outcome2, pair_errors), hash2) = inner_res;
+
     let mut r1_report = PyValidationReport::from(outcome1);
     let mut r2_report = PyValidationReport::from(outcome2);
+
+    r1_report.sha256 = Some(hash1);
+    r2_report.sha256 = Some(hash2);
+
     r1_report.errors.extend(pair_errors.clone());
     r2_report.errors.extend(pair_errors.clone());
     r1_report.is_valid &= r1_report.errors.is_empty();
@@ -308,25 +340,59 @@ fn validate_fastq_paired_paths(
 
     let length_check = parse_read_length_check(min_mean_read_length);
 
-    let (outcome1, outcome2, pair_errors) = py
-        .detach(|| {
-            let file1 = File::open(&r1_path).map_err(|e| format!("Failed to open R1 file: {e}"))?;
-            let file2 = File::open(&r2_path).map_err(|e| format!("Failed to open R2 file: {e}"))?;
+    let (outcome1, outcome2, pair_errors, hash1, hash2) = py
+        .detach(|| -> Result<_, String> {
+            let file1 = File::open(&r1_path).map_err(|e| format!("Failed to open R1: {e}"))?;
+            let file2 = File::open(&r2_path).map_err(|e| format!("Failed to open R2: {e}"))?;
 
-            let (decompressed1, _fmt1) = niffler::get_reader(Box::new(file1))
-                .map_err(|e| format!("Failed to decompress R1 file: {e}"))?;
-            let (decompressed2, _fmt2) = niffler::get_reader(Box::new(file2))
-                .map_err(|e| format!("Failed to decompress R2 file: {e}"))?;
+            let hasher1 = Arc::new(Mutex::new(Sha256::new()));
+            let hasher2 = Arc::new(Mutex::new(Sha256::new()));
 
-            let reader1 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed1);
-            let reader2 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed2);
+            let hr1 = StreamHasher {
+                inner: file1,
+                hasher: hasher1.clone(),
+            };
+            let hr2 = StreamHasher {
+                inner: file2,
+                hasher: hasher2.clone(),
+            };
 
-            process_paired_readers(reader1, reader2, length_check)
+            let (decompressed1, _) =
+                niffler::get_reader(Box::new(hr1)).map_err(|e| e.to_string())?;
+            let (decompressed2, _) =
+                niffler::get_reader(Box::new(hr2)).map_err(|e| e.to_string())?;
+
+            let mut reader1 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed1);
+            let mut reader2 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed2);
+
+            let res = process_paired_readers(&mut reader1, &mut reader2, length_check)?;
+
+            drop(reader1);
+            drop(reader2);
+
+            let h1 = hex::encode(
+                Arc::try_unwrap(hasher1)
+                    .unwrap()
+                    .into_inner()
+                    .unwrap()
+                    .finalize(),
+            );
+            let h2 = hex::encode(
+                Arc::try_unwrap(hasher2)
+                    .unwrap()
+                    .into_inner()
+                    .unwrap()
+                    .finalize(),
+            );
+
+            Ok((res.0, res.1, res.2, h1, h2))
         })
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
     let mut r1_report = PyValidationReport::from(outcome1);
     let mut r2_report = PyValidationReport::from(outcome2);
+    r1_report.sha256 = Some(hash1);
+    r2_report.sha256 = Some(hash2);
     r1_report.errors.extend(pair_errors.clone());
     r2_report.errors.extend(pair_errors.clone());
     r1_report.is_valid &= r1_report.errors.is_empty();
@@ -341,7 +407,7 @@ fn validate_bam(py: Python, path: PathBuf) -> PyResult<PyValidationReport> {
     let report = py.detach(|| {
         let pb = noop_progress_bar();
         let main_pb = noop_progress_bar();
-        crate::checks::bam::check_bam(&path, &pb, &main_pb)
+        check_bam(&path, &pb, &main_pb)
     });
 
     Ok(PyValidationReport::from(report))
@@ -352,24 +418,96 @@ fn validate_bam(py: Python, path: PathBuf) -> PyResult<PyValidationReport> {
 fn validate_bam_stream(py: Python, source: &Bound<'_, PyAny>) -> PyResult<PyValidationReport> {
     let input = extract_stream_input(source)?;
 
-    let outcome = py
-        .detach(|| match input {
-            StreamInput::PyBuf(buffer) => {
-                // The buffer is dropped after the cursor, so the slice stays valid.
-                let slice = unsafe { buffer_as_slice(&buffer) };
-                validate_bam_data(&mut Cursor::new(slice))
-            }
-            StreamInput::FileLike(file_like) => {
-                let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, file_like);
-                validate_bam_data(&mut reader)
+    let (outcome, checksum) = py
+        .detach(|| -> Result<_, String> {
+            let hasher = Arc::new(Mutex::new(Sha256::new()));
+
+            let res = match input {
+                StreamInput::PyBuf(buffer) => {
+                    // The buffer is dropped after the cursor, so the slice stays valid.
+                    let slice = unsafe { buffer_as_slice(&buffer) };
+                    let hash_reader = StreamHasher {
+                        inner: Cursor::new(slice),
+                        hasher: hasher.clone(),
+                    };
+                    let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, hash_reader);
+                    validate_bam_data(&mut reader)
+                }
+                StreamInput::FileLike(file_like) => {
+                    let hash_reader = StreamHasher {
+                        inner: file_like,
+                        hasher: hasher.clone(),
+                    };
+                    let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, hash_reader);
+                    validate_bam_data(&mut reader)
+                }
+            };
+
+            let final_hash = hex::encode(
+                Arc::try_unwrap(hasher)
+                    .unwrap()
+                    .into_inner()
+                    .unwrap()
+                    .finalize(),
+            );
+            Ok((res.map_err(|e| e.to_string())?, final_hash))
+        })
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
+
+    let mut report = PyValidationReport::from(outcome);
+    report.sha256 = Some(checksum);
+    Ok(report)
+}
+
+#[pyfunction]
+fn validate_raw(py: Python, path: PathBuf) -> PyResult<PyValidationReport> {
+    let checksum = py
+        .detach(|| -> Result<_, String> {
+            calculate_file_checksum(&path).map_err(|e| e.to_string())
+        })
+        .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
+
+    Ok(PyValidationReport {
+        path: path.to_string_lossy().to_string(),
+        num_records: None,
+        mean_read_length: None,
+        sha256: Some(checksum),
+        errors: vec![],
+        warnings: vec![],
+        is_valid: true,
+    })
+}
+
+#[pyfunction]
+fn validate_raw_stream(py: Python, source: &Bound<'_, PyAny>) -> PyResult<PyValidationReport> {
+    let input = extract_stream_input(source)?;
+
+    let checksum = py
+        .detach(|| -> Result<_, String> {
+            match input {
+                StreamInput::PyBuf(buffer) => {
+                    let slice = unsafe { buffer_as_slice(&buffer) };
+                    calculate_stream_checksum(Cursor::new(slice)).map_err(|e| e.to_string())
+                }
+                StreamInput::FileLike(file_like) => {
+                    let reader = BufReader::with_capacity(STREAM_BUF_SIZE, file_like);
+                    calculate_stream_checksum(reader).map_err(|e| e.to_string())
+                }
             }
         })
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
-    Ok(PyValidationReport::from(outcome))
+    Ok(PyValidationReport {
+        path: "".to_string(),
+        num_records: None,
+        mean_read_length: None,
+        sha256: Some(checksum),
+        errors: vec![],
+        warnings: vec![],
+        is_valid: true,
+    })
 }
 
-/// Internal helper to calculate checksum from a path
 fn calculate_file_checksum(path: &std::path::Path) -> Result<String, std::io::Error> {
     use std::fs::File;
 
@@ -430,6 +568,8 @@ fn grz_check(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(validate_fastq_paired_paths, m)?)?;
     m.add_function(wrap_pyfunction!(validate_bam, m)?)?;
     m.add_function(wrap_pyfunction!(validate_bam_stream, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_raw, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_raw_stream, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_checksum, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_checksum_stream, m)?)?;
     Ok(())

@@ -370,19 +370,6 @@ class Submission:
             meta.file_size_in_bytes for task in tasks for meta in task[2] if meta.file_size_in_bytes
         )
 
-        class ChecksumReport:
-            def __init__(
-                self,
-                sha256: str | None,
-                errors: list | None = None,
-                warnings: list | None = None,
-                is_valid: bool = True,
-            ):
-                self.sha256 = sha256
-                self.errors = errors or []
-                self.warnings = warnings or []
-                self.is_valid = is_valid
-
         class TqdmFileReader:
             def __init__(self, file_obj, pbar):
                 self._file = file_obj
@@ -417,12 +404,9 @@ class Submission:
                     elif task_type == "bam":
                         reports = [grz_check.validate_bam(sources[0])]
                     elif task_type == "raw":
-                        checksum = grz_check.calculate_checksum(sources[0])
-                        reports = [ChecksumReport(checksum)]
+                        reports = [grz_check.validate_raw(sources[0])]
             except Exception as e:
-                reports = [
-                    ChecksumReport(None, errors=[f"Validation runtime error: {str(e)}"], is_valid=False) for _ in paths
-                ]
+                raise e
 
             return paths, metas, reports
 
@@ -442,6 +426,9 @@ class Submission:
 
                     for w in report.warnings:
                         self.__log.warning(f"{file_path.name}: {w}")
+
+                    if not report.sha256:
+                        checksum_issues.append("No checksum found.")
 
                     if (
                         report.sha256
