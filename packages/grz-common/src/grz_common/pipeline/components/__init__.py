@@ -155,8 +155,7 @@ class ReadStream(io.BufferedIOBase, Pipeable):
         elif isinstance(self._source, ReadStream):
             self._source.source = source
         else:
-            # TODO: Raise?
-            self._source = source
+            raise TypeError(f"Cannot set source: {type(self._source)} is not a ReadStream")
 
     def read(self, size: int | None = -1) -> bytes:
         if self._source is None:
@@ -230,8 +229,7 @@ class WriteStream(io.BufferedIOBase, Pipeable):
         elif isinstance(self._sink, WriteStream):
             self._sink.sink = sink
         else:
-            # TODO: Raise?
-            self._sink = sink
+            raise TypeError(f"Cannot set sink: {type(self._sink)} is not a WriteStream")
 
     def write(self, data: Buffer) -> int:
         if self._sink is None:
