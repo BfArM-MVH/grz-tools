@@ -14,13 +14,29 @@ use crate::checks::fastq::{
 
 const STREAM_BUF_SIZE: usize = 4 * 1024 * 1024; // 4 MB
 
+/// sha2 dropped std::io::Write implementation, so we work around it.
+struct HashWriter<'a, D>(&'a mut D);
+
+impl<'a, D: Digest> std::io::Write for HashWriter<'a, D> {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Wrapper for Python file-like objects that implements Rust's Read trait.
 pub struct PyFileLikeObject {
-    obj: PyObject,
+    obj: Py<PyAny>,
 }
 
 impl PyFileLikeObject {
-    /// Create a new PyFileLikeObject from a PyObject.
+    /// Create a new PyFileLikeObject from a Py<PyAny>.
     /// The object must have a .read() method.
     pub fn new(obj: &Bound<'_, PyAny>) -> PyResult<Self> {
         // Verify the object has a read method
@@ -54,7 +70,7 @@ impl PyFileLikeObject {
 /// path in `buffer_as_slice` avoids this cost.
 impl Read for PyFileLikeObject {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        Python::with_gil(|py| -> PyResult<usize> {
+        Python::attach(|py| -> PyResult<usize> {
             let result = self.obj.bind(py).call_method1("read", (buf.len(),))?;
             let bytes = result.downcast::<PyBytes>()?;
             let data = bytes.as_bytes();
@@ -115,7 +131,7 @@ unsafe fn buffer_as_slice(buffer: &PyBuffer<u8>) -> &[u8] {
 }
 
 /// Validation report exposed to Python
-#[pyclass(name = "ValidationReport")]
+#[pyclass(name = "ValidationReport", from_py_object)]
 #[derive(Clone)]
 pub struct PyValidationReport {
     #[pyo3(get)]
@@ -219,7 +235,7 @@ fn validate_fastq_single(
 ) -> PyResult<PyValidationReport> {
     let length_check = parse_read_length_check(min_mean_read_length);
 
-    let report = py.allow_threads(|| {
+    let report = py.detach(|| {
         let pb = noop_progress_bar();
         let main_pb = noop_progress_bar();
         check_single_fastq(&path, length_check, &pb, &main_pb)
@@ -240,9 +256,7 @@ fn validate_fastq_single_stream(
     let input = extract_stream_input(source)?;
 
     let outcome = py
-        .allow_threads(|| {
-            with_fastq_reader(input, |reader| validate_fastq_data(reader, length_check))
-        })
+        .detach(|| with_fastq_reader(input, |reader| validate_fastq_data(reader, length_check)))
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
     Ok(PyValidationReport::from(outcome))
@@ -262,7 +276,7 @@ fn validate_fastq_paired_stream(
     let input2 = extract_stream_input(r2)?;
 
     let (outcome1, outcome2, _pair_errors) = py
-        .allow_threads(|| {
+        .detach(|| {
             with_fastq_reader(input1, |reader1| {
                 with_fastq_reader(input2, |reader2| {
                     process_paired_readers(reader1, reader2, length_check)
@@ -291,7 +305,7 @@ fn validate_fastq_paired_paths(
     let length_check = parse_read_length_check(min_mean_read_length);
 
     let (outcome1, outcome2, _pair_errors) = py
-        .allow_threads(|| {
+        .detach(|| {
             let file1 = File::open(&r1_path).map_err(|e| format!("Failed to open R1 file: {e}"))?;
             let file2 = File::open(&r2_path).map_err(|e| format!("Failed to open R2 file: {e}"))?;
 
@@ -316,7 +330,7 @@ fn validate_fastq_paired_paths(
 /// Validate a BAM file from a path
 #[pyfunction]
 fn validate_bam(py: Python, path: PathBuf) -> PyResult<PyValidationReport> {
-    let report = py.allow_threads(|| {
+    let report = py.detach(|| {
         let pb = noop_progress_bar();
         let main_pb = noop_progress_bar();
         crate::checks::bam::check_bam(&path, &pb, &main_pb)
@@ -331,7 +345,7 @@ fn validate_bam_stream(py: Python, source: &Bound<'_, PyAny>) -> PyResult<PyVali
     let input = extract_stream_input(source)?;
 
     let outcome = py
-        .allow_threads(|| match input {
+        .detach(|| match input {
             StreamInput::PyBuf(buffer) => {
                 // The buffer is dropped after the cursor, so the slice stays valid.
                 let slice = unsafe { buffer_as_slice(&buffer) };
@@ -355,16 +369,15 @@ fn calculate_file_checksum(path: &std::path::Path) -> Result<String, std::io::Er
     let mut reader = BufReader::with_capacity(STREAM_BUF_SIZE, file);
     let mut hasher = Sha256::new();
 
-    std::io::copy(&mut reader, &mut hasher)?;
-
-    Ok(format!("{:x}", hasher.finalize()))
+    std::io::copy(&mut reader, &mut HashWriter(&mut hasher))?;
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Calculate SHA256 checksum of a file
 #[pyfunction]
 fn calculate_checksum(py: Python, path: PathBuf) -> PyResult<String> {
     let checksum = py
-        .allow_threads(|| calculate_file_checksum(&path))
+        .detach(|| calculate_file_checksum(&path))
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
 
     Ok(checksum)
@@ -373,8 +386,8 @@ fn calculate_checksum(py: Python, path: PathBuf) -> PyResult<String> {
 /// Internal helper to calculate checksum from any Read source
 fn calculate_stream_checksum<R: Read>(mut reader: R) -> Result<String, std::io::Error> {
     let mut hasher = Sha256::new();
-    std::io::copy(&mut reader, &mut hasher)?;
-    Ok(format!("{:x}", hasher.finalize()))
+    std::io::copy(&mut reader, &mut HashWriter(&mut hasher))?;
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// SHA256 checksum of an mmap or file-like object (no decompression).
@@ -383,7 +396,7 @@ fn calculate_checksum_stream(py: Python, source: &Bound<'_, PyAny>) -> PyResult<
     let input = extract_stream_input(source)?;
 
     let checksum = py
-        .allow_threads(|| match input {
+        .detach(|| match input {
             StreamInput::PyBuf(buffer) => {
                 // The buffer is dropped after the cursor, so the slice stays valid.
                 let slice = unsafe { buffer_as_slice(&buffer) };
