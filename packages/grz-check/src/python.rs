@@ -275,7 +275,7 @@ fn validate_fastq_paired_stream(
     let input1 = extract_stream_input(r1)?;
     let input2 = extract_stream_input(r2)?;
 
-    let (outcome1, outcome2, _pair_errors) = py
+    let (outcome1, outcome2, pair_errors) = py
         .detach(|| {
             with_fastq_reader(input1, |reader1| {
                 with_fastq_reader(input2, |reader2| {
@@ -285,8 +285,12 @@ fn validate_fastq_paired_stream(
         })
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
-    let r1_report = PyValidationReport::from(outcome1);
-    let r2_report = PyValidationReport::from(outcome2);
+    let mut r1_report = PyValidationReport::from(outcome1);
+    let mut r2_report = PyValidationReport::from(outcome2);
+    r1_report.errors.extend(pair_errors.clone());
+    r2_report.errors.extend(pair_errors.clone());
+    r1_report.is_valid &= r1_report.errors.is_empty();
+    r2_report.is_valid &= r2_report.errors.is_empty();
 
     Ok((r1_report, r2_report))
 }
@@ -304,7 +308,7 @@ fn validate_fastq_paired_paths(
 
     let length_check = parse_read_length_check(min_mean_read_length);
 
-    let (outcome1, outcome2, _pair_errors) = py
+    let (outcome1, outcome2, pair_errors) = py
         .detach(|| {
             let file1 = File::open(&r1_path).map_err(|e| format!("Failed to open R1 file: {e}"))?;
             let file2 = File::open(&r2_path).map_err(|e| format!("Failed to open R2 file: {e}"))?;
@@ -321,8 +325,12 @@ fn validate_fastq_paired_paths(
         })
         .map_err(PyErr::new::<pyo3::exceptions::PyIOError, _>)?;
 
-    let r1_report = PyValidationReport::from(outcome1);
-    let r2_report = PyValidationReport::from(outcome2);
+    let mut r1_report = PyValidationReport::from(outcome1);
+    let mut r2_report = PyValidationReport::from(outcome2);
+    r1_report.errors.extend(pair_errors.clone());
+    r2_report.errors.extend(pair_errors.clone());
+    r1_report.is_valid &= r1_report.errors.is_empty();
+    r2_report.is_valid &= r2_report.errors.is_empty();
 
     Ok((r1_report, r2_report))
 }
