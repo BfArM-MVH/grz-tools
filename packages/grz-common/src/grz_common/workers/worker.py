@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from os import PathLike
 from pathlib import Path
 
@@ -18,7 +17,6 @@ from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
 from ..transfer import init_s3_client
-from ..validation import UserInterruptException
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
 from .upload import S3BotoUploadWorker
@@ -99,13 +97,13 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False, with_grz_check=True):
+    def validate(self, identifiers: IdentifiersModel, force=False, no_mmap=False):
         """
         Validate this submission
 
         :param identifiers: IdentifiersModel containing GRZ and LE identifiers.
         :param force: Force validation of already validated files
-        :param with_grz_check: If True, use the grz-check tool for validation.
+        :param no_mmap: If True, use the streaming python reader instead of zero-copy mmap.
         :raises SubmissionValidationError: if the validation fails
         """
         submission = self.parse_submission()
@@ -124,51 +122,30 @@ class Worker:
             self.progress_file_checksum_validation.unlink(missing_ok=True)
             self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
 
-        have_grz_check = shutil.which("grz-check") is not None
-        if with_grz_check and have_grz_check:
-            try:
-                self.__log.info("Starting file validation with `grz-check`...")
-                errors = list(
-                    submission.validate_files_with_grz_check(
-                        checksum_progress_file=self.progress_file_checksum_validation,
-                        seq_data_progress_file=self.progress_file_sequencing_data_validation,
-                        threads=self._threads,
-                    )
+        try:
+            self.__log.info("Starting file validation with `grz-check`...")
+            errors = list(
+                submission.validate_files(
+                    checksum_progress_file=self.progress_file_checksum_validation,
+                    seq_data_progress_file=self.progress_file_sequencing_data_validation,
+                    threads=self._threads,
+                    no_mmap=no_mmap,
                 )
-                if errors:
-                    error_msg = "\n".join(["File validation failed! Errors:", *errors])
-                    self.__log.error(error_msg)
-                    raise SubmissionValidationError(error_msg)
-                else:
-                    self.__log.info("File validation successful!")
-                return
-            except UserInterruptException as e:
-                error_msg = "Validation was cancelled by the user and is incomplete."
-                self.__log.error(error_msg)
-                raise SubmissionValidationError(error_msg) from e
-
-        # Fallback validation
-        self.__log.info("Starting checksum validation (fallback)...")
-        if errors := list(
-            submission._validate_checksums_fallback(progress_log_file=self.progress_file_checksum_validation)
-        ):
-            error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
-            self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
-        else:
-            self.__log.info("Checksum validation successful!")
-
-        self.__log.info("Starting sequencing data validation (fallback)...")
-        if errors := list(
-            submission._validate_sequencing_data_fallback(
-                progress_log_file=self.progress_file_sequencing_data_validation
             )
-        ):
-            error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
+            if errors:
+                error_msg = "\n".join(["File validation failed! Errors:", *errors])
+                self.__log.error(error_msg)
+                raise SubmissionValidationError(error_msg)
+            else:
+                self.__log.info("File validation successful!")
+        except KeyboardInterrupt as e:
+            error_msg = "Validation was cancelled by the user and is incomplete."
             self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
-        else:
-            self.__log.info("Sequencing data validation successful!")
+            raise SubmissionValidationError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Validation failed due to an error: {e}"
+            self.__log.error(error_msg)
+            raise SubmissionValidationError(error_msg) from e
 
     def encrypt(
         self,
