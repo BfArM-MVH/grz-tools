@@ -53,7 +53,7 @@ def validate_fastq(source: str | os.PathLike, *, min_mean_read_length: int | Non
 def validate_fastq(source: typing.BinaryIO, *, min_mean_read_length: int | None = None) -> ValidationReport: ...
 
 
-def validate_fastq(source, *, min_mean_read_length=None):
+def validate_fastq(source, *, min_mean_read_length=None) -> ValidationReport:
     """Validate a single-end FASTQ file.
 
     Args:
@@ -83,7 +83,7 @@ def validate_fastq_paired(
 ) -> tuple[ValidationReport, ValidationReport]: ...
 
 
-def validate_fastq_paired(r1, r2, *, min_mean_read_length=None):
+def validate_fastq_paired(r1, r2, *, min_mean_read_length=None) -> tuple[ValidationReport, ValidationReport]:
     """Validate paired-end FASTQ files.
 
     Args:
@@ -108,7 +108,7 @@ def validate_bam(source: str | os.PathLike) -> ValidationReport: ...
 def validate_bam(source: typing.BinaryIO) -> ValidationReport: ...
 
 
-def validate_bam(source):
+def validate_bam(source) -> ValidationReport:
     """Validate a BAM file.
 
     Args:
@@ -130,7 +130,7 @@ def calculate_checksum(source: str | os.PathLike) -> str: ...
 def calculate_checksum(source: typing.BinaryIO) -> str: ...
 
 
-def calculate_checksum(source):
+def calculate_checksum(source) -> str:
     """Calculate SHA256 checksum.
 
     Args:
