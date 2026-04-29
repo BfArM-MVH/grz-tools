@@ -177,6 +177,7 @@ class DbContext:
             private_key_bytes=key_path.read_bytes(),
             private_key_passphrase=db_config.author.private_key_passphrase,
         )
+
     def _map_exception_to_failure_reason(
         self, exc_type: type[BaseException], exc_val: BaseException | None
     ) -> FailureReasonEnum:
