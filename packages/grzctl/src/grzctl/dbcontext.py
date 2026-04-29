@@ -158,11 +158,7 @@ class DbContext:
                     error_state,
                     failure_reason=failure_reason,
                     data={"error": error_message},
-<<<<<<< HEAD
                     grzctl_versions=self.grzctl_versions,
-=======
-                    grzctl_versions=self.grzctl_versions
->>>>>>> 84e1daf (feat(grz-cli, grz-db): require & record QC workflow version; log grzctl runtime version (closes #532) (#561))
                 )
             except Exception as db_exc:
                 log.error(f"Failed to write error state to DB: {db_exc}")
@@ -198,6 +194,17 @@ class DbContext:
             private_key_bytes=key_path.read_bytes(),
             private_key_passphrase=db_config.author.private_key_passphrase,
         )
+    def _map_exception_to_failure_reason(
+        self, exc_type: type[BaseException], exc_val: BaseException | None
+    ) -> FailureReasonEnum:
+        """Maps an exception to the closest FailureReasonEnum value."""
+        if isinstance(exc_val, FileNotFoundError):
+            return FailureReasonEnum.FILE_NOT_FOUND
+        if isinstance(exc_val, ValidationError):
+            return FailureReasonEnum.VALIDATION_ERROR
+        if isinstance(exc_val, OSError):
+            return FailureReasonEnum.FILE_NOT_FOUND
+        return FailureReasonEnum.UNKNOWN
 
     def _map_exception_to_failure_reason(
         self, exc_type: type[BaseException], exc_val: BaseException | None
