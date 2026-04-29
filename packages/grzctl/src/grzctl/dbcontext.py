@@ -5,7 +5,7 @@ from typing import Any
 
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.author import Author
-from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
 
 from .commands.db.cli import get_submission_db_instance
@@ -117,20 +117,36 @@ class DbContext:
 
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> bool:
-        """Handles success or failure state updates."""
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> bool:
+        """Exit the database context.
+
+        Commits the transaction if no exception occurred, otherwise rolls back.
+
+        Returns:
+            False so any exception is propagated.
+        """
         if not self.db:
             return False
 
         if exc_type:
             error_message = str(exc_val)
             error_state = SubmissionStateEnum.ERROR
+            failure_reason = self._map_exception_to_failure_reason(exc_type, exc_val)  # new
             log.error(f"Operation failed for {self.submission_id}. Updating DB to {error_state.name}.")
             try:
-                self.db.update_submission_state(self.submission_id, error_state, data={"error": error_message})
+                self.db.update_submission_state(
+                    self.submission_id,
+                    error_state,
+                    failure_reason=failure_reason,
+                    data={"error": error_message},
+                )
             except Exception as db_exc:
                 log.error(f"Failed to write error state to DB: {db_exc}")
-
             return False
 
         else:
@@ -161,6 +177,17 @@ class DbContext:
             private_key_bytes=key_path.read_bytes(),
             private_key_passphrase=db_config.author.private_key_passphrase,
         )
+    def _map_exception_to_failure_reason(
+        self, exc_type: type[BaseException], exc_val: BaseException | None
+    ) -> FailureReasonEnum:
+        """Maps an exception to the closest FailureReasonEnum value."""
+        if isinstance(exc_val, FileNotFoundError):
+            return FailureReasonEnum.FILE_NOT_FOUND
+        if isinstance(exc_val, ValidationError):
+            return FailureReasonEnum.VALIDATION_ERROR
+        if isinstance(exc_val, OSError):
+            return FailureReasonEnum.FILE_NOT_FOUND
+        return FailureReasonEnum.UNKNOWN
 
     def _check_prerequisites(self):
         """
