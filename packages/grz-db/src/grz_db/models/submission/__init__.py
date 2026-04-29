@@ -250,10 +250,15 @@ class Submission(SubmissionBase, table=True):
 class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Failure reason enum for submissions in ERROR state."""
 
-    DUPLICATE_TANG = "duplicatedtanG"
-    INCOMPLETE_SUBMISSION = "incompletesubmission"
-    DECRYPTION_ERROR = "decryptionerror"
-    NETWORK_ERROR = "networkerror"
+    DUPLICATE_TANG = "duplicated_tang"
+    INCOMPLETE_SUBMISSION = "incomplete_submission"
+    DECRYPTION_ERROR = "decryption_error"
+    NETWORK_ERROR = "network_error"
+    VALIDATION_ERROR = "validation_error"
+    FILE_NOT_FOUND = "file_not_found"
+    ENCRYPTION_ERROR = "encryption_error"
+    UPLOAD_ERROR = "upload_error"
+    UNKNOWN = "unknown"
 
 
 class SubmissionStateLogBase(SQLModel):
@@ -266,7 +271,13 @@ class SubmissionStateLogBase(SQLModel):
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
-    failure_reason: FailureReasonEnum | None = Field(default=None)
+    failure_reason: FailureReasonEnum | None = Field(
+        default=None,
+        sa_column=Column(
+            Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e]),
+            nullable=True,
+        ),
+    )
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
