@@ -1,5 +1,4 @@
 import abc
-import hashlib
 import logging
 import queue
 import threading
@@ -12,43 +11,13 @@ from . import DataValidationError, ObserverWithMetrics, PipelineError, PushToPul
 log = logging.getLogger(__name__)
 
 
-class ChecksumValidator(ObserverWithMetrics):
-    """SHA256 Checksum Observer."""
-
-    def __init__(self, algorithm: str = "sha256", expected_checksum: str | None = None):
-        super().__init__()
-        self.expected = expected_checksum
-        self._hasher = hashlib.new(algorithm)
-        self._bytes_seen = 0
-
-    def observe(self, chunk: bytes) -> None:
-        self._bytes_seen += len(chunk)
-        self._hasher.update(chunk)
-
-    def close(self):
-        if self.closed:
-            return
-        try:
-            calculated = self._hasher.hexdigest()
-            if self.expected and calculated != self.expected:
-                raise DataValidationError(
-                    f"Checksum mismatch! Exp: {self.expected}, Got: {calculated}", stage=self.__class__.__name__
-                )
-        finally:
-            super().close()
-
-    @property
-    def metrics(self) -> dict[str, Any]:
-        return {"checksum": self._hasher.hexdigest(), "size": self._bytes_seen}
-
-
 class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
     """Base class for validators delegating format validation to grz_check."""
 
     def __init__(self):
         super().__init__()
         self.adapter = PushToPullAdapter()
-        self.report = None
+        self.report: grz_check.ValidationReport = None
         self.exception = None
         self.validation_thread = threading.Thread(target=self._run_validation_thread, daemon=True)
         self.validation_thread.start()
@@ -171,3 +140,33 @@ class BamValidator(GrzCheckValidator):
     @property
     def metrics(self) -> dict[str, Any]:
         return {"size": self._bytes_seen}
+
+
+class ChecksumValidator(GrzCheckValidator):
+    """Validates checksum using grz_check bindings (native speed)."""
+
+    def __init__(self, expected_checksum: str | None = None):
+        self._expected = expected_checksum
+        self._bytes_seen = 0
+        super().__init__()
+
+    def _invoke_grz_check(self) -> Any:
+        return grz_check.validate_raw(self.adapter)
+
+    def _format_error_prefix(self) -> str:
+        return "Checksum Invalid"
+
+    def observe(self, chunk: bytes) -> None:
+        self._bytes_seen += len(chunk)
+        self._enqueue_chunk(chunk)
+
+    def close(self):
+        super().close()
+        if self.report and self._expected and self.report.sha256 != self._expected:
+            raise DataValidationError(
+                f"Checksum mismatch! Exp: {self._expected}, Got: {self.report.sha256}", stage=self.__class__.__name__
+            )
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {"checksum": self.report.sha256 if self.report else None, "size": self._bytes_seen}
