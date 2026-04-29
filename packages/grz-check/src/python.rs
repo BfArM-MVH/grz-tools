@@ -327,6 +327,24 @@ fn validate_fastq_paired_stream(
     Ok((r1_report, r2_report))
 }
 
+/// Helper to set up a buffered reader and a hasher for a given file path.
+fn get_file_reader_and_hasher(
+    path: &std::path::Path,
+) -> Result<(BufReader<Box<dyn Read>>, Arc<Mutex<Sha256>>), String> {
+    use std::fs::File;
+    let file = File::open(path).map_err(|e| format!("Failed to open {}: {e}", path.display()))?;
+    let hasher = Arc::new(Mutex::new(Sha256::new()));
+    let hr = StreamHasher {
+        inner: file,
+        hasher: hasher.clone(),
+    };
+    let (decompressed, _) = niffler::get_reader(Box::new(hr)).map_err(|e| e.to_string())?;
+    Ok((
+        BufReader::with_capacity(STREAM_BUF_SIZE, decompressed),
+        hasher,
+    ))
+}
+
 /// Validate paired-end FASTQ files from paths
 #[pyfunction]
 #[pyo3(signature = (r1_path, r2_path, min_mean_read_length=None))]
@@ -336,37 +354,16 @@ fn validate_fastq_paired_paths(
     r2_path: PathBuf,
     min_mean_read_length: Option<i64>,
 ) -> PyResult<(PyValidationReport, PyValidationReport)> {
-    use std::fs::File;
-
     let length_check = parse_read_length_check(min_mean_read_length);
 
     let (outcome1, outcome2, pair_errors, hash1, hash2) = py
         .detach(|| -> Result<_, String> {
-            let file1 = File::open(&r1_path).map_err(|e| format!("Failed to open R1: {e}"))?;
-            let file2 = File::open(&r2_path).map_err(|e| format!("Failed to open R2: {e}"))?;
-
-            let hasher1 = Arc::new(Mutex::new(Sha256::new()));
-            let hasher2 = Arc::new(Mutex::new(Sha256::new()));
-
-            let hr1 = StreamHasher {
-                inner: file1,
-                hasher: hasher1.clone(),
-            };
-            let hr2 = StreamHasher {
-                inner: file2,
-                hasher: hasher2.clone(),
-            };
-
-            let (decompressed1, _) =
-                niffler::get_reader(Box::new(hr1)).map_err(|e| e.to_string())?;
-            let (decompressed2, _) =
-                niffler::get_reader(Box::new(hr2)).map_err(|e| e.to_string())?;
-
-            let mut reader1 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed1);
-            let mut reader2 = BufReader::with_capacity(STREAM_BUF_SIZE, decompressed2);
+            let (mut reader1, hasher1) = get_file_reader_and_hasher(&r1_path)?;
+            let (mut reader2, hasher2) = get_file_reader_and_hasher(&r2_path)?;
 
             let res = process_paired_readers(&mut reader1, &mut reader2, length_check)?;
 
+            // Explicitly drop readers to release the hasher Arcs
             drop(reader1);
             drop(reader2);
 
