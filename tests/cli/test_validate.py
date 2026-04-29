@@ -4,13 +4,16 @@ import shutil
 from pathlib import Path
 
 import grz_cli.cli
+import pytest
 from click.testing import CliRunner
 from grz_common.workers.submission import SubmissionValidationError
 
 
+@pytest.mark.parametrize("grz_check_mmap", ["--mmap", "--no-mmap"])
 def test_validate_submission(
     temp_identifiers_config_file_path,
     working_dir_path,
+    grz_check_mmap,
     caplog,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -24,6 +27,7 @@ def test_validate_submission(
         temp_identifiers_config_file_path,
         "--submission-dir",
         str(working_dir_path),
+        grz_check_mmap,
     ]
 
     runner = CliRunner()

@@ -281,15 +281,33 @@ class Submission:
 
         return retval
 
+    def _aggregate_validation_errors(
+        self, checksum_progress_logger: FileProgressLogger, seq_data_progress_logger: FileProgressLogger
+    ) -> Generator[str, None, None]:
+        """Aggregates all errors from both progress loggers into a flat generator."""
+        all_errors = set()
+        for local_file_path, file_metadata in self.files.items():
+            checksum_state = checksum_progress_logger.get_state(local_file_path, file_metadata)
+            if checksum_state and not checksum_state.get("validation_passed"):
+                for error in checksum_state.get("errors", []):
+                    all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
+
+            if file_metadata.file_type in ("fastq", "bam"):
+                seq_data_state = seq_data_progress_logger.get_state(local_file_path, file_metadata)
+                if seq_data_state and not seq_data_state.get("validation_passed"):
+                    for error in seq_data_state.get("errors", []):
+                        all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
+        yield from all_errors
+
     def validate_files(  # noqa: C901, PLR0912, PLR0915
         self,
         checksum_progress_file: str | PathLike,
         seq_data_progress_file: str | PathLike,
         threads: int | None,
-        use_mmap: bool = False,
+        no_mmap: bool = False,
     ) -> Generator[str, None, None]:
         """
-        Validates submission files using `grz-check` and populates both progress logs.
+        Validates submission files using native `grz-check` PyO3 bindings and populates progress logs.
         """
         checksum_progress_logger = FileProgressLogger[ValidationState](log_file_path=checksum_progress_file)
         checksum_progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
@@ -355,18 +373,9 @@ class Submission:
             yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
             return
 
-        # pre-calculate total bytes
         total_bytes_to_process = sum(
             meta.file_size_in_bytes for task in tasks for meta in task[2] if meta.file_size_in_bytes
         )
-
-        # grz-check doesn't return a validation report for raw file processing / plain checksums
-        class ChecksumReport:
-            def __init__(self, checksum, errors=None, status="OK"):
-                self.checksum = checksum
-                self.errors = errors or []
-                self.warnings = []
-                self.status = status
 
         class TqdmFileReader:
             def __init__(self, file_obj, pbar):
@@ -386,11 +395,10 @@ class Submission:
                     sources = []
                     for p in paths:
                         if not p.exists() or p.stat().st_size == 0:
-                            # pass path string for empty/missing files and let grz-check handle these errors
                             sources.append(str(p))
                         else:
                             f = stack.enter_context(open(p, "rb"))
-                            if not use_mmap:
+                            if no_mmap:
                                 sources.append(TqdmFileReader(f, pbar))
                             else:
                                 mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
@@ -403,13 +411,16 @@ class Submission:
                     elif task_type == "bam":
                         reports = [grz_check.validate_bam(sources[0])]
                     elif task_type == "raw":
-                        checksum = grz_check.calculate_checksum(sources[0])
-                        reports = [ChecksumReport(checksum)]
+                        reports = [grz_check.validate_raw(sources[0])]
             except Exception as e:
                 # Catch rust panics, IOErrors gracefully and bubble as standard validation errors
-                reports = [
-                    ChecksumReport(None, errors=[f"Validation runtime error: {str(e)}"], status="ERROR") for _ in paths
-                ]
+                class ErrorReport:
+                    is_valid = False
+                    errors = [f"Validation runtime error: {str(e)}"]
+                    warnings = []
+                    sha256 = None
+
+                reports = [ErrorReport() for _ in paths]
 
             return paths, metas, reports
 
@@ -426,21 +437,22 @@ class Submission:
 
                 for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
                     checksum_issues = []
-                    status = getattr(report, "status", "OK")
-                    errors = list(getattr(report, "errors", []))
-                    warnings = list(getattr(report, "warnings", []))
-                    checksum = getattr(report, "checksum", None)
 
-                    for w in warnings:
+                    for w in getattr(report, "warnings", []):
                         self.__log.warning(f"{file_path.name}: {w}")
 
+                    report_sha256 = getattr(report, "sha256", None)
+
+                    if not report_sha256:
+                        checksum_issues.append("No checksum found.")
+
                     if (
-                        checksum
+                        report_sha256
                         and file_metadata.checksum_type == ChecksumType.sha256
-                        and file_metadata.file_checksum != checksum
+                        and file_metadata.file_checksum != report_sha256
                     ):
                         checksum_issues.append(
-                            f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{checksum}'"
+                            f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report_sha256}'"
                         )
 
                     if file_path.exists() and file_path.is_file():
@@ -456,33 +468,14 @@ class Submission:
                     checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
 
                     if file_metadata.file_type in ("fastq", "bam"):
-                        integrity_passed = status == "OK" and not errors
-                        seq_data_state = ValidationState(errors=errors, validation_passed=integrity_passed)
+                        seq_data_state = ValidationState(errors=getattr(report, "errors", []), validation_passed=getattr(report, "is_valid", False))
                         seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
 
-                if use_mmap:
+                if not no_mmap:
                     task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
                     pbar.update(task_bytes)
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
-
-    def _aggregate_validation_errors(
-        self, checksum_progress_logger: FileProgressLogger, seq_data_progress_logger: FileProgressLogger
-    ) -> Generator[str, None, None]:
-        """Aggregates all errors from both progress loggers into a flat generator."""
-        all_errors = set()
-        for local_file_path, file_metadata in self.files.items():
-            checksum_state = checksum_progress_logger.get_state(local_file_path, file_metadata)
-            if checksum_state and not checksum_state.get("validation_passed"):
-                for error in checksum_state.get("errors", []):
-                    all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
-
-            if file_metadata.file_type in ("fastq", "bam"):
-                seq_data_state = seq_data_progress_logger.get_state(local_file_path, file_metadata)
-                if seq_data_state and not seq_data_state.get("validation_passed"):
-                    for error in seq_data_state.get("errors", []):
-                        all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
-        yield from all_errors
 
     def encrypt(
         self,

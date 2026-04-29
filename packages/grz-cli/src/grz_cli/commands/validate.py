@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
     "mmap",
     default=True,
     hidden=True,
-    help="Whether to use mmap based validation.",
+    help="Whether to use mmap.",
 )
 def validate(
     configuration: dict[str, Any],
@@ -51,6 +51,6 @@ def validate(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-    worker_inst.validate(identifiers=config.identifiers, force=force, mmap=mmap)
+    worker_inst.validate(identifiers=config.identifiers, force=force, no_mmap=not mmap)
 
     log.info("Validation finished!")

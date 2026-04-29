@@ -26,15 +26,16 @@ log = logging.getLogger(__name__)
     "mmap",
     default=True,
     hidden=True,
-    help="Whether to use mmap based validation.",
+    help="Whether to use mmap.",
 )
+@grzcli.update_db
 def validate(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_dir,
     force,
     threads,
-    update_db,
     mmap,
+    update_db,
     **kwargs,
 ):
     """
@@ -66,6 +67,6 @@ def validate(  # noqa: PLR0913
             submission_dir=submission_dir,
             force=force,
             threads=threads,
-            mmap=mmap,
+            no_mmap=not mmap,
             **kwargs,
         )

@@ -201,6 +201,8 @@ runner = "uv-venv-lock-runner"
 description = "run unit tests"
 dependency_groups = ["test"]
 commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
+# isolate Cargo build directories per tox environment, otherwise Cargo caches the compiled Rust extension (and then we end up with mismatches between ABI versions).
+setenv = { UV_REINSTALL_PACKAGE = "grz-check", CARGO_TARGET_DIR = "{work_dir}/cargo_target_{env_name}" }
 
 [tool.tox.env."format-check"]
 runner = "uv-venv-lock-runner"
