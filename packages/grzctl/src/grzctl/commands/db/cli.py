@@ -38,7 +38,6 @@ from grz_db.models.submission import (
     DetailedQCResult,
     FailureReasonEnum,
     FieldDiff,
-    Donor,
     Submission,
     SubmissionBase,
     SubmissionDb,
