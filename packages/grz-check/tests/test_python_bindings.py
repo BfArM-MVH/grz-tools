@@ -218,3 +218,50 @@ def test_text_mode_file_rejected(fastq_file: Path) -> None:
 def test_non_filelike_rejected() -> None:
     with pytest.raises(TypeError):
         grz_check.validate_fastq(42)
+
+
+def test_validate_raw_path(tmp_path: Path) -> None:
+    """Validate a raw file path creates a valid report with the correct SHA256."""
+    data = b"foobar\n"
+    path = tmp_path / "raw.bin"
+    path.write_bytes(data)
+    expected = "aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f"
+
+    report = grz_check.validate_raw(path)
+    assert report.is_valid
+    assert report.sha256 == expected
+    assert report.path == str(path)
+
+
+def test_validate_raw_stream() -> None:
+    """Validate a raw stream correctly hashes data."""
+    data = b"foobar\n"
+    expected = "aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f"
+
+    report = grz_check.validate_raw(io.BytesIO(data))
+    assert report.is_valid
+    assert report.sha256 == expected
+
+
+def test_validate_raw_buffer_protocol_bytes() -> None:
+    """Validate raw bytes via the buffer protocol."""
+    data = b"foobar\n"
+    expected = "aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f"
+
+    report = grz_check.validate_raw(data)
+    assert report.is_valid
+    assert report.sha256 == expected
+
+
+def test_validate_raw_mmap_zero_copy(tmp_path: Path) -> None:
+    """Validate mmap works for raw validation."""
+    data = b"some arbitrary bytes for checksumming\n" * 100
+    path = tmp_path / "raw_mmap.bin"
+    path.write_bytes(data)
+    expected = hashlib.sha256(data).hexdigest()
+
+    with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        report = grz_check.validate_raw(mm)
+
+    assert report.is_valid
+    assert report.sha256 == expected
