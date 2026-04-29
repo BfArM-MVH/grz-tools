@@ -77,14 +77,14 @@ def test_all_migrations(blank_initial_database_config_path):
 
     # Test failure reason functionality
     result_failure_test = runner.invoke(
-        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryptionerror"]
+        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryption_error"]
     )
     assert result_failure_test.exit_code == 0, result_failure_test.stderr
 
     # Verify the failure reason was stored
     result_show_after_error = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
     assert result_show_after_error.exit_code == 0, result_show_after_error.stderr
-    assert "decryptionerror" in result_show_after_error.stdout
+    assert "decryption_error" in result_show_after_error.stdout
 
     # Also test via database API
     db = SubmissionDb(db_url=config.db.database_url, author=None)
@@ -618,14 +618,14 @@ def test_failure_reason_migration(blank_initial_database_config_path):
 
     # Test that failure_reason functionality works
     result_update = runner.invoke(
-        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryptionerror"]
+        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryption_error"]
     )
     assert result_update.exit_code == 0, result_update.stderr
 
     # Verify the failure reason was stored
     result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
     assert result_show.exit_code == 0, result_show.stderr
-    assert "decryptionerror" in result_show.stdout
+    assert "decryption_err" in result_show.stdout
 
 
 def test_submission_show_json_includes_failure_reason(blank_database_config_path: Path):
@@ -647,7 +647,7 @@ def test_submission_show_json_includes_failure_reason(blank_database_config_path
             submission_id,
             "Error",
             "--failure-reason",
-            "decryptionerror",
+            "decryption_error",
         ],
     )
     assert result_update.exit_code == 0, result_update.stderr
@@ -657,4 +657,4 @@ def test_submission_show_json_includes_failure_reason(blank_database_config_path
 
     parsed = json.loads(result_show.stdout)
     error_state = next(s for s in parsed["states"] if s["state"] == "Error")
-    assert error_state["failure_reason"] == "decryptionerror"
+    assert error_state["failure_reason"] == "decryption_error"
