@@ -580,8 +580,8 @@ mod tests {
 
     #[test]
     fn test_stream_hasher() {
-        let data = b"foobar";
-        let expected_hash = b"aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f";
+        let data = b"foobar\n";
+        let expected_hash = "aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f";
 
         let hasher = Arc::new(Mutex::new(Sha256::new()));
         let mut stream_hasher = StreamHasher {
@@ -591,8 +591,8 @@ mod tests {
 
         let mut out = Vec::new();
         stream_hasher.read_to_end(&mut out).unwrap();
-
         assert_eq!(out, data);
+        drop(stream_hasher);
 
         let final_hash = hex::encode(
             Arc::try_unwrap(hasher)
@@ -607,28 +607,28 @@ mod tests {
     #[test]
     fn test_file_vs_stream_checksum() {
         let mut file = NamedTempFile::new().unwrap();
-        let data = b"foobar";
+        let data = b"foobar\n";
         file.write_all(data).unwrap();
-        let expected_hash = b"aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f";
+        let expected_hash = "aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f";
 
         let path_checksum = calculate_file_checksum(file.path()).unwrap();
         assert_eq!(
-            path_checksum, expected,
+            path_checksum, expected_hash,
             "Path checksum did not match the baseline."
         );
 
         let file_reopened = std::fs::File::open(file.path()).unwrap();
         let stream_checksum = calculate_stream_checksum(file_reopened).unwrap();
         assert_eq!(
-            stream_checksum, expected,
+            stream_checksum, expected_hash,
             "Stream checksum did not match the baseline."
         );
     }
 
     #[test]
     fn test_hash_writer() {
-        let data = b"foobar";
-        let expected_hash = b"aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f";
+        let data = b"foobar\n";
+        let expected_hash = "aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f";
 
         let mut hasher = Sha256::new();
         let mut hw = HashWriter(&mut hasher);
