@@ -84,7 +84,7 @@ def test_all_migrations(blank_initial_database_config_path):
     # Verify the failure reason was stored
     result_show_after_error = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
     assert result_show_after_error.exit_code == 0, result_show_after_error.stderr
-    assert "decryption_error" in result_show_after_error.stdout
+    assert "decryption_err" in result_show_after_error.stdout
 
     # Also test via database API
     db = SubmissionDb(db_url=config.db.database_url, author=None)
