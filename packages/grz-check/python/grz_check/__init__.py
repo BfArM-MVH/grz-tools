@@ -19,6 +19,13 @@ Any binary file-like object with ``.read()`` also works but is slower.
 Writable buffers (``bytearray``, ``mmap`` opened for writing) are rejected.
 """
 
+import importlib.metadata
+
+try:
+    __version__ = importlib.metadata.version("grz-check")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "unknown"
+
 from __future__ import annotations
 
 import os
@@ -44,8 +51,6 @@ __all__ = [
     "validate_fastq_paired",
     "validate_raw",
 ]
-
-__version__ = "0.2.1"
 
 
 @typing.overload
