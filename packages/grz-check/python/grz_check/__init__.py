@@ -19,14 +19,14 @@ Any binary file-like object with ``.read()`` also works but is slower.
 Writable buffers (``bytearray``, ``mmap`` opened for writing) are rejected.
 """
 
+from __future__ import annotations
+
 import importlib.metadata
 
 try:
     __version__ = importlib.metadata.version("grz-check")
 except importlib.metadata.PackageNotFoundError:
     __version__ = "unknown"
-
-from __future__ import annotations
 
 import os
 import typing
