@@ -414,13 +414,12 @@ class Submission:
                         reports = [grz_check.validate_raw(sources[0])]
             except Exception as e:
                 # Catch rust panics, IOErrors gracefully and bubble as standard validation errors
-                class ErrorReport:
-                    is_valid = False
-                    errors = [f"Validation runtime error: {str(e)}"]
-                    warnings = []
-                    sha256 = None
-
-                reports = [ErrorReport() for _ in paths]
+                reports = [
+                    grz_check.ValidationReport(
+                        path=str(p), is_valid=False, errors=[f"Validation runtime error: {str(e)}"]
+                    )
+                    for p in paths
+                ]
 
             return paths, metas, reports
 
@@ -468,7 +467,9 @@ class Submission:
                     checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
 
                     if file_metadata.file_type in ("fastq", "bam"):
-                        seq_data_state = ValidationState(errors=getattr(report, "errors", []), validation_passed=getattr(report, "is_valid", False))
+                        seq_data_state = ValidationState(
+                            errors=getattr(report, "errors", []), validation_passed=getattr(report, "is_valid", False)
+                        )
                         seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
 
                 if not no_mmap:

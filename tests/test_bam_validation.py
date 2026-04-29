@@ -1,6 +1,7 @@
 """Tests for the bam_validation module."""
 
 import importlib.resources
+import logging
 
 import grz_check
 from grz_common.pipeline.components import ReadStream
@@ -18,6 +19,7 @@ def test_valid_hifi_bam():
     assert report.is_valid
     assert len(report.errors) == 0
 
+
 def test_valid_hifi_bam_stream():
     """Valid HiFi BAM files should pass validation"""
     bam_ptr = importlib.resources.files(resources).joinpath("reads", "valid_HiFi.bam")
@@ -26,6 +28,7 @@ def test_valid_hifi_bam_stream():
         validator = BamValidator()
         with open(bam_path, "rb") as f:
             ReadStream(f) >> validator
+
 
 def test_hard_clipped_primary():
     """A warning should be present if hard-clipped bases are detected in a primary alignment."""
@@ -66,6 +69,7 @@ def test_secondary():
 
     # Hard-clipped bases are fine in secondaries, so ensure the primary warning didn't trigger
     assert not any("primary alignment(s) with hard-clipped bases" in w for w in report.warnings)
+
 
 def test_secondary_stream(caplog):
     """A warning should be logged if a secondary alignment is detected."""
