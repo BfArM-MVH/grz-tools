@@ -919,6 +919,24 @@ class SubmissionDb:
             submission = session.exec(statement).first()
             return submission
 
+    def get_submissions(self, submission_ids: Sequence[str]) -> list[Submission | None]:
+        """Fetch a specific set of submissions by their IDs in a single query.
+
+        :param submission_ids: IDs to fetch.
+        :returns: A list of the same length as *submission_ids*, where each element is the
+                  matching :class:`Submission` or ``None`` when the ID does not exist.
+        """
+        if not submission_ids:
+            return []
+        with self._get_session() as session:
+            statement = (
+                select(Submission)
+                .where(Submission.id.in_(submission_ids))  # type: ignore[attr-defined]
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+            )
+            found = {s.id: s for s in session.exec(statement).all()}
+        return [found.get(sid) for sid in submission_ids]
+
     def list_submissions(
         self,
         limit: int | None,

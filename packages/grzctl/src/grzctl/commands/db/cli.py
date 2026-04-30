@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+import botocore.exceptions
 import click
 import grz_common.cli as grzcli
 import rich.console
@@ -22,6 +23,7 @@ import textual.logging
 from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
+from grz_common.transfer import init_s3_client
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     DatabaseConfigurationError,
@@ -35,6 +37,7 @@ from grz_db.models.submission import (
     DetailedQCResult,
     FieldDiff,
     Submission,
+    SubmissionBase,
     SubmissionDb,
     SubmissionDiffCollection,
     SubmissionStateEnum,
@@ -52,6 +55,7 @@ from grz_pydantic_models.submission.metadata import (
     SequenceType,
 )
 from pydantic import Field
+from tqdm.auto import tqdm
 
 from ...models.config import DbConfig, ListConfig
 from .. import limit
@@ -960,6 +964,255 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         title=f"Submission {submission.id}",
     )
     console.print(panel)
+
+
+class _BackfillResult:
+    """Accumulates per-submission outcomes for the backfill command."""
+
+    def __init__(self) -> None:
+        self.updated: int = 0
+        self.skipped: int = 0
+        self.errors: list[tuple[str, Exception]] = []
+
+
+def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str | None:
+    """Return the raw metadata.json content for *submission_id*, or None when not found.
+
+    Raises for any S3 error that is not a simple 404/NoSuchKey.
+    """
+    key = f"{submission_id}/metadata/metadata.json"
+    try:
+        response = s3_client.get_object(Bucket=bucket, Key=key)
+        return response["Body"].read().decode("utf-8")
+    except botocore.exceptions.ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in {"404", "NoSuchKey"}:
+            return None
+        raise
+
+
+def _backfill_submission(  # noqa: PLR0913, PLR0911
+    current_submission: Submission,
+    s3_client: Any,
+    bucket: str,
+    db_service: "SubmissionDb",
+    dry_run: bool,
+    force: bool,
+    ignore_fields: set[str],
+    result: _BackfillResult,
+) -> None:
+    """Fetch metadata.json from S3 for one submission and commit a diff to the database.
+
+    Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
+    as ``grzctl db submission populate`` so that every derived field (not only
+    *submission_size* and *submission_metadata*) is kept consistent, donor records are
+    synchronised, and already-up-to-date submissions are detected without a write.
+
+    When *force* is False, candidates whose ``submission_size`` and
+    ``submission_metadata`` are both already non-NULL are short-circuited before any
+    S3 access, so re-runs do not re-pay the network cost for already-populated rows
+    and manually-corrected values are preserved.
+    """
+    submission_id = current_submission.id
+
+    if (
+        not force
+        and current_submission.submission_size is not None
+        and current_submission.submission_metadata is not None
+    ):
+        console_err.print(f"[dim]  {submission_id}: already populated, skipping (use --force to re-derive).[/dim]")
+        result.skipped += 1
+        return
+
+    try:
+        raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: S3 error – {exc}[/red]")
+        result.errors.append((submission_id, exc))
+        return
+
+    if raw_json is None:
+        console_err.print(f"[yellow]  {submission_id}: metadata.json not found in S3, skipping.[/yellow]")
+        result.skipped += 1
+        return
+
+    try:
+        metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: failed to parse metadata.json – {exc}[/red]")
+        result.errors.append((submission_id, exc))
+        return
+
+    try:
+        submission_diff, donors_diff = db_service.diff(
+            submission_id,
+            metadata,
+            submission_date=None,
+            ignore_fields=ignore_fields or None,
+        )
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: diff failed – {exc}[/red]")
+        result.errors.append((submission_id, exc))
+        return
+
+    if not submission_diff.has_pending and not donors_diff.has_pending:
+        console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
+        result.skipped += 1
+        return
+
+    pending_fields = [d.key for d in submission_diff.pending if d.key != "submission_metadata"]
+    if dry_run:
+        console_err.print(f"[yellow]  [dry-run] {submission_id}: would update fields: {pending_fields}[/yellow]")
+        result.updated += 1
+        return
+
+    try:
+        db_service.commit_changes(submission_id, submission_diff, donors_diff)
+        console_err.print(
+            f"[green]  {submission_id}: updated ({', '.join(pending_fields) or 'no scalar changes'}).[/green]"
+        )
+        result.updated += 1
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: failed to commit – {exc}[/red]")
+        result.errors.append((submission_id, exc))
+
+
+@db.command("backfill")
+@grzcli.configuration
+@click.option(
+    "--dry-run/--no-dry-run",
+    default=False,
+    help="Preview which submissions would be updated without writing to the database.",
+)
+@click.option(
+    "--force/--no-force",
+    default=False,
+    help=(
+        "Process submissions even when submission_size and submission_metadata are already set. "
+        "By default only submissions where at least one of those columns is NULL are candidates."
+    ),
+)
+@click.option(
+    "--submission-id",
+    "submission_ids",
+    multiple=True,
+    metavar="SUBMISSION_ID",
+    help="Restrict backfill to these submission IDs (may be repeated). Mutually exclusive with --start-date/--end-date.",
+)
+@click.option(
+    "--start-date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=date.min,
+    help="Process only submissions processed on or after this date (inclusive). Defaults to the beginning of time.",
+)
+@click.option(
+    "--end-date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=date.max,
+    help="Process only submissions processed on or before this date (inclusive). Defaults to the end of time.",
+)
+@click.option(
+    "--ignore-field",
+    "ignore_field",
+    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
+    help="Do not overwrite the given field from the metadata. Can be specified multiple times.",
+    multiple=True,
+)
+@click.pass_context
+def backfill(  # noqa: PLR0913
+    ctx: click.Context,
+    configuration: dict[str, Any],
+    dry_run: bool,
+    force: bool,
+    submission_ids: tuple[str, ...],
+    start_date: datetime,
+    end_date: datetime,
+    ignore_field: tuple[str, ...],
+    **kwargs,
+):
+    r"""Backfill submission fields for existing submissions by re-reading metadata.json from S3.
+
+    Uses the same diff/commit path as ``grzctl db submission populate``: only fields
+    that are actually missing or changed are written, donor records are synchronised,
+    and already-up-to-date submissions are silently skipped.
+
+    By default, only submissions where submission_size or submission_metadata is NULL
+    are candidates (use --force to process all submissions).
+
+    Candidate selection (mutually exclusive):
+
+    \b
+      (default)                submissions with a REPORTED or QCED state log entry within the date window (defaults to the full historical range — i.e. fully-processed submissions only)
+      --submission-id ...      explicit list of submission IDs
+      --start-date/--end-date  narrow the default REPORTED/QCED date window
+
+    This command is idempotent: re-running it is always safe.
+    """
+    # ── Validate option combinations ────────────────────────────────────────
+    if submission_ids and (start_date != date.min and end_date != date.max):
+        raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
+
+    ignore_fields = set(ignore_field) | {
+        "submission_date",
+        "tan_g",
+        "local_case_id",
+    }
+    try:
+        list_config = ListConfig.model_validate(configuration)
+    except Exception:
+        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
+        sys.exit(1)
+
+    db_service = get_submission_db_instance(ctx.obj["db_url"], author=ctx.obj["author"])
+
+    # ── Determine which submissions to process ──────────────────────────────
+    if submission_ids:
+        candidates: list[Submission] = []
+        for sid, sub in zip(submission_ids, db_service.get_submissions(list(submission_ids)), strict=True):
+            if sub is None:
+                console_err.print(f"[yellow]Warning: submission '{sid}' not found in database, skipping.[/yellow]")
+            else:
+                candidates.append(sub)
+    else:
+        candidates = db_service.list_processed_between(start_date.date(), end_date.date())
+        console_err.print(
+            f"[cyan]Date window: {start_date.date()} – {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
+        )
+
+    console_err.print(
+        f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
+        f"from bucket '{list_config.s3.bucket}'…[/cyan]"
+    )
+
+    # ── Fetch metadata from S3 and update DB ────────────────────────────────
+    s3_client = init_s3_client(list_config.s3)
+    result = _BackfillResult()
+
+    for submission in tqdm(candidates):
+        _backfill_submission(
+            submission,
+            s3_client,
+            list_config.s3.bucket,
+            db_service,
+            dry_run,
+            force,
+            ignore_fields,
+            result,
+        )
+
+    # ── Summary ─────────────────────────────────────────────────────────────
+    prefix = "[dry-run] " if dry_run else ""
+    verb = "Would update" if dry_run else "Updated"
+    console_err.print(
+        f"\n[cyan]{prefix}Done. {verb}: {result.updated}, "
+        f"Skipped (no S3 object or already up to date): {result.skipped}, "
+        f"Errors: {len(result.errors)}[/cyan]"
+    )
+    if result.errors:
+        console_err.print("[red]The following submissions encountered errors:[/red]")
+        for sid, exc in result.errors:
+            console_err.print(f"  [red]{sid}[/red]: {exc}")
+        sys.exit(1)
 
 
 @db.command("sync-from-inbox")
