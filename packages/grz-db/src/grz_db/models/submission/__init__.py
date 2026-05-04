@@ -247,22 +247,44 @@ class Submission(SubmissionBase, table=True):
         )
 
 
+class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Failure reason enum for submissions in ERROR state."""
+
+    DUPLICATE_TANG = "duplicated_tang"
+    INCOMPLETE_SUBMISSION = "incomplete_submission"
+    DECRYPTION_ERROR = "decryption_error"
+    NETWORK_ERROR = "network_error"
+    VALIDATION_ERROR = "validation_error"
+    FILE_NOT_FOUND = "file_not_found"
+    ENCRYPTION_ERROR = "encryption_error"
+    UPLOAD_ERROR = "upload_error"
+    UNKNOWN = "unknown"
+
+
 class SubmissionStateLogBase(SQLModel):
     """
     Submission state log base model.
     Holds state information for each submission.
-    Timestamped.
-    Can optionally have associated JSON data.
+    Timestamped. Can optionally have associated JSON data
+    and a failure reason for submissions in an ERROR state.
     """
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    failure_reason: FailureReasonEnum | None = Field(
+        default=None,
+        sa_column=Column(
+            Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e]),
+            nullable=True,
+        ),
+    )
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
     model_config = ConfigDict(  # type: ignore
+        json_encoders={datetime.datetime: serialize_datetime_to_iso_z},
         populate_by_name=True,
     )
 
@@ -737,6 +759,7 @@ class SubmissionDb:
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
+        failure_reason: FailureReasonEnum | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -757,7 +780,11 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             state_log_payload = SubmissionStateLogPayload(
-                submission_id=submission_id, author_name=self._author.name, state=state, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                state=state,
+                data=data,
+                failure_reason=failure_reason,
             )
             signature = state_log_payload.sign(self._author.private_key())
 
