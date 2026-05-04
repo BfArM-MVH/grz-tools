@@ -1,6 +1,7 @@
 """Command for managing a submission database"""
 
 import csv
+import itertools
 import json
 import logging
 import sys
@@ -551,6 +552,15 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
+_ignore_field_option = click.option(
+    "--ignore-field",
+    "ignore_field",
+    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
+    help="Do not populate the given field from the metadata to the database. Can be specified multiple times.",
+    multiple=True,
+)
+
+
 def _prepare_submission_console_table(submission_diff: "SubmissionDiffCollection") -> rich.console.RenderableType:
     """Build a Rich renderable that shows pending submission-level metadata changes.
 
@@ -614,11 +624,7 @@ def _prepare_donor_console_table(
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
-@click.option(
-    "--ignore-field",
-    help="Do not populate the given key from the metadata to the database. Can be specified multiple times to ignore multiple keys.",
-    multiple=True,
-)
+@_ignore_field_option
 @click.pass_context
 def populate(  # noqa: C901, PLR0913
     ctx: click.Context,
@@ -995,7 +1001,7 @@ def _backfill_submission(  # noqa: PLR0913, PLR0911
     current_submission: Submission,
     s3_client: Any,
     bucket: str,
-    db_service: "SubmissionDb",
+    db_service: SubmissionDb,
     dry_run: bool,
     force: bool,
     ignore_fields: set[str],
@@ -1014,15 +1020,6 @@ def _backfill_submission(  # noqa: PLR0913, PLR0911
     and manually-corrected values are preserved.
     """
     submission_id = current_submission.id
-
-    if (
-        not force
-        and current_submission.submission_size is not None
-        and current_submission.submission_metadata is not None
-    ):
-        console_err.print(f"[dim]  {submission_id}: already populated, skipping (use --force to re-derive).[/dim]")
-        result.skipped += 1
-        return
 
     try:
         raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
@@ -1060,16 +1057,24 @@ def _backfill_submission(  # noqa: PLR0913, PLR0911
         result.skipped += 1
         return
 
-    pending_fields = [d.key for d in submission_diff.pending if d.key != "submission_metadata"]
     if dry_run:
-        console_err.print(f"[yellow]  [dry-run] {submission_id}: would update fields: {pending_fields}[/yellow]")
+        console_err.print(
+            f"[yellow]  [dry-run] {submission_id}: would update fields: {[d.key for d in submission_diff.pending]}[/yellow]"
+        )
         result.updated += 1
+        return
+
+    if not force and submission_diff.has_pending_destructive:
+        console_err.print(
+            f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}', skipping (use --force to overwrite).[/dim]"
+        )
+        result.skipped += 1
         return
 
     try:
         db_service.commit_changes(submission_id, submission_diff, donors_diff)
         console_err.print(
-            f"[green]  {submission_id}: updated ({', '.join(pending_fields) or 'no scalar changes'}).[/green]"
+            f"[green]  {submission_id}: updated ({', '.join(d.key for d in submission_diff.pending) or 'no scalar changes'}).[/green]"
         )
         result.updated += 1
     except Exception as exc:
@@ -1111,13 +1116,7 @@ def _backfill_submission(  # noqa: PLR0913, PLR0911
     default=date.max,
     help="Process only submissions processed on or before this date (inclusive). Defaults to the end of time.",
 )
-@click.option(
-    "--ignore-field",
-    "ignore_field",
-    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
-    help="Do not overwrite the given field from the metadata. Can be specified multiple times.",
-    multiple=True,
-)
+@_ignore_field_option
 @click.pass_context
 def backfill(  # noqa: PLR0913
     ctx: click.Context,

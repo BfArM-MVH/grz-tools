@@ -370,13 +370,13 @@ class Worker:
         submission_diff, donors_diff = db.diff(submission_id, metadata, submission_date)
 
         # check for destructive changes
-        if not force and (len(submission_diff.deleted) + len(submission_diff.updated)) > 0:
+        if not force and submission_diff.has_pending_destructive:
             raise RuntimeError(
                 f"Would update/delete existing submission data in the database, but `force` not set. "
                 f"submission_id={submission_id!r}, submission_diff={submission_diff!r}"
             )
 
-        if not force and (len(donors_diff.deleted) + len(donors_diff.updated)) > 0:
+        if not force and donors_diff.has_pending_destructive:
             raise RuntimeError(
                 f"Would update/delete existing donors in the database, but `force` not set. "
                 f"submission_id={submission_id!r}, donors_diff={donors_diff!r}"
