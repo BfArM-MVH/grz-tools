@@ -168,8 +168,11 @@ class S3BotoUploadWorker(UploadWorker):
             self.__log.debug("state for %s: %s", file_path, logged_state)
 
             s3_object_id = files_to_upload[file_path]
-
-            if (logged_state is None) or not logged_state.get("upload_successful", False):
+            if (
+                (logged_state is None)
+                or not logged_state.get("upload_successful", False)
+                or logged_state.get("submission_id") != encrypted_submission.submission_id
+            ):
                 self.__log.info(
                     "Uploading file: '%s' -> '%s'",
                     str(file_path),
@@ -183,7 +186,7 @@ class S3BotoUploadWorker(UploadWorker):
                     progress_logger.set_state(
                         file_path,
                         file_metadata,
-                        state=UploadState(upload_successful=True),
+                        state=UploadState(upload_successful=True, submission_id=encrypted_submission.submission_id),
                     )
                 except Exception as e:
                     self.__log.error("Upload failed for '%s'", str(file_path))
@@ -191,14 +194,17 @@ class S3BotoUploadWorker(UploadWorker):
                     progress_logger.set_state(
                         file_path,
                         file_metadata,
-                        state=UploadState(upload_successful=False, errors=[str(e)]),
+                        state=UploadState(
+                            upload_successful=False, errors=[str(e)], submission_id=encrypted_submission.submission_id
+                        ),
                     )
 
                     raise e
             else:
                 self.__log.info(
-                    "File '%s' already uploaded (at '%s')",
+                    "File '%s' already uploaded for submission'%s' (at '%s')",
                     str(file_path),
+                    encrypted_submission.submission_id,
                     str(s3_object_id),
                 )
 

@@ -27,6 +27,7 @@ class UploadState(State):
     """
 
     upload_successful: bool
+    submission_id: str
 
 
 class EncryptionState(State):
