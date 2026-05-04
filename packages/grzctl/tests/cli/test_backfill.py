@@ -12,7 +12,6 @@ import importlib.resources
 import json
 from collections.abc import Iterator
 from typing import Any
-from unittest.mock import MagicMock
 
 import boto3
 import pytest
@@ -22,12 +21,12 @@ from grz_db.models.author import Author
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.commands.db.cli import _BackfillResult, _backfill_submission
+from grzctl.commands.db.cli import _backfill_submission, _BackfillResult
 from moto import mock_aws
 
 BUCKET = "test-backfill-bucket"
 REGION = "us-east-1"
-IGNORE_FIELDS = {"submission_date", "tan_g", "local_case_id"}
+IGNORE_FIELDS = {"submission_date", "tan_g", "pseudonym"}
 DIFFERENT_TAN_G = "b" * 64
 DIFFERENT_PSEUDONYM = "different-pseudonym"
 DIFFERENT_DATE = datetime.date(1999, 1, 1)
@@ -202,17 +201,20 @@ def test_backfill_submission_skips_when_no_pending_diff(
     assert result.errors == []
 
 
-def test_backfill_submission_pre_filter_skips_when_both_columns_set_and_not_force(
+def test_backfill_submission_skips_destructive_changes_without_force(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
-    """Without --force, an already-populated row is short-circuited before any S3 access."""
-    current = _populate_full_row(db, submission_id, metadata)
-    spy_client = MagicMock(wraps=s3_client_mock)
+    """Without --force, a submission whose non-NULL field differs from S3 is skipped and the DB is unchanged."""
+    current = db.add_submission(submission_id)
+    current.submission_size = 1  # non-NULL value that will differ from metadata
+    db.update_submission(current)
+    current = db.get_submission(submission_id)
+    _put_metadata(s3_client_mock, submission_id, metadata)
     result = _BackfillResult()
 
     _backfill_submission(
         current_submission=current,
-        s3_client=spy_client,
+        s3_client=s3_client_mock,
         bucket=BUCKET,
         db_service=db,
         dry_run=False,
@@ -224,7 +226,38 @@ def test_backfill_submission_pre_filter_skips_when_both_columns_set_and_not_forc
     assert result.updated == 0
     assert result.skipped == 1
     assert result.errors == []
-    assert spy_client.get_object.call_count == 0
+    persisted = db.get_submission(submission_id)
+    assert persisted.submission_size == 1
+
+
+def test_backfill_submission_force_applies_destructive_changes(
+    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    """With --force, a submission whose non-NULL field differs from S3 is updated even though it overwrites data."""
+    current = db.add_submission(submission_id)
+    current.submission_size = 1  # non-NULL value that will differ from metadata
+    db.update_submission(current)
+    current = db.get_submission(submission_id)
+    _put_metadata(s3_client_mock, submission_id, metadata)
+    result = _BackfillResult()
+
+    _backfill_submission(
+        current_submission=current,
+        s3_client=s3_client_mock,
+        bucket=BUCKET,
+        db_service=db,
+        dry_run=False,
+        force=True,
+        ignore_fields=IGNORE_FIELDS,
+        result=result,
+    )
+
+    assert result.updated == 1
+    assert result.skipped == 0
+    assert result.errors == []
+    persisted = db.get_submission(submission_id)
+    assert persisted.submission_size == metadata.get_submission_size()
+    assert persisted.submission_metadata == metadata.to_redacted_dict()
 
 
 def test_backfill_submission_force_does_not_overwrite_ignore_fields(
