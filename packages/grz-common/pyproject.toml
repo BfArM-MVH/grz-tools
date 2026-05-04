@@ -42,8 +42,6 @@ dev = [
     "boto3-stubs",
 ]
 
-
-
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"
 Repository = "https://github.com/BfArM-MVH/grz-tools"

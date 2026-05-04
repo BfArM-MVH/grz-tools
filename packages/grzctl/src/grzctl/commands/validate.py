@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 @grzcli.submission_dir
 @grzcli.force
 @grzcli.threads
+@grzcli.update_db
 @click.option(
     "--mmap/--no-mmap",
     "mmap",
