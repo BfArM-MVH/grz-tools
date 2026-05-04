@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const READ_BUF_SIZE: usize = 4 * 1024 * 1024;
+pub(crate) const READ_BUF_SIZE: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct CheckOutcome {
@@ -87,7 +87,7 @@ where
     let checksum = match Arc::try_unwrap(hasher) {
         Ok(mutex) => {
             let final_hasher = mutex.into_inner().unwrap();
-            Some(format!("{:x}", final_hasher.finalize()))
+            Some(hex::encode(final_hasher.finalize()))
         }
         Err(_) => {
             let mut final_report = FileReport::new(path, outcome.stats, vec![], outcome.warnings);
