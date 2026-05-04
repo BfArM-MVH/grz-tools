@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.6.1...grz-common-v2.0.0) (2026-05-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501))
+
+### Features
+
+* **grz-cli,grz-common:** Add version checks to upload/submit ([#477](https://github.com/BfArM-MVH/grz-tools/issues/477)) ([289683d](https://github.com/BfArM-MVH/grz-tools/commit/289683d6154df7fb175ad4db9671f28e1cdd0eb3))
+* **grz-cli,grzctl,grz-common,grz-check:** use grz check python bindings ([#554](https://github.com/BfArM-MVH/grz-tools/issues/554)) ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-cli,grzctl,grz-common:** use grz-check python bindings instead ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grzctl, grz-db, grz-pydantic-models:** Improved populate ([#547](https://github.com/BfArM-MVH/grz-tools/issues/547)) ([8cbf232](https://github.com/BfArM-MVH/grz-tools/commit/8cbf2323747a3a2c35623b80f7ad1ef420217f07))
+* **grzctl,grz-cli,grz-common:** Merge multiple configuration files ([#490](https://github.com/BfArM-MVH/grz-tools/issues/490)) ([8ae881d](https://github.com/BfArM-MVH/grz-tools/commit/8ae881d4f65882ae5d8823bdb00971eec246a395))
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501)) ([8953102](https://github.com/BfArM-MVH/grz-tools/commit/895310211d36796d995c37f1929a12458195d4c7))
+* **grzctl:** Improved redaction during archival ([#517](https://github.com/BfArM-MVH/grz-tools/issues/517)) ([a10e63f](https://github.com/BfArM-MVH/grz-tools/commit/a10e63ff4eadfc09b060509f004518dba01154df))
+
+
+### Bug Fixes
+
+* **grz-check:** actually calculate checksums in python exposed API ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** add return types to public python functions ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** do not silently ignore pair errors ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** expose validate_raw* functions that also return a ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** set source.name as path in report as a fallback ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** use 8MB as buffer size to match python codebase defaults ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.6.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.6.0...grz-common-v1.6.1) (2025-12-14)
 
 

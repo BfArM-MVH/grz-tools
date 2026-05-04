@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.5.0...grz-pydantic-models-v2.6.0) (2026-05-04)
+
+
+### Features
+
+* **grz-pydantic-models:** Enforce differring checksums for sequencing data ([#496](https://github.com/BfArM-MVH/grz-tools/issues/496)) ([2fc80db](https://github.com/BfArM-MVH/grz-tools/commit/2fc80db0dea956d8f820ce8f8212b6b402fd53ca)), closes [#430](https://github.com/BfArM-MVH/grz-tools/issues/430)
+* **grzctl, grz-db, grz-pydantic-models:** Improved populate ([#547](https://github.com/BfArM-MVH/grz-tools/issues/547)) ([8cbf232](https://github.com/BfArM-MVH/grz-tools/commit/8cbf2323747a3a2c35623b80f7ad1ef420217f07))
+* **grzctl:** implement Prüfbericht generation using submission ID from database ([#525](https://github.com/BfArM-MVH/grz-tools/issues/525)) ([fa09ffd](https://github.com/BfArM-MVH/grz-tools/commit/fa09ffda89a014614bbef51365ea0ac8d4af250f))
+* **grzctl:** Improved redaction during archival ([#517](https://github.com/BfArM-MVH/grz-tools/issues/517)) ([a10e63f](https://github.com/BfArM-MVH/grz-tools/commit/a10e63ff4eadfc09b060509f004518dba01154df))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models,grz-cli,grzctl:** Fix MII Consent Period to use datetime instead of date ([#491](https://github.com/BfArM-MVH/grz-tools/issues/491)) ([0eb69fd](https://github.com/BfArM-MVH/grz-tools/commit/0eb69fd9f0c63360ed19f20b1468ab0700270c81))
+* **grz-pydantic-models:** Change minReadLength default from 0 to -1 ([#506](https://github.com/BfArM-MVH/grz-tools/issues/506)) ([3e23d1c](https://github.com/BfArM-MVH/grz-tools/commit/3e23d1c29cdd98356a576f4da6806d89f3036c61))
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [2.5.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.4.0...grz-pydantic-models-v2.5.0) (2025-12-04)
 
 

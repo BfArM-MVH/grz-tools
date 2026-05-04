@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.4.0...grzctl-v2.0.0) (2026-05-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501))
+
+### Features
+
+* **grz-cli,grzctl,grz-common,grz-check:** use grz check python bindings ([#554](https://github.com/BfArM-MVH/grz-tools/issues/554)) ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-cli,grzctl,grz-common:** use grz-check python bindings instead ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-db,grzctl:** add selected_for_qc submission column to submission database ([#531](https://github.com/BfArM-MVH/grz-tools/issues/531)) ([a753bd2](https://github.com/BfArM-MVH/grz-tools/commit/a753bd2f44a73fc113e10a736dd8c09f7c035b07))
+* **grz-pydantic-models:** Enforce differring checksums for sequencing data ([#496](https://github.com/BfArM-MVH/grz-tools/issues/496)) ([2fc80db](https://github.com/BfArM-MVH/grz-tools/commit/2fc80db0dea956d8f820ce8f8212b6b402fd53ca)), closes [#430](https://github.com/BfArM-MVH/grz-tools/issues/430)
+* **grzctl, grz-db, grz-pydantic-models:** Improved populate ([#547](https://github.com/BfArM-MVH/grz-tools/issues/547)) ([8cbf232](https://github.com/BfArM-MVH/grz-tools/commit/8cbf2323747a3a2c35623b80f7ad1ef420217f07))
+* **grzctl,grz-cli,grz-common:** Merge multiple configuration files ([#490](https://github.com/BfArM-MVH/grz-tools/issues/490)) ([8ae881d](https://github.com/BfArM-MVH/grz-tools/commit/8ae881d4f65882ae5d8823bdb00971eec246a395))
+* **grzctl:** add --json output to db submission show ([69c398d](https://github.com/BfArM-MVH/grz-tools/commit/69c398db8591e6cf48fd0d3f2c2f288a03c6203a)), closes [#503](https://github.com/BfArM-MVH/grz-tools/issues/503)
+* **grzctl:** Add --json output to grzctl db submission show ([#510](https://github.com/BfArM-MVH/grz-tools/issues/510)) ([69c398d](https://github.com/BfArM-MVH/grz-tools/commit/69c398db8591e6cf48fd0d3f2c2f288a03c6203a))
+* **grzctl:** add state-based filtering to grzctl db list (latest by default) ([#523](https://github.com/BfArM-MVH/grz-tools/issues/523)) ([9a715f4](https://github.com/BfArM-MVH/grz-tools/commit/9a715f40ec80d149fe5ab2fbda383da9671ff332)), closes [#504](https://github.com/BfArM-MVH/grz-tools/issues/504)
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501)) ([8953102](https://github.com/BfArM-MVH/grz-tools/commit/895310211d36796d995c37f1929a12458195d4c7))
+* **grzctl:** implement Prüfbericht generation using submission ID from database ([#525](https://github.com/BfArM-MVH/grz-tools/issues/525)) ([fa09ffd](https://github.com/BfArM-MVH/grz-tools/commit/fa09ffda89a014614bbef51365ea0ac8d4af250f))
+* **grzctl:** Make 'identifiers.le' config optional for 'grzctl report' command ([#488](https://github.com/BfArM-MVH/grz-tools/issues/488)) ([f065e5a](https://github.com/BfArM-MVH/grz-tools/commit/f065e5a8115bd3ff791b0657ff2513c9e4c2f076))
+* **grzctl:** submission-id for grzctl report with option --with-submission-ids ([#539](https://github.com/BfArM-MVH/grz-tools/issues/539)) ([8765e88](https://github.com/BfArM-MVH/grz-tools/commit/8765e88627b0a3a7665e2711310cabd5b54d8972))
+* **grzctl:** Update DbContext for more stringent exception handling ([#546](https://github.com/BfArM-MVH/grz-tools/issues/546)) ([f5a5d69](https://github.com/BfArM-MVH/grz-tools/commit/f5a5d6901d058f4ec7bd0bc0371d5c617971d3ba))
+
+
+### Bug Fixes
+
+* **grz-check:** actually calculate checksums in python exposed API ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** add return types to public python functions ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** do not silently ignore pair errors ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** expose validate_raw* functions that also return a ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** set source.name as path in report as a fallback ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** use 8MB as buffer size to match python codebase defaults ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-pydantic-models,grz-cli,grzctl:** Fix MII Consent Period to use datetime instead of date ([#491](https://github.com/BfArM-MVH/grz-tools/issues/491)) ([0eb69fd](https://github.com/BfArM-MVH/grz-tools/commit/0eb69fd9f0c63360ed19f20b1468ab0700270c81))
+* **grzctl:** accept `THRESHOLD NOT MET` as valid QC status in populate-qc ([#529](https://github.com/BfArM-MVH/grz-tools/issues/529)) ([6dac1d4](https://github.com/BfArM-MVH/grz-tools/commit/6dac1d499947bd1f7e28adf7361dda40c6f45345))
+* **grzctl:** fix displayed QC stats ([#508](https://github.com/BfArM-MVH/grz-tools/issues/508)) ([4a175e7](https://github.com/BfArM-MVH/grz-tools/commit/4a175e7f8091fb3ded8e8354b89b6d2a243993cf)), closes [#451](https://github.com/BfArM-MVH/grz-tools/issues/451)
+* handle `THRESHOLD NOT MET` QCStatus in `populate-qc` command ([6dac1d4](https://github.com/BfArM-MVH/grz-tools/commit/6dac1d499947bd1f7e28adf7361dda40c6f45345))
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.3.0...grzctl-v1.4.0) (2025-12-04)
 
 
