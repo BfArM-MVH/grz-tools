@@ -98,6 +98,7 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
 
     submission = db.get_submission(metadata.submission_id)
     assert submission.pseudonym == metadata.submission.local_case_id
+    assert submission.consented == metadata.consents_to_research(date(2026, 1, 1))
 
     # check that the consent records were populated
     meta_father = metadata.donors[1]
