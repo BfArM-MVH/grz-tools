@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Self, cast
@@ -98,13 +99,21 @@ class SubmissionDiffCollection:
     unchanged: list[FieldDiff] = field(default_factory=list)
 
     @property
-    def pending(self) -> list[FieldDiff]:
+    def pending(self) -> Generator[FieldDiff, None, None]:
         """All diffs that need to be written to the database (added + updated + deleted)."""
-        return self.added + self.updated + self.deleted
+        yield from self.added
+        yield from self.updated
+        yield from self.deleted
 
     @property
     def has_pending(self) -> bool:
+        """True if any field needs to be written to the database (added, updated, or deleted)."""
         return len(self.added) > 0 or len(self.updated) > 0 or len(self.deleted) > 0
+
+    @property
+    def has_pending_destructive(self) -> bool:
+        """True if any field will overwrite or remove an existing database value (updated or deleted)."""
+        return len(self.updated) > 0 or len(self.deleted) > 0
 
     def append(self, field_diff: FieldDiff):
         match field_diff.diff.state:
@@ -179,13 +188,21 @@ class DonorsDiffCollection:
     unchanged: list[DonorDiff] = field(default_factory=list)
 
     @property
-    def pending(self) -> list[DonorDiff]:
+    def pending(self) -> Generator[DonorDiff, None, None]:
         """All diffs that need to be written to the database (added + updated + deleted)."""
-        return self.added + self.updated + self.deleted
+        yield from self.added
+        yield from self.updated
+        yield from self.deleted
 
     @property
     def has_pending(self) -> bool:
+        """True if any donor needs to be written to the database (added, updated, or deleted)."""
         return len(self.added) > 0 or len(self.updated) > 0 or len(self.deleted) > 0
+
+    @property
+    def has_pending_destructive(self) -> bool:
+        """True if any donor will overwrite or remove an existing database record (updated or deleted)."""
+        return len(self.updated) > 0 or len(self.deleted) > 0
 
     def append(self, donor_diff: DonorDiff):
         match donor_diff.state:
