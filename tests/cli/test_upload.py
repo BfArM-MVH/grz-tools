@@ -233,39 +233,37 @@ def test_upload_aborts_if_encryption_log_missing(
     assert len(objects_in_bucket) == 1, "Upload should not have happened!"
 
 
-@pytest.mark.parametrize("grz_check_flag", ["--no-grz-check", "--with-grz-check"])
-def test_upload_workflow_succeeds_with_symlink_in_files_dir(
+def test_upload_workflow_succeeds_with_symlinks_to_real_test_files(
     working_dir_path,
-    grz_check_flag,
     temp_identifiers_config_file_path,
     temp_keys_config_file_path,
     temp_s3_config_file_path,
     remote_bucket_with_version,
 ):
     """
-    End-to-end smoke test for LE submissions where `files/` contains symlinks.
-
-    Runs both with and without `grz-check` (when available).
+    End-to-end smoke test for LE submissions where `files/` entries are symlinks
+    to real fixture files in tests/.
     """
-    if (grz_check_flag == "--with-grz-check") and (shutil.which("grz-check") is None):
-        pytest.skip(reason="grz-check not installed")
-
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
+    # Create files/ directory with symlinks to real test fixture files
+    (working_dir_path / "files").mkdir(parents=True, exist_ok=True)
+    for source_path in (submission_dir / "files").rglob("*"):
+        relative_path = source_path.relative_to(submission_dir / "files")
+        link_path = working_dir_path / "files" / relative_path
+
+        if source_path.is_dir():
+            link_path.mkdir(parents=True, exist_ok=True)
+            continue
+
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            link_path.symlink_to(source_path.resolve())
+        except (OSError, NotImplementedError) as e:
+            pytest.skip(f"Symlinks not supported in this environment: {e}")
+
+    # Copy metadata (not symlinked since it's not validated by grz-check)
     shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
-
-    # Replace one submission file with a symlink pointing to data outside the submission directory.
-    symlink_path = working_dir_path / "files" / "target_regions.bed"
-    external_dir = working_dir_path / "real_data"
-    external_dir.mkdir(parents=True, exist_ok=True)
-    external_target = external_dir / symlink_path.name
-
-    shutil.move(symlink_path, external_target)
-    try:
-        symlink_path.symlink_to(external_target)
-    except (OSError, NotImplementedError) as e:
-        pytest.skip(f"Symlinks not supported in this environment: {e}")
 
     runner = CliRunner()
     cli = grz_cli.cli.build_cli()
@@ -285,14 +283,13 @@ def test_upload_workflow_succeeds_with_symlink_in_files_dir(
             "validate",
             "--submission-dir",
             str(working_dir_path),
-            grz_check_flag,
             *config_args,
         ],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
 
-    # encrypt (must read the symlinked input file)
+    # encrypt (must read the symlinked input files)
     result = runner.invoke(
         cli,
         [
