@@ -265,6 +265,7 @@ def list_submissions(
 
     if output_json:
         json.dump(submission_dicts, sys.stdout)
+        sys.stdout.write("\n")
     else:
         console.print(table)
 
@@ -325,6 +326,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
 
     if output_json:
         json.dump(submission_dicts, sys.stdout)
+        sys.stdout.write("\n")
     else:
         console.print(table)
 
@@ -997,7 +999,7 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
         raise
 
 
-def _backfill_submission(  # noqa: PLR0913, PLR0911
+def _backfill_submission(  # noqa: PLR0913
     current_submission: Submission,
     s3_client: Any,
     bucket: str,
@@ -1006,7 +1008,7 @@ def _backfill_submission(  # noqa: PLR0913, PLR0911
     force: bool,
     ignore_fields: set[str],
     result: _BackfillResult,
-) -> None:
+):
     """Fetch metadata.json from S3 for one submission and commit a diff to the database.
 
     Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
