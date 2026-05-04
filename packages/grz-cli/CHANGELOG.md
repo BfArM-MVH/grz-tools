@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.1...grz-cli-v1.6.0) (2026-05-04)
+
+
+### Features
+
+* **grz-cli,grz-common:** Add version checks to upload/submit ([#477](https://github.com/BfArM-MVH/grz-tools/issues/477)) ([289683d](https://github.com/BfArM-MVH/grz-tools/commit/289683d6154df7fb175ad4db9671f28e1cdd0eb3))
+* **grz-cli,grzctl,grz-common,grz-check:** use grz check python bindings ([#554](https://github.com/BfArM-MVH/grz-tools/issues/554)) ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-cli,grzctl,grz-common:** use grz-check python bindings instead ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grzctl,grz-cli,grz-common:** Merge multiple configuration files ([#490](https://github.com/BfArM-MVH/grz-tools/issues/490)) ([8ae881d](https://github.com/BfArM-MVH/grz-tools/commit/8ae881d4f65882ae5d8823bdb00971eec246a395))
+
+
+### Bug Fixes
+
+* **grz-check:** actually calculate checksums in python exposed API ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** add return types to public python functions ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** do not silently ignore pair errors ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** expose validate_raw* functions that also return a ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** set source.name as path in report as a fallback ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** use 8MB as buffer size to match python codebase defaults ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.5.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.0...grz-cli-v1.5.1) (2025-12-04)
 
 

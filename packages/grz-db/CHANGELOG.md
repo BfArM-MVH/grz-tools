@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.2.0...grz-db-v2.0.0) (2026-05-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501))
+
+### Features
+
+* **grz-db,grzctl:** add selected_for_qc submission column to submission database ([#531](https://github.com/BfArM-MVH/grz-tools/issues/531)) ([a753bd2](https://github.com/BfArM-MVH/grz-tools/commit/a753bd2f44a73fc113e10a736dd8c09f7c035b07))
+* **grzctl, grz-db, grz-pydantic-models:** Improved populate ([#547](https://github.com/BfArM-MVH/grz-tools/issues/547)) ([8cbf232](https://github.com/BfArM-MVH/grz-tools/commit/8cbf2323747a3a2c35623b80f7ad1ef420217f07))
+* **grzctl:** add state-based filtering to grzctl db list (latest by default) ([#523](https://github.com/BfArM-MVH/grz-tools/issues/523)) ([9a715f4](https://github.com/BfArM-MVH/grz-tools/commit/9a715f40ec80d149fe5ab2fbda383da9671ff332)), closes [#504](https://github.com/BfArM-MVH/grz-tools/issues/504)
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501)) ([8953102](https://github.com/BfArM-MVH/grz-tools/commit/895310211d36796d995c37f1929a12458195d4c7))
+
+
+### Bug Fixes
+
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.1.0...grz-db-v1.2.0) (2025-12-04)
 
 
