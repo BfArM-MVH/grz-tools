@@ -21,11 +21,11 @@ log = logging.getLogger(__name__)
 @grzcli.force
 @grzcli.threads
 @click.option(
-    "--with-grz-check/--no-grz-check",
-    "with_grz_check",
+    "--mmap/--no-mmap",
+    "mmap",
     default=True,
     hidden=True,
-    help="Whether to use grz-check to perform validation",
+    help="Whether to use mmap.",
 )
 @grzcli.update_db
 def validate(  # noqa: PLR0913
@@ -33,7 +33,7 @@ def validate(  # noqa: PLR0913
     submission_dir,
     force,
     threads,
-    with_grz_check,
+    mmap,
     update_db,
     **kwargs,
 ):
@@ -66,6 +66,6 @@ def validate(  # noqa: PLR0913
             submission_dir=submission_dir,
             force=force,
             threads=threads,
-            with_grz_check=with_grz_check,
+            no_mmap=not mmap,
             **kwargs,
         )

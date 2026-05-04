@@ -59,10 +59,11 @@ jobs:
           # Define dependency graph (source package name -> space-separated list of dependent package names)
           declare -A DEPENDENCY_GRAPH
           DEPENDENCY_GRAPH["grz-pydantic-models"]="grz-cli grzctl grz-common grz-db"
+          DEPENDENCY_GRAPH["grz-pydantic-models-testing"]="grz-pydantic-models grzctl grz-db"
           DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl"
           DEPENDENCY_GRAPH["grz-db"]="grzctl"
           DEPENDENCY_GRAPH["grz-cli"]="grzctl"
-          DEPENDENCY_GRAPH["grz-check"]="grz-cli"
+          DEPENDENCY_GRAPH["grz-check"]="grz-cli grzctl grz-common"
           # Add other dependencies as needed: DEPENDENCY_GRAPH["pkg-x"]="pkg-y pkg-z"
 
           final_test_dirs=("${directly_changed_package_dirs[@]}")
@@ -93,7 +94,9 @@ jobs:
             if [[ -f "$pkg_path/pyproject.toml" ]]; then
               # Note: We only need the path in the matrix object now
               python_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
-            elif [[ -f "$pkg_path/Cargo.toml" ]]; then
+            fi
+
+            if [[ -f "$pkg_path/Cargo.toml" ]]; then
               rust_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
             fi
           done

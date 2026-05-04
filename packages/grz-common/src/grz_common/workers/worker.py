@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from os import PathLike
 from pathlib import Path
+
+from grz_db.models.submission import (
+    DonorsDiffCollection,
+    SubmissionDb,
+    SubmissionDiffCollection,
+)
+from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
-from ..validation import UserInterruptException
+from ..transfer import init_s3_client
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
 from .upload import S3BotoUploadWorker
@@ -91,13 +97,13 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False, with_grz_check=True):
+    def validate(self, identifiers: IdentifiersModel, force=False, no_mmap=False):
         """
         Validate this submission
 
         :param identifiers: IdentifiersModel containing GRZ and LE identifiers.
         :param force: Force validation of already validated files
-        :param with_grz_check: If True, use the grz-check tool for validation.
+        :param no_mmap: If True, use the streaming python reader instead of zero-copy mmap.
         :raises SubmissionValidationError: if the validation fails
         """
         submission = self.parse_submission()
@@ -116,51 +122,30 @@ class Worker:
             self.progress_file_checksum_validation.unlink(missing_ok=True)
             self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
 
-        have_grz_check = shutil.which("grz-check") is not None
-        if with_grz_check and have_grz_check:
-            try:
-                self.__log.info("Starting file validation with `grz-check`...")
-                errors = list(
-                    submission.validate_files_with_grz_check(
-                        checksum_progress_file=self.progress_file_checksum_validation,
-                        seq_data_progress_file=self.progress_file_sequencing_data_validation,
-                        threads=self._threads,
-                    )
+        try:
+            self.__log.info("Starting file validation with `grz-check`...")
+            errors = list(
+                submission.validate_files(
+                    checksum_progress_file=self.progress_file_checksum_validation,
+                    seq_data_progress_file=self.progress_file_sequencing_data_validation,
+                    threads=self._threads,
+                    no_mmap=no_mmap,
                 )
-                if errors:
-                    error_msg = "\n".join(["File validation failed! Errors:", *errors])
-                    self.__log.error(error_msg)
-                    raise SubmissionValidationError(error_msg)
-                else:
-                    self.__log.info("File validation successful!")
-                return
-            except UserInterruptException as e:
-                error_msg = "Validation was cancelled by the user and is incomplete."
-                self.__log.error(error_msg)
-                raise SubmissionValidationError(error_msg) from e
-
-        # Fallback validation
-        self.__log.info("Starting checksum validation (fallback)...")
-        if errors := list(
-            submission._validate_checksums_fallback(progress_log_file=self.progress_file_checksum_validation)
-        ):
-            error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
-            self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
-        else:
-            self.__log.info("Checksum validation successful!")
-
-        self.__log.info("Starting sequencing data validation (fallback)...")
-        if errors := list(
-            submission._validate_sequencing_data_fallback(
-                progress_log_file=self.progress_file_sequencing_data_validation
             )
-        ):
-            error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
+            if errors:
+                error_msg = "\n".join(["File validation failed! Errors:", *errors])
+                self.__log.error(error_msg)
+                raise SubmissionValidationError(error_msg)
+            else:
+                self.__log.info("File validation successful!")
+        except KeyboardInterrupt as e:
+            error_msg = "Validation was cancelled by the user and is incomplete."
             self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
-        else:
-            self.__log.info("Sequencing data validation successful!")
+            raise SubmissionValidationError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Validation failed due to an error: {e}"
+            self.__log.error(error_msg)
+            raise SubmissionValidationError(error_msg) from e
 
     def encrypt(
         self,
@@ -317,3 +302,90 @@ class Worker:
 
         self.__log.info("Downloading encrypted files...")
         download_worker.download(submission_id, EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir))
+
+    def _log_pending_changes(
+        self,
+        submission_id: str,
+        submission_diff: SubmissionDiffCollection,
+        donors_diff: DonorsDiffCollection,
+    ) -> None:
+        """Emit info-level log lines summarising what is about to be committed."""
+        log = self.__log
+        sid = f"Submission: {submission_id}"
+
+        # log submission_diff
+        pending_keys = [d.key for d in submission_diff.pending]
+        unchanged_keys = [d.key for d in submission_diff.unchanged]
+        if pending_keys:
+            log.info("%s - Updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in pending_keys))
+        if unchanged_keys:
+            log.info("%s - Not updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in unchanged_keys))
+
+        # log donors_diff
+        if donors_diff.unchanged:
+            log.info(
+                "%s - Keep existing donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.unchanged)
+            )
+        if donors_diff.added:
+            log.info(
+                "%s - Adding new donor(s): %s",
+                sid,
+                ", ".join(f'"{d.pseudonym}"' for d in donors_diff.added),
+            )
+        if donors_diff.updated:
+            log.info(
+                "%s - Modifying existing donor(s): %s",
+                sid,
+                ", ".join(f'"{d.pseudonym}"' for d in donors_diff.updated),
+            )
+        if donors_diff.deleted:
+            log.info("%s - Dropping donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.deleted))
+
+    def populate(self, s3_options: S3Options, db: SubmissionDb, submission_id: str, force: bool):
+        """Populate the submission database from the downloaded metadata file."""
+        # Fetch the S3 last-modified date of the submission's metadata file.
+        s3_client = init_s3_client(s3_options)
+        response = s3_client.head_object(Bucket=s3_options.bucket, Key=f"{submission_id}/metadata/metadata.json")
+        submission_date = response["LastModified"].date()
+
+        # create submission if not existing yet
+        if not db.get_submission(submission_id):
+            self.__log.warning("Submission %s does not exist. Creating ...", submission_id)
+            db.add_submission(submission_id)
+            self.__log.debug("Submission %s added to database. Force populate", submission_id)
+            force = True
+
+        # load submission metadata
+        metadata_file_path = self.metadata_dir / "metadata.json"
+        with open(metadata_file_path) as fd:
+            metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
+
+        if metadata.submission.tan_g == REDACTED_TAN:
+            raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.json ({metadata_file_path}).")
+        if not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID:
+            raise ValueError(
+                f"Submission {submission_id} has missing or redacted local_case_id in metadata.json ({metadata_file_path})."
+            )
+
+        submission_diff, donors_diff = db.diff(submission_id, metadata, submission_date)
+
+        # check for destructive changes
+        if not force and (len(submission_diff.deleted) + len(submission_diff.updated)) > 0:
+            raise RuntimeError(
+                f"Would update/delete existing submission data in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, submission_diff={submission_diff!r}"
+            )
+
+        if not force and (len(donors_diff.deleted) + len(donors_diff.updated)) > 0:
+            raise RuntimeError(
+                f"Would update/delete existing donors in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, donors_diff={donors_diff!r}"
+            )
+
+        # commit pending changes to the database
+        if submission_diff.has_pending or donors_diff.has_pending:
+            self.__log.info("Submission: %s - Updating...", submission_id)
+            self._log_pending_changes(submission_id, submission_diff, donors_diff)
+            db.commit_changes(submission_id, submission_diff, donors_diff)
+        else:
+            self.__log.info("Submission: %s - No updates necessary.", submission_id)

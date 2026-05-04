@@ -1,0 +1,44 @@
+[project]
+name = "grz-pydantic-models-testing"
+version = "0.1.0"
+description = "Installable test fixtures and example metadata for grz-pydantic-models."
+readme = "README.md"
+requires-python = ">=3.12"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Florian R. Hölzlwimmer", email = "git.ich@frhoelzlwimmer.de" },
+    { name = "Till Hartmann", email = "till.hartmann@bih-charite.de" },
+]
+keywords = ["GRZ", "testing"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "grz-pydantic-models >=2.5,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/BfArM-MVH/grz-tools"
+Repository = "https://github.com/BfArM-MVH/grz-tools/tree/main/packages/grz-pydantic-models-testing"
+Issues = "https://github.com/BfArM-MVH/grz-tools/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grz_pydantic_models_testing"]
+include = [
+    "src/grz_pydantic_models_testing/**/*.json",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/grz_pydantic_models_testing/**/*.json",
+    "src/grz_pydantic_models_testing/**/*.py",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]

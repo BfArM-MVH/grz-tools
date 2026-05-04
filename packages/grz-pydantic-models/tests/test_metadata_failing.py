@@ -4,20 +4,17 @@ import importlib.resources
 
 import pytest
 from grz_pydantic_models.submission.metadata.v1 import GrzSubmissionMetadata
+from grz_pydantic_models_testing import failing_metadata
 from pydantic import ValidationError
 
-from . import resources
+resource_files = importlib.resources.files(failing_metadata)
 
-resource_files = importlib.resources.files(resources)
-
-metadata_missing_read_order = resource_files.joinpath("failing_metadata/missing-read-order.json")
-metadata_missing_vcf_file = resource_files.joinpath("failing_metadata/missing-vcf-file.json")
-metadata_missing_fastq_r2 = resource_files.joinpath("failing_metadata/missing-fastq-r2.json")
-metadata_no_target_regions = resource_files.joinpath("failing_metadata/missing-target-regions.json")
-metadata_incompatible_reference_genomes = resource_files.joinpath(
-    "failing_metadata/incompatible-reference-genomes.json"
-)
-metadata_duplicate_run_id = resource_files.joinpath("failing_metadata/duplicate-run-id.json")
+metadata_missing_read_order = resource_files.joinpath("missing-read-order.json")
+metadata_missing_vcf_file = resource_files.joinpath("missing-vcf-file.json")
+metadata_missing_fastq_r2 = resource_files.joinpath("missing-fastq-r2.json")
+metadata_no_target_regions = resource_files.joinpath("missing-target-regions.json")
+metadata_incompatible_reference_genomes = resource_files.joinpath("incompatible-reference-genomes.json")
+metadata_duplicate_run_id = resource_files.joinpath("duplicate-run-id.json")
 
 
 def test_submission_metadata_fails():

@@ -8,6 +8,7 @@ dependencies = [
     "grzctl",
     "grz-db",
     "grz-pydantic-models",
+    "grz-pydantic-models-testing",
 ]
 
 [tool.uv.workspace]
@@ -17,6 +18,8 @@ members = [
     "packages/grzctl",
     "packages/grz-db",
     "packages/grz-pydantic-models",
+    "packages/grz-pydantic-models-testing",
+    "packages/grz-check",
 ]
 
 [tool.uv.sources]
@@ -25,6 +28,8 @@ grz-cli = { workspace = true }
 grzctl = { workspace = true }
 grz-db = { workspace = true }
 grz-pydantic-models = { workspace = true }
+grz-pydantic-models-testing = { workspace = true }
+grz-check = { workspace = true }
 
 [project.optional-dependencies]
 test = [
@@ -42,6 +47,8 @@ test = [
     "grz-cli",
     "grz-db",
     "grzctl",
+    "grz-pydantic-models-testing",
+    "grz-check",
 ]
 
 [dependency-groups]
@@ -63,6 +70,8 @@ test = [
     "grz-cli",
     "grz-db",
     "grzctl",
+    "grz-pydantic-models-testing",
+    "grz-check",
 ]
 lint = [
     "ruff",
@@ -188,6 +197,8 @@ runner = "uv-venv-lock-runner"
 description = "run unit tests"
 dependency_groups = ["test"]
 commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
+# isolate Cargo build directories per tox environment, otherwise Cargo caches the compiled Rust extension (and then we end up with mismatches between ABI versions).
+setenv = { UV_REINSTALL_PACKAGE = "grz-check", CARGO_TARGET_DIR = "{work_dir}/cargo_target_{env_name}" }
 
 [tool.tox.env."format-check"]
 runner = "uv-venv-lock-runner"

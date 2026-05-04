@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "grz-check"
+dynamic = ["version"]
+description = "Fast validation of sequencing files (FASTQ, BAM) powered by Rust"
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "maturin"]
+
+[dependency-groups]
+test = ["pytest >=8,<9"]
+dev = ["tox >=4.23", "tox-uv"]
+
+[tool.maturin]
+features = ["python"]
+python-source = "python"
+module-name = "grz_check"
+
+[tool.tox]
+requires = ["tox>=4.23", "tox-uv"]
+env_list = ["3.12", "3.13"]
+
+[tool.tox.env_run_base]
+runner = "uv-venv-lock-runner"
+dependency_groups = ["test"]
+commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]

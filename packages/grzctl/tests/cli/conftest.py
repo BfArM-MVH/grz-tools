@@ -1,3 +1,4 @@
+import importlib.resources
 import shutil
 from pathlib import Path
 
@@ -8,7 +9,13 @@ import psycopg
 import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.models.config import DbConfig
+
+
+@pytest.fixture
+def test_metadata_path():
+    return importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 
 
 @pytest.fixture(

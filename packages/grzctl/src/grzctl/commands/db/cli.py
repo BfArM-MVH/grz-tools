@@ -1,15 +1,13 @@
 """Command for managing a submission database"""
 
 import csv
-import dataclasses
 import json
 import logging
 import sys
 import traceback
 from collections import namedtuple
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
-from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +25,7 @@ from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     DatabaseConfigurationError,
-    DuplicateSubmissionError,
-    DuplicateTanGError,
+    SubmissionError,
     SubmissionNotFoundError,
 )
 from grz_db.models.author import Author
@@ -36,20 +33,21 @@ from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
-    Donor,
+    FieldDiff,
     Submission,
     SubmissionDb,
+    SubmissionDiffCollection,
     SubmissionStateEnum,
     SubmissionStateFilterModeEnum,
     SubmissionStateLog,
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
     LibraryType,
-    Relation,
     SequenceSubtype,
     SequenceType,
 )
@@ -87,7 +85,7 @@ def db(
     config = DbConfig.model_validate(configuration)
     db_config = config.db
     if not db_config:
-        raise ValueError("DB config not found")
+        raise DatabaseConfigurationError("DB config not found")
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:
@@ -96,7 +94,7 @@ def db(
     elif key := db_config.author.private_key:
         private_key_bytes = key.encode("utf-8")
     else:
-        raise ValueError("Either private_key or private_key_path must be provided.")
+        raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
     KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])
@@ -328,7 +326,19 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
 
 @db.command("tui")
 @click.pass_context
-def tui(ctx: click.Context):
+@click.option(
+    "--quarter",
+    type=click.IntRange(min=1, max=4),
+    default=None,
+    help="Quarter (1-4) for the 'Detailed QC by LE' overview panel (default: current quarter).",
+)
+@click.option(
+    "--year",
+    type=click.IntRange(min=2024, max=9999),
+    default=None,
+    help="Year for the selected --quarter in the 'Detailed QC by LE' overview panel (default: current year).",
+)
+def tui(ctx: click.Context, quarter: int | None, year: int | None):
     """Starts the interactive terminal user interface to the database."""
     db_url = ctx.obj["db_url"]
     public_keys = ctx.obj["public_keys"]
@@ -346,7 +356,7 @@ def tui(ctx: click.Context):
     textual_handler.setFormatter(logging.Formatter(fmt=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT))
     root_logger.addHandler(textual_handler)
 
-    app = DatabaseBrowser(database=database, public_keys=public_keys)
+    app = DatabaseBrowser(database=database, public_keys=public_keys, quarter=quarter, year=year)
     app.run()
 
 
@@ -372,9 +382,12 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
     database_url = ctx.obj["db_url"]
     database = get_submission_db_instance(database_url)
 
-    click.echo(
-        str(database.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)).lower()
-    )
+    try:
+        result = database.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)
+        click.echo(str(result).lower())
+    except SubmissionError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
 
 
 def _build_submission_dict_from(
@@ -382,6 +395,16 @@ def _build_submission_dict_from(
     submission: Submission,
     signature_status: SignatureStatus,
 ) -> dict[str, Any]:
+    """Serialize a submission and its latest log entry to a JSON-compatible dict.
+
+    :param log_obj: The most recent :class:`~grz_db.models.submission.SubmissionStateLog` or
+        :class:`~grz_db.models.submission.ChangeRequestLog`, or ``None`` if no log exists yet.
+    :param submission: The submission ORM/Pydantic model instance.
+    :param signature_status: Verification result for the log entry's author signature.
+    :returns: A dictionary suitable for JSON serialisation that contains the submission identifiers
+        and either a ``latest_state`` or ``latest_change_request`` key depending on *log_obj*.
+    :raises TypeError: If *log_obj* is neither ``None`` nor one of the two expected log types.
+    """
     submission_dict: dict[str, Any] = {
         "id": submission.id,
         "tan_g": submission.tan_g,
@@ -424,7 +447,7 @@ def add(ctx: click.Context, submission_id: str):
     try:
         db_submission = db_service.add_submission(submission_id)
         console_err.print(f"[green]Submission '{db_submission.id}' added successfully.[/green]")
-    except (DuplicateSubmissionError, DuplicateTanGError) as e:
+    except SubmissionError as e:
         console_err.print(f"[red]Error: {e}[/red]")
         raise click.Abort() from e
     except Exception as e:
@@ -524,144 +547,64 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-def _diff_metadata(
-    submission: Submission, metadata: GrzSubmissionMetadata, ignore_fields: set[str]
-) -> list[tuple[str, Any, Any]]:
-    """Given a database submission and a metadata.json file, report changed fields and their before/after values if they are not in ignore_fields."""
-    changes = []
+def _prepare_submission_console_table(submission_diff: "SubmissionDiffCollection") -> rich.console.RenderableType:
+    """Build a Rich renderable that shows pending submission-level metadata changes.
 
-    simple_fields = {
-        "tan_g",
-        "submission_date",
-        "submission_type",
-        "submitter_id",
-        "coverage_type",
-        "disease_type",
-        "genomic_study_type",
-        "genomic_study_subtype",
-    }
-
-    for field in simple_fields - ignore_fields:
-        if field == "tan_g" and metadata.submission.tan_g == REDACTED_TAN:
-            raise ValueError(
-                "Refusing to populate a seemingly-redacted TAN (all zeros). "
-                "Add 'tan_g' to --ignore-field or use 'grzctl db submission modify' directly."
+    :param submission_diff: :class:`SubmissionDiff` instance produced by :func:`diff_metadata`.
+    :returns: A :class:`rich.table.Table` when there are pending changes, or a plain text message otherwise.
+    """
+    pending = [d for d in submission_diff.pending if d.key != "submission_metadata"]
+    if pending:
+        diff_table_tbl = rich.table.Table(title="Submission Metadata")
+        diff_table_tbl.add_column("Key")
+        diff_table_tbl.add_column("Before")
+        diff_table_tbl.add_column("After")
+        for field_diff in sorted(pending, key=lambda d: d.key):
+            diff_table_tbl.add_row(
+                field_diff.key,
+                str(field_diff.diff.before) if field_diff.diff.before is not None else _TEXT_MISSING,
+                str(field_diff.diff.after),
             )
-        submission_attr = getattr(submission, field)
-        metadata_attr = getattr(metadata.submission, field)
-        if submission_attr != metadata_attr:
-            changes.append((field, submission_attr, metadata_attr))
+        diff_table: rich.console.RenderableType = diff_table_tbl
+    else:
+        diff_table = rich.padding.Padding(rich.text.Text("No changes to submission-level metadata."), pad=(0, 0, 0, 0))
+    return diff_table
 
-    # pseudonym (TODO: change after phase 0)
-    if "pseudonym" not in ignore_fields and (submission.pseudonym != metadata.submission.local_case_id):
-        if not metadata.submission.local_case_id:
-            raise ValueError(
-                "Refusing to populate a seemingly-redacted local case ID (empty). "
-                "Add 'pseudonym' to --ignore-field or use 'grzctl db submission modify' directly."
+
+def _prepare_donor_console_table(
+    donor_data: list[FieldDiff], donor_id: str, status: str
+) -> rich.console.RenderableType:
+    """Build a Rich renderable that shows pending changes for a single donor.
+
+    :param donor_data: List of :class:`FieldDiff` instances for the donor's fields.
+    :param donor_id: Pseudonym of the donor (used in the table title).
+    :param status: Human-readable database status string (e.g. ``"new"`` or ``"update"``).
+    :returns: A :class:`rich.table.Table` listing only the fields whose value changed.
+    """
+    table_title = f"[green]Donor '{donor_id}' database status: {status}[/green]"
+    diff_table = rich.table.Table(title=table_title, min_width=len(table_title), title_justify="left")
+    diff_table.add_column("Key")
+    diff_table.add_column("Before")
+    diff_table.add_column("After")
+    for field_diff in sorted(donor_data, key=lambda d: d.key):
+        if field_diff.diff.before != field_diff.diff.after:
+            diff_table.add_row(
+                field_diff.key,
+                _TEXT_MISSING if field_diff.diff.before is None else rich.pretty.Pretty(field_diff.diff.before),
+                rich.pretty.Pretty(field_diff.diff.after),
             )
-        changes.append(("pseudonym", submission.pseudonym, metadata.submission.local_case_id))
-
-    # data node id
-    if "data_node_id" not in ignore_fields and (submission.data_node_id != metadata.submission.genomic_data_center_id):
-        changes.append(("data_node_id", submission.data_node_id, metadata.submission.genomic_data_center_id))
-
-    # consent state
-    consented = metadata.consents_to_research(date=date.today())
-    if submission.consented != consented:
-        changes.append(("consented", submission.consented, consented))
-
-    return changes
-
-
-@dataclasses.dataclass
-class _DonorDiff:
-    added: tuple[Donor, ...]
-    updated: tuple[Donor, ...]
-    deleted: tuple[Donor, ...]
-    diff_tables: tuple[rich.console.RenderableType, ...]
-
-
-def _diff_donors(
-    donors_in_submission: tuple[Donor, ...], submission_id: str, metadata: GrzSubmissionMetadata
-) -> _DonorDiff:
-    pseudonym2before = {donor.pseudonym: donor for donor in donors_in_submission}
-
-    added_donors = []
-    updated_donors = []
-    type Pseudonym = str
-    pending_pseudonyms: set[Pseudonym] = set()
-    donor_diff_tables: list[rich.console.RenderableType] = []
-    for donor in metadata.donors:
-        # we use submission ID passed to this function instead of metadata
-        # because the tanG might be redacted and therefore the
-        # metadata-calculated submission ID would change.
-        # Also, we use model_validate here instead of __init__ because of:
-        # https://github.com/fastapi/sqlmodel/issues/453
-        donor_after = Donor.model_validate(
-            {
-                "submission_id": submission_id,
-                "pseudonym": "index" if donor.relation == Relation.index_ else donor.donor_pseudonym,
-                "relation": Relation(donor.relation),
-                "library_types": {datum.library_type for datum in donor.lab_data},
-                "sequence_types": {datum.sequence_type for datum in donor.lab_data},
-                "sequence_subtypes": {datum.sequence_subtype for datum in donor.lab_data},
-                "mv_consented": donor.consents_to_mv(),
-                "research_consented": donor.consents_to_research(date=date.today()),
-                "research_consent_missing_justifications": {
-                    consent.no_scope_justification
-                    for consent in donor.research_consents
-                    if consent.no_scope_justification is not None
-                }
-                if donor.research_consents
-                else None,
-            }
-        )
-        donor_before = pseudonym2before.get(donor_after.pseudonym)
-        pending_pseudonyms.add(donor_after.pseudonym)
-        change = "added"
-        if donor_before == donor_after:
-            continue
-        if donor_before is None:
-            added_donors.append(donor_after)
-        else:
-            updated_donors.append(donor_after)
-            change = "updated"
-
-        table_title = f"[green]Donor '{donor_after.pseudonym}' {change}[/green]"
-        diff_table = rich.table.Table(title=table_title, min_width=len(table_title), title_justify="left")
-        diff_table.add_column("Key")
-        diff_table.add_column("Before")
-        diff_table.add_column("After")
-        for field in sorted(Donor.model_fields.keys() - {"submission_id", "pseudonym"}):
-            before = getattr(donor_before, field, None)
-            after = getattr(donor_after, field)
-            if before != after:
-                diff_table.add_row(
-                    field, _TEXT_MISSING if before is None else rich.pretty.Pretty(before), rich.pretty.Pretty(after)
-                )
-        if diff_table.row_count:
-            donor_diff_tables.append(diff_table)
-
-    deleted_donors = tuple(
-        filter(
-            lambda donor: donor.pseudonym not in pending_pseudonyms,
-            pseudonym2before.values(),
-        )
-    )
-    for deleted_donor in deleted_donors:
-        donor_diff_tables.append(rich.text.Text(f"Donor {deleted_donor.pseudonym} deleted", style="red"))
-
-    return _DonorDiff(
-        added=tuple(added_donors),
-        updated=tuple(updated_donors),
-        deleted=deleted_donors,
-        diff_tables=tuple(donor_diff_tables),
-    )
+    return diff_table
 
 
 @submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
+@click.option(
+    "--submission_date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=None,
+    help="Submission date of the submission; overwrites submissionDate in metadata.json",
+)
 @click.option(
     "--confirm/--no-confirm",
     default=True,
@@ -673,9 +616,25 @@ def _diff_donors(
     multiple=True,
 )
 @click.pass_context
-def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm: bool, ignore_field: list[str]):  # noqa: C901
-    """Populate the submission database from a metadata JSON file."""
+def populate(  # noqa: C901, PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    metadata_path: str,
+    submission_date: datetime | None,
+    confirm: bool,
+    ignore_field: tuple[str, ...],
+):
+    """Populate a submission in the database based on the given metadata.json file."""
     log.debug("Ignored fields for populate: %s", ignore_field)
+
+    if submission_date is not None:
+        log.info("Submission date from provided option is used")
+        if submission_date.date() >= date.today() + timedelta(days=1):
+            raise RuntimeError(
+                f"Submission date ({submission_date.date()}) is set to a future date (today: {date.today()}) which is not allowed"
+            )
+    else:
+        log.warning("Submission date from metadata.json is used")
 
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -693,51 +652,57 @@ def populate(ctx: click.Context, submission_id: str, metadata_path: str, confirm
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
-    with open(metadata_path, encoding="utf-8") as metadata_file:
-        metadata = GrzSubmissionMetadata.model_validate_json(metadata_file.read())
+    with open(metadata_path) as fd:
+        metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
 
-    changes = _diff_metadata(submission, metadata, set(ignore_field))
+    if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_field:
+        raise ValueError(
+            f"Submission {submission_id} has redacted tan_g in metadata.json: {metadata_path}. "
+            "Refusing to populate a seemingly-redacted TAN. "
+            "Add 'tan_g' to ignore fields and/or use 'grzctl db submission modify' directly."
+        )
+    if (
+        not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
+    ) and "pseudonym" not in ignore_field:
+        raise ValueError(
+            f"Submission {submission_id} has missing or redacted local_case_id in metadata.json: {metadata_path}. "
+            "Add 'pseudonym' to ignore fields and/or use 'grzctl db submission modify' directly."
+        )
 
-    # consent records
-    donor_diff = _diff_donors(
-        donors_in_submission=db_service.get_donors(submission_id=submission_id),
-        submission_id=submission_id,
-        metadata=metadata,
+    submission_diff, donors_diff = db_service.diff(
+        submission_id,
+        metadata,
+        submission_date,
+        ignore_fields=set(ignore_field),
     )
 
-    if not any(dataclasses.astuple(donor_diff)):
+    # build donor diff and attach Rich tables for console preview in one pass
+    diff_tables: list[rich.console.RenderableType] = []
+    for donor_diff in donors_diff.added + donors_diff.updated:
+        diff_tables.append(
+            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
+        )
+    for donor_diff in donors_diff.deleted:
+        diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))
+
+    if not submission_diff.has_pending and not donors_diff.has_pending:
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
         ctx.exit()
+        return  # ctx.exit() raises SystemExit; this line satisfies static analysers
 
-    diff_table: rich.console.RenderableType
-    if changes:
-        diff_table = rich.table.Table(title="Submission Metadata")
-        diff_table.add_column("Key")
-        diff_table.add_column("Before")
-        diff_table.add_column("After")
-        for key, before, after in sorted(changes, key=itemgetter(0)):
-            diff_table.add_row(key, str(before) if before is not None else _TEXT_MISSING, str(after))
-    else:
-        diff_table = rich.padding.Padding(rich.text.Text("No changes to submission-level metadata."), pad=(0, 0, 1, 0))
-
-    panel = rich.panel.Panel.fit(
-        rich.console.Group(diff_table, *donor_diff.diff_tables, fit=True), title="Pending Changes"
+    console.print(
+        rich.panel.Panel.fit(
+            rich.console.Group(_prepare_submission_console_table(submission_diff), *diff_tables, fit=True),
+            title="Pending Changes",
+        )
     )
-    console.print(panel)
 
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?",
         default=False,
         show_default=True,
     ):
-        for key, _before, after in changes:
-            _ = db_service.modify_submission(submission_id, key=key, value=after)
-        for added_donor in donor_diff.added:
-            _ = db_service.add_donor(added_donor)
-        for updated_donor in donor_diff.updated:
-            _ = db_service.update_donor(updated_donor)
-        for deleted_donor in donor_diff.deleted:
-            db_service.delete_donor(deleted_donor)
+        db_service.commit_changes(submission_id, submission_diff, donors_diff)
         console_err.print("[green]Database populated successfully.[/green]")
 
 
@@ -749,6 +714,8 @@ class QCStatus(StrEnum):
 
 
 class QCReportRow(StrictBaseModel):
+    """Pydantic model representing a single row from a detailed QC pipeline report CSV."""
+
     sample_id: str
     donor_pseudonym: str
     lab_data_name: str
@@ -938,6 +905,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         ("tanG", "tan_g"),
         ("Pseudonym", "pseudonym"),
         ("Submission Date", "submission_date"),
+        ("Submission Size", "submission_size"),
         ("Submission Type", "submission_type"),
         ("Submitter ID", "submitter_id"),
         ("Data Node ID", "data_node_id"),
@@ -946,6 +914,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         ("Genomic Study Subtype", "genomic_study_subtype"),
         ("Basic QC Passed", "basic_qc_passed"),
         ("Consented", "consented"),
+        ("Selected For QC", "selected_for_qc"),
         ("Detailed QC Passed", "detailed_qc_passed"),
     ):
         attr = getattr(submission, attr_name)
