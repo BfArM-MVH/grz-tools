@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Annotated, Self
 
 import yaml
+from grz_common.utils.config import read_and_merge_config_files
 from pydantic import AfterValidator, BaseModel, ConfigDict
 from pydantic.types import PathType
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -45,9 +46,9 @@ class IgnoringBaseSettings(BaseSettings):
         yaml.dump(self.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True), fd)
 
     @classmethod
-    def from_path(cls, path: str | PathLike) -> Self:
+    def from_path(cls, path: str | PathLike | list[str | PathLike]) -> Self:
         """Reads the configuration file and validates it against the schema."""
-        with open(path, encoding="utf-8") as f:
-            config = cls(**yaml.safe_load(f))
-
-        return config
+        if isinstance(path, str):
+            path = [path]
+        config = read_and_merge_config_files(path)
+        return cls.model_validate(config)
