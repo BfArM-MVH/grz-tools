@@ -52,17 +52,21 @@ def test_validation_skips_files_already_validated_for_same_submission(
         validation_passed=True,
     )
 
-    run_spy = mocker.spy(submission, "_run_grz_check_command")
-    errors = list(
-        submission.validate_files_with_grz_check(
+    mock_validate = mocker.patch("grz_common.workers.submission.grz_check")
+
+    list(
+        submission.validate_files(
             checksum_progress_file=temp_checksum_log,
             seq_data_progress_file=temp_seq_data_log,
             threads=1,
+            no_mmap=True,
         )
     )
 
-    assert run_spy.call_count == 0, "Expected grz-check to be skipped for already-validated files"
-    assert errors == []
+    assert not mock_validate.validate_fastq_paired.called
+    assert not mock_validate.validate_fastq.called
+    assert not mock_validate.validate_bam.called
+    assert not mock_validate.validate_raw.called
 
 
 def test_validation_reruns_for_different_submission_id(
@@ -80,18 +84,32 @@ def test_validation_reruns_for_different_submission_id(
         validation_passed=True,
     )
 
-    mocker.patch.object(submission, "_run_grz_check_command", return_value=iter([]))
-    run_spy = mocker.spy(submission, "_run_grz_check_command")
+    mock_validate = mocker.patch("grz_common.workers.submission.grz_check")
+    mock_report = mocker.MagicMock()
+    mock_report.warnings = []
+    mock_report.errors = []
+    mock_report.is_valid = True
+    mock_report.sha256 = None
+    mock_validate.validate_fastq_paired.return_value = [mock_report, mock_report]
+    mock_validate.validate_fastq.return_value = mock_report
+    mock_validate.validate_bam.return_value = mock_report
+    mock_validate.validate_raw.return_value = mock_report
 
     list(
-        submission.validate_files_with_grz_check(
+        submission.validate_files(
             checksum_progress_file=temp_checksum_log,
             seq_data_progress_file=temp_seq_data_log,
             threads=1,
+            no_mmap=True,
         )
     )
 
-    assert run_spy.call_count == 1, "Expected grz-check to re-run for a different submission_id"
+    assert (
+        mock_validate.validate_fastq_paired.called
+        or mock_validate.validate_fastq.called
+        or mock_validate.validate_bam.called
+        or mock_validate.validate_raw.called
+    ), "Expected grz-check to re-run for a different submission_id"
 
 
 def test_validation_reruns_after_failed_validation(
@@ -109,15 +127,29 @@ def test_validation_reruns_after_failed_validation(
         validation_passed=False,
     )
 
-    mocker.patch.object(submission, "_run_grz_check_command", return_value=iter([]))
-    run_spy = mocker.spy(submission, "_run_grz_check_command")
+    mock_validate = mocker.patch("grz_common.workers.submission.grz_check")
+    mock_report = mocker.MagicMock()
+    mock_report.warnings = []
+    mock_report.errors = []
+    mock_report.is_valid = True
+    mock_report.sha256 = None
+    mock_validate.validate_fastq_paired.return_value = [mock_report, mock_report]
+    mock_validate.validate_fastq.return_value = mock_report
+    mock_validate.validate_bam.return_value = mock_report
+    mock_validate.validate_raw.return_value = mock_report
 
     list(
-        submission.validate_files_with_grz_check(
+        submission.validate_files(
             checksum_progress_file=temp_checksum_log,
             seq_data_progress_file=temp_seq_data_log,
             threads=1,
+            no_mmap=True,
         )
     )
 
-    assert run_spy.call_count == 1, "Expected grz-check to re-run for previously failed files"
+    assert (
+        mock_validate.validate_fastq_paired.called
+        or mock_validate.validate_fastq.called
+        or mock_validate.validate_bam.called
+        or mock_validate.validate_raw.called
+    ), "Expected grz-check to re-run for previously failed files"
