@@ -9,8 +9,9 @@ import grz_cli.cli
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
+from grz_common.exceptions import IncompleteSubmissionError
 from grz_common.progress import EncryptionState, FileProgressLogger
-from grz_common.workers.submission import Submission, SubmissionValidationError
+from grz_common.workers.submission import Submission
 
 
 def are_dir_trees_equal(dir1, dir2):
@@ -187,7 +188,7 @@ def test_upload_aborts_on_incomplete_encryption(working_dir_path, temp_s3_config
     result = runner.invoke(cli, upload_args, catch_exceptions=True)
 
     assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], SubmissionValidationError)
+    assert isinstance(result.exc_info[1], IncompleteSubmissionError)
     error_message = str(result.exc_info[1])
     assert "Will not upload" in error_message
     relative_failed_path = failed_file_path.relative_to(working_dir_path / "files")
@@ -221,7 +222,7 @@ def test_upload_aborts_if_encryption_log_missing(
     result = runner.invoke(cli, upload_args, catch_exceptions=True)
 
     assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], SubmissionValidationError)
+    assert isinstance(result.exc_info[1], IncompleteSubmissionError)
     error_message = str(result.exc_info[1])
     assert "Will not upload" in error_message
 

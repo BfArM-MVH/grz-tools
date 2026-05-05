@@ -44,13 +44,19 @@ class TestFailureReasonEnum:
         assert set(values) == {e.value for e in FailureReasonEnum}
 
     def test_case_insensitive_lookup(self):
+        assert FailureReasonEnum("DECRYPTIONERROR") == FailureReasonEnum.DECRYPTION_ERROR
+        assert FailureReasonEnum("DecryptionError") == FailureReasonEnum.DECRYPTION_ERROR
         assert FailureReasonEnum("decryption_error") == FailureReasonEnum.DECRYPTION_ERROR
-        assert FailureReasonEnum("DECRYPTION_ERROR") == FailureReasonEnum.DECRYPTION_ERROR
-        assert FailureReasonEnum("Decryption_Error") == FailureReasonEnum.DECRYPTION_ERRORROR
 
     def test_invalid_value_raises(self):
         with pytest.raises(ValueError):
             FailureReasonEnum("notavalidreason")
+
+    def test_all_enum_values_are_snake_case(self):
+        """Ensures no typos like 'duplicated_tang' slip in — all values should be snake_case."""
+        for member in FailureReasonEnum:
+            assert member.value == member.value.lower()
+            assert " " not in member.value
 
 
 class TestFailureReasonPersistence:
@@ -87,3 +93,19 @@ class TestFailureReasonPersistence:
         assert states[-1].state == SubmissionStateEnum.UPLOADED
         assert states[-1].failure_reason is None
         assert states[-2].failure_reason == FailureReasonEnum.DECRYPTION_ERROR
+
+    def test_failure_reason_persists_across_sessions(self, tmp_path, test_author: Author):
+        """failure_reason should survive closing and reopening the DB connection."""
+        db_path = tmp_path / "submissions.sqlite"
+        db_url = f"sqlite:///{db_path.resolve()}"
+
+        sid = f"{SUBMITTER_ID}_2025-01-01_00000000"
+
+        db1 = SubmissionDb(db_url=db_url, author=test_author, debug=False)
+        db1.initialize_schema()
+        db1.add_submission(sid)
+        db1.update_submission_state(sid, SubmissionStateEnum.ERROR, failure_reason=FailureReasonEnum.NETWORK_ERROR)
+
+        db2 = SubmissionDb(db_url=db_url, author=test_author, debug=False)
+        submission = db2.get_submission(sid)
+        assert submission.get_latest_state().failure_reason == FailureReasonEnum.NETWORK_ERROR

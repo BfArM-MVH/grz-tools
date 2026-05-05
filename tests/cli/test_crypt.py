@@ -6,9 +6,10 @@ import grz_cli.cli
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
+from grz_common.exceptions import EncryptionError, IncompleteSubmissionError
 from grz_common.progress import FileProgressLogger, ValidationState
 from grz_common.utils.checksums import calculate_sha256
-from grz_common.workers.submission import Submission, SubmissionValidationError
+from grz_common.workers.submission import Submission
 
 
 def test_encrypt_submission(
@@ -68,7 +69,7 @@ def test_encrypt_submission_protect_overwrite(
 
     # removing the cache and running again should error without force
     (working_dir_path / "logs" / "progress_encrypt.cjson").unlink()
-    with pytest.raises(RuntimeError, match=re.escape("already exists. Delete it or use --force to overwrite it.")):
+    with pytest.raises(EncryptionError, match=re.escape("already exists. Delete it or use --force to overwrite it.")):
         runner.invoke(cli, testargs, catch_exceptions=False)
 
 
@@ -266,7 +267,7 @@ def test_encrypt_aborts_on_incomplete_validation(working_dir_path, temp_keys_con
     result = runner.invoke(cli, encrypt_args, catch_exceptions=True)
 
     assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], SubmissionValidationError)
+    assert isinstance(result.exc_info[1], IncompleteSubmissionError)
     error_message = str(result.exc_info[1])
     assert "Will not encrypt" in error_message
     assert str(failed_file_path) in error_message
@@ -293,7 +294,7 @@ def test_encrypt_aborts_if_validation_log_missing(working_dir_path, temp_keys_co
     result = runner.invoke(cli, encrypt_args, catch_exceptions=True)
 
     assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], SubmissionValidationError)
+    assert isinstance(result.exc_info[1], IncompleteSubmissionError)
     error_message = str(result.exc_info[1])
     assert "Will not encrypt" in error_message
 
