@@ -11,6 +11,7 @@ class State(TypedDict, total=False):
     """
 
     errors: list[str]
+    submission_id: str
 
 
 class ValidationState(State):
@@ -27,7 +28,6 @@ class UploadState(State):
     """
 
     upload_successful: bool
-    submission_id: str
 
 
 class EncryptionState(State):
