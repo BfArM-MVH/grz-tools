@@ -1,3 +1,4 @@
+import base64
 import contextlib
 import hashlib
 import logging
@@ -158,15 +159,28 @@ class S3MultipartUploader(Observer):
         self._futures.append(future)
 
     def _upload_part(self, uid: str, part_num: int, data: bytes) -> dict[str, Any]:
-        local_md5 = hashlib.md5(data, usedforsecurity=False).digest()
+        hasher = hashlib.md5(data, usedforsecurity=False)
+        local_md5_bytes = hasher.digest()
+        local_md5_hex = hasher.hexdigest()
+        b64_md5 = base64.b64encode(local_md5_bytes).decode("utf-8")
+
         resp = self.s3.upload_part(
             Bucket=self.bucket,
             Key=self.key,
             UploadId=uid,
             PartNumber=part_num,
             Body=data,
+            ContentMD5=b64_md5,
         )
-        return {"PartNumber": part_num, "ETag": resp["ETag"], "local_md5": local_md5}
+
+        server_etag = resp["ETag"].strip('"')
+        if server_etag != local_md5_hex:
+            raise DataIntegrityError(
+                f"Local checksum for {part_num} does not match remote one! Expected: {local_md5_hex}, Got: {server_etag}",
+                stage=self.__class__.__name__,
+            )
+
+        return {"PartNumber": part_num, "ETag": resp["ETag"], "local_md5": local_md5_bytes}
 
     def _complete_upload(self):
         expected = self._calc_etag(self._parts)
@@ -186,7 +200,7 @@ class S3MultipartUploader(Observer):
         server_etag = complete.get("ETag", "").strip('"')
         if expected and server_etag != expected:
             raise DataIntegrityError(
-                f"ETag mismatch! Exp: {expected}, Got: {server_etag}", stage=self.__class__.__name__
+                f"Final ETag mismatch! Exp: {expected}, Got: {server_etag}", stage=self.__class__.__name__
             )
 
     def _calc_etag(self, parts: list[dict[str, Any]]) -> str:
