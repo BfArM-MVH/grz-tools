@@ -3,7 +3,14 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-from grz_db.errors import SubmissionNotFoundError
+from grz_common.exceptions import (
+    DecryptionError,
+    EncryptionError,
+    IncompleteSubmissionError,
+    NetworkError,
+    UploadError,
+)
+from grz_db.errors import DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
@@ -192,12 +199,19 @@ class DbContext:
         self, exc_type: type[BaseException], exc_val: BaseException | None
     ) -> FailureReasonEnum:
         """Maps an exception to the closest FailureReasonEnum value."""
-        if isinstance(exc_val, FileNotFoundError):
-            return FailureReasonEnum.FILE_NOT_FOUND
-        if isinstance(exc_val, ValidationError):
-            return FailureReasonEnum.VALIDATION_ERROR
-        if isinstance(exc_val, OSError):
-            return FailureReasonEnum.FILE_NOT_FOUND
+        exception_map: list[tuple[type[BaseException], FailureReasonEnum]] = [
+            (FileNotFoundError, FailureReasonEnum.FILE_NOT_FOUND),
+            (ValidationError, FailureReasonEnum.VALIDATION_ERROR),
+            (DecryptionError, FailureReasonEnum.DECRYPTION_ERROR),
+            (EncryptionError, FailureReasonEnum.ENCRYPTION_ERROR),
+            (NetworkError, FailureReasonEnum.NETWORK_ERROR),
+            (UploadError, FailureReasonEnum.UPLOAD_ERROR),
+            (DuplicateTanGError, FailureReasonEnum.DUPLICATE_TANG),
+            (IncompleteSubmissionError, FailureReasonEnum.INCOMPLETE_SUBMISSION),
+        ]
+        for exc_class, failure_reason in exception_map:
+            if isinstance(exc_val, exc_class):
+                return failure_reason
         return FailureReasonEnum.UNKNOWN
 
     def _check_prerequisites(self):
