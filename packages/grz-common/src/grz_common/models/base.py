@@ -48,7 +48,9 @@ class IgnoringBaseSettings(BaseSettings):
     @classmethod
     def from_path(cls, path: str | PathLike | list[str | PathLike]) -> Self:
         """Reads the configuration file and validates it against the schema."""
-        if isinstance(path, str):
+        if not isinstance(path, list):
             path = [path]
-        config = read_and_merge_config_files(path)
+
+        paths = [Path(p) for p in path]
+        config = read_and_merge_config_files(paths)
         return cls.model_validate(config)
