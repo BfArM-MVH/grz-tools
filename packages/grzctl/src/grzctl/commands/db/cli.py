@@ -941,7 +941,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         state_table.add_column("Timestamp (UTC)", style="yellow")
         state_table.add_column("State", style="green")
         state_table.add_column("Data", style="cyan", overflow="ellipsis")
-        state_table.add_column("grzctl Version", header_style="blue", style="blue")
+        state_table.add_column("grzctl Version", style="blue")
         state_table.add_column("Data Steward", style="magenta")
         state_table.add_column("Signature Status")
 

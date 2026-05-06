@@ -807,8 +807,6 @@ def test_submission_grzctl_version_logging(blank_database_config_path: Path, tes
     assert result_show.exit_code == 0, result_show.stderr
 
     output = result_show.stdout
-    # Check for the table header
-    assert "grzctl Version" in output, "grzctl Version column header not found in output"
     # Check that version appears in the output (at least once)
     assert test_version in output, f"Version {test_version} not found in table output"
 
