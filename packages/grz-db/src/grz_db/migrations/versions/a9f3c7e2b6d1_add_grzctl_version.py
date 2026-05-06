@@ -1,9 +1,10 @@
 """add grzctl_version to submission_states
 
 Revision ID: a9f3c7e2b6d1
-Revises: 8aa6fc8d118a
+Revises: 834bd50b8734
 Create Date: 2026-05-05 00:00:00.000000
 """
+
 from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
