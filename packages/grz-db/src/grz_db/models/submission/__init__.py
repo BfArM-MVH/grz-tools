@@ -257,9 +257,9 @@ class SubmissionStateLogBase(SQLModel):
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
-    # grzctl version that created this state log (optional)
     grzctl_version: str | None = Field(
         default=None,
+        description="grzctl version that created this state log (nullable for backward compatibility with old state logs)",
         sa_column=Column(sa.String(length=64), nullable=True),
     )
     timestamp: datetime.datetime = Field(
@@ -473,6 +473,7 @@ class DetailedQCResult(SQLModel, table=True):
     qc_workflow_version: str | None = Field(
         default=None,
         sa_column=Column(sa.String(length=64), nullable=True),
+        description="QC workflow version (nullable for backward compatibility with old results)",
     )
 
     model_config = ConfigDict(  # type: ignore
