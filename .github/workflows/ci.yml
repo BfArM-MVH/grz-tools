@@ -91,7 +91,7 @@ jobs:
           rust_json_objects=""
 
           for pkg_path in "${unique_test_dirs_array[@]}"; do
-            if [[ -f "$pkg_path/pyproject.toml" ]]; then
+            if [[ -f "$pkg_path/pyproject.toml" && -d "$pkg_path/tests" ]]; then
               # Note: We only need the path in the matrix object now
               python_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
             fi
