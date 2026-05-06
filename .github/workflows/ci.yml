@@ -335,4 +335,4 @@ jobs:
         run: cd ${{ matrix.package.path }} && uv lock --check
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
-        run: cd ${{ matrix.package.path }} && uv run tox -e py${{ matrix.python-version }}
+        run: uv run tox -e py${{ matrix.python-version }} -- ${{ matrix.package.path }}
