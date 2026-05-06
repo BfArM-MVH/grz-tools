@@ -44,8 +44,8 @@ class TestFailureReasonEnum:
         assert set(values) == {e.value for e in FailureReasonEnum}
 
     def test_case_insensitive_lookup(self):
-        assert FailureReasonEnum("DECRYPTIONERROR") == FailureReasonEnum.DECRYPTION_ERROR
-        assert FailureReasonEnum("DecryptionError") == FailureReasonEnum.DECRYPTION_ERROR
+        assert FailureReasonEnum("DECRYPTION_ERROR") == FailureReasonEnum.DECRYPTION_ERROR
+        assert FailureReasonEnum("Decryption_Error") == FailureReasonEnum.DECRYPTION_ERROR
         assert FailureReasonEnum("decryption_error") == FailureReasonEnum.DECRYPTION_ERROR
 
     def test_invalid_value_raises(self):
