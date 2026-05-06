@@ -91,7 +91,7 @@ jobs:
           rust_json_objects=""
 
           for pkg_path in "${unique_test_dirs_array[@]}"; do
-            if [[ -f "$pkg_path/pyproject.toml" ]]; then
+            if [[ -f "$pkg_path/pyproject.toml" && -d "$pkg_path/tests" ]]; then
               # Note: We only need the path in the matrix object now
               python_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
             fi
@@ -283,7 +283,7 @@ jobs:
         run: which grz-check && grz-check --version
 
       - name: Test ${{ matrix.python-version }}
-        run: uv run tox -e ${{ matrix.python-version }}
+        run: uv run tox -e ${{ matrix.python-version }} -- tests/
 
   test-changed-packages-python:
     name: Test Changed Python Packages
@@ -335,4 +335,4 @@ jobs:
         run: cd ${{ matrix.package.path }} && uv lock --check
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
-        run: cd ${{ matrix.package.path }} && uv run tox -e py${{ matrix.python-version }}
+        run: uv run tox -e py${{ matrix.python-version }} -- ${{ matrix.package.path }}
