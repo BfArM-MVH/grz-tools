@@ -283,7 +283,7 @@ jobs:
         run: which grz-check && grz-check --version
 
       - name: Test ${{ matrix.python-version }}
-        run: uv run tox -e ${{ matrix.python-version }}
+        run: uv run tox -e ${{ matrix.python-version }} -- tests/
 
   test-changed-packages-python:
     name: Test Changed Python Packages
