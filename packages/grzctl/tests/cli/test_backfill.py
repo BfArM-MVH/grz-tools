@@ -97,9 +97,8 @@ def test_backfill_submission_happy_path(
     assert current.submission_size is None
     assert current.submission_metadata is None
     _put_metadata(s3_client_mock, submission_id, metadata)
-    result = _BackfillResult()
 
-    _backfill_submission(
+    result = _backfill_submission(
         current_submission=current,
         s3_client=s3_client_mock,
         bucket=BUCKET,
@@ -107,12 +106,9 @@ def test_backfill_submission_happy_path(
         dry_run=False,
         force=False,
         ignore_fields=IGNORE_FIELDS,
-        result=result,
     )
 
-    assert result.updated == 1
-    assert result.skipped == 0
-    assert result.errors == []
+    assert result == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == metadata.get_submission_size()
     assert persisted.submission_metadata == metadata.to_redacted_dict()
@@ -123,9 +119,8 @@ def test_backfill_submission_skips_when_metadata_missing_in_s3(
 ) -> None:
     """When metadata.json does not exist in S3, the submission is recorded as skipped and the row stays NULL."""
     current = db.add_submission(submission_id)
-    result = _BackfillResult()
 
-    _backfill_submission(
+    result = _backfill_submission(
         current_submission=current,
         s3_client=s3_client_mock,
         bucket=BUCKET,
@@ -133,12 +128,9 @@ def test_backfill_submission_skips_when_metadata_missing_in_s3(
         dry_run=False,
         force=False,
         ignore_fields=IGNORE_FIELDS,
-        result=result,
     )
 
-    assert result.updated == 0
-    assert result.skipped == 1
-    assert result.errors == []
+    assert result == _BackfillResult.SKIPPED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size is None
     assert persisted.submission_metadata is None
@@ -154,9 +146,8 @@ def test_backfill_submission_records_error_on_invalid_json(
         Key=f"{submission_id}/metadata/metadata.json",
         Body=b"{not json",
     )
-    result = _BackfillResult()
 
-    _backfill_submission(
+    result = _backfill_submission(
         current_submission=current,
         s3_client=s3_client_mock,
         bucket=BUCKET,
@@ -164,14 +155,9 @@ def test_backfill_submission_records_error_on_invalid_json(
         dry_run=False,
         force=False,
         ignore_fields=IGNORE_FIELDS,
-        result=result,
     )
 
-    assert result.updated == 0
-    assert result.skipped == 0
-    assert len(result.errors) == 1
-    failed_id, _exc = result.errors[0]
-    assert failed_id == submission_id
+    assert result == _BackfillResult.ERROR
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size is None
     assert persisted.submission_metadata is None
@@ -183,9 +169,8 @@ def test_backfill_submission_skips_when_no_pending_diff(
     """With force=True against an already-in-sync row, the diff path runs and reports skipped (no updates)."""
     current = _populate_full_row(db, submission_id, metadata)
     _put_metadata(s3_client_mock, submission_id, metadata)
-    result = _BackfillResult()
 
-    _backfill_submission(
+    result = _backfill_submission(
         current_submission=current,
         s3_client=s3_client_mock,
         bucket=BUCKET,
@@ -193,12 +178,9 @@ def test_backfill_submission_skips_when_no_pending_diff(
         dry_run=False,
         force=True,
         ignore_fields=IGNORE_FIELDS,
-        result=result,
     )
 
-    assert result.updated == 0
-    assert result.skipped == 1
-    assert result.errors == []
+    assert result == _BackfillResult.SKIPPED
 
 
 def test_backfill_submission_skips_destructive_changes_without_force(
@@ -210,9 +192,8 @@ def test_backfill_submission_skips_destructive_changes_without_force(
     db.update_submission(current)
     current = db.get_submission(submission_id)
     _put_metadata(s3_client_mock, submission_id, metadata)
-    result = _BackfillResult()
 
-    _backfill_submission(
+    result = _backfill_submission(
         current_submission=current,
         s3_client=s3_client_mock,
         bucket=BUCKET,
@@ -220,12 +201,9 @@ def test_backfill_submission_skips_destructive_changes_without_force(
         dry_run=False,
         force=False,
         ignore_fields=IGNORE_FIELDS,
-        result=result,
     )
 
-    assert result.updated == 0
-    assert result.skipped == 1
-    assert result.errors == []
+    assert result == _BackfillResult.SKIPPED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == 1
 
@@ -239,9 +217,8 @@ def test_backfill_submission_force_applies_destructive_changes(
     db.update_submission(current)
     current = db.get_submission(submission_id)
     _put_metadata(s3_client_mock, submission_id, metadata)
-    result = _BackfillResult()
 
-    _backfill_submission(
+    result = _backfill_submission(
         current_submission=current,
         s3_client=s3_client_mock,
         bucket=BUCKET,
@@ -249,12 +226,9 @@ def test_backfill_submission_force_applies_destructive_changes(
         dry_run=False,
         force=True,
         ignore_fields=IGNORE_FIELDS,
-        result=result,
     )
 
-    assert result.updated == 1
-    assert result.skipped == 0
-    assert result.errors == []
+    assert result == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == metadata.get_submission_size()
     assert persisted.submission_metadata == metadata.to_redacted_dict()
@@ -274,9 +248,8 @@ def test_backfill_submission_force_does_not_overwrite_ignore_fields(
     assert metadata.submission.local_case_id != DIFFERENT_PSEUDONYM
     assert metadata.submission.submission_date != DIFFERENT_DATE
     _put_metadata(s3_client_mock, submission_id, metadata)
-    result = _BackfillResult()
 
-    _backfill_submission(
+    result = _backfill_submission(
         current_submission=current,
         s3_client=s3_client_mock,
         bucket=BUCKET,
@@ -284,10 +257,9 @@ def test_backfill_submission_force_does_not_overwrite_ignore_fields(
         dry_run=False,
         force=True,
         ignore_fields=IGNORE_FIELDS,
-        result=result,
     )
 
-    assert result.errors == []
+    assert result == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_date == DIFFERENT_DATE
     assert persisted.tan_g == DIFFERENT_TAN_G

@@ -996,7 +996,7 @@ class _BackfillResult(StrEnum):
     ERROR = "error"
 
 
-def _backfill_submission(  # noqa: PLR0913
+def _backfill_submission(  # noqa: PLR0911, PLR0913
     current_submission: Submission,
     s3_client: Any,
     bucket: str,
@@ -1109,7 +1109,7 @@ def _backfill_submission(  # noqa: PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(
+def backfill(  # noqa: PLR0913
     ctx: click.Context,
     configuration: dict[str, Any],
     dry_run: bool,
@@ -1164,7 +1164,7 @@ def backfill(
             else:
                 candidates.append(sub)
     else:
-        candidates = db_service.list_processed_between(start_date.date(), end_date.date())
+        candidates = list(db_service.list_processed_between(start_date.date(), end_date.date()))
         console_err.print(
             f"[cyan]Date window: {start_date.date()} – {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
         )
