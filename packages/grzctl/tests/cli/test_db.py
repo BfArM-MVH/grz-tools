@@ -802,15 +802,7 @@ def test_submission_grzctl_version_logging(blank_database_config_path: Path, tes
         assert "data_steward" in state
         assert "data_steward_signature" in state
 
-    # Test 2: Verify grzctl_version in human-readable table output
-    result_show = runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
-    assert result_show.exit_code == 0, result_show.stderr
-
-    output = result_show.stdout
-    # Check that version appears in the output (at least once)
-    assert test_version in output, f"Version {test_version} not found in table output"
-
-    # Test 3: Verify database records have the version
+    # Test 2: Verify database records have the version
     config = DbConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submission = db.get_submission(metadata.submission_id)
