@@ -2,6 +2,8 @@ import logging
 from functools import cached_property
 from pathlib import Path
 from typing import Any
+from .commands.db import _get_grzctl_version
+from .commands.db.cli import get_submission_db_instance
 
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.author import Author
@@ -106,7 +108,7 @@ class DbContext:
             self._check_prerequisites()
 
             log.debug(f"Updating submission {self.submission_id} state to {self.start_state.name}")
-            self.db.update_submission_state(self.submission_id, self.start_state)
+            self.db.update_submission_state(self.submission_id, self.start_state, grzctl_version=_get_grzctl_version())
 
         except SubmissionNotFoundError:
             raise
@@ -127,7 +129,9 @@ class DbContext:
             error_state = SubmissionStateEnum.ERROR
             log.error(f"Operation failed for {self.submission_id}. Updating DB to {error_state.name}.")
             try:
-                self.db.update_submission_state(self.submission_id, error_state, data={"error": error_message})
+                self.db.update_submission_state(
+                    self.submission_id, error_state, data={"error": error_message}, grzctl_version=_get_grzctl_version()
+                )
             except Exception as db_exc:
                 log.error(f"Failed to write error state to DB: {db_exc}")
 
@@ -136,7 +140,9 @@ class DbContext:
         else:
             log.info(f"Operation successful. Updating DB to {self.end_state.name}.")
             try:
-                self.db.update_submission_state(self.submission_id, self.end_state)
+                self.db.update_submission_state(
+                    self.submission_id, self.end_state, grzctl_version=_get_grzctl_version()
+                )
             except Exception as db_exc:
                 log.error(f"Failed to write success state to DB: {db_exc}")
 

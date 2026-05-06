@@ -257,6 +257,11 @@ class SubmissionStateLogBase(SQLModel):
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # grzctl version that created this state log (optional, indexed)
+    grzctl_version: str | None = Field(
+        default=None,
+        sa_column=Column(sa.String(length=64), nullable=True),
+    )
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -737,6 +742,7 @@ class SubmissionDb:
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
+        grzctl_version: str | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -757,7 +763,11 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             state_log_payload = SubmissionStateLogPayload(
-                submission_id=submission_id, author_name=self._author.name, state=state, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                state=state,
+                data=data,
+                grzctl_version=grzctl_version,
             )
             signature = state_log_payload.sign(self._author.private_key())
 

@@ -1,10 +1,18 @@
 import enum
 import logging
+from importlib.metadata import PackageNotFoundError, version
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from grz_db.models.base import VerifiableLog
 
 log = logging.getLogger(__name__)
+
+
+def _get_grzctl_version() -> str:
+    try:
+        return version("grzctl")
+    except PackageNotFoundError:
+        return "dev"
 
 
 class SignatureStatus(enum.StrEnum):
