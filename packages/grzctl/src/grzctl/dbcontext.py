@@ -2,14 +2,13 @@ import logging
 from functools import cached_property
 from pathlib import Path
 from typing import Any
-from .commands.db import _get_grzctl_version
-from .commands.db.cli import get_submission_db_instance
 
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
 
+from .commands.db import _get_grzctl_version
 from .commands.db.cli import get_submission_db_instance
 from .models.config import DbConfig
 
@@ -82,6 +81,10 @@ class DbContext:
         self.db: SubmissionDb | None = None
 
     @cached_property
+    def grzctl_version(self) -> str:
+        return _get_grzctl_version()
+
+    @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
         # determine expected prior state based on order of enums
         members = list(SubmissionStateEnum)
@@ -108,7 +111,7 @@ class DbContext:
             self._check_prerequisites()
 
             log.debug(f"Updating submission {self.submission_id} state to {self.start_state.name}")
-            self.db.update_submission_state(self.submission_id, self.start_state, grzctl_version=_get_grzctl_version())
+            self.db.update_submission_state(self.submission_id, self.start_state, grzctl_version=self.grzctl_version)
 
         except SubmissionNotFoundError:
             raise
@@ -130,7 +133,7 @@ class DbContext:
             log.error(f"Operation failed for {self.submission_id}. Updating DB to {error_state.name}.")
             try:
                 self.db.update_submission_state(
-                    self.submission_id, error_state, data={"error": error_message}, grzctl_version=_get_grzctl_version()
+                    self.submission_id, error_state, data={"error": error_message}, grzctl_version=self.grzctl_version
                 )
             except Exception as db_exc:
                 log.error(f"Failed to write error state to DB: {db_exc}")
@@ -140,9 +143,7 @@ class DbContext:
         else:
             log.info(f"Operation successful. Updating DB to {self.end_state.name}.")
             try:
-                self.db.update_submission_state(
-                    self.submission_id, self.end_state, grzctl_version=_get_grzctl_version()
-                )
+                self.db.update_submission_state(self.submission_id, self.end_state, grzctl_version=self.grzctl_version)
             except Exception as db_exc:
                 log.error(f"Failed to write success state to DB: {db_exc}")
 

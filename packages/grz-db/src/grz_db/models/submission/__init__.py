@@ -257,7 +257,7 @@ class SubmissionStateLogBase(SQLModel):
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
-    # grzctl version that created this state log (optional, indexed)
+    # grzctl version that created this state log (optional)
     grzctl_version: str | None = Field(
         default=None,
         sa_column=Column(sa.String(length=64), nullable=True),
