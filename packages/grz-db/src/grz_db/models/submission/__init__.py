@@ -470,6 +470,10 @@ class DetailedQCResult(SQLModel, table=True):
     targeted_regions_above_min_coverage: float
     targeted_regions_above_min_coverage_passed_qc: bool
     targeted_regions_above_min_coverage_percent_deviation: float
+    qc_workflow_version: str | None = Field(
+        default=None,
+        sa_column=Column(sa.String(length=64), nullable=True),
+    )
 
     model_config = ConfigDict(  # type: ignore
         populate_by_name=True,

@@ -748,12 +748,19 @@ class QCReportRow(StrictBaseModel):
 @click.argument("submission_id", type=str)
 @click.argument("report_csv_path", metavar="path/to/report.csv", type=grzcli.FILE_R_E)
 @click.option(
+    "--qc-workflow-version",
+    type=str,
+    required=True,
+    envvar="GRZCTL_QC_WORKFLOW_VERSION",
+    help="QC workflow version to store with detailed QC results. Can also be provided via GRZCTL_QC_WORKFLOW_VERSION.",
+)
+@click.option(
     "--confirm/--no-confirm",
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
 @click.pass_context
-def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, confirm: bool):
+def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, qc_workflow_version: str, confirm: bool):
     """Populate the submission database from a detailed QC pipeline report."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -790,6 +797,7 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, co
                 targeted_regions_above_min_coverage_passed_qc=report.targeted_regions_above_min_coverage_qc_status
                 == QCStatus.PASS,
                 targeted_regions_above_min_coverage_percent_deviation=report.targeted_regions_above_min_coverage_deviation,
+                qc_workflow_version=qc_workflow_version,
             )
         )
     table = rich.table.Table(

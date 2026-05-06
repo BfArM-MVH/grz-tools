@@ -316,7 +316,16 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_meta
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate-qc", metadata.submission_id, str(report_csv_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -328,6 +337,172 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_meta
     assert len(results) == 3
     father_result = next(r for r in results if r.lab_datum_id == "father1_germline0")
     assert not father_result.mean_depth_of_coverage_passed_qc
+
+
+def test_populate_qc_with_qc_workflow_version_flag(
+    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
+    """Test populate-qc with --qc-workflow-version flag."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test with --qc-workflow-version flag
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "v1.0.0"
+
+
+def test_populate_qc_with_qc_workflow_version_env_var(
+    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path, monkeypatch
+):
+    """Test populate-qc with GRZCTL_QC_WORKFLOW_VERSION environment variable."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    # Set the environment variable
+    monkeypatch.setenv("GRZCTL_QC_WORKFLOW_VERSION", "v2.1.0")
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test without --qc-workflow-version flag (should use env var)
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+        ],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "v2.1.0"
+
+
+def test_populate_qc_missing_qc_workflow_version(
+    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
+    """Test populate-qc fails when qc_workflow_version is not provided."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test without --qc-workflow-version flag and without env var (should fail)
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+        ],
+    )
+    assert result_populate_qc.exit_code != 0
+    assert "Missing option '--qc-workflow-version'" in result_populate_qc.output
 
 
 def test_update_error_confirm(blank_database_config_path: Path, test_metadata_path: Path):
