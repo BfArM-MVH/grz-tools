@@ -6,7 +6,7 @@ import json
 import logging
 import sys
 import traceback
-from collections import namedtuple
+from collections import Counter, namedtuple
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -974,15 +974,6 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
     console.print(panel)
 
 
-class _BackfillResult:
-    """Accumulates per-submission outcomes for the backfill command."""
-
-    def __init__(self) -> None:
-        self.updated: int = 0
-        self.skipped: int = 0
-        self.errors: list[tuple[str, Exception]] = []
-
-
 def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str | None:
     """Return the raw metadata.json content for *submission_id*, or None when not found.
 
@@ -999,6 +990,12 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
         raise
 
 
+class _BackfillResult(StrEnum):
+    UPDATED = "updated"
+    SKIPPED = "skipped"
+    ERROR = "error"
+
+
 def _backfill_submission(  # noqa: PLR0913
     current_submission: Submission,
     s3_client: Any,
@@ -1007,8 +1004,7 @@ def _backfill_submission(  # noqa: PLR0913
     dry_run: bool,
     force: bool,
     ignore_fields: set[str],
-    result: _BackfillResult,
-):
+) -> _BackfillResult:
     """Fetch metadata.json from S3 for one submission and commit a diff to the database.
 
     Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
@@ -1027,20 +1023,17 @@ def _backfill_submission(  # noqa: PLR0913
         raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: S3 error – {exc}[/red]")
-        result.errors.append((submission_id, exc))
-        return
+        return _BackfillResult.ERROR
 
     if raw_json is None:
         console_err.print(f"[yellow]  {submission_id}: metadata.json not found in S3, skipping.[/yellow]")
-        result.skipped += 1
-        return
+        return _BackfillResult.SKIPPED
 
     try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: failed to parse metadata.json – {exc}[/red]")
-        result.errors.append((submission_id, exc))
-        return
+        return _BackfillResult.ERROR
 
     try:
         submission_diff, donors_diff = db_service.diff(
@@ -1051,37 +1044,33 @@ def _backfill_submission(  # noqa: PLR0913
         )
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: diff failed – {exc}[/red]")
-        result.errors.append((submission_id, exc))
-        return
+        return _BackfillResult.ERROR
 
     if not submission_diff.has_pending and not donors_diff.has_pending:
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
-        result.skipped += 1
-        return
+        return _BackfillResult.SKIPPED
 
     if dry_run:
         console_err.print(
             f"[yellow]  [dry-run] {submission_id}: would update fields: {[d.key for d in submission_diff.pending]}[/yellow]"
         )
-        result.updated += 1
-        return
+        return _BackfillResult.UPDATED
 
     if not force and submission_diff.has_pending_destructive:
         console_err.print(
             f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}', skipping (use --force to overwrite).[/dim]"
         )
-        result.skipped += 1
-        return
+        return _BackfillResult.SKIPPED
 
     try:
         db_service.commit_changes(submission_id, submission_diff, donors_diff)
         console_err.print(
             f"[green]  {submission_id}: updated ({', '.join(d.key for d in submission_diff.pending) or 'no scalar changes'}).[/green]"
         )
-        result.updated += 1
+        return _BackfillResult.UPDATED
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: failed to commit – {exc}[/red]")
-        result.errors.append((submission_id, exc))
+        return _BackfillResult.ERROR
 
 
 @db.command("backfill")
@@ -1120,7 +1109,7 @@ def _backfill_submission(  # noqa: PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(  # noqa: PLR0913
+def backfill(
     ctx: click.Context,
     configuration: dict[str, Any],
     dry_run: bool,
@@ -1187,32 +1176,30 @@ def backfill(  # noqa: PLR0913
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
     s3_client = init_s3_client(list_config.s3)
-    result = _BackfillResult()
+    counts: Counter[_BackfillResult] = Counter()
 
     for submission in tqdm(candidates):
-        _backfill_submission(
-            submission,
-            s3_client,
-            list_config.s3.bucket,
-            db_service,
-            dry_run,
-            force,
-            ignore_fields,
-            result,
-        )
+        counts[
+            _backfill_submission(
+                submission,
+                s3_client,
+                list_config.s3.bucket,
+                db_service,
+                dry_run,
+                force,
+                ignore_fields,
+            )
+        ] += 1
 
     # ── Summary ─────────────────────────────────────────────────────────────
     prefix = "[dry-run] " if dry_run else ""
     verb = "Would update" if dry_run else "Updated"
     console_err.print(
-        f"\n[cyan]{prefix}Done. {verb}: {result.updated}, "
-        f"Skipped (no S3 object or already up to date): {result.skipped}, "
-        f"Errors: {len(result.errors)}[/cyan]"
+        f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}, "
+        f"Skipped (no S3 object or already up to date): {counts[_BackfillResult.SKIPPED]}, "
+        f"Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
-    if result.errors:
-        console_err.print("[red]The following submissions encountered errors:[/red]")
-        for sid, exc in result.errors:
-            console_err.print(f"  [red]{sid}[/red]: {exc}")
+    if counts[_BackfillResult.ERROR]:
         sys.exit(1)
 
 
