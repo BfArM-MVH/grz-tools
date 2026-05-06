@@ -7,6 +7,7 @@ import logging
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary
 from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
+
 from . import _get_grzctl_version
 
 log = logging.getLogger(__name__)

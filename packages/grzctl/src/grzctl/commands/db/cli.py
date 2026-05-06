@@ -13,7 +13,6 @@ from typing import Any
 
 import click
 import grz_common.cli as grzcli
-from . import SignatureStatus, _get_grzctl_version, _verify_signature
 import rich.console
 import rich.padding
 import rich.panel
@@ -56,6 +55,7 @@ from pydantic import Field
 
 from ...models.config import DbConfig, ListConfig
 from .. import limit
+from . import SignatureStatus, _get_grzctl_version, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
 
@@ -936,12 +936,12 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
 
     renderables: list[rich.console.RenderableType] = [rich.padding.Padding(attribute_table, (1, 0))]
     if submission.states:
-        state_table = rich.table.Table(title="State History")
+        state_table = rich.table.Table(title="State History", show_header=True)
         state_table.add_column("Log ID", style="dim", width=12)
         state_table.add_column("Timestamp (UTC)", style="yellow")
         state_table.add_column("State", style="green")
         state_table.add_column("Data", style="cyan", overflow="ellipsis")
-        state_table.add_column("grzctl Version", style="blue")
+        state_table.add_column("grzctl Version", header_style="blue", style="blue")
         state_table.add_column("Data Steward", style="magenta")
         state_table.add_column("Signature Status")
 
