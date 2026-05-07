@@ -756,7 +756,7 @@ class SubmissionDb:
             submission_id: Submission ID of the submission to update.
             state: New state of the submission.
             data: Optional data to attach to the update.
-            grzctl_versions: Optional dictionary of grzctl versions.
+            grzctl_versions: Optional dictionary of grzctl dependency versions.
 
         Returns:
             An instance of SubmissionStateLog.

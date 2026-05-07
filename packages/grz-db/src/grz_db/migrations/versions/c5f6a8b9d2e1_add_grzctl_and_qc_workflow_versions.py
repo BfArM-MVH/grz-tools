@@ -17,7 +17,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Add grzctl_version to submission_states
+    # Add grzctl_versions to submission_states
     op.add_column(
         "submission_states",
         sa.Column("grzctl_versions", sa.JSON(), nullable=True),
