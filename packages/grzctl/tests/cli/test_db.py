@@ -761,6 +761,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         "grz-common": "1.0.0",
         "grz-db": "1.0.0",
         "grz-pydantic-models": "1.0.0",
+        "grz-check": "1.0.0",
     }
     monkeypatch.setattr("grzctl.get_versions", lambda: test_versions_dict)
 
@@ -802,7 +803,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
         assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
         # Verify all expected keys are present
-        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models"}
+        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
         assert set(state["grzctl_versions"].keys()) == expected_keys, (
             f"grzctl_versions has unexpected keys in state {i}: {state['grzctl_versions'].keys()}"
         )
@@ -832,7 +833,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
             f"grzctl_versions should be dict, got {type(state_log.grzctl_versions)}"
         )
         # Verify all expected keys are present
-        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models"}
+        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
         assert set(state_log.grzctl_versions.keys()) == expected_keys, (
             f"grzctl_versions has unexpected keys: {state_log.grzctl_versions.keys()}"
         )

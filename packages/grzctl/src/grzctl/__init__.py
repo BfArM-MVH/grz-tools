@@ -7,12 +7,12 @@ from importlib.metadata import PackageNotFoundError, version
 __version__ = "1.4.0"  # This version is managed by release-please
 
 
-def get_versions() -> dict[str, str]:
-    def get_version(package_name: str) -> str:
+def get_versions() -> dict[str, str | None]:
+    def get_version(package_name: str) -> str | None:
         try:
             return version(package_name)
         except PackageNotFoundError:
-            return "package-not-found"
+            return None
 
     return {
         "grzctl": get_version("grzctl"),
@@ -20,4 +20,5 @@ def get_versions() -> dict[str, str]:
         "grz-common": get_version("grz-common"),
         "grz-db": get_version("grz-db"),
         "grz-pydantic-models": get_version("grz-pydantic-models"),
+        "grz-check": get_version("grz-check"),
     }
