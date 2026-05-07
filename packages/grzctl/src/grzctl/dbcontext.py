@@ -8,7 +8,7 @@ from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
 
-from .commands.db import _get_versions
+from . import get_versions
 from .commands.db.cli import get_submission_db_instance
 from .models.config import DbConfig
 
@@ -82,7 +82,7 @@ class DbContext:
 
     @cached_property
     def grzctl_versions(self) -> dict[str, str]:
-        return _get_versions()
+        return get_versions()
 
     @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:

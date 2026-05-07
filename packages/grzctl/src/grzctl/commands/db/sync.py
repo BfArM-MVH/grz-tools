@@ -8,7 +8,7 @@ from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSum
 from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 
-from . import _get_versions
+from ... import get_versions
 
 log = logging.getLogger(__name__)
 
@@ -86,4 +86,4 @@ def _determine_target_state(s3_state: InboxSubmissionState) -> SubmissionStateEn
 
 
 def _update_state(db: SubmissionDb, submission_id: str, state: SubmissionStateEnum, author: Author):
-    db.update_submission_state(submission_id, state, grzctl_versions=_get_versions())
+    db.update_submission_state(submission_id, state, grzctl_versions=get_versions())

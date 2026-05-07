@@ -53,9 +53,10 @@ from grz_pydantic_models.submission.metadata import (
 )
 from pydantic import Field
 
+from ... import get_versions
 from ...models.config import DbConfig, ListConfig
 from .. import limit
-from . import SignatureStatus, _get_versions, _verify_signature
+from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
 
@@ -497,7 +498,7 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             ctx.exit()
 
         new_state_log = db_service.update_submission_state(
-            submission_id, state_enum, parsed_data, grzctl_versions=_get_versions()
+            submission_id, state_enum, parsed_data, grzctl_versions=get_versions()
         )
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
