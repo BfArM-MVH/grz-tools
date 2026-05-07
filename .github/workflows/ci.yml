@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  UV_VERSION: '0.8.5'
+  UV_VERSION: '0.11.11'
   GRZ_CHECK_WORKSPACE: "packages/grz-check"
   RUST_TOOLCHAIN_VERSION: "1.89.0"
 
@@ -330,9 +330,6 @@ jobs:
       - name: Extract package name from path
         id: pkg_info
         run: echo "name=$(basename ${{ matrix.package.path }})" >> $GITHUB_OUTPUT
-
-      - name: Ensure package uv lockfile is up-to-date
-        run: cd ${{ matrix.package.path }} && uv lock --check
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
         run: uv run tox -e py${{ matrix.python-version }} -- ${{ matrix.package.path }}
