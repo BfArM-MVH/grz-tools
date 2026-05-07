@@ -1012,10 +1012,10 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     *submission_size* and *submission_metadata*) is kept consistent, donor records are
     synchronised, and already-up-to-date submissions are detected without a write.
 
-    When *force* is False, candidates whose ``submission_size`` and
-    ``submission_metadata`` are both already non-NULL are short-circuited before any
-    S3 access, so re-runs do not re-pay the network cost for already-populated rows
-    and manually-corrected values are preserved.
+    When *force* is False, a destructive diff (existing non-NULL field would change)
+    is skipped instead of committed, preserving manually-corrected values. The caller
+    is expected to pre-filter already-populated rows so re-runs do not re-pay the S3
+    network cost for them.
     """
     submission_id = current_submission.id
 
@@ -1058,7 +1058,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 
     if not force and submission_diff.has_pending_destructive:
         console_err.print(
-            f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}', skipping (use --force to overwrite).[/dim]"
+            f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}, skipping (use --force to overwrite).[/dim]"
         )
         return _BackfillResult.SKIPPED
 
@@ -1083,10 +1083,14 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 @click.option(
     "--force/--no-force",
     default=False,
-    help=(
-        "Process submissions even when submission_size and submission_metadata are already set. "
-        "By default only submissions where at least one of those columns is NULL are candidates."
-    ),
+    help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
+    "Without this flag, such submissions are reported and skipped.",
+)
+@click.option(
+    "--skip-populated/--no-skip-populated",
+    default=True,
+    help="Skip candidates whose submission_size and submission_metadata are both already non-NULL "
+    "without fetching metadata.json from S3. Default: skip them.",
 )
 @click.option(
     "--submission-id",
@@ -1114,6 +1118,7 @@ def backfill(  # noqa: PLR0913
     configuration: dict[str, Any],
     dry_run: bool,
     force: bool,
+    skip_populated: bool,
     submission_ids: tuple[str, ...],
     start_date: datetime,
     end_date: datetime,
@@ -1126,20 +1131,22 @@ def backfill(  # noqa: PLR0913
     that are actually missing or changed are written, donor records are synchronised,
     and already-up-to-date submissions are silently skipped.
 
-    By default, only submissions where submission_size or submission_metadata is NULL
-    are candidates (use --force to process all submissions).
+    By default, candidates whose submission_size and submission_metadata are both
+    already non-NULL are skipped without an S3 fetch (disable with --no-skip-populated).
+    Existing non-NULL fields whose values differ from metadata.json are not overwritten
+    unless --force is given.
 
     Candidate selection (mutually exclusive):
 
     \b
-      (default)                submissions with a REPORTED or QCED state log entry within the date window (defaults to the full historical range — i.e. fully-processed submissions only)
+      (default)                all submissions within the date window (defaults to the full historical range)
       --submission-id ...      explicit list of submission IDs
-      --start-date/--end-date  narrow the default REPORTED/QCED date window
+      --start-date/--end-date  narrow the default date window
 
     This command is idempotent: re-running it is always safe.
     """
     # ── Validate option combinations ────────────────────────────────────────
-    if submission_ids and (start_date != date.min and end_date != date.max):
+    if submission_ids and (start_date != date.min or end_date != date.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
     ignore_fields = set(ignore_field) | {
@@ -1169,6 +1176,22 @@ def backfill(  # noqa: PLR0913
             f"[cyan]Date window: {start_date.date()} – {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
         )
 
+    # ── Pre-filter already-populated rows when --skip-populated ─────────────
+    counts: Counter[_BackfillResult] = Counter()
+    if skip_populated:
+        filtered: list[Submission] = []
+        for sub in candidates:
+            if sub.submission_size is not None and sub.submission_metadata is not None:
+                counts[_BackfillResult.SKIPPED] += 1
+            else:
+                filtered.append(sub)
+        n_already = counts[_BackfillResult.SKIPPED]
+        if n_already:
+            console_err.print(
+                f"[dim]Skipping {n_already} already-populated submission(s) (use --no-skip-populated to process).[/dim]"
+            )
+        candidates = filtered
+
     console_err.print(
         f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
         f"from bucket '{list_config.s3.bucket}'…[/cyan]"
@@ -1176,7 +1199,6 @@ def backfill(  # noqa: PLR0913
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
     s3_client = init_s3_client(list_config.s3)
-    counts: Counter[_BackfillResult] = Counter()
 
     for submission in tqdm(candidates):
         counts[
@@ -1196,7 +1218,7 @@ def backfill(  # noqa: PLR0913
     verb = "Would update" if dry_run else "Updated"
     console_err.print(
         f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}, "
-        f"Skipped (no S3 object or already up to date): {counts[_BackfillResult.SKIPPED]}, "
+        f"Skipped (already populated, no S3 object, up to date, or would overwrite without --force): {counts[_BackfillResult.SKIPPED]}, "
         f"Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
     if counts[_BackfillResult.ERROR]:
