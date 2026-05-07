@@ -82,7 +82,9 @@ class DbContext:
 
     @cached_property
     def grzctl_versions(self) -> dict[str, str]:
-        return get_versions()
+        """Get version information."""
+        versions = get_versions()
+        return {k: v or "unknown" for k, v in versions.items()}
 
     @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:

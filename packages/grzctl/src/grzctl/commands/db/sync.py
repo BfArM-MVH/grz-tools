@@ -86,4 +86,8 @@ def _determine_target_state(s3_state: InboxSubmissionState) -> SubmissionStateEn
 
 
 def _update_state(db: SubmissionDb, submission_id: str, state: SubmissionStateEnum, author: Author):
-    db.update_submission_state(submission_id, state, grzctl_versions=get_versions())
+    db.update_submission_state(
+        submission_id,
+        state,
+        grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
+    )

@@ -498,7 +498,10 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             ctx.exit()
 
         new_state_log = db_service.update_submission_state(
-            submission_id, state_enum, parsed_data, grzctl_versions=get_versions()
+            submission_id,
+            state_enum,
+            parsed_data,
+            grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
         )
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
