@@ -1087,12 +1087,6 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     "Without this flag, such submissions are reported and skipped.",
 )
 @click.option(
-    "--skip-populated/--no-skip-populated",
-    default=True,
-    help="Skip candidates whose submission_size and submission_metadata are both already non-NULL "
-    "without fetching metadata.json from S3. Default: skip them.",
-)
-@click.option(
     "--submission-id",
     "submission_ids",
     multiple=True,
@@ -1118,7 +1112,6 @@ def backfill(  # noqa: PLR0913
     configuration: dict[str, Any],
     dry_run: bool,
     force: bool,
-    skip_populated: bool,
     submission_ids: tuple[str, ...],
     start_date: datetime,
     end_date: datetime,
@@ -1131,8 +1124,6 @@ def backfill(  # noqa: PLR0913
     that are actually missing or changed are written, donor records are synchronised,
     and already-up-to-date submissions are silently skipped.
 
-    By default, candidates whose submission_size and submission_metadata are both
-    already non-NULL are skipped without an S3 fetch (disable with --no-skip-populated).
     Existing non-NULL fields whose values differ from metadata.json are not overwritten
     unless --force is given.
 
@@ -1176,21 +1167,7 @@ def backfill(  # noqa: PLR0913
             f"[cyan]Date window: {start_date.date()} – {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
         )
 
-    # ── Pre-filter already-populated rows when --skip-populated ─────────────
     counts: Counter[_BackfillResult] = Counter()
-    if skip_populated:
-        filtered: list[Submission] = []
-        for sub in candidates:
-            if sub.submission_size is not None and sub.submission_metadata is not None:
-                counts[_BackfillResult.SKIPPED] += 1
-            else:
-                filtered.append(sub)
-        n_already = counts[_BackfillResult.SKIPPED]
-        if n_already:
-            console_err.print(
-                f"[dim]Skipping {n_already} already-populated submission(s) (use --no-skip-populated to process).[/dim]"
-            )
-        candidates = filtered
 
     console_err.print(
         f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
