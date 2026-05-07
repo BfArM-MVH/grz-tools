@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 __version__ = "1.4.0"  # This version is managed by release-please
 
+
 def get_versions() -> dict[str, str]:
     def get_version(package_name: str) -> str:
         try:
