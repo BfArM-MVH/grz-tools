@@ -8,11 +8,22 @@ from grz_db.models.base import VerifiableLog
 log = logging.getLogger(__name__)
 
 
-def _get_grzctl_version() -> str:
-    try:
-        return version("grzctl")
-    except PackageNotFoundError:
-        return "dev"
+def _get_versions() -> dict[str, str]:
+    """Return versions of grzctl and key dependencies."""
+
+    def get_version(package_name: str) -> str:
+        try:
+            return version(package_name)
+        except PackageNotFoundError:
+            return "package-not-found"
+
+    return {
+        "grzctl": get_version("grzctl"),
+        "grz-cli": get_version("grz-cli"),
+        "grz-common": get_version("grz-common"),
+        "grz-db": get_version("grz-db"),
+        "grz-pydantic-models": get_version("grz-pydantic-models"),
+    }
 
 
 class SignatureStatus(enum.StrEnum):

@@ -740,21 +740,28 @@ def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path)
     assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}
 
 
-def test_submission_grzctl_version_logging(blank_database_config_path: Path, test_metadata_path: Path, monkeypatch):
+def test_submission_grzctl_versions_logging(blank_database_config_path: Path, test_metadata_path: Path, monkeypatch):
     """
-    Test that grzctl_version is correctly logged on state transitions and appears in CLI output.
+    Test that grzctl_versions is correctly logged on state transitions and appears in CLI output.
 
     Verifies:
-    - grzctl_version is recorded for each state log entry
-    - grzctl_version appears in JSON output
-    - grzctl_version appears in human-readable table output
-    - Version is preserved across multiple state transitions
+    - grzctl_versions is recorded for each state log entry
+    - grzctl_versions appears in JSON output
+    - grzctl_versions appears in human-readable table output
+    - Versions are preserved across multiple state transitions
     """
     args_common = ["db", "--config-file", blank_database_config_path]
 
     # Mock the version to a known test value for reproducibility
     test_version = "0.1.2-test"
-    monkeypatch.setattr("grzctl.commands.db.cli._get_grzctl_version", lambda: test_version)
+    test_versions_dict = {
+        "grzctl": test_version,
+        "grz-cli": "1.0.0",
+        "grz-common": "1.0.0",
+        "grz-db": "1.0.0",
+        "grz-pydantic-models": "1.0.0",
+    }
+    monkeypatch.setattr("grzctl.commands.db.cli._get_versions", lambda: test_versions_dict)
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -781,7 +788,7 @@ def test_submission_grzctl_version_logging(blank_database_config_path: Path, tes
         )
         assert result_update.exit_code == 0, result_update.stderr
 
-    # Test 1: Verify grzctl_version in JSON output
+    # Test 1: Verify grzctl_versions in JSON output
     result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
     assert result_show_json.exit_code == 0, result_show_json.stderr
 
@@ -789,11 +796,12 @@ def test_submission_grzctl_version_logging(blank_database_config_path: Path, tes
     assert "states" in parsed_json
     assert len(parsed_json["states"]) > 0, "No state logs found"
 
-    # Verify each state has grzctl_version field
+    # Verify each state has grzctl_versions field
     for i, state in enumerate(parsed_json["states"]):
-        assert "grzctl_version" in state, f"grzctl_version missing in state {i}"
-        assert state["grzctl_version"] == test_version, (
-            f"Expected grzctl_version={test_version}, got {state['grzctl_version']} in state {i}"
+        assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
+        assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
+        assert state["grzctl_versions"]["grzctl"] == test_version, (
+            f"Expected grzctl={test_version}, got {state['grzctl_versions'].get('grzctl')} in state {i}"
         )
         # Verify other expected fields are present
         assert "id" in state
@@ -809,11 +817,14 @@ def test_submission_grzctl_version_logging(blank_database_config_path: Path, tes
 
     # Verify all state logs have the version
     for state_log in submission.states:
-        assert state_log.grzctl_version is not None, (
-            f"grzctl_version is None for state {state_log.state} at {state_log.timestamp}"
+        assert state_log.grzctl_versions is not None, (
+            f"grzctl_versions is None for state {state_log.state} at {state_log.timestamp}"
         )
-        assert state_log.grzctl_version == test_version, (
-            f"Expected grzctl_version={test_version}, got {state_log.grzctl_version}"
+        assert isinstance(state_log.grzctl_versions, dict), (
+            f"grzctl_versions should be dict, got {type(state_log.grzctl_versions)}"
+        )
+        assert state_log.grzctl_versions["grzctl"] == test_version, (
+            f"Expected grzctl={test_version}, got {state_log.grzctl_versions.get('grzctl')}"
         )
 
 
@@ -834,7 +845,16 @@ def test_submission_grzctl_version_different_versions(
     assert result_add.exit_code == 0, result_add.stderr
 
     # State update #1 with version 0.1.0
-    monkeypatch.setattr("grzctl.commands.db.cli._get_grzctl_version", lambda: "0.1.0")
+    monkeypatch.setattr(
+        "grzctl.commands.db.cli._get_versions",
+        lambda: {
+            "grzctl": "0.1.0",
+            "grz-cli": "1.0.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
     result_update_1 = runner.invoke(
         cli,
         [*args_common, "submission", "update", metadata.submission_id, "Downloading"],
@@ -842,7 +862,16 @@ def test_submission_grzctl_version_different_versions(
     assert result_update_1.exit_code == 0, result_update_1.stderr
 
     # State update #2 with version 0.1.1
-    monkeypatch.setattr("grzctl.commands.db.cli._get_grzctl_version", lambda: "0.1.1")
+    monkeypatch.setattr(
+        "grzctl.commands.db.cli._get_versions",
+        lambda: {
+            "grzctl": "0.1.1",
+            "grz-cli": "1.0.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
     result_update_2 = runner.invoke(
         cli,
         [*args_common, "submission", "update", metadata.submission_id, "Downloaded"],
@@ -850,7 +879,16 @@ def test_submission_grzctl_version_different_versions(
     assert result_update_2.exit_code == 0, result_update_2.stderr
 
     # State update #3 with version 0.2.0
-    monkeypatch.setattr("grzctl.commands.db.cli._get_grzctl_version", lambda: "0.2.0")
+    monkeypatch.setattr(
+        "grzctl.commands.db.cli._get_versions",
+        lambda: {
+            "grzctl": "0.2.0",
+            "grz-cli": "1.0.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
     result_update_3 = runner.invoke(
         cli,
         [*args_common, "submission", "update", metadata.submission_id, "QCing"],
@@ -862,7 +900,7 @@ def test_submission_grzctl_version_different_versions(
     assert result_show_json.exit_code == 0, result_show_json.stderr
     parsed_json = json.loads(result_show_json.stdout)
 
-    states_by_version = {state["grzctl_version"]: state["state"] for state in parsed_json["states"]}
+    states_by_version = {state["grzctl_versions"]["grzctl"]: state["state"] for state in parsed_json["states"]}
     assert states_by_version.get("0.1.0") == "Downloading"
     assert states_by_version.get("0.1.1") == "Downloaded"
     assert states_by_version.get("0.2.0") == "QCing"

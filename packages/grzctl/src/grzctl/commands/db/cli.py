@@ -55,7 +55,7 @@ from pydantic import Field
 
 from ...models.config import DbConfig, ListConfig
 from .. import limit
-from . import SignatureStatus, _get_grzctl_version, _verify_signature
+from . import SignatureStatus, _get_versions, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
 
@@ -497,7 +497,7 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             ctx.exit()
 
         new_state_log = db_service.update_submission_state(
-            submission_id, state_enum, parsed_data, grzctl_version=_get_grzctl_version()
+            submission_id, state_enum, parsed_data, grzctl_versions=_get_versions()
         )
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
@@ -899,7 +899,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
             state_dict = state_log.model_dump(
-                mode="json", include={"id", "timestamp", "state", "data", "grzctl_version"}
+                mode="json", include={"id", "timestamp", "state", "data", "grzctl_versions"}
             )
             state_dict["data_steward"] = state_log.author_name
             state_dict["data_steward_signature"] = signature_status
@@ -941,7 +941,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         state_table.add_column("Timestamp (UTC)", style="yellow")
         state_table.add_column("State", style="green")
         state_table.add_column("Data", style="cyan", overflow="ellipsis")
-        state_table.add_column("grzctl Version", style="blue")
+        state_table.add_column("Dependency Versions", style="blue")
         state_table.add_column("Data Steward", style="magenta")
         state_table.add_column("Signature Status")
 
@@ -961,7 +961,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 state_log.timestamp.isoformat(),
                 state_str,
                 data_str,
-                state_log.grzctl_version if state_log.grzctl_version is not None else _TEXT_MISSING,
+                json.dumps(state_log.grzctl_versions) if state_log.grzctl_versions else _TEXT_MISSING,
                 data_steward_str,
                 signature_status_str,
             )

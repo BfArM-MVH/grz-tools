@@ -257,10 +257,10 @@ class SubmissionStateLogBase(SQLModel):
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
-    grzctl_version: str | None = Field(
+    grzctl_versions: dict[str, str] | None = Field(
         default=None,
-        description="grzctl version that created this state log (nullable for backward compatibility with old state logs)",
-        sa_column=Column(sa.String(length=64), nullable=True),
+        description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
+        sa_column=Column(JSON),
     )
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
@@ -747,7 +747,7 @@ class SubmissionDb:
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
-        grzctl_version: str | None = None,
+        grzctl_versions: dict[str, str] | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -756,6 +756,7 @@ class SubmissionDb:
             submission_id: Submission ID of the submission to update.
             state: New state of the submission.
             data: Optional data to attach to the update.
+            grzctl_versions: Optional dictionary of grzctl versions.
 
         Returns:
             An instance of SubmissionStateLog.
@@ -772,7 +773,7 @@ class SubmissionDb:
                 author_name=self._author.name,
                 state=state,
                 data=data,
-                grzctl_version=grzctl_version,
+                grzctl_versions=grzctl_versions,
             )
             signature = state_log_payload.sign(self._author.private_key())
 

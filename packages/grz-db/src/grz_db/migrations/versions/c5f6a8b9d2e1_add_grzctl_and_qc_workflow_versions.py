@@ -20,9 +20,8 @@ def upgrade() -> None:
     # Add grzctl_version to submission_states
     op.add_column(
         "submission_states",
-        sa.Column("grzctl_version", sa.String(length=64), nullable=True),
+        sa.Column("grzctl_versions", sa.JSON(), nullable=True),
     )
-    op.create_index("ix_submission_states_grzctl_version", "submission_states", ["grzctl_version"])
 
     # Add qc_workflow_version to detailed_qc_results
     op.add_column(
