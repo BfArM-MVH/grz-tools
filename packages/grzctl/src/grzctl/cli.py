@@ -51,7 +51,7 @@ def build_cli():
     @click.version_option(
         version=versions["grzctl"],
         prog_name="grzctl",
-        message="\n".join(f"{k} {v}" for k, v in versions.items()),
+        message="\n".join(f"{k} {'v' + v if v else 'unknown'}" for k, v in versions.items()),
     )
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(
