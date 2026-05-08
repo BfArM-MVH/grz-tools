@@ -67,3 +67,102 @@ def test_boto_download(
     assert calculate_sha256(files_dir / "small_test_file.txt") == temp_small_file_sha256sum, (
         "Text file SHA256 mismatch."
     )
+
+
+def test_download_skips_file_already_downloaded_for_same_submission(
+    s3_config_model,
+    remote_bucket,
+    temp_download_log_file_path,
+    encrypted_submission,
+    mocker,
+):
+    """Files with download_successful=True and matching submission_id should be skipped."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_download_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=DownloadState(download_successful=True, submission_id=encrypted_submission.submission_id),
+        )
+
+    download_spy = mocker.spy(download_worker, "download_file")
+    download_worker.download(encrypted_submission.submission_id, encrypted_submission)
+
+    assert download_spy.call_count == 0, (
+        f"Expected all files to be skipped, but {download_spy.call_count} were downloaded"
+    )
+
+
+def test_download_redownloads_file_with_different_submission_id(
+    s3_config_model,
+    remote_bucket,
+    temp_download_log_file_path,
+    encrypted_submission,
+    mocker,
+):
+    """Files logged as download_successful=True for a different submission_id must be re-downloaded."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_download_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=DownloadState(download_successful=True, submission_id="different-submission-id-9999"),
+        )
+
+    mock_download = mocker.patch.object(download_worker, "download_file")
+    download_worker.download(encrypted_submission.submission_id, encrypted_submission)
+
+    expected = len(encrypted_submission.encrypted_files)
+    assert mock_download.call_count == expected, (
+        f"Expected {expected} files to be re-downloaded for a different submission_id, "
+        f"but only {mock_download.call_count} were downloaded"
+    )
+
+
+def test_download_redownloads_file_after_failed_download(
+    s3_config_model,
+    remote_bucket,
+    temp_download_log_file_path,
+    encrypted_submission,
+    mocker,
+):
+    """Files logged as download_successful=False must be retried even with matching submission_id."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_download_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=DownloadState(download_successful=False, submission_id=encrypted_submission.submission_id),
+        )
+
+    mock_download = mocker.patch.object(download_worker, "download_file")
+    download_worker.download(encrypted_submission.submission_id, encrypted_submission)
+
+    expected = len(encrypted_submission.encrypted_files)
+    assert mock_download.call_count == expected, (
+        f"Expected {expected} failed files to be retried, but only {mock_download.call_count} were downloaded"
+    )

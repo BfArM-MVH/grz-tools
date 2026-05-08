@@ -164,6 +164,7 @@ class S3BotoDownloadWorker:
         s3_object_id: str,
         progress_logger: FileProgressLogger[DownloadState],
         file_metadata: SubmissionFileMetadata,
+        submission_id: str,
     ):
         """
         Download a single file from S3 to the specified local_file_path.
@@ -179,7 +180,11 @@ class S3BotoDownloadWorker:
             self._download_with_progress(str(local_file_path), s3_object_id)
 
             self.__log.info(f"Download complete for {str(local_file_path)}.")
-            progress_logger.set_state(local_file_path, file_metadata, state=DownloadState(download_successful=True))
+            progress_logger.set_state(
+                local_file_path,
+                file_metadata,
+                state=DownloadState(download_successful=True, submission_id=submission_id),
+            )
 
         except botocore.exceptions.ClientError as e:
             if e.response.get("Error", {}).get("Code") == "404":
@@ -190,13 +195,17 @@ class S3BotoDownloadWorker:
                 exc = e  # type: ignore[assignment]
             self.__log.error(error_msg)
             progress_logger.set_state(
-                local_file_path, file_metadata, state=DownloadState(download_successful=False, errors=[str(exc)])
+                local_file_path,
+                file_metadata,
+                state=DownloadState(download_successful=False, errors=[str(exc)], submission_id=submission_id),
             )
             raise exc from e
         except Exception as e:
             self.__log.error("Download failed for '%s': %s", str(local_file_path), e)
             progress_logger.set_state(
-                local_file_path, file_metadata, state=DownloadState(download_successful=False, errors=[str(e)])
+                local_file_path,
+                file_metadata,
+                state=DownloadState(download_successful=False, errors=[str(e)], submission_id=submission_id),
             )
             raise e
 
@@ -217,7 +226,11 @@ class S3BotoDownloadWorker:
             file_key = f"{submission_id}/files/{relative_encrypted_path}"
 
             logged_state = progress_logger.get_state(local_file_path, file_metadata)
-            if logged_state and logged_state.get("download_successful"):
+            if (
+                logged_state
+                and logged_state.get("download_successful")
+                and logged_state.get("submission_id") == submission_id
+            ):
                 self.__log.info(
                     "File '%s' already downloaded (at '%s'), skipping.",
                     file_key,
@@ -226,7 +239,7 @@ class S3BotoDownloadWorker:
                 continue
 
             self.__log.info("Downloading file: '%s' -> '%s'", file_key, str(local_file_path))
-            self.download_file(local_file_path, file_key, progress_logger, file_metadata)
+            self.download_file(local_file_path, file_key, progress_logger, file_metadata, submission_id)
 
 
 class InboxSubmissionState(enum.StrEnum):
