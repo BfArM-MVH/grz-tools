@@ -17,6 +17,7 @@ from grz_common.cli.dump_config import dump_config
 from grz_common.logging import setup_cli_logging
 
 from .commands.archive import archive
+from .commands.change_request_template import change_request_template
 from .commands.clean import clean
 from .commands.consent import consent
 from .commands.db.cli import db
@@ -98,6 +99,7 @@ def build_cli():
     cli.add_command(consent)
     cli.add_command(pruefbericht)
     cli.add_command(db)
+    cli.add_command(change_request_template)
     cli.add_command(report)
     cli.add_command(dump_config)
 

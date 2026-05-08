@@ -1,3 +1,4 @@
+import base64
 import calendar
 import datetime
 import logging
@@ -33,7 +34,7 @@ from grz_pydantic_models.submission.metadata import (
     Tan,
 )
 from grz_pydantic_models.submission.metadata.v1 import Donor as MetadataDonor
-from pydantic import ConfigDict, field_serializer, field_validator
+from pydantic import ConfigDict, field_serializer, field_validator, model_validator
 from sqlalchemy import JSON, BigInteger, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -319,14 +320,43 @@ class ChangeRequestEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     TRANSFER = "Transfer"
 
 
+class RequestRawContentType(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Type/encoding of the raw (binary) content attached to a change request."""
+
+    PDF = "PDF"
+    PNG = "PNG"
+
+
+_RAW_CONTENT_MAGIC: dict[RequestRawContentType, bytes] = {
+    RequestRawContentType.PDF: b"%PDF-",
+    RequestRawContentType.PNG: b"\x89PNG\r\n\x1a\n",
+}
+
+
+_TEMPLATE_PLACEHOLDER_MARKER = "<FILL IN"
+
+
 class ChangeRequestLogBase(SQLModel):
     """
     Base model for change request logs.
-    Timestamped.
-    Can optionally have associated JSON data.
+    Timestamped. Carries the audit trail (who requested the change and when)
+    plus the request content as text and/or a binary blob. Optional ``data``
+    JSON is reserved for type-specific extras.
     """
 
     change: ChangeRequestEnum
+    # Audit fields are nullable in the schema so historical rows (predating these
+    # columns) remain valid. Required-ness for new entries is enforced at the
+    # application/CLI layer.
+    requester_name: str | None = None
+    requester_email: str | None = None
+    requested_at: datetime.date | None = None
+    request_email_content: str | None = Field(default=None, sa_column=Column(sa.Text))
+    request_raw_content: bytes | None = Field(default=None, sa_column=Column(sa.LargeBinary))
+    request_raw_content_type: RequestRawContentType | None = Field(
+        default=None,
+        sa_column=Column(Enum(RequestRawContentType, values_callable=lambda e: [x.name for x in e])),
+    )
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
@@ -341,6 +371,48 @@ class ChangeRequestLogBase(SQLModel):
     def serialize_timestamp(self, ts: datetime.datetime) -> str:
         return serialize_datetime_to_iso_z(ts)
 
+    @field_serializer("request_raw_content", when_used="json")
+    def _serialize_raw_content(self, v: bytes | None) -> str | None:
+        return None if v is None else base64.b64encode(v).decode("ascii")
+
+    @field_validator("request_raw_content", mode="before")
+    @classmethod
+    def _decode_raw_content(cls, v: Any) -> Any:
+        # Accept base64 strings (e.g. when reconstructing the payload from a model_dump
+        # round-trip during signature verification) as well as raw bytes (DB / CLI path).
+        if isinstance(v, str):
+            return base64.b64decode(v)
+        return v
+
+    @model_validator(mode="after")
+    def _reject_template_placeholders(self) -> Self:
+        for name in ("requester_name", "requester_email", "request_email_content"):
+            value = getattr(self, name)
+            if isinstance(value, str) and _TEMPLATE_PLACEHOLDER_MARKER in value:
+                raise ValueError(
+                    f"Field '{name}' still contains the template placeholder "
+                    f"'{_TEMPLATE_PLACEHOLDER_MARKER}…>'. Replace it with the actual value."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_raw_content_pair(self) -> Self:
+        # Note: "at least one of email_content / raw_content" is enforced at the CLI layer
+        # so that historical rows (with both NULL) can still be loaded from the DB.
+        if (self.request_raw_content is None) != (self.request_raw_content_type is None):
+            raise ValueError(
+                "'request_raw_content' and 'request_raw_content_type' must be set together (or both omitted)."
+            )
+        if self.request_raw_content is not None and self.request_raw_content_type is not None:
+            expected_magic = _RAW_CONTENT_MAGIC.get(self.request_raw_content_type)
+            if expected_magic is not None and not self.request_raw_content.startswith(expected_magic):
+                raise ValueError(
+                    f"request_raw_content does not start with the expected "
+                    f"{self.request_raw_content_type.value} magic bytes — file content does not "
+                    f"match the declared type."
+                )
+        return self
+
 
 class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
     """
@@ -350,12 +422,25 @@ class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
     submission_id: str
     author_name: str
 
+    def to_bytes(self) -> bytes:
+        # exclude_none keeps signatures stable across schema additions: rows signed before
+        # the audit columns existed were signed without those keys, so re-verifying them
+        # under the expanded model must also serialize without the (now-NULL) keys.
+        payload_json = self.model_dump_json(by_alias=True, exclude_none=True)
+        return payload_json.encode("utf8")
+
 
 class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPayload], table=True):
     """Change-request log table model."""
 
     __tablename__ = "submission_change_requests"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        sa.CheckConstraint(
+            "(request_raw_content IS NULL) = (request_raw_content_type IS NULL)",
+            name="chk_change_request_raw_content_type_paired",
+        ),
+        {"extend_existing": True},
+    )
 
     _payload_model_class: ClassVar = ChangeRequestLogPayload
 
@@ -859,10 +944,17 @@ class SubmissionDb:
                 session.rollback()
                 raise e
 
-    def add_change_request(
+    def add_change_request(  # noqa: PLR0913
         self,
         submission_id: str,
         change: ChangeRequestEnum,
+        *,
+        requester_name: str,
+        requester_email: str,
+        requested_at: datetime.date,
+        request_email_content: str | None = None,
+        request_raw_content: bytes | None = None,
+        request_raw_content_type: RequestRawContentType | None = None,
         data: dict | None = None,
     ) -> ChangeRequestLog:
         """
@@ -871,7 +963,13 @@ class SubmissionDb:
         Args:
             submission_id: Submission ID of the submission to register a change request for.
             change: Requested change.
-            data: Optional data to attach to the update.
+            requester_name: Full name of the requester.
+            requester_email: Email address of the requester.
+            requested_at: Date the change was requested.
+            request_email_content: Verbatim text content of the request (optional if raw content given).
+            request_raw_content: Optional binary blob (e.g. PDF bytes).
+            request_raw_content_type: Type of the binary blob; required iff request_raw_content is set.
+            data: Optional type-specific extras.
 
         Returns:
             An instance of ChangeRequestLog.
@@ -884,7 +982,16 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             change_request_log_payload = ChangeRequestLogPayload(
-                submission_id=submission_id, author_name=self._author.name, change=change, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                change=change,
+                requester_name=requester_name,
+                requester_email=requester_email,
+                requested_at=requested_at,
+                request_email_content=request_email_content,
+                request_raw_content=request_raw_content,
+                request_raw_content_type=request_raw_content_type,
+                data=data,
             )
             signature = change_request_log_payload.sign(self._author.private_key())
 

@@ -19,6 +19,7 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
+import yaml
 from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
@@ -32,8 +33,10 @@ from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
+    ChangeRequestLogBase,
     DetailedQCResult,
     FieldDiff,
+    RequestRawContentType,
     Submission,
     SubmissionDb,
     SubmissionDiffCollection,
@@ -51,10 +54,11 @@ from grz_pydantic_models.submission.metadata import (
     SequenceSubtype,
     SequenceType,
 )
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from ...models.config import DbConfig, ListConfig
 from .. import limit
+from ..change_request_template import render_yaml_template
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
@@ -393,14 +397,13 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
 def _build_submission_dict_from(
     log_obj: SubmissionStateLog | ChangeRequestLog | None,
     submission: Submission,
-    signature_status: SignatureStatus,
+    signature_status: SignatureStatus = SignatureStatus.UNKNOWN,
 ) -> dict[str, Any]:
     """Serialize a submission and its latest log entry to a JSON-compatible dict.
 
     :param log_obj: The most recent :class:`~grz_db.models.submission.SubmissionStateLog` or
         :class:`~grz_db.models.submission.ChangeRequestLog`, or ``None`` if no log exists yet.
     :param submission: The submission ORM/Pydantic model instance.
-    :param signature_status: Verification result for the log entry's author signature.
     :returns: A dictionary suitable for JSON serialisation that contains the submission identifiers
         and either a ``latest_state`` or ``latest_change_request`` key depending on *log_obj*.
     :raises TypeError: If *log_obj* is neither ``None`` nor one of the two expected log types.
@@ -825,30 +828,201 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, co
             db_service.add_detailed_qc_result(result)
 
 
+_COLUMNAR_KEYS = {"requester_name", "requester_email", "requested_at", "request_email_content"}
+
+_RAW_CONTENT_TYPE_BY_SUFFIX: dict[str, RequestRawContentType] = {
+    ".pdf": RequestRawContentType.PDF,
+    ".png": RequestRawContentType.PNG,
+}
+
+
+def _load_change_request_input(data_json: str | None, data_file: Path | None) -> dict | None:
+    """Resolve the raw change-request input dict from inline JSON or a JSON/YAML file."""
+    if data_json is not None and data_file is not None:
+        console_err.print("[red]Error: --data and --data-file are mutually exclusive.[/red]")
+        raise click.Abort()
+    if data_json is not None:
+        try:
+            return json.loads(data_json)
+        except json.JSONDecodeError as e:
+            console_err.print(f"[red]Error: Invalid JSON string for --data: {e}[/red]")
+            raise click.Abort() from e
+    if data_file is None:
+        return None
+    suffix = data_file.suffix.lower()
+    text = data_file.read_text()
+    try:
+        if suffix in (".yaml", ".yml"):
+            raw = yaml.safe_load(text)
+        elif suffix == ".json":
+            raw = json.loads(text)
+        else:
+            console_err.print(
+                f"[red]Error: Unsupported --data-file extension '{suffix}'. Use .json, .yaml, or .yml.[/red]"
+            )
+            raise click.Abort()
+    except (json.JSONDecodeError, yaml.YAMLError) as e:
+        console_err.print(f"[red]Error: Failed to parse '{data_file}': {e}[/red]")
+        raise click.Abort() from e
+    if not isinstance(raw, dict):
+        console_err.print(f"[red]Error: '{data_file}' must contain a mapping/object at the top level.[/red]")
+        raise click.Abort()
+    return raw
+
+
+def _read_raw_content(path: Path | None) -> tuple[bytes | None, RequestRawContentType | None]:
+    """Read the optional binary attachment and infer its type from the file extension."""
+    if path is None:
+        return None, None
+    content_type = _RAW_CONTENT_TYPE_BY_SUFFIX.get(path.suffix.lower())
+    if content_type is None:
+        console_err.print(
+            f"[red]Error: cannot infer raw-content type from extension '{path.suffix}'. "
+            f"Supported extensions: {', '.join(sorted(_RAW_CONTENT_TYPE_BY_SUFFIX))}.[/red]"
+        )
+        raise click.Abort()
+    return path.read_bytes(), content_type
+
+
+def _build_change_request_kwargs(
+    raw_input: dict | None,
+    raw_content_bytes: bytes | None,
+    raw_content_type: RequestRawContentType | None,
+    change: ChangeRequestEnum,
+) -> dict:
+    """Split loaded input dict into columnar fields + nested ``data`` extras and validate.
+
+    Required-ness for new entries is enforced here (the schema permits NULL so that
+    historical rows pre-dating the audit columns can still be loaded).
+    """
+    raw_input = dict(raw_input or {})
+    nested_extras = raw_input.pop("data", None)
+    unknown_keys = {k: v for k, v in raw_input.items() if k not in _COLUMNAR_KEYS}
+    extras = nested_extras if nested_extras else (unknown_keys or None)
+
+    kwargs = {
+        "requester_name": raw_input.get("requester_name"),
+        "requester_email": raw_input.get("requester_email"),
+        "requested_at": raw_input.get("requested_at"),
+        "request_email_content": raw_input.get("request_email_content"),
+        "request_raw_content": raw_content_bytes,
+        "request_raw_content_type": raw_content_type,
+        "data": extras,
+    }
+
+    missing = [k for k in ("requester_name", "requester_email", "requested_at") if not kwargs[k]]
+    if missing:
+        console_err.print(f"[red]Error: missing required field(s) for new change request: {', '.join(missing)}.[/red]")
+        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
+        click.echo(render_yaml_template(change), err=True)
+        raise click.Abort()
+    if kwargs["request_email_content"] is None and kwargs["request_raw_content"] is None:
+        console_err.print(
+            "[red]Error: provide either 'request_email_content' (in --data/--data-file) or "
+            "--raw-content (or both).[/red]"
+        )
+        raise click.Abort()
+
+    try:
+        ChangeRequestLogBase(change=change, **kwargs)
+    except ValidationError as e:
+        console_err.print(f"[red]Error: data failed validation for change type '{change.value}':[/red]")
+        click.echo(str(e), err=True)
+        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
+        click.echo(render_yaml_template(change), err=True)
+        raise click.Abort() from e
+    return kwargs
+
+
 @submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
-@click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.option("--data", "data_json", type=str, default=None, help='Inline JSON data (e.g., \'{"k":"v"}\').')
+@click.option(
+    "--data-file",
+    "data_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to a JSON or YAML file with the change-request fields (see `grzctl change-request-template`).",
+)
+@click.option(
+    "--raw-content",
+    "raw_content_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Optional path to a binary file (e.g. a .pdf or .png) accompanying the request. "
+        "Type is inferred from the file extension and verified by magic bytes."
+    ),
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Validate inputs and check the submission exists, but do not write the change request.",
+)
 @click.pass_context
-def change_request(ctx: click.Context, submission_id: str, change_str: str, data_json: str | None):
-    """Register a completed change request for the given submission. Optionally accepts additional JSON data to associate with the log entry."""
-    db = ctx.obj["db_url"]
-    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+def change_request(  # noqa: PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    change_str: str,
+    data_json: str | None,
+    data_file: Path | None,
+    raw_content_path: Path | None,
+    dry_run: bool,
+):
+    """Register a completed change request for the given submission.
+
+    The audit fields (requester name, email, requested-at, request content) are required.
+    See ``grzctl change-request-template`` for a fill-in YAML template, and
+    ``packages/grzctl/examples/demo_change_request.py`` for a runnable end-to-end
+    walkthrough including the optional ``--raw-content`` (PDF/PNG) attachment path.
+    """
     try:
         change_request_enum = ChangeRequestEnum(change_str)
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
         raise click.Abort() from e
 
-    parsed_data = None
-    if data_json:
-        try:
-            parsed_data = json.loads(data_json)
-        except json.JSONDecodeError as e:
-            console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
-            raise click.Abort() from e
+    raw_content_bytes, raw_content_type = _read_raw_content(raw_content_path)
+
+    raw_input = _load_change_request_input(data_json, data_file)
+    if raw_input is None and raw_content_bytes is None:
+        console_err.print(
+            f"[red]Error: change request '{change_request_enum.value}' requires audit data via --data or --data-file "
+            f"(and/or --raw-content).[/red]"
+        )
+        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
+        click.echo(render_yaml_template(change_request_enum), err=True)
+        raise click.Abort()
+
+    kwargs = _build_change_request_kwargs(raw_input, raw_content_bytes, raw_content_type, change_request_enum)
+
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    if dry_run:
+        existing = db_service.get_submission(submission_id)
+        if existing is None:
+            console_err.print(
+                f"[red]Dry run: submission '{submission_id}' not found. "
+                f"You might need to add it first: grz-cli db submission add {submission_id}[/red]"
+            )
+            raise click.Abort()
+        console_err.print(
+            f"[yellow]Dry run: would register change request '{change_request_enum.value}' "
+            f"for submission '{submission_id}'. No changes were written.[/yellow]"
+        )
+        console_err.print("[yellow]Validated fields:[/yellow]")
+        preview = {k: v for k, v in kwargs.items() if k != "request_raw_content"}
+        if kwargs["request_raw_content"] is not None:
+            preview["request_raw_content"] = f"<{len(kwargs['request_raw_content'])} bytes>"
+        click.echo(json.dumps(preview, indent=2, ensure_ascii=False, default=str), err=True)
+        return
+
     try:
-        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, parsed_data)
+        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, **kwargs)
         console_err.print(
             f"[green]Submission '{submission_id}' has undergone a change request of '{new_change_request_log.change.value}'. Log ID: {new_change_request_log.id}[/green]"
         )
