@@ -909,9 +909,7 @@ def _build_change_request_kwargs(
 
     missing = [k for k in ("requester_name", "requester_email", "requested_at") if not kwargs[k]]
     if missing:
-        console_err.print(
-            f"[red]Error: missing required field(s) for new change request: {', '.join(missing)}.[/red]"
-        )
+        console_err.print(f"[red]Error: missing required field(s) for new change request: {', '.join(missing)}.[/red]")
         console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
         click.echo(render_yaml_template(change), err=True)
         raise click.Abort()
@@ -1038,8 +1036,6 @@ def change_request(  # noqa: PLR0913
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-
-
 @submission.command("show")
 @click.argument("submission_id", type=str)
 @output_json
@@ -1060,9 +1056,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         submission_dict["states"] = []
 
         for state_log in sorted(submission.states, key=lambda s: s.timestamp):
-            _, verifying_key_comment = _verify_signature(
-                ctx.obj["public_keys"], state_log.author_name, state_log
-            )
+            _, verifying_key_comment = _verify_signature(ctx.obj["public_keys"], state_log.author_name, state_log)
             state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
             state_dict["data_steward"] = state_log.author_name
             state_dict["signature_key_comment"] = verifying_key_comment

@@ -586,9 +586,7 @@ def _add_submission(runner: click.testing.CliRunner, cli, args_common: list, sub
     assert result.exit_code == 0, result.stderr
 
 
-def test_change_request_delete_succeeds_with_yaml_data_file(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_delete_succeeds_with_yaml_data_file(blank_database_config_path: Path, tmp_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
@@ -709,18 +707,14 @@ def test_change_request_delete_fails_without_data(blank_database_config_path: Pa
     cli = grzctl.cli.build_cli()
     _add_submission(runner, cli, args_common, submission_id)
 
-    result = runner.invoke(
-        cli, [*args_common, "submission", "change-request", submission_id, "Delete"]
-    )
+    result = runner.invoke(cli, [*args_common, "submission", "change-request", submission_id, "Delete"])
     assert result.exit_code != 0
     assert "requires audit data" in result.stderr
     assert "requester_name" in result.stderr
     assert "request_email_content" in result.stderr
 
 
-def test_change_request_delete_fails_with_missing_field(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_delete_fails_with_missing_field(blank_database_config_path: Path, tmp_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
@@ -747,9 +741,7 @@ def test_change_request_delete_fails_with_missing_field(
     assert "requester_email" in result.stderr
 
 
-def test_change_request_delete_accepts_and_persists_extra_field(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_delete_accepts_and_persists_extra_field(blank_database_config_path: Path, tmp_path: Path):
     """Extras are allowed alongside the required schema fields and stored verbatim."""
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
@@ -783,9 +775,7 @@ def test_change_request_delete_accepts_and_persists_extra_field(
     assert persisted.data == {"internal_note": "received fax 2026-04-30"}
 
 
-def test_change_request_data_and_data_file_mutually_exclusive(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_data_and_data_file_mutually_exclusive(blank_database_config_path: Path, tmp_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
@@ -864,9 +854,7 @@ def test_unmodified_template_fails_validation(blank_database_config_path: Path, 
     assert "requested_at" in result.stderr
 
 
-def test_template_with_only_date_filled_in_still_fails(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_template_with_only_date_filled_in_still_fails(blank_database_config_path: Path, tmp_path: Path):
     """If the user fills in only the date but leaves text placeholders, validation must still fail."""
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
@@ -940,9 +928,7 @@ def test_change_request_dry_run_does_not_write(blank_database_config_path: Path,
     assert submissions_with_changes == []
 
 
-def test_change_request_dry_run_aborts_when_submission_missing(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_dry_run_aborts_when_submission_missing(blank_database_config_path: Path, tmp_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -966,9 +952,7 @@ def test_change_request_dry_run_aborts_when_submission_missing(
     assert "not found" in result.stderr
 
 
-def test_change_request_dry_run_validates_before_db_check(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_dry_run_validates_before_db_check(blank_database_config_path: Path, tmp_path: Path):
     """Schema validation runs first; missing fields fail even with --dry-run."""
     args_common = ["db", "--config-file", blank_database_config_path]
     runner = click.testing.CliRunner()
@@ -1061,9 +1045,7 @@ def test_change_request_with_raw_content_pdf(blank_database_config_path: Path, t
     assert persisted.request_raw_content_type.value == "PDF"
 
 
-def test_change_request_raw_content_unknown_extension_fails(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_raw_content_unknown_extension_fails(blank_database_config_path: Path, tmp_path: Path):
     """An unknown extension must fail with a clear error since type is only inferred."""
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
@@ -1094,9 +1076,7 @@ def test_change_request_raw_content_unknown_extension_fails(
     assert "infer raw-content type" in result.stderr
 
 
-def test_change_request_raw_content_magic_byte_mismatch_fails(
-    blank_database_config_path: Path, tmp_path: Path
-):
+def test_change_request_raw_content_magic_byte_mismatch_fails(blank_database_config_path: Path, tmp_path: Path):
     """A file with a .pdf extension but non-PDF bytes must fail the magic-byte validator."""
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
