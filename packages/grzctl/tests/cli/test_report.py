@@ -252,7 +252,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
                     "requester_name": "Test Requester",
                     "requester_email": "requester@example.com",
                     "requested_at": "2025-09-01",
-                    "requester_email_content": "Please delete this submission.",
+                    "request_email_content": "Please delete this submission.",
                 }
             ),
         ],
