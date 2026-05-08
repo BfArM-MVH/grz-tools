@@ -309,9 +309,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                 )
 
             if output_json:
-                submission_dict = _build_submission_dict_from(
-                    latest_change_request_obj, submission, signature_status
-                )
+                submission_dict = _build_submission_dict_from(latest_change_request_obj, submission, signature_status)
                 submission_dicts.append(submission_dict)
             else:
                 table.add_row(
