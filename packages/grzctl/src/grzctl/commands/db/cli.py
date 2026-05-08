@@ -249,7 +249,7 @@ def list_submissions(
             )
 
         if output_json:
-            submission_dict = _build_submission_dict_from(latest_state_obj, submission)
+            submission_dict = _build_submission_dict_from(latest_state_obj, submission, signature_status)
             submission_dicts.append(submission_dict)
         else:
             table.add_row(
@@ -309,7 +309,9 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                 )
 
             if output_json:
-                submission_dict = _build_submission_dict_from(latest_change_request_obj, submission)
+                submission_dict = _build_submission_dict_from(
+                    latest_change_request_obj, submission, signature_status
+                )
                 submission_dicts.append(submission_dict)
             else:
                 table.add_row(
@@ -397,6 +399,7 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
 def _build_submission_dict_from(
     log_obj: SubmissionStateLog | ChangeRequestLog | None,
     submission: Submission,
+    signature_status: SignatureStatus = SignatureStatus.UNKNOWN,
 ) -> dict[str, Any]:
     """Serialize a submission and its latest log entry to a JSON-compatible dict.
 
@@ -420,6 +423,7 @@ def _build_submission_dict_from(
                 "timestamp": log_obj.timestamp.isoformat(),
                 "data": log_obj.data,
                 "data_steward": log_obj.author_name,
+                "data_steward_signature": signature_status,
                 "state": log_obj.state.value,
             }
         elif isinstance(log_obj, ChangeRequestLog):
@@ -428,6 +432,7 @@ def _build_submission_dict_from(
                 "timestamp": log_obj.timestamp.isoformat(),
                 "data": log_obj.data,
                 "data_steward": log_obj.author_name,
+                "data_steward_signature": signature_status,
                 "change": log_obj.change.value,
             }
         else:
@@ -1056,9 +1061,12 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         submission_dict["states"] = []
 
         for state_log in sorted(submission.states, key=lambda s: s.timestamp):
-            _, verifying_key_comment = _verify_signature(ctx.obj["public_keys"], state_log.author_name, state_log)
+            signature_status, verifying_key_comment = _verify_signature(
+                ctx.obj["public_keys"], state_log.author_name, state_log
+            )
             state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
             state_dict["data_steward"] = state_log.author_name
+            state_dict["data_steward_signature"] = signature_status
             state_dict["signature_key_comment"] = verifying_key_comment
             submission_dict["states"].append(state_dict)
 
