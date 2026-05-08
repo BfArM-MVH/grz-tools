@@ -345,9 +345,12 @@ class ChangeRequestLogBase(SQLModel):
     """
 
     change: ChangeRequestEnum
-    requester_name: str
-    requester_email: str
-    requested_at: datetime.date
+    # Audit fields are nullable in the schema so historical rows (predating these
+    # columns) remain valid. Required-ness for new entries is enforced at the
+    # application/CLI layer.
+    requester_name: str | None = None
+    requester_email: str | None = None
+    requested_at: datetime.date | None = None
     request_email_content: str | None = Field(default=None, sa_column=Column(sa.Text))
     request_raw_content: bytes | None = Field(default=None, sa_column=Column(sa.LargeBinary))
     request_raw_content_type: RequestRawContentType | None = Field(
@@ -393,11 +396,9 @@ class ChangeRequestLogBase(SQLModel):
         return self
 
     @model_validator(mode="after")
-    def _check_content_pair(self) -> Self:
-        if self.request_email_content is None and self.request_raw_content is None:
-            raise ValueError(
-                "At least one of 'request_email_content' or 'request_raw_content' must be provided."
-            )
+    def _check_raw_content_pair(self) -> Self:
+        # Note: "at least one of email_content / raw_content" is enforced at the CLI layer
+        # so that historical rows (with both NULL) can still be loaded from the DB.
         if (self.request_raw_content is None) != (self.request_raw_content_type is None):
             raise ValueError(
                 "'request_raw_content' and 'request_raw_content_type' must be set together (or both omitted)."
@@ -421,16 +422,19 @@ class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
     submission_id: str
     author_name: str
 
+    def to_bytes(self) -> bytes:
+        # exclude_none keeps signatures stable across schema additions: rows signed before
+        # the audit columns existed were signed without those keys, so re-verifying them
+        # under the expanded model must also serialize without the (now-NULL) keys.
+        payload_json = self.model_dump_json(by_alias=True, exclude_none=True)
+        return payload_json.encode("utf8")
+
 
 class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPayload], table=True):
     """Change-request log table model."""
 
     __tablename__ = "submission_change_requests"
     __table_args__ = (
-        sa.CheckConstraint(
-            "request_email_content IS NOT NULL OR request_raw_content IS NOT NULL",
-            name="chk_change_request_content_present",
-        ),
         sa.CheckConstraint(
             "(request_raw_content IS NULL) = (request_raw_content_type IS NULL)",
             name="chk_change_request_raw_content_type_paired",

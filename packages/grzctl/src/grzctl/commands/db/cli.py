@@ -887,7 +887,11 @@ def _build_change_request_kwargs(
     raw_content_type: RequestRawContentType | None,
     change: ChangeRequestEnum,
 ) -> dict:
-    """Split loaded input dict into columnar fields + nested ``data`` extras and Pydantic-validate."""
+    """Split loaded input dict into columnar fields + nested ``data`` extras and validate.
+
+    Required-ness for new entries is enforced here (the schema permits NULL so that
+    historical rows pre-dating the audit columns can still be loaded).
+    """
     raw_input = dict(raw_input or {})
     nested_extras = raw_input.pop("data", None)
     unknown_keys = {k: v for k, v in raw_input.items() if k not in _COLUMNAR_KEYS}
@@ -902,6 +906,22 @@ def _build_change_request_kwargs(
         "request_raw_content_type": raw_content_type,
         "data": extras,
     }
+
+    missing = [k for k in ("requester_name", "requester_email", "requested_at") if not kwargs[k]]
+    if missing:
+        console_err.print(
+            f"[red]Error: missing required field(s) for new change request: {', '.join(missing)}.[/red]"
+        )
+        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
+        click.echo(render_yaml_template(change), err=True)
+        raise click.Abort()
+    if kwargs["request_email_content"] is None and kwargs["request_raw_content"] is None:
+        console_err.print(
+            "[red]Error: provide either 'request_email_content' (in --data/--data-file) or "
+            "--raw-content (or both).[/red]"
+        )
+        raise click.Abort()
+
     try:
         ChangeRequestLogBase(change=change, **kwargs)
     except ValidationError as e:
