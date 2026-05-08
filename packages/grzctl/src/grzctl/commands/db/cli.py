@@ -58,6 +58,7 @@ from grz_pydantic_models.submission.metadata import (
 from pydantic import Field
 from tqdm.auto import tqdm
 
+from ... import get_versions
 from ...models.config import DbConfig, ListConfig
 from .. import limit
 from . import SignatureStatus, _verify_signature
@@ -503,7 +504,12 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             console_err.print(f"[yellow]Not modifying state of errored submission '{submission_id}'.[/yellow]")
             ctx.exit()
 
-        new_state_log = db_service.update_submission_state(submission_id, state_enum, parsed_data)
+        new_state_log = db_service.update_submission_state(
+            submission_id,
+            state_enum,
+            parsed_data,
+            grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
+        )
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
         )
@@ -758,12 +764,19 @@ class QCReportRow(StrictBaseModel):
 @click.argument("submission_id", type=str)
 @click.argument("report_csv_path", metavar="path/to/report.csv", type=grzcli.FILE_R_E)
 @click.option(
+    "--qc-workflow-version",
+    type=str,
+    required=True,
+    envvar="GRZCTL_QC_WORKFLOW_VERSION",
+    help="QC workflow version to store with detailed QC results. Can also be provided via GRZCTL_QC_WORKFLOW_VERSION.",
+)
+@click.option(
     "--confirm/--no-confirm",
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
 @click.pass_context
-def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, confirm: bool):
+def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, qc_workflow_version: str, confirm: bool):
     """Populate the submission database from a detailed QC pipeline report."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -800,6 +813,7 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, co
                 targeted_regions_above_min_coverage_passed_qc=report.targeted_regions_above_min_coverage_qc_status
                 == QCStatus.PASS,
                 targeted_regions_above_min_coverage_percent_deviation=report.targeted_regions_above_min_coverage_deviation,
+                qc_workflow_version=qc_workflow_version,
             )
         )
     table = rich.table.Table(
@@ -900,7 +914,9 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
             signature_status, verifying_key_comment = _verify_signature(
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
-            state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
+            state_dict = state_log.model_dump(
+                mode="json", include={"id", "timestamp", "state", "data", "grzctl_versions"}
+            )
             state_dict["data_steward"] = state_log.author_name
             state_dict["data_steward_signature"] = signature_status
             state_dict["signature_key_comment"] = verifying_key_comment
@@ -936,11 +952,12 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
 
     renderables: list[rich.console.RenderableType] = [rich.padding.Padding(attribute_table, (1, 0))]
     if submission.states:
-        state_table = rich.table.Table(title="State History")
+        state_table = rich.table.Table(title="State History", show_header=True)
         state_table.add_column("Log ID", style="dim", width=12)
         state_table.add_column("Timestamp (UTC)", style="yellow")
         state_table.add_column("State", style="green")
         state_table.add_column("Data", style="cyan", overflow="ellipsis")
+        state_table.add_column("Dependency Versions", style="blue")
         state_table.add_column("Data Steward", style="magenta")
         state_table.add_column("Signature Status")
 
@@ -960,6 +977,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 state_log.timestamp.isoformat(),
                 state_str,
                 data_str,
+                json.dumps(state_log.grzctl_versions) if state_log.grzctl_versions else _TEXT_MISSING,
                 data_steward_str,
                 signature_status_str,
             )

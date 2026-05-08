@@ -8,6 +8,7 @@ from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
 
+from . import get_versions
 from .commands.db.cli import get_submission_db_instance
 from .models.config import DbConfig
 
@@ -80,6 +81,12 @@ class DbContext:
         self.db: SubmissionDb | None = None
 
     @cached_property
+    def grzctl_versions(self) -> dict[str, str]:
+        """Get version information."""
+        versions = get_versions()
+        return {k: v or "unknown" for k, v in versions.items()}
+
+    @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
         # determine expected prior state based on order of enums
         members = list(SubmissionStateEnum)
@@ -106,7 +113,7 @@ class DbContext:
             self._check_prerequisites()
 
             log.debug(f"Updating submission {self.submission_id} state to {self.start_state.name}")
-            self.db.update_submission_state(self.submission_id, self.start_state)
+            self.db.update_submission_state(self.submission_id, self.start_state, grzctl_versions=self.grzctl_versions)
 
         except SubmissionNotFoundError:
             raise
@@ -127,7 +134,9 @@ class DbContext:
             error_state = SubmissionStateEnum.ERROR
             log.error(f"Operation failed for {self.submission_id}. Updating DB to {error_state.name}.")
             try:
-                self.db.update_submission_state(self.submission_id, error_state, data={"error": error_message})
+                self.db.update_submission_state(
+                    self.submission_id, error_state, data={"error": error_message}, grzctl_versions=self.grzctl_versions
+                )
             except Exception as db_exc:
                 log.error(f"Failed to write error state to DB: {db_exc}")
 
@@ -136,7 +145,9 @@ class DbContext:
         else:
             log.info(f"Operation successful. Updating DB to {self.end_state.name}.")
             try:
-                self.db.update_submission_state(self.submission_id, self.end_state)
+                self.db.update_submission_state(
+                    self.submission_id, self.end_state, grzctl_versions=self.grzctl_versions
+                )
             except Exception as db_exc:
                 log.error(f"Failed to write success state to DB: {db_exc}")
 
