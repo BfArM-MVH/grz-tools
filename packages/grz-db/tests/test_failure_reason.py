@@ -46,7 +46,7 @@ class TestFailureReasonEnum:
     def test_case_insensitive_lookup(self):
         assert FailureReasonEnum("decryption_error") == FailureReasonEnum.DECRYPTION_ERROR
         assert FailureReasonEnum("DECRYPTION_ERROR") == FailureReasonEnum.DECRYPTION_ERROR
-        assert FailureReasonEnum("Decryption_Error") == FailureReasonEnum.DECRYPTION_ERRORROR
+        assert FailureReasonEnum("Decryption_Error") == FailureReasonEnum.DECRYPTION_ERROR
 
     def test_invalid_value_raises(self):
         with pytest.raises(ValueError):

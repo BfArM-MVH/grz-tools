@@ -238,7 +238,7 @@ class Worker:
                 recipient_private_key_path=recipient_private_key_path,
             )
         except Exception as e:
-            raise DecryptionError(...) from e
+            raise DecryptionError(str(e)) from e
 
         return submission
 
@@ -280,7 +280,7 @@ class Worker:
         try:
             upload_worker.upload(encrypted_submission)
         except Exception as e:
-            raise UploadError(...) from e
+            raise UploadError(str(e)) from e
 
         return encrypted_submission.submission_id
 
