@@ -85,7 +85,7 @@ def _run(runner: click.testing.CliRunner, cli, args: list[str]) -> click.testing
     return result
 
 
-def main() -> int:
+def main() -> int:  # noqa: PLR0915
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
         "--keep",
