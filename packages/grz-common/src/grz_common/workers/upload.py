@@ -202,7 +202,7 @@ class S3BotoUploadWorker(UploadWorker):
                     raise e
             else:
                 self.__log.info(
-                    "File '%s' already uploaded for submission'%s' (at '%s')",
+                    "File '%s' already uploaded for submission '%s' (at '%s')",
                     str(file_path),
                     encrypted_submission.submission_id,
                     str(s3_object_id),

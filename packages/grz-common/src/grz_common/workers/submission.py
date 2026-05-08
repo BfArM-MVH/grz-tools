@@ -457,11 +457,15 @@ class Submission:
                         checksum_issues.append("File not found for size check.")
 
                     checksum_passed = not checksum_issues
-                    checksum_state = ValidationState(errors=checksum_issues, validation_passed=checksum_passed)
+                    checksum_state = ValidationState(
+                        errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
+                    )
                     checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
 
                     if file_metadata.file_type in ("fastq", "bam"):
-                        seq_data_state = ValidationState(errors=report.errors, validation_passed=report.is_valid)
+                        seq_data_state = ValidationState(
+                            errors=report.errors, validation_passed=report.is_valid, submission_id=self.submission_id
+                        )
                         seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
 
                 if not no_mmap:
@@ -716,6 +720,7 @@ class EncryptedSubmission:
             if (
                 (logged_state is None)
                 or not logged_state.get("decryption_successful", False)
+                or logged_state.get("submission_id") != self.submission_id
                 or not decrypted_file_path.is_file()
             ):
                 self.__log.info(
@@ -731,7 +736,7 @@ class EncryptedSubmission:
                     progress_logger.set_state(
                         encrypted_file_path,
                         file_metadata,
-                        state=DecryptionState(decryption_successful=True),
+                        state=DecryptionState(decryption_successful=True, submission_id=self.submission_id),
                     )
                 except Exception as e:
                     self.__log.error("Decryption failed for '%s'", str(encrypted_file_path))
@@ -739,7 +744,9 @@ class EncryptedSubmission:
                     progress_logger.set_state(
                         encrypted_file_path,
                         file_metadata,
-                        state=DecryptionState(decryption_successful=False, errors=[str(e)]),
+                        state=DecryptionState(
+                            decryption_successful=False, errors=[str(e)], submission_id=self.submission_id
+                        ),
                     )
 
                     raise e
