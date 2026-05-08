@@ -31,11 +31,12 @@ from grz_db.errors import (
 )
 from grz_db.models.author import Author
 from grz_db.models.submission import (
-    CHANGE_REQUEST_DATA_SCHEMAS,
     ChangeRequestEnum,
     ChangeRequestLog,
+    ChangeRequestLogBase,
     DetailedQCResult,
     FieldDiff,
+    RequestRawContentType,
     Submission,
     SubmissionDb,
     SubmissionDiffCollection,
@@ -824,8 +825,16 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, co
             db_service.add_detailed_qc_result(result)
 
 
-def _load_change_request_data(data_json: str | None, data_file: Path | None) -> dict | None:
-    """Resolve the raw change-request data dict from inline JSON or a JSON/YAML file."""
+_COLUMNAR_KEYS = {"requester_name", "requester_email", "requested_at", "request_email_content"}
+
+_RAW_CONTENT_TYPE_BY_SUFFIX: dict[str, RequestRawContentType] = {
+    ".pdf": RequestRawContentType.PDF,
+    ".png": RequestRawContentType.PNG,
+}
+
+
+def _load_change_request_input(data_json: str | None, data_file: Path | None) -> dict | None:
+    """Resolve the raw change-request input dict from inline JSON or a JSON/YAML file."""
     if data_json is not None and data_file is not None:
         console_err.print("[red]Error: --data and --data-file are mutually exclusive.[/red]")
         raise click.Abort()
@@ -858,30 +867,50 @@ def _load_change_request_data(data_json: str | None, data_file: Path | None) -> 
     return raw
 
 
-def _validate_change_request_data(
-    schema_cls: type | None,
-    raw_data: dict | None,
-    change_value: str,
-) -> dict | None:
-    """Validate raw data against the schema for the change type, printing the template on error."""
-    if schema_cls is None:
-        return raw_data
-    if raw_data is None:
+def _read_raw_content(path: Path | None) -> tuple[bytes | None, RequestRawContentType | None]:
+    """Read the optional binary attachment and infer its type from the file extension."""
+    if path is None:
+        return None, None
+    content_type = _RAW_CONTENT_TYPE_BY_SUFFIX.get(path.suffix.lower())
+    if content_type is None:
         console_err.print(
-            f"[red]Error: change type '{change_value}' requires data via --data or --data-file.[/red]"
+            f"[red]Error: cannot infer raw-content type from extension '{path.suffix}'. "
+            f"Supported extensions: {', '.join(sorted(_RAW_CONTENT_TYPE_BY_SUFFIX))}.[/red]"
         )
-        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
-        click.echo(render_yaml_template(schema_cls), err=True)
         raise click.Abort()
+    return path.read_bytes(), content_type
+
+
+def _build_change_request_kwargs(
+    raw_input: dict | None,
+    raw_content_bytes: bytes | None,
+    raw_content_type: RequestRawContentType | None,
+    change: ChangeRequestEnum,
+) -> dict:
+    """Split loaded input dict into columnar fields + nested ``data`` extras and Pydantic-validate."""
+    raw_input = dict(raw_input or {})
+    nested_extras = raw_input.pop("data", None)
+    unknown_keys = {k: v for k, v in raw_input.items() if k not in _COLUMNAR_KEYS}
+    extras = nested_extras if nested_extras else (unknown_keys or None)
+
+    kwargs = {
+        "requester_name": raw_input.get("requester_name"),
+        "requester_email": raw_input.get("requester_email"),
+        "requested_at": raw_input.get("requested_at"),
+        "request_email_content": raw_input.get("request_email_content"),
+        "request_raw_content": raw_content_bytes,
+        "request_raw_content_type": raw_content_type,
+        "data": extras,
+    }
     try:
-        validated = schema_cls.model_validate(raw_data)
+        ChangeRequestLogBase(change=change, **kwargs)
     except ValidationError as e:
-        console_err.print(f"[red]Error: data failed validation for change type '{change_value}':[/red]")
+        console_err.print(f"[red]Error: data failed validation for change type '{change.value}':[/red]")
         click.echo(str(e), err=True)
         console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
-        click.echo(render_yaml_template(schema_cls), err=True)
+        click.echo(render_yaml_template(change), err=True)
         raise click.Abort() from e
-    return validated.model_dump(mode="json")
+    return kwargs
 
 
 @submission.command()
@@ -893,7 +922,17 @@ def _validate_change_request_data(
     "data_file",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Path to a JSON or YAML file with the change-request data (recommended for multi-line content).",
+    help="Path to a JSON or YAML file with the change-request fields (see `grzctl change-request-template`).",
+)
+@click.option(
+    "--raw-content",
+    "raw_content_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Optional path to a binary file (e.g. a .pdf or .png) accompanying the request. "
+        "Type is inferred from the file extension and verified by magic bytes."
+    ),
 )
 @click.option(
     "--dry-run",
@@ -909,12 +948,15 @@ def change_request(  # noqa: PLR0913
     change_str: str,
     data_json: str | None,
     data_file: Path | None,
+    raw_content_path: Path | None,
     dry_run: bool,
 ):
     """Register a completed change request for the given submission.
 
-    For change types with a registered data schema (e.g. DELETE), data is required and validated.
-    See ``grzctl change-request-template`` for a fill-in template.
+    The audit fields (requester name, email, requested-at, request content) are required.
+    See ``grzctl change-request-template`` for a fill-in YAML template, and
+    ``packages/grzctl/examples/demo_change_request.py`` for a runnable end-to-end
+    walkthrough including the optional ``--raw-content`` (PDF/PNG) attachment path.
     """
     try:
         change_request_enum = ChangeRequestEnum(change_str)
@@ -922,9 +964,19 @@ def change_request(  # noqa: PLR0913
         console_err.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
         raise click.Abort() from e
 
-    schema_cls = CHANGE_REQUEST_DATA_SCHEMAS.get(change_request_enum)
-    raw_data = _load_change_request_data(data_json, data_file)
-    parsed_data = _validate_change_request_data(schema_cls, raw_data, change_request_enum.value)
+    raw_content_bytes, raw_content_type = _read_raw_content(raw_content_path)
+
+    raw_input = _load_change_request_input(data_json, data_file)
+    if raw_input is None and raw_content_bytes is None:
+        console_err.print(
+            f"[red]Error: change request '{change_request_enum.value}' requires audit data via --data or --data-file "
+            f"(and/or --raw-content).[/red]"
+        )
+        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
+        click.echo(render_yaml_template(change_request_enum), err=True)
+        raise click.Abort()
+
+    kwargs = _build_change_request_kwargs(raw_input, raw_content_bytes, raw_content_type, change_request_enum)
 
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -941,13 +993,15 @@ def change_request(  # noqa: PLR0913
             f"[yellow]Dry run: would register change request '{change_request_enum.value}' "
             f"for submission '{submission_id}'. No changes were written.[/yellow]"
         )
-        if parsed_data is not None:
-            console_err.print("[yellow]Validated data:[/yellow]")
-            click.echo(json.dumps(parsed_data, indent=2, ensure_ascii=False), err=True)
+        console_err.print("[yellow]Validated fields:[/yellow]")
+        preview = {k: v for k, v in kwargs.items() if k != "request_raw_content"}
+        if kwargs["request_raw_content"] is not None:
+            preview["request_raw_content"] = f"<{len(kwargs['request_raw_content'])} bytes>"
+        click.echo(json.dumps(preview, indent=2, ensure_ascii=False, default=str), err=True)
         return
 
     try:
-        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, parsed_data)
+        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, **kwargs)
         console_err.print(
             f"[green]Submission '{submission_id}' has undergone a change request of '{new_change_request_log.change.value}'. Log ID: {new_change_request_log.id}[/green]"
         )

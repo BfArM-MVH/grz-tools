@@ -1,3 +1,4 @@
+import base64
 import calendar
 import datetime
 import logging
@@ -33,7 +34,7 @@ from grz_pydantic_models.submission.metadata import (
     Tan,
 )
 from grz_pydantic_models.submission.metadata.v1 import Donor as MetadataDonor
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
+from pydantic import ConfigDict, field_serializer, field_validator, model_validator
 from sqlalchemy import JSON, BigInteger, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -319,14 +320,40 @@ class ChangeRequestEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     TRANSFER = "Transfer"
 
 
+class RequestRawContentType(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Type/encoding of the raw (binary) content attached to a change request."""
+
+    PDF = "PDF"
+    PNG = "PNG"
+
+
+_RAW_CONTENT_MAGIC: dict[RequestRawContentType, bytes] = {
+    RequestRawContentType.PDF: b"%PDF-",
+    RequestRawContentType.PNG: b"\x89PNG\r\n\x1a\n",
+}
+
+
+_TEMPLATE_PLACEHOLDER_MARKER = "<FILL IN"
+
+
 class ChangeRequestLogBase(SQLModel):
     """
     Base model for change request logs.
-    Timestamped.
-    Can optionally have associated JSON data.
+    Timestamped. Carries the audit trail (who requested the change and when)
+    plus the request content as text and/or a binary blob. Optional ``data``
+    JSON is reserved for type-specific extras.
     """
 
     change: ChangeRequestEnum
+    requester_name: str
+    requester_email: str
+    requested_at: datetime.date
+    request_email_content: str | None = Field(default=None, sa_column=Column(sa.Text))
+    request_raw_content: bytes | None = Field(default=None, sa_column=Column(sa.LargeBinary))
+    request_raw_content_type: RequestRawContentType | None = Field(
+        default=None,
+        sa_column=Column(Enum(RequestRawContentType, values_callable=lambda e: [x.name for x in e])),
+    )
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
@@ -340,6 +367,50 @@ class ChangeRequestLogBase(SQLModel):
     @field_serializer("timestamp")
     def serialize_timestamp(self, ts: datetime.datetime) -> str:
         return serialize_datetime_to_iso_z(ts)
+
+    @field_serializer("request_raw_content", when_used="json")
+    def _serialize_raw_content(self, v: bytes | None) -> str | None:
+        return None if v is None else base64.b64encode(v).decode("ascii")
+
+    @field_validator("request_raw_content", mode="before")
+    @classmethod
+    def _decode_raw_content(cls, v: Any) -> Any:
+        # Accept base64 strings (e.g. when reconstructing the payload from a model_dump
+        # round-trip during signature verification) as well as raw bytes (DB / CLI path).
+        if isinstance(v, str):
+            return base64.b64decode(v)
+        return v
+
+    @model_validator(mode="after")
+    def _reject_template_placeholders(self) -> Self:
+        for name in ("requester_name", "requester_email", "request_email_content"):
+            value = getattr(self, name)
+            if isinstance(value, str) and _TEMPLATE_PLACEHOLDER_MARKER in value:
+                raise ValueError(
+                    f"Field '{name}' still contains the template placeholder "
+                    f"'{_TEMPLATE_PLACEHOLDER_MARKER}…>'. Replace it with the actual value."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_content_pair(self) -> Self:
+        if self.request_email_content is None and self.request_raw_content is None:
+            raise ValueError(
+                "At least one of 'request_email_content' or 'request_raw_content' must be provided."
+            )
+        if (self.request_raw_content is None) != (self.request_raw_content_type is None):
+            raise ValueError(
+                "'request_raw_content' and 'request_raw_content_type' must be set together (or both omitted)."
+            )
+        if self.request_raw_content is not None and self.request_raw_content_type is not None:
+            expected_magic = _RAW_CONTENT_MAGIC.get(self.request_raw_content_type)
+            if expected_magic is not None and not self.request_raw_content.startswith(expected_magic):
+                raise ValueError(
+                    f"request_raw_content does not start with the expected "
+                    f"{self.request_raw_content_type.value} magic bytes — file content does not "
+                    f"match the declared type."
+                )
+        return self
 
 
 class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
@@ -355,7 +426,17 @@ class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPaylo
     """Change-request log table model."""
 
     __tablename__ = "submission_change_requests"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        sa.CheckConstraint(
+            "request_email_content IS NOT NULL OR request_raw_content IS NOT NULL",
+            name="chk_change_request_content_present",
+        ),
+        sa.CheckConstraint(
+            "(request_raw_content IS NULL) = (request_raw_content_type IS NULL)",
+            name="chk_change_request_raw_content_type_paired",
+        ),
+        {"extend_existing": True},
+    )
 
     _payload_model_class: ClassVar = ChangeRequestLogPayload
 
@@ -374,41 +455,6 @@ class ChangeRequestLogCreate(ChangeRequestLogBase):
     submission_id: str
     author_name: str
     signature: str
-
-
-_TEMPLATE_PLACEHOLDER_MARKER = "<FILL IN"
-
-
-class DeleteChangeRequestData(BaseModel):
-    """Validation schema for the ``data`` field of a DELETE change request.
-
-    Extra keys beyond the declared fields are allowed and preserved, so callers
-    can attach ad-hoc context per entry. Steward identity is captured by the
-    row's ``author_name`` and cryptographic ``signature`` and is not duplicated here.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    requester_name: str = Field(description="Full name of the person requesting deletion")
-    requester_email: str = Field(description="Email address of the requester")
-    requested_at: datetime.date = Field(description="Date the deletion was requested (YYYY-MM-DD)")
-    requester_email_content: str = Field(description="Verbatim email text from the requester")
-
-    @model_validator(mode="after")
-    def _reject_template_placeholders(self) -> Self:
-        for name in type(self).model_fields:
-            value = getattr(self, name)
-            if isinstance(value, str) and _TEMPLATE_PLACEHOLDER_MARKER in value:
-                raise ValueError(
-                    f"Field '{name}' still contains the template placeholder "
-                    f"'{_TEMPLATE_PLACEHOLDER_MARKER}…>'. Replace it with the actual value."
-                )
-        return self
-
-
-CHANGE_REQUEST_DATA_SCHEMAS: dict[ChangeRequestEnum, type[BaseModel]] = {
-    ChangeRequestEnum.DELETE: DeleteChangeRequestData,
-}
 
 
 def coerce_empty_set_to_none(value: set | None) -> set | None:
@@ -894,10 +940,17 @@ class SubmissionDb:
                 session.rollback()
                 raise e
 
-    def add_change_request(
+    def add_change_request(  # noqa: PLR0913
         self,
         submission_id: str,
         change: ChangeRequestEnum,
+        *,
+        requester_name: str,
+        requester_email: str,
+        requested_at: datetime.date,
+        request_email_content: str | None = None,
+        request_raw_content: bytes | None = None,
+        request_raw_content_type: RequestRawContentType | None = None,
         data: dict | None = None,
     ) -> ChangeRequestLog:
         """
@@ -906,7 +959,13 @@ class SubmissionDb:
         Args:
             submission_id: Submission ID of the submission to register a change request for.
             change: Requested change.
-            data: Optional data to attach to the update.
+            requester_name: Full name of the requester.
+            requester_email: Email address of the requester.
+            requested_at: Date the change was requested.
+            request_email_content: Verbatim text content of the request (optional if raw content given).
+            request_raw_content: Optional binary blob (e.g. PDF bytes).
+            request_raw_content_type: Type of the binary blob; required iff request_raw_content is set.
+            data: Optional type-specific extras.
 
         Returns:
             An instance of ChangeRequestLog.
@@ -919,7 +978,16 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             change_request_log_payload = ChangeRequestLogPayload(
-                submission_id=submission_id, author_name=self._author.name, change=change, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                change=change,
+                requester_name=requester_name,
+                requester_email=requester_email,
+                requested_at=requested_at,
+                request_email_content=request_email_content,
+                request_raw_content=request_raw_content,
+                request_raw_content_type=request_raw_content_type,
+                data=data,
             )
             signature = change_request_log_payload.sign(self._author.private_key())
 

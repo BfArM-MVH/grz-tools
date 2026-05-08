@@ -26,8 +26,11 @@ import cryptography.hazmat.primitives.serialization as cryptser
 import grzctl.cli
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from grz_db.models.submission import SubmissionDb
+from grzctl.models.config import DbConfig
 
 SUB_ID = "260840108_2026-03-27_deadbeef"
+SUB_ID_PDF = "260840108_2026-04-15_deadbeef"
 
 
 def _setup_workspace(workspace: Path) -> Path:
@@ -123,7 +126,7 @@ def main() -> int:
             "requester_name": "Erika Mustermann",
             "requester_email": "demo.requester@example.org",
             "requested_at": "2026-03-27",
-            "requester_email_content": (
+            "request_email_content": (
                 "Liebe Kolleginnen und Kollegen vom Beispielklinikum,\n"
                 f"bitte den Datensatz mit der Submission-ID {SUB_ID} löschen.\n"
                 "Vielen Dank, Erika\n"
@@ -148,8 +151,47 @@ def main() -> int:
         _step("8. Same content via --data (inline JSON) — same constraints apply")
         _run(runner, cli, [*cr_cmd, "--data", json.dumps(good_data), "--dry-run"])
 
-        _step("9. Modify is unschematized — loose pass-through still works")
-        _run(runner, cli, [*common, "submission", "change-request", SUB_ID, "Modify"])
+        _step("9. Modify also requires audit fields (universal across change types)")
+        _run(runner, cli, [*cr_cmd[:-1], "Modify", "--data-file", str(good)])
+
+        _step("10. Same flow with a binary attachment (--raw-content). Fake PDF synthesized in temp dir.")
+        fake_pdf = workspace / "delete-request.pdf"
+        # The bytes must start with %PDF- to pass the magic-byte validator.
+        fake_pdf.write_bytes(b"%PDF-1.7 (synthesized for demo) signed deletion notice from Erika ...")
+        _run(runner, cli, [*common, "submission", "add", SUB_ID_PDF])
+        cr_cmd_pdf = [*common, "submission", "change-request", SUB_ID_PDF, "Delete"]
+        _run(runner, cli, [*cr_cmd_pdf, "--data-file", str(good), "--raw-content", str(fake_pdf)])
+
+        _step("11. Resulting DB row (audit columns + binary blob)")
+        config = DbConfig.from_path(cfg)
+        db = SubmissionDb(db_url=config.db.database_url, author=None)
+        row = next(s for s in db.list_change_requests() if s.id == SUB_ID_PDF).changes[0]
+        rendered = [
+            ("submission_id", row.submission_id),
+            ("change", row.change.value),
+            ("requester_name", row.requester_name),
+            ("requester_email", row.requester_email),
+            ("requested_at", row.requested_at),
+            (
+                "request_email_content",
+                (row.request_email_content[:60] + "...") if row.request_email_content else None,
+            ),
+            (
+                "request_raw_content",
+                (
+                    f"<{len(row.request_raw_content)} bytes, starts with {row.request_raw_content[:8]!r}>"
+                    if row.request_raw_content
+                    else None
+                ),
+            ),
+            ("request_raw_content_type", row.request_raw_content_type.value if row.request_raw_content_type else None),
+            ("data", row.data),
+            ("author_name", row.author_name),
+            ("signature", row.signature[:24] + "..."),
+            ("timestamp", row.timestamp.isoformat()),
+        ]
+        for k, v in rendered:
+            print(f"  {k:28s} | {v}")
 
         print()
         print("Demo complete.")

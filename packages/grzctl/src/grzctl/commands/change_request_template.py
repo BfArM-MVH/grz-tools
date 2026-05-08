@@ -3,8 +3,9 @@
 Provides:
 
 * ``render_yaml_template`` — pure helper that builds a fill-in YAML template
-  from a Pydantic model. Used by the ``db submission change-request`` error
-  paths to print the expected schema when validation fails.
+  for the given change-request type. Used by the ``db submission
+  change-request`` error paths to print the expected schema when validation
+  fails.
 * ``change_request_template`` — top-level Click command that prints the same
   template on demand. Lives outside the ``db`` group so it does not require
   ``--config-file`` or DB credentials.
@@ -12,49 +13,45 @@ Provides:
 
 from __future__ import annotations
 
-import datetime
-from typing import Any
-
 import click
 import rich.console
-from grz_db.models.submission import CHANGE_REQUEST_DATA_SCHEMAS, ChangeRequestEnum
-from pydantic import BaseModel
-from pydantic.fields import FieldInfo
+from grz_db.models.submission import ChangeRequestEnum
 
 console_err = rich.console.Console(stderr=True)
 
 
-def render_yaml_template(model_cls: type[BaseModel]) -> str:
-    """Build a fill-in YAML template from a Pydantic model's fields.
+_TYPE_GUIDANCE: dict[ChangeRequestEnum, str] = {
+    ChangeRequestEnum.DELETE: "describe what to delete and why",
+    ChangeRequestEnum.MODIFY: "describe the field/value to modify",
+    ChangeRequestEnum.TRANSFER: "describe the transfer destination",
+}
 
-    Each field becomes a ``# <description>`` comment followed by ``name: <placeholder>``.
-    Placeholder shape is driven by the field's annotation (e.g. multi-line block
-    scalar for ``*_content`` strings, ``YYYY-MM-DD`` for dates).
+
+def render_yaml_template(change: ChangeRequestEnum) -> str:
+    """Build a fill-in YAML template for a change-request type.
+
+    Each placeholder embeds ``<FILL IN`` so the model validator rejects
+    templates submitted unchanged.
     """
-    lines: list[str] = []
-    for name, info in model_cls.model_fields.items():
-        if info.description:
-            lines.append(f"# {info.description}")
-        lines.append(f"{name}: {_placeholder_for(name, info)}")
-        lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _placeholder_for(name: str, info: FieldInfo) -> str:
-    annotation: Any = info.annotation
-    if annotation is datetime.date:
-        # Not a parseable date — fails Pydantic validation if left as-is.
-        return "YYYY-MM-DD"
-    if annotation is str:
-        # Each placeholder embeds "<FILL IN" so the schema's model validator
-        # rejects them if the user submits the template unchanged.
-        # No colons inside angle brackets — YAML parses '<FILL IN: x>' as a nested mapping.
-        if name.endswith("_content"):
-            return "|\n  <FILL IN paste verbatim email content here (multi-line allowed)>"
-        if "email" in name:
-            return "<FILL IN email address>"
-        return f"<FILL IN {name.replace('_', ' ')}>"
-    return "null"
+    guidance = _TYPE_GUIDANCE.get(change, "describe the requested change")
+    return (
+        "# Full name of the person requesting the change\n"
+        "requester_name: <FILL IN requester name>\n"
+        "\n"
+        "# Email address of the requester\n"
+        "requester_email: <FILL IN email address>\n"
+        "\n"
+        "# Date the change was requested (YYYY-MM-DD)\n"
+        "requested_at: YYYY-MM-DD\n"
+        "\n"
+        "# Verbatim email text from the requester (multi-line allowed).\n"
+        "# Required unless --raw-content (e.g. PDF) is supplied via the CLI.\n"
+        "request_email_content: |\n"
+        f"  <FILL IN paste verbatim email content here — {guidance}>\n"
+        "\n"
+        "# Optional type-specific extras (free-form key/value pairs)\n"
+        "data: {}\n"
+    )
 
 
 @click.command("change-request-template")
@@ -66,10 +63,4 @@ def _placeholder_for(name: str, info: FieldInfo) -> str:
 def change_request_template(change_str: str):
     """Print a YAML data template for the given change-request type."""
     change_request_enum = ChangeRequestEnum(change_str)
-    schema_cls = CHANGE_REQUEST_DATA_SCHEMAS.get(change_request_enum)
-    if schema_cls is None:
-        console_err.print(
-            f"[yellow]No data schema is defined for change type '{change_request_enum.value}'.[/yellow]"
-        )
-        return
-    click.echo(render_yaml_template(schema_cls))
+    click.echo(render_yaml_template(change_request_enum))
