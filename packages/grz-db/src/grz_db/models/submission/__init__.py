@@ -280,6 +280,10 @@ class SubmissionStateLogBase(SQLModel):
             Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e]),
             nullable=True,
         ),
+    grzctl_versions: dict[str, str] | None = Field(
+        default=None,
+        description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
+        sa_column=Column(JSON),
     )
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
@@ -767,6 +771,7 @@ class SubmissionDb:
         data: dict | None = None,
         grzctl_versions: dict[str, str] | None = None,
         failure_reason: FailureReasonEnum | None = None,
+        grzctl_versions: dict[str, str] | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -794,6 +799,7 @@ class SubmissionDb:
                 data=data,
                 grzctl_versions=grzctl_versions,
                 failure_reason=failure_reason,
+                grzctl_versions=grzctl_versions,
             )
             signature = state_log_payload.sign(self._author.private_key())
 

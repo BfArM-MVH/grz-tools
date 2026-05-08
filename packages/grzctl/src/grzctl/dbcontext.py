@@ -158,7 +158,11 @@ class DbContext:
                     error_state,
                     failure_reason=failure_reason,
                     data={"error": error_message},
+<<<<<<< HEAD
                     grzctl_versions=self.grzctl_versions,
+=======
+                    grzctl_versions=self.grzctl_versions
+>>>>>>> 84e1daf (feat(grz-cli, grz-db): require & record QC workflow version; log grzctl runtime version (closes #532) (#561))
                 )
             except Exception as db_exc:
                 log.error(f"Failed to write error state to DB: {db_exc}")

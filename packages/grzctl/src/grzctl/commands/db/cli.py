@@ -528,6 +528,16 @@ def update(  # noqa: C901, PLR0913
             grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
         )
 
+<<<<<<< HEAD
+=======
+        new_state_log = db_service.update_submission_state(submission_id, state_enum, parsed_data, failure_reason_enum)
+        new_state_log = db_service.update_submission_state(
+            submission_id,
+            state_enum,
+            parsed_data,
+            grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
+        )
+>>>>>>> 84e1daf (feat(grz-cli, grz-db): require & record QC workflow version; log grzctl runtime version (closes #532) (#561))
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
         )
@@ -932,7 +942,11 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
             state_dict = state_log.model_dump(
+<<<<<<< HEAD
                 mode="json", include={"id", "timestamp", "state", "data", "grzctl_versions", "failure_reason"}
+=======
+                mode="json", include={"id", "timestamp", "state", "data", "failure_reason", "grzctl_version"}
+>>>>>>> 84e1daf (feat(grz-cli, grz-db): require & record QC workflow version; log grzctl runtime version (closes #532) (#561))
             )
 
             state_dict["data_steward"] = state_log.author_name
