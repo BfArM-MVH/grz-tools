@@ -19,6 +19,7 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
+import yaml
 from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
@@ -30,6 +31,7 @@ from grz_db.errors import (
 )
 from grz_db.models.author import Author
 from grz_db.models.submission import (
+    CHANGE_REQUEST_DATA_SCHEMAS,
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
@@ -51,10 +53,11 @@ from grz_pydantic_models.submission.metadata import (
     SequenceSubtype,
     SequenceType,
 )
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from ...models.config import DbConfig, ListConfig
 from .. import limit
+from ..change_request_template import render_yaml_template
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
@@ -245,7 +248,7 @@ def list_submissions(
             )
 
         if output_json:
-            submission_dict = _build_submission_dict_from(latest_state_obj, submission, signature_status)
+            submission_dict = _build_submission_dict_from(latest_state_obj, submission)
             submission_dicts.append(submission_dict)
         else:
             table.add_row(
@@ -305,7 +308,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                 )
 
             if output_json:
-                submission_dict = _build_submission_dict_from(latest_change_request_obj, submission, signature_status)
+                submission_dict = _build_submission_dict_from(latest_change_request_obj, submission)
                 submission_dicts.append(submission_dict)
             else:
                 table.add_row(
@@ -393,14 +396,12 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
 def _build_submission_dict_from(
     log_obj: SubmissionStateLog | ChangeRequestLog | None,
     submission: Submission,
-    signature_status: SignatureStatus,
 ) -> dict[str, Any]:
     """Serialize a submission and its latest log entry to a JSON-compatible dict.
 
     :param log_obj: The most recent :class:`~grz_db.models.submission.SubmissionStateLog` or
         :class:`~grz_db.models.submission.ChangeRequestLog`, or ``None`` if no log exists yet.
     :param submission: The submission ORM/Pydantic model instance.
-    :param signature_status: Verification result for the log entry's author signature.
     :returns: A dictionary suitable for JSON serialisation that contains the submission identifiers
         and either a ``latest_state`` or ``latest_change_request`` key depending on *log_obj*.
     :raises TypeError: If *log_obj* is neither ``None`` nor one of the two expected log types.
@@ -418,7 +419,6 @@ def _build_submission_dict_from(
                 "timestamp": log_obj.timestamp.isoformat(),
                 "data": log_obj.data,
                 "data_steward": log_obj.author_name,
-                "data_steward_signature": signature_status,
                 "state": log_obj.state.value,
             }
         elif isinstance(log_obj, ChangeRequestLog):
@@ -427,7 +427,6 @@ def _build_submission_dict_from(
                 "timestamp": log_obj.timestamp.isoformat(),
                 "data": log_obj.data,
                 "data_steward": log_obj.author_name,
-                "data_steward_signature": signature_status,
                 "change": log_obj.change.value,
             }
         else:
@@ -825,28 +824,128 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, co
             db_service.add_detailed_qc_result(result)
 
 
+def _load_change_request_data(data_json: str | None, data_file: Path | None) -> dict | None:
+    """Resolve the raw change-request data dict from inline JSON or a JSON/YAML file."""
+    if data_json is not None and data_file is not None:
+        console_err.print("[red]Error: --data and --data-file are mutually exclusive.[/red]")
+        raise click.Abort()
+    if data_json is not None:
+        try:
+            return json.loads(data_json)
+        except json.JSONDecodeError as e:
+            console_err.print(f"[red]Error: Invalid JSON string for --data: {e}[/red]")
+            raise click.Abort() from e
+    if data_file is None:
+        return None
+    suffix = data_file.suffix.lower()
+    text = data_file.read_text()
+    try:
+        if suffix in (".yaml", ".yml"):
+            raw = yaml.safe_load(text)
+        elif suffix == ".json":
+            raw = json.loads(text)
+        else:
+            console_err.print(
+                f"[red]Error: Unsupported --data-file extension '{suffix}'. Use .json, .yaml, or .yml.[/red]"
+            )
+            raise click.Abort()
+    except (json.JSONDecodeError, yaml.YAMLError) as e:
+        console_err.print(f"[red]Error: Failed to parse '{data_file}': {e}[/red]")
+        raise click.Abort() from e
+    if not isinstance(raw, dict):
+        console_err.print(f"[red]Error: '{data_file}' must contain a mapping/object at the top level.[/red]")
+        raise click.Abort()
+    return raw
+
+
+def _validate_change_request_data(
+    schema_cls: type | None,
+    raw_data: dict | None,
+    change_value: str,
+) -> dict | None:
+    """Validate raw data against the schema for the change type, printing the template on error."""
+    if schema_cls is None:
+        return raw_data
+    if raw_data is None:
+        console_err.print(
+            f"[red]Error: change type '{change_value}' requires data via --data or --data-file.[/red]"
+        )
+        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
+        click.echo(render_yaml_template(schema_cls), err=True)
+        raise click.Abort()
+    try:
+        validated = schema_cls.model_validate(raw_data)
+    except ValidationError as e:
+        console_err.print(f"[red]Error: data failed validation for change type '{change_value}':[/red]")
+        click.echo(str(e), err=True)
+        console_err.print("[yellow]Expected fields (YAML template):[/yellow]")
+        click.echo(render_yaml_template(schema_cls), err=True)
+        raise click.Abort() from e
+    return validated.model_dump(mode="json")
+
+
 @submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
-@click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.option("--data", "data_json", type=str, default=None, help='Inline JSON data (e.g., \'{"k":"v"}\').')
+@click.option(
+    "--data-file",
+    "data_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to a JSON or YAML file with the change-request data (recommended for multi-line content).",
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Validate inputs and check the submission exists, but do not write the change request.",
+)
 @click.pass_context
-def change_request(ctx: click.Context, submission_id: str, change_str: str, data_json: str | None):
-    """Register a completed change request for the given submission. Optionally accepts additional JSON data to associate with the log entry."""
-    db = ctx.obj["db_url"]
-    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+def change_request(  # noqa: PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    change_str: str,
+    data_json: str | None,
+    data_file: Path | None,
+    dry_run: bool,
+):
+    """Register a completed change request for the given submission.
+
+    For change types with a registered data schema (e.g. DELETE), data is required and validated.
+    See ``grzctl change-request-template`` for a fill-in template.
+    """
     try:
         change_request_enum = ChangeRequestEnum(change_str)
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
         raise click.Abort() from e
 
-    parsed_data = None
-    if data_json:
-        try:
-            parsed_data = json.loads(data_json)
-        except json.JSONDecodeError as e:
-            console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
-            raise click.Abort() from e
+    schema_cls = CHANGE_REQUEST_DATA_SCHEMAS.get(change_request_enum)
+    raw_data = _load_change_request_data(data_json, data_file)
+    parsed_data = _validate_change_request_data(schema_cls, raw_data, change_request_enum.value)
+
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    if dry_run:
+        existing = db_service.get_submission(submission_id)
+        if existing is None:
+            console_err.print(
+                f"[red]Dry run: submission '{submission_id}' not found. "
+                f"You might need to add it first: grz-cli db submission add {submission_id}[/red]"
+            )
+            raise click.Abort()
+        console_err.print(
+            f"[yellow]Dry run: would register change request '{change_request_enum.value}' "
+            f"for submission '{submission_id}'. No changes were written.[/yellow]"
+        )
+        if parsed_data is not None:
+            console_err.print("[yellow]Validated data:[/yellow]")
+            click.echo(json.dumps(parsed_data, indent=2, ensure_ascii=False), err=True)
+        return
+
     try:
         new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, parsed_data)
         console_err.print(
@@ -863,6 +962,8 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
 
 
 @submission.command("show")
@@ -885,12 +986,11 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         submission_dict["states"] = []
 
         for state_log in sorted(submission.states, key=lambda s: s.timestamp):
-            signature_status, verifying_key_comment = _verify_signature(
+            _, verifying_key_comment = _verify_signature(
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
             state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
             state_dict["data_steward"] = state_log.author_name
-            state_dict["data_steward_signature"] = signature_status
             state_dict["signature_key_comment"] = verifying_key_comment
             submission_dict["states"].append(state_dict)
 

@@ -33,7 +33,7 @@ from grz_pydantic_models.submission.metadata import (
     Tan,
 )
 from grz_pydantic_models.submission.metadata.v1 import Donor as MetadataDonor
-from pydantic import ConfigDict, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, model_validator
 from sqlalchemy import JSON, BigInteger, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -374,6 +374,41 @@ class ChangeRequestLogCreate(ChangeRequestLogBase):
     submission_id: str
     author_name: str
     signature: str
+
+
+_TEMPLATE_PLACEHOLDER_MARKER = "<FILL IN"
+
+
+class DeleteChangeRequestData(BaseModel):
+    """Validation schema for the ``data`` field of a DELETE change request.
+
+    Extra keys beyond the declared fields are allowed and preserved, so callers
+    can attach ad-hoc context per entry. Steward identity is captured by the
+    row's ``author_name`` and cryptographic ``signature`` and is not duplicated here.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    requester_name: str = Field(description="Full name of the person requesting deletion")
+    requester_email: str = Field(description="Email address of the requester")
+    requested_at: datetime.date = Field(description="Date the deletion was requested (YYYY-MM-DD)")
+    requester_email_content: str = Field(description="Verbatim email text from the requester")
+
+    @model_validator(mode="after")
+    def _reject_template_placeholders(self) -> Self:
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, str) and _TEMPLATE_PLACEHOLDER_MARKER in value:
+                raise ValueError(
+                    f"Field '{name}' still contains the template placeholder "
+                    f"'{_TEMPLATE_PLACEHOLDER_MARKER}…>'. Replace it with the actual value."
+                )
+        return self
+
+
+CHANGE_REQUEST_DATA_SCHEMAS: dict[ChangeRequestEnum, type[BaseModel]] = {
+    ChangeRequestEnum.DELETE: DeleteChangeRequestData,
+}
 
 
 def coerce_empty_set_to_none(value: set | None) -> set | None:

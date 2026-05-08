@@ -563,3 +563,433 @@ def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path)
     assert result_state_alias.exit_code == 0, result_state_alias.stderr
     parsed_state_alias = json.loads(result_state_alias.stdout)
     assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}
+
+
+_DELETE_CHANGE_REQUEST_DATA = {
+    "requester_name": "Erika Mustermann",
+    "requester_email": "demo.requester@example.org",
+    "requested_at": "2026-03-27",
+    "requester_email_content": "Liebe Kolleginnen,\nbitte löschen.\nVielen Dank,\nErika",
+}
+
+
+def _add_submission(runner: click.testing.CliRunner, cli, args_common: list, submission_id: str) -> None:
+    result = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result.exit_code == 0, result.stderr
+
+
+def test_change_request_delete_succeeds_with_yaml_data_file(
+    blank_database_config_path: Path, tmp_path: Path
+):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "has undergone a change request" in result.stderr.replace("\n", " ")
+    assert "Delete" in result.stderr
+
+    config = DbConfig.from_path(blank_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
+    assert len(submissions_with_changes) == 1
+    changes = submissions_with_changes[0].changes
+    assert len(changes) == 1
+    assert changes[0].data == _DELETE_CHANGE_REQUEST_DATA
+
+
+def test_change_request_delete_succeeds_with_inline_data(blank_database_config_path: Path):
+    """`--data` accepts valid Delete data and stores it the same way `--data-file` does."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(_DELETE_CHANGE_REQUEST_DATA),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    config = DbConfig.from_path(blank_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
+    assert submissions_with_changes[0].changes[0].data == _DELETE_CHANGE_REQUEST_DATA
+
+
+def test_change_request_delete_inline_data_rejects_placeholder(blank_database_config_path: Path):
+    """`--data` is subject to the same placeholder rejection as `--data-file`."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    bad = {**_DELETE_CHANGE_REQUEST_DATA, "requester_name": "<FILL IN requester name>"}
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(bad),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "FILL IN" in result.stderr or "placeholder" in result.stderr
+
+
+def test_change_request_delete_inline_data_rejects_missing_field(blank_database_config_path: Path):
+    """`--data` is subject to the same required-field check as `--data-file`."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(incomplete),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_delete_fails_without_data(blank_database_config_path: Path):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    result = runner.invoke(
+        cli, [*args_common, "submission", "change-request", submission_id, "Delete"]
+    )
+    assert result.exit_code != 0
+    assert "requires data" in result.stderr
+    assert "requester_name" in result.stderr
+    assert "requester_email_content" in result.stderr
+
+
+def test_change_request_delete_fails_with_missing_field(
+    blank_database_config_path: Path, tmp_path: Path
+):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(incomplete, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_delete_accepts_and_persists_extra_field(
+    blank_database_config_path: Path, tmp_path: Path
+):
+    """Extras are allowed alongside the required schema fields and stored verbatim."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_with_extra = {**_DELETE_CHANGE_REQUEST_DATA, "internal_note": "received fax 2026-04-30"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(data_with_extra, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    config = DbConfig.from_path(blank_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
+    assert submissions_with_changes[0].changes[0].data == data_with_extra
+
+
+def test_change_request_data_and_data_file_mutually_exclusive(
+    blank_database_config_path: Path, tmp_path: Path
+):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(_DELETE_CHANGE_REQUEST_DATA),
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.stderr
+
+
+def test_change_request_template_subcommand_prints_template():
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-template", "Delete"])
+    assert result.exit_code == 0, result.stderr
+    expected_fields = {
+        "requester_name",
+        "requester_email",
+        "requested_at",
+        "requester_email_content",
+    }
+    for field_name in expected_fields:
+        assert field_name in result.stdout
+    # template should be valid YAML
+    parsed = yaml.safe_load(result.stdout)
+    assert isinstance(parsed, dict)
+    assert set(parsed.keys()) == expected_fields
+
+
+def test_unmodified_template_fails_validation(blank_database_config_path: Path, tmp_path: Path):
+    """A user who saves the template and submits it unchanged must not pass validation."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    template_result = runner.invoke(cli, ["change-request-template", "Delete"])
+    assert template_result.exit_code == 0, template_result.stderr
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(template_result.stdout)
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    # `requested_at: YYYY-MM-DD` fails date coercion before the model validator runs.
+    assert "requested_at" in result.stderr
+
+
+def test_template_with_only_date_filled_in_still_fails(
+    blank_database_config_path: Path, tmp_path: Path
+):
+    """If the user fills in only the date but leaves text placeholders, validation must still fail."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    template_result = runner.invoke(cli, ["change-request-template", "Delete"])
+    partially_filled = template_result.stdout.replace("YYYY-MM-DD", "2026-03-27")
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(partially_filled)
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "FILL IN" in result.stderr or "placeholder" in result.stderr
+
+
+def test_change_request_template_for_unschematized_change_type():
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-template", "Modify"])
+    assert result.exit_code == 0, result.stderr
+    assert "No data schema" in result.stderr
+
+
+def test_change_request_dry_run_does_not_write(blank_database_config_path: Path, tmp_path: Path):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "Dry run" in result.stderr
+    assert "would register change request" in result.stderr.replace("\n", " ")
+    assert "Validated data" in result.stderr
+
+    config = DbConfig.from_path(blank_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = list(db.list_change_requests())
+    assert submissions_with_changes == []
+
+
+def test_change_request_dry_run_aborts_when_submission_missing(
+    blank_database_config_path: Path, tmp_path: Path
+):
+    args_common = ["db", "--config-file", blank_database_config_path]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            "DOES_NOT_EXIST",
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not found" in result.stderr
+
+
+def test_change_request_dry_run_validates_before_db_check(
+    blank_database_config_path: Path, tmp_path: Path
+):
+    """Schema validation runs first; missing fields fail even with --dry-run."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(incomplete, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            "DOES_NOT_EXIST",
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_modify_loose_no_data(blank_database_config_path: Path):
+    """Unschematized change types (Modify) preserve current loose behavior."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    result = runner.invoke(
+        cli, [*args_common, "submission", "change-request", submission_id, "Modify"]
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "has undergone a change request" in result.stderr.replace("\n", " ")
+    assert "Modify" in result.stderr
