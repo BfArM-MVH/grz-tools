@@ -317,7 +317,16 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_meta
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate-qc", metadata.submission_id, str(report_csv_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -329,6 +338,172 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_meta
     assert len(results) == 3
     father_result = next(r for r in results if r.lab_datum_id == "father1_germline0")
     assert not father_result.mean_depth_of_coverage_passed_qc
+
+
+def test_populate_qc_with_qc_workflow_version_flag(
+    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
+    """Test populate-qc with --qc-workflow-version flag."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test with --qc-workflow-version flag
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "v1.0.0"
+
+
+def test_populate_qc_with_qc_workflow_version_env_var(
+    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path, monkeypatch
+):
+    """Test populate-qc with GRZCTL_QC_WORKFLOW_VERSION environment variable."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    # Set the environment variable
+    monkeypatch.setenv("GRZCTL_QC_WORKFLOW_VERSION", "v2.1.0")
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test without --qc-workflow-version flag (should use env var)
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+        ],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "v2.1.0"
+
+
+def test_populate_qc_missing_qc_workflow_version(
+    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
+    """Test populate-qc fails when qc_workflow_version is not provided."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test without --qc-workflow-version flag and without env var (should fail)
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+        ],
+    )
+    assert result_populate_qc.exit_code != 0
+    assert "Missing option '--qc-workflow-version'" in result_populate_qc.output
 
 
 def test_update_error_confirm(blank_database_config_path: Path, test_metadata_path: Path):
@@ -564,3 +739,189 @@ def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path)
     assert result_state_alias.exit_code == 0, result_state_alias.stderr
     parsed_state_alias = json.loads(result_state_alias.stdout)
     assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}
+
+
+def test_submission_grzctl_versions_logging(blank_database_config_path: Path, test_metadata_path: Path, monkeypatch):
+    """
+    Test that grzctl_versions is correctly logged on state transitions and appears in CLI output.
+
+    Verifies:
+    - grzctl_versions is recorded for each state log entry
+    - grzctl_versions appears in JSON output
+    - grzctl_versions appears in human-readable table output
+    - Versions are preserved across multiple state transitions
+    """
+    args_common = ["db", "--config-file", blank_database_config_path]
+
+    # Mock the version to a known test value for reproducibility
+    test_version = "0.1.2-test"
+    test_versions_dict = {
+        "grzctl": test_version,
+        "grz-cli": "1.0.0",
+        "grz-common": "1.0.0",
+        "grz-db": "1.0.0",
+        "grz-pydantic-models": "1.0.0",
+        "grz-check": "1.0.0",
+    }
+    monkeypatch.setattr("grzctl.get_versions", lambda: test_versions_dict)
+
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    cli = grzctl.cli.build_cli()
+
+    # add submission
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission (triggers first state transition)
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # perform multiple state transitions
+    state_transitions = ["Downloading", "Downloaded", "QCing"]
+    for state in state_transitions:
+        result_update = runner.invoke(
+            cli,
+            [*args_common, "submission", "update", metadata.submission_id, state],
+        )
+        assert result_update.exit_code == 0, result_update.stderr
+
+    # Test 1: Verify grzctl_versions in JSON output
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+
+    parsed_json = json.loads(result_show_json.stdout)
+    assert "states" in parsed_json
+    assert len(parsed_json["states"]) > 0, "No state logs found"
+
+    # Verify each state has grzctl_versions field with correct structure
+    for i, state in enumerate(parsed_json["states"]):
+        assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
+        assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
+        # Verify all expected keys are present
+        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
+        assert set(state["grzctl_versions"].keys()) == expected_keys, (
+            f"grzctl_versions has unexpected keys in state {i}: {state['grzctl_versions'].keys()}"
+        )
+        # Verify all values are non-empty strings
+        for key, value in state["grzctl_versions"].items():
+            assert isinstance(value, str) and len(value) > 0, (
+                f"grzctl_versions['{key}'] should be non-empty string in state {i}"
+            )
+        # Verify other expected fields are present
+        assert "id" in state
+        assert "timestamp" in state
+        assert "state" in state
+        assert "data_steward" in state
+        assert "data_steward_signature" in state
+
+    # Test 2: Verify database records have the version
+    config = DbConfig.from_path(blank_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submission = db.get_submission(metadata.submission_id)
+
+    # Verify all state logs have the version
+    for state_log in submission.states:
+        assert state_log.grzctl_versions is not None, (
+            f"grzctl_versions is None for state {state_log.state} at {state_log.timestamp}"
+        )
+        assert isinstance(state_log.grzctl_versions, dict), (
+            f"grzctl_versions should be dict, got {type(state_log.grzctl_versions)}"
+        )
+        # Verify all expected keys are present
+        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
+        assert set(state_log.grzctl_versions.keys()) == expected_keys, (
+            f"grzctl_versions has unexpected keys: {state_log.grzctl_versions.keys()}"
+        )
+        # Verify all values are non-empty strings
+        for key, value in state_log.grzctl_versions.items():
+            assert isinstance(value, str) and len(value) > 0, f"grzctl_versions['{key}'] should be non-empty string"
+
+
+def test_submission_grzctl_version_different_versions(
+    blank_database_config_path: Path, test_metadata_path: Path, monkeypatch
+):
+    """
+    Verify that state logs show their logged version, not the current runtime version.
+    """
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    cli = grzctl.cli.build_cli()
+
+    # Setup only (does not create state logs)
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # State update #1 with version 0.1.0
+    monkeypatch.setattr(
+        "grzctl.get_versions",
+        lambda: {
+            "grzctl": "0.1.0",
+            "grz-cli": "1.0.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
+    result_update_1 = runner.invoke(
+        cli,
+        [*args_common, "submission", "update", metadata.submission_id, "Downloading"],
+    )
+    assert result_update_1.exit_code == 0, result_update_1.stderr
+
+    # State update #2 with version 0.1.1
+    monkeypatch.setattr(
+        "grzctl.get_versions",
+        lambda: {
+            "grzctl": "0.1.1",
+            "grz-cli": "1.0.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
+    result_update_2 = runner.invoke(
+        cli,
+        [*args_common, "submission", "update", metadata.submission_id, "Downloaded"],
+    )
+    assert result_update_2.exit_code == 0, result_update_2.stderr
+
+    # State update #3 with version 0.2.0
+    monkeypatch.setattr(
+        "grzctl.get_versions",
+        lambda: {
+            "grzctl": "0.2.0",
+            "grz-cli": "1.0.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
+    result_update_3 = runner.invoke(
+        cli,
+        [*args_common, "submission", "update", metadata.submission_id, "QCing"],
+    )
+    assert result_update_3.exit_code == 0, result_update_3.stderr
+
+    # Verify JSON output
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+    parsed_json = json.loads(result_show_json.stdout)
+
+    # Verify each state has grzctl_versions recorded
+    assert len(parsed_json["states"]) == 3, "Expected 3 state transitions"
+    expected_states = ["Downloading", "Downloaded", "QCing"]
+    for i, state in enumerate(parsed_json["states"]):
+        assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
+        assert state["state"] == expected_states[i], (
+            f"Expected state {expected_states[i]}, got {state['state']} at index {i}"
+        )
+        # Verify grzctl_versions structure (not checking specific versions due to import-time binding)
+        assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
+        assert "grzctl" in state["grzctl_versions"], f"grzctl missing in grzctl_versions for state {i}"
