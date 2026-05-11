@@ -199,29 +199,17 @@ class DbContext:
         self, exc_type: type[BaseException], exc_val: BaseException | None
     ) -> FailureReasonEnum:
         """Maps an exception to the closest FailureReasonEnum value."""
-        if isinstance(exc_val, FileNotFoundError):
-            return FailureReasonEnum.FILE_NOT_FOUND
-        if isinstance(exc_val, ValidationError):
-            return FailureReasonEnum.VALIDATION_ERROR
-        if isinstance(exc_val, OSError):
-            return FailureReasonEnum.FILE_NOT_FOUND
-        return FailureReasonEnum.UNKNOWN
-
-    def _map_exception_to_failure_reason(
-        self, exc_type: type[BaseException], exc_val: BaseException | None
-    ) -> FailureReasonEnum:
-        """Maps an exception to the closest FailureReasonEnum value."""
-        exception_map: list[tuple[type[BaseException], FailureReasonEnum]] = [
-            (FileNotFoundError, FailureReasonEnum.FILE_NOT_FOUND),
-            (ValidationError, FailureReasonEnum.VALIDATION_ERROR),
-            (DecryptionError, FailureReasonEnum.DECRYPTION_ERROR),
-            (EncryptionError, FailureReasonEnum.ENCRYPTION_ERROR),
-            (NetworkError, FailureReasonEnum.NETWORK_ERROR),
-            (UploadError, FailureReasonEnum.UPLOAD_ERROR),
-            (DuplicateTanGError, FailureReasonEnum.DUPLICATE_TANG),
-            (IncompleteSubmissionError, FailureReasonEnum.INCOMPLETE_SUBMISSION),
-        ]
-        for exc_class, failure_reason in exception_map:
+        exception_map: dict[type[BaseException], FailureReasonEnum] = {
+            FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
+            ValidationError: FailureReasonEnum.VALIDATION_ERROR,
+            DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
+            EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
+            NetworkError: FailureReasonEnum.NETWORK_ERROR,
+            UploadError: FailureReasonEnum.UPLOAD_ERROR,
+            DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
+            IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
+        }
+        for exc_class, failure_reason in exception_map.items():
             if isinstance(exc_val, exc_class):
                 return failure_reason
         return FailureReasonEnum.UNKNOWN
