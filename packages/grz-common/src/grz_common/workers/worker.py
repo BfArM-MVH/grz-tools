@@ -6,6 +6,11 @@ import logging
 from os import PathLike
 from pathlib import Path
 
+from grz_common.exceptions import (
+    DecryptionError,
+    EncryptionError,
+    IncompleteSubmissionError,
+)
 from grz_db.models.submission import (
     DonorsDiffCollection,
     SubmissionDb,
@@ -19,7 +24,7 @@ from ..progress import EncryptionState, FileProgressLogger, ValidationState
 from ..transfer import init_s3_client
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
-from .upload import S3BotoUploadWorker
+from .upload import S3BotoUploadWorker, UploadError
 
 log = logging.getLogger(__name__)
 
@@ -192,7 +197,7 @@ class Worker:
                     "Please re-run the 'validate' command and try again."
                 )
                 self.__log.error(error_msg)
-                raise SubmissionValidationError(error_msg)
+                raise IncompleteSubmissionError(error_msg)
 
             self.__log.info("All files verified as successfully validated.")
 
@@ -200,13 +205,16 @@ class Worker:
             # delete the log file if it exists
             self.progress_file_encrypt.unlink(missing_ok=True)
 
-        encrypted_submission = submission.encrypt(
-            encrypted_files_dir=str(self.encrypted_files_dir),
-            progress_log_file=self.progress_file_encrypt,
-            recipient_public_key_path=recipient_public_key_path,
-            submitter_private_key_path=submitter_private_key_path,
-            force=force,
-        )
+        try:
+            encrypted_submission = submission.encrypt(
+                encrypted_files_dir=str(self.encrypted_files_dir),
+                progress_log_file=self.progress_file_encrypt,
+                recipient_public_key_path=recipient_public_key_path,
+                submitter_private_key_path=submitter_private_key_path,
+                force=force,
+            )
+        except Exception as e:
+            raise EncryptionError(str(e)) from e
 
         return encrypted_submission
 
@@ -223,11 +231,14 @@ class Worker:
             # delete the log file if it exists
             self.progress_file_decrypt.unlink(missing_ok=True)
 
-        submission = encrypted_submission.decrypt(
-            files_dir=self.files_dir,
-            progress_log_file=self.progress_file_decrypt,
-            recipient_private_key_path=recipient_private_key_path,
-        )
+        try:
+            submission = encrypted_submission.decrypt(
+                files_dir=self.files_dir,
+                progress_log_file=self.progress_file_decrypt,
+                recipient_private_key_path=recipient_private_key_path,
+            )
+        except Exception as e:
+            raise DecryptionError(str(e)) from e
 
         return submission
 
@@ -256,7 +267,7 @@ class Worker:
                 "Please re-run the 'encrypt' command and try again."
             )
             self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
+            raise IncompleteSubmissionError(error_msg)
 
         self.__log.info("All files verified as successfully encrypted.")
 
@@ -266,7 +277,10 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        upload_worker.upload(encrypted_submission)
+        try:
+            upload_worker.upload(encrypted_submission)
+        except Exception as e:
+            raise UploadError(str(e)) from e
 
         return encrypted_submission.submission_id
 
