@@ -1202,6 +1202,7 @@ def test_submission_grzctl_version_different_versions(
         # Verify grzctl_versions structure (not checking specific versions due to import-time binding)
         assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
         assert "grzctl" in state["grzctl_versions"], f"grzctl missing in grzctl_versions for state {i}"
+
 def test_failure_reason_migration(blank_initial_database_config_path):
     """Test the failure_reason migration works correctly."""
     # Set up test data before migration
