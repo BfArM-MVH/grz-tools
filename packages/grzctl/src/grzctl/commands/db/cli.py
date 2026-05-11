@@ -520,6 +520,7 @@ def update(  # noqa: C901, PLR0913
         failure_reason_enum = None
         if failure_reason:
             failure_reason_enum = FailureReasonEnum(failure_reason)
+<<<<<<< HEAD
         new_state_log = db_service.update_submission_state(
             submission_id,
             state_enum,
@@ -527,6 +528,8 @@ def update(  # noqa: C901, PLR0913
             failure_reason=failure_reason_enum,
             grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
         )
+=======
+>>>>>>> 7450afd (repair issues caused by rebase - restore failure_reason model field, fix enum snake_case values, remove duplicate tests)
 
         new_state_log = db_service.update_submission_state(
             submission_id,

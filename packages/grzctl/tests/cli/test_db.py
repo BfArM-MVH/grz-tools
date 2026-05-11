@@ -763,6 +763,7 @@ def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path)
     assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}
 
 
+<<<<<<< HEAD
 def test_submission_grzctl_versions_logging(blank_database_config_path: Path, test_metadata_path: Path, monkeypatch):
     """
     Test that grzctl_versions is correctly logged on state transitions and appears in CLI output.
@@ -988,6 +989,8 @@ def test_failure_reason_migration(blank_initial_database_config_path):
     assert "decryption_err" in result_show.stdout
 
 
+=======
+>>>>>>> 7450afd (repair issues caused by rebase - restore failure_reason model field, fix enum snake_case values, remove duplicate tests)
 def test_submission_show_json_includes_failure_reason(blank_database_config_path: Path):
     """Submission show --json should include failure_reason in state history."""
     args_common = ["db", "--config-file", blank_database_config_path]
@@ -1018,6 +1021,8 @@ def test_submission_show_json_includes_failure_reason(blank_database_config_path
     parsed = json.loads(result_show.stdout)
     error_state = next(s for s in parsed["states"] if s["state"] == "Error")
     assert error_state["failure_reason"] == "decryption_error"
+
+
 def test_submission_grzctl_versions_logging(blank_database_config_path: Path, test_metadata_path: Path, monkeypatch):
     """
     Test that grzctl_versions is correctly logged on state transitions and appears in CLI output.
@@ -1203,6 +1208,7 @@ def test_submission_grzctl_version_different_versions(
         assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
         assert "grzctl" in state["grzctl_versions"], f"grzctl missing in grzctl_versions for state {i}"
 
+
 def test_failure_reason_migration(blank_initial_database_config_path):
     """Test the failure_reason migration works correctly."""
     # Set up test data before migration
@@ -1234,43 +1240,11 @@ def test_failure_reason_migration(blank_initial_database_config_path):
 
     # Test that failure_reason functionality works
     result_update = runner.invoke(
-        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryptionerror"]
+        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryption_error"]
     )
     assert result_update.exit_code == 0, result_update.stderr
 
     # Verify the failure reason was stored
     result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
     assert result_show.exit_code == 0, result_show.stderr
-    assert "decryptionerror" in result_show.stdout
-
-
-def test_submission_show_json_includes_failure_reason(blank_database_config_path: Path):
-    """Submission show --json should include failure_reason in state history."""
-    args_common = ["db", "--config-file", blank_database_config_path]
-    runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
-
-    submission_id = "123456789_2025-01-01_00000000"
-    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
-    assert result_add.exit_code == 0, result_add.stderr
-
-    result_update = runner.invoke(
-        cli,
-        [
-            *args_common,
-            "submission",
-            "update",
-            submission_id,
-            "Error",
-            "--failure-reason",
-            "decryptionerror",
-        ],
-    )
-    assert result_update.exit_code == 0, result_update.stderr
-
-    result_show = runner.invoke(cli, [*args_common, "submission", "show", "--json", submission_id])
-    assert result_show.exit_code == 0, result_show.stderr
-
-    parsed = json.loads(result_show.stdout)
-    error_state = next(s for s in parsed["states"] if s["state"] == "Error")
-    assert error_state["failure_reason"] == "decryptionerror"
+    assert "decryption_error" in result_show.stdout

@@ -249,7 +249,6 @@ class Submission(SubmissionBase, table=True):
 class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Failure reason enum for submissions in ERROR state."""
 
-
     DUPLICATE_TANG = "duplicate_tang"
     INCOMPLETE_SUBMISSION = "incomplete_submission"
     DECRYPTION_ERROR = "decryption_error"
@@ -287,14 +286,7 @@ class SubmissionStateLogBase(SQLModel):
         description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
         sa_column=Column(JSON),
     )
-    
-    failure_reason: FailureReasonEnum | None = Field(
-        default=None,
-        sa_column=Column(
-            Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e]),
-            nullable=True,
-        ),
-    )
+
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
