@@ -531,8 +531,8 @@ def update(  # noqa: C901, PLR0913
         new_state_log = db_service.update_submission_state(
             submission_id,
             state_enum,
-            parsed_data,
-            failure_reason_enum,
+            data=parsed_data,
+            failure_reason=failure_reason_enum,
             grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
         )
 
