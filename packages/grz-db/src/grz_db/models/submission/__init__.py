@@ -246,6 +246,7 @@ class Submission(SubmissionBase, table=True):
             }
         )
 
+
 class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Failure reason enum for submissions in ERROR state."""
 
@@ -258,6 +259,7 @@ class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     ENCRYPTION_ERROR = "encryption_error"
     UPLOAD_ERROR = "upload_error"
     UNKNOWN = "unknown"
+
 
 class SubmissionStateLogBase(SQLModel):
     """
@@ -281,12 +283,6 @@ class SubmissionStateLogBase(SQLModel):
             nullable=True,
         ),
     )
-    grzctl_versions: dict[str, str] | None = Field(
-        default=None,
-        description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
-        sa_column=Column(JSON),
-    )
-
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -325,6 +321,7 @@ class SubmissionStateLog(SubmissionStateLogBase, VerifiableLog[SubmissionStateLo
     signature: str
 
     submission: Submission | None = Relationship(back_populates="states")
+
 
 class SubmissionStateLogCreate(SubmissionStateLogBase):
     """Submission state log create model."""
@@ -773,7 +770,6 @@ class SubmissionDb:
         data: dict | None = None,
         grzctl_versions: dict[str, str] | None = None,
         failure_reason: FailureReasonEnum | None = None,
-        grzctl_versions: dict[str, str] | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -801,7 +797,6 @@ class SubmissionDb:
                 data=data,
                 grzctl_versions=grzctl_versions,
                 failure_reason=failure_reason,
-                grzctl_versions=grzctl_versions,
             )
             signature = state_log_payload.sign(self._author.private_key())
 

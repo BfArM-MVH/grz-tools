@@ -45,7 +45,6 @@ from grz_db.models.submission import (
     SubmissionStateEnum,
     SubmissionStateFilterModeEnum,
     SubmissionStateLog,
-    FailureReasonEnum,
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
@@ -520,16 +519,6 @@ def update(  # noqa: C901, PLR0913
         failure_reason_enum = None
         if failure_reason:
             failure_reason_enum = FailureReasonEnum(failure_reason)
-<<<<<<< HEAD
-        new_state_log = db_service.update_submission_state(
-            submission_id,
-            state_enum,
-            parsed_data,
-            failure_reason=failure_reason_enum,
-            grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
-        )
-=======
->>>>>>> 7450afd (repair issues caused by rebase - restore failure_reason model field, fix enum snake_case values, remove duplicate tests)
 
         new_state_log = db_service.update_submission_state(
             submission_id,
@@ -943,8 +932,8 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
             state_dict = state_log.model_dump(
-                mode="json", include={"id", "timestamp", "state", "data", "failure_reason", "grzctl_version"}
-          )
+                mode="json", include={"id", "timestamp", "state", "data", "failure_reason", "grzctl_versions"}
+            )
 
             state_dict["data_steward"] = state_log.author_name
             state_dict["data_steward_signature"] = signature_status
