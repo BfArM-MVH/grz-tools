@@ -4,7 +4,7 @@ GRZ Control CLI for GRZ administrators.
 
 from importlib.metadata import PackageNotFoundError, version
 
-__version__ = "1.4.0"  # This version is managed by release-please
+__version__ = "2.0.0"  # This version is managed by release-please
 
 
 def get_versions() -> dict[str, str | None]:
