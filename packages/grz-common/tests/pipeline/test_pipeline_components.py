@@ -131,9 +131,11 @@ class TestFastqValidator:
 
     def test_invalid_fastq_seq_qual_length_mismatch(self):
         """Test that sequence and quality length match."""
-        fastq_content = b"@read1\n" + b"A"*16 + b"\n+\n" + b"I"*15 + b"\n"
+        fastq_content = b"@read1\n" + b"A" * 16 + b"\n+\n" + b"I" * 15 + b"\n"
 
-        with pytest.raises(DataValidationError, match=r"sequence and quality lengths don't match|Failed to parse record"):
+        with pytest.raises(
+            DataValidationError, match=r"sequence and quality lengths don't match|Failed to parse record"
+        ):
             with (
                 BytesIO(gzip.compress(fastq_content)) as f,
                 ReadStream(f) as source,
