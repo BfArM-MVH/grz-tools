@@ -64,6 +64,16 @@ impl FastqCheckProcessor {
             )
         })?;
 
+        if record.sequence().len() != record.quality_scores().len() {
+            return Err(format!(
+                "Failed to parse {} record #{}: sequence length ({}) does not match quality scores length ({})",
+                file_id,
+                self.num_records,
+                record.sequence().len(),
+                record.quality_scores().len()
+            ).into());
+        }
+
         self.total_read_length = self
             .total_read_length
             .checked_add(
