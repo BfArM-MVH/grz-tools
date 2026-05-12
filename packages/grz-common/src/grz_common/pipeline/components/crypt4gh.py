@@ -3,7 +3,8 @@ import os
 
 import crypt4gh.header
 import crypt4gh.lib
-from nacl.bindings import crypto_aead_chacha20poly1305_ietf_encrypt
+from grz_common.exceptions import DecryptionError
+from nacl.bindings import crypto_aead_chacha20poly1305_ietf_decrypt, crypto_aead_chacha20poly1305_ietf_encrypt
 from nacl.public import PrivateKey
 
 from . import StreamConfigurationError, Transformer
@@ -54,7 +55,17 @@ class Crypt4GHDecryptor(Transformer):
         if len(ciphersegment) <= self.CIPHER_DIFF:
             raise ValueError("Truncated cipher segment")
 
-        return crypt4gh.lib.decrypt_block(ciphersegment, self._session_keys)
+        nonce = ciphersegment[:12]
+        ciphertext = ciphersegment[12:]
+
+        errors = []
+        for key in self._session_keys:
+            try:
+                return crypto_aead_chacha20poly1305_ietf_decrypt(ciphertext, None, nonce, bytes(key))
+            except Exception as e:
+                errors.append(repr(e))
+
+        raise DecryptionError(f"Decryption failed: {errors}")
 
     def _read_header(self) -> None:
         try:

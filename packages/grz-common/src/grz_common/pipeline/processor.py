@@ -499,6 +499,7 @@ class SubmissionProcessor:
         self._pipeline_executor.process_submission_files(submission_run)
 
         if submission_run.context.has_errors:
+            log.error(f"Pipeline errors: {submission_run.context._errors}")
             raise RuntimeError("Submission failed consistency checks or validation.")
 
         self._upload_final_metadata(submission_metadata, submission_run)
