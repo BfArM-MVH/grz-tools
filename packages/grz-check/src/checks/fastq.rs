@@ -71,7 +71,7 @@ impl FastqCheckProcessor {
                 self.num_records,
                 record.sequence().len(),
                 record.quality_scores().len()
-            ).into());
+            ));
         }
 
         self.total_read_length = self
