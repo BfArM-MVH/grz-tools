@@ -191,6 +191,8 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
             s2_metadata.submission_id,
             str(report_csv_path),
             "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
         ],
     )
     assert result_qc_populate2.exit_code == 0, result_qc_populate2.output

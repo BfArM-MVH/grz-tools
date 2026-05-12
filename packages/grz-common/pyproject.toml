@@ -15,7 +15,8 @@ dynamic = ["version"]
 dependencies = [
     "boto3 >=1.36,<2",
     "click >=8.2,<9",
-    "crypt4gh >=1.7,<2",
+    "crypt4gh >=1.8.6,<2",
+    "pynacl >=1.6.2,<2",
     "jsonschema >=4.23.0,<5",
     "pyyaml >=6.0.2,<7",
     "tqdm >=4.66.5,<5",
@@ -24,7 +25,6 @@ dependencies = [
     "platformdirs >=4.3.6,<5",
     "grz-pydantic-models >=2.2.0",
     "grz-check >=0.2.1",
-    "pysam ==0.23.*",
     "rich ==13.*",
     "requests >=2.32.3,<3",
 ]

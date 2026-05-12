@@ -3,11 +3,7 @@ CLI module for handling command-line interface operations for GRZ administrators
 """
 
 import logging.config
-import shutil
-import subprocess
-from importlib.metadata import version
 from pathlib import Path
-from textwrap import dedent
 
 import click
 import grz_common.cli as grzcli
@@ -16,6 +12,7 @@ from grz_cli.commands.upload import upload
 from grz_common.cli.dump_config import dump_config
 from grz_common.logging import setup_cli_logging
 
+from . import get_versions
 from .commands.archive import archive
 from .commands.clean import clean
 from .commands.consent import consent
@@ -46,26 +43,16 @@ def build_cli():
     """
     Factory for building the CLI application.
     """
+    versions = get_versions()
 
     @click.group(
         cls=OrderedGroup,
         help="GRZ Control CLI for GRZ administrators.",
     )
     @click.version_option(
-        version=version("grzctl"),
+        version=versions["grzctl"],
         prog_name="grzctl",
-        message=dedent(f"""\
-        %(prog)s v%(version)s
-        grz-cli v{version("grz-cli")}
-        grz-common v{version("grz-common")}
-        grz-db v{version("grz-db")}
-        grz-pydantic-models v{version("grz-pydantic-models")}
-        """)
-        + (
-            subprocess.run(["grz-check", "--version"], capture_output=True, text=True).stdout.strip()  # noqa: S607
-            if shutil.which("grz-check") is not None
-            else ""
-        ),
+        message="\n".join(f"{k} {'v' + v if v else 'unknown'}" for k, v in versions.items()),
     )
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(

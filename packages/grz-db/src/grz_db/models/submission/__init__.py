@@ -249,6 +249,20 @@ class Submission(SubmissionBase, table=True):
         )
 
 
+class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Failure reason enum for submissions in ERROR state."""
+
+    DUPLICATE_TANG = "duplicate_tang"
+    INCOMPLETE_SUBMISSION = "incomplete_submission"
+    DECRYPTION_ERROR = "decryption_error"
+    NETWORK_ERROR = "network_error"
+    VALIDATION_ERROR = "validation_error"
+    FILE_NOT_FOUND = "file_not_found"
+    ENCRYPTION_ERROR = "encryption_error"
+    UPLOAD_ERROR = "upload_error"
+    UNKNOWN = "unknown"
+
+
 class SubmissionStateLogBase(SQLModel):
     """
     Submission state log base model.
@@ -259,6 +273,18 @@ class SubmissionStateLogBase(SQLModel):
 
     state: SubmissionStateEnum
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    grzctl_versions: dict[str, str] | None = Field(
+        default=None,
+        description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
+        sa_column=Column(JSON),
+    )
+    failure_reason: FailureReasonEnum | None = Field(
+        default=None,
+        sa_column=Column(
+            Enum(FailureReasonEnum, values_callable=lambda e: [x.value for x in e]),
+            nullable=True,
+        ),
+    )
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -467,6 +493,11 @@ class DetailedQCResult(SQLModel, table=True):
     targeted_regions_above_min_coverage: float
     targeted_regions_above_min_coverage_passed_qc: bool
     targeted_regions_above_min_coverage_percent_deviation: float
+    qc_workflow_version: str | None = Field(
+        default=None,
+        sa_column=Column(sa.String(length=64), nullable=True),
+        description="QC workflow version (nullable for backward compatibility with old results)",
+    )
 
     model_config = ConfigDict(  # type: ignore
         populate_by_name=True,
@@ -739,6 +770,8 @@ class SubmissionDb:
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
+        grzctl_versions: dict[str, str] | None = None,
+        failure_reason: FailureReasonEnum | None = None,
     ) -> SubmissionStateLog:
         """
         Updates a submission's state to the specified state.
@@ -747,6 +780,7 @@ class SubmissionDb:
             submission_id: Submission ID of the submission to update.
             state: New state of the submission.
             data: Optional data to attach to the update.
+            grzctl_versions: Optional dictionary of grzctl dependency versions.
 
         Returns:
             An instance of SubmissionStateLog.
@@ -759,7 +793,12 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             state_log_payload = SubmissionStateLogPayload(
-                submission_id=submission_id, author_name=self._author.name, state=state, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                state=state,
+                data=data,
+                grzctl_versions=grzctl_versions,
+                failure_reason=failure_reason,
             )
             signature = state_log_payload.sign(self._author.private_key())
 
@@ -920,6 +959,24 @@ class SubmissionDb:
             )
             submission = session.exec(statement).first()
             return submission
+
+    def get_submissions(self, submission_ids: Sequence[str]) -> list[Submission | None]:
+        """Fetch a specific set of submissions by their IDs in a single query.
+
+        :param submission_ids: IDs to fetch.
+        :returns: A list of the same length as *submission_ids*, where each element is the
+                  matching :class:`Submission` or ``None`` when the ID does not exist.
+        """
+        if not submission_ids:
+            return []
+        with self._get_session() as session:
+            statement = (
+                select(Submission)
+                .where(Submission.id.in_(submission_ids))  # type: ignore[attr-defined]
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+            )
+            found = {s.id: s for s in session.exec(statement).all()}
+        return [found.get(sid) for sid in submission_ids]
 
     def list_submissions(
         self,
