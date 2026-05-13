@@ -56,7 +56,9 @@ def test_retrieve_private_key_missing_passphrase(encrypted_dummy_key, monkeypatc
     with patch("grz_common.utils.crypt.getpass") as mock_getpass:
         mock_getpass.side_effect = RuntimeError("Interactive prompt triggered in CI")
 
-        with pytest.raises(RuntimeError, match="Interactive prompt triggered in CI"):
+        # crypt4gh now raises SystemExit...
+        with pytest.raises(SystemExit) as exc_info:
             Crypt4GH.retrieve_private_key(sec_key_path, passphrase=None)
+        assert exc_info.value.code == 2
 
         mock_getpass.assert_called_once()
