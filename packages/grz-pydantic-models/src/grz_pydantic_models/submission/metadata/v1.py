@@ -1281,6 +1281,29 @@ class GrzSubmissionMetadata(StrictBaseModel):
             return self
 
     @model_validator(mode="after")
+    def ensure_disease_type_rare_has_matching_library_types(self):
+        allowed_library_types: set[LibraryType] = {
+            LibraryType.wgs,
+            LibraryType.wgs_lr,
+            LibraryType.wxs,
+            LibraryType.wxs_lr,
+            LibraryType.other,
+            LibraryType.unknown,
+        }
+        today = date.today()
+        relevant_date = max(self.submission.submission_date, today)
+        if self.submission.disease_type == DiseaseType.rare:
+            for donor in self.donors:
+                for lab_datum in donor.lab_data:
+                    if lab_datum.library_type not in allowed_library_types:
+                        message = f"Using libraryType {lab_datum.library_type} for diseaseType {DiseaseType.rare} is no longer allowed starting 01.06.2026"
+                        if relevant_date > date(2026, 6, 1):
+                            raise ValueError(message)
+                        else:
+                            log.warning(message)
+        return self
+
+    @model_validator(mode="after")
     def check_for_tumor_cell_count(self):
         """
         Check if oncology samples have tumor cell counts.
