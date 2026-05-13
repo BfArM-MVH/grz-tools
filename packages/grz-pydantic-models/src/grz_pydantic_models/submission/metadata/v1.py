@@ -307,6 +307,21 @@ class ResearchConsent(StrictBaseModel):
     no_scope_justification: ResearchConsentNoScopeJustification | None = None
 
     @model_validator(mode="after")
+    def ensure_no_scope_justification_is_not_technical_or_organizational(self):
+        today = date.today()
+        relevant_date = max(self.presentation_date or today, today)
+        if self.no_scope_justification in {
+            ResearchConsentNoScopeJustification.LE_TECH,
+            ResearchConsentNoScopeJustification.LE_ORG,
+        }:
+            message = f"Setting noScopeJustification to {self.no_scope_justification} is no longer allowed starting 01.06.2026."
+            if relevant_date >= date(2026, 6, 1):
+                raise ValueError(message)
+            else:
+                log.warning(message)
+        return self
+
+    @model_validator(mode="after")
     def ensure_scope_xor_justification(self):
         if (self.scope is None) != (self.no_scope_justification is None):
             return self
