@@ -17,7 +17,7 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
     def __init__(self):
         super().__init__()
         self.adapter = PushToPullAdapter()
-        self.report: grz_check.ValidationReport = None
+        self.report: grz_check.ValidationReport | None = None
         self.exception = None
         self.validation_thread = threading.Thread(target=self._run_validation_thread, daemon=True)
         self.validation_thread.start()
