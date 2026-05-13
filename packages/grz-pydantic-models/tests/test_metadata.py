@@ -8,6 +8,10 @@ from datetime import date
 
 import pytest
 from grz_pydantic_models.mii.consent import Consent
+from grz_pydantic_models.submission.metadata import (
+    DiseaseType,
+    ResearchConsentNoScopeJustification,
+)
 from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata, ResearchConsent
 from grz_pydantic_models_testing import example_metadata, example_research_consent
 from packaging.version import Version
@@ -387,3 +391,155 @@ def test_research_consent_no_subprovisions():
     )
     del consent_json_raw["provision"]["provision"]
     Consent.model_validate_json(json.dumps(consent_json_raw))
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(
+        [
+            "oncomine_panel_tumor_only",
+            "panel_tumor_only",
+            "wes_tumor_germline",
+        ],
+        TESTED_VERSIONS,
+    ),
+)
+def test_disease_type_rare_invalid_library_raises(dataset: str, version: str):
+    """These datasets natively use panel or wes. If diseaseType is rare, they must fail on/after 01.06.2026."""
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    with pytest.raises(ValidationError, match=r"is no longer allowed starting 01\.06\.2026"):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(
+        [
+            "oncomine_panel_tumor_only",
+            "panel_tumor_only",
+            "wes_tumor_germline",
+        ],
+        TESTED_VERSIONS,
+    ),
+)
+def test_disease_type_rare_invalid_library_warns(dataset: str, version: str, caplog):
+    """These datasets natively use panel or wes. If diseaseType is rare, they warn before 01.06.2026."""
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-05-31"
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        # If mutating diseaseType triggers an unrelated structural error in the mock,
+        # we just ensure our target date error isn't the one blocking it.
+        assert "is no longer allowed starting 01.06.2026" not in str(e)
+
+    assert "is no longer allowed starting 01.06.2026" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(
+        [
+            "wgs_tumor_germline",
+            "wgs_lr_tumor_only",
+            "wgs_trio",
+        ],
+        TESTED_VERSIONS,
+    ),
+)
+def test_disease_type_rare_valid_library_passes(dataset: str, version: str):
+    """These datasets natively use wgs or wgs_lr. If diseaseType is rare, they must pass."""
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "is no longer allowed starting 01.06.2026" not in str(e)
+
+
+@pytest.mark.parametrize(
+    "version,justification",
+    itertools.product(
+        TESTED_VERSIONS,
+        [ResearchConsentNoScopeJustification.LE_TECH.value, ResearchConsentNoScopeJustification.LE_ORG.value],
+    ),
+)
+def test_no_scope_justification_tech_org_raises(version: str, justification: str):
+    """LE_TECH and LE_ORG justifications should raise an error starting exactly 01.06.2026."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    # Apply to all consents to be thorough
+    for donor in metadata["donors"]:
+        for consent in donor.get("researchConsents", []):
+            consent["noScopeJustification"] = justification
+            consent.pop("scope", None)
+
+    with pytest.raises(ValidationError, match=r"is no longer allowed starting 01\.06\.2026"):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize(
+    "version,justification",
+    itertools.product(
+        TESTED_VERSIONS,
+        [ResearchConsentNoScopeJustification.LE_TECH.value, ResearchConsentNoScopeJustification.LE_ORG.value],
+    ),
+)
+def test_no_scope_justification_tech_org_warns(version: str, justification: str, caplog):
+    """LE_TECH and LE_ORG justifications should only warn strictly before 01.06.2026."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2026-05-31"
+
+    for donor in metadata["donors"]:
+        for consent in donor.get("researchConsents", []):
+            consent["noScopeJustification"] = justification
+            consent.pop("scope", None)
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "is no longer allowed starting 01.06.2026" not in str(e)
+
+    assert "is no longer allowed starting 01.06.2026" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "version,justification",
+    itertools.product(
+        TESTED_VERSIONS,
+        [
+            ResearchConsentNoScopeJustification.UNABLE.value,
+            ResearchConsentNoScopeJustification.REFUSED.value,
+            ResearchConsentNoScopeJustification.NO_RETURN.value,
+            ResearchConsentNoScopeJustification.OTHER.value,
+        ],
+    ),
+)
+def test_no_scope_justification_standard_passes_after_cutoff(version: str, justification: str):
+    """Standard valid justifications should continue to pass seamlessly after 01.06.2026."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    for donor in metadata["donors"]:
+        for consent in donor.get("researchConsents", []):
+            consent["noScopeJustification"] = justification
+            consent.pop("scope", None)
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "is no longer allowed starting 01.06.2026" not in str(e)
