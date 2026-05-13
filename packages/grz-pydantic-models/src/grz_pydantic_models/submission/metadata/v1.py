@@ -1280,7 +1280,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 for lab_datum in donor.lab_data:
                     if lab_datum.library_type not in allowed_library_types:
                         message = f"Using libraryType {lab_datum.library_type} for diseaseType {DiseaseType.rare} is no longer allowed starting 01.06.2026"
-                        if self.submission.submission_date > date(2026, 6, 1):
+                        if self.submission.submission_date >= date(2026, 6, 1):
                             raise ValueError(message)
                         else:
                             log.warning(message)
