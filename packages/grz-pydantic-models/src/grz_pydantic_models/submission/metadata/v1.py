@@ -307,21 +307,6 @@ class ResearchConsent(StrictBaseModel):
     no_scope_justification: ResearchConsentNoScopeJustification | None = None
 
     @model_validator(mode="after")
-    def ensure_no_scope_justification_is_not_technical_or_organizational(self):
-        today = date.today()
-        relevant_date = max(self.presentation_date or today, today)
-        if self.no_scope_justification in {
-            ResearchConsentNoScopeJustification.LE_TECH,
-            ResearchConsentNoScopeJustification.LE_ORG,
-        }:
-            message = f"Setting noScopeJustification to {self.no_scope_justification} is no longer allowed starting 01.06.2026."
-            if relevant_date >= date(2026, 6, 1):
-                raise ValueError(message)
-            else:
-                log.warning(message)
-        return self
-
-    @model_validator(mode="after")
     def ensure_scope_xor_justification(self):
         if (self.scope is None) != (self.no_scope_justification is None):
             return self
@@ -1290,14 +1275,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
             LibraryType.other,
             LibraryType.unknown,
         }
-        today = date.today()
-        relevant_date = max(self.submission.submission_date, today)
         if self.submission.disease_type == DiseaseType.rare:
             for donor in self.donors:
                 for lab_datum in donor.lab_data:
                     if lab_datum.library_type not in allowed_library_types:
                         message = f"Using libraryType {lab_datum.library_type} for diseaseType {DiseaseType.rare} is no longer allowed starting 01.06.2026"
-                        if relevant_date > date(2026, 6, 1):
+                        if self.submission.submission_date > date(2026, 6, 1):
                             raise ValueError(message)
                         else:
                             log.warning(message)
@@ -1489,6 +1472,21 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 f"Reference genomes: {reference_genomes}"
             )
 
+        return self
+
+    @model_validator(mode="after")
+    def ensure_no_scope_justification_is_not_technical_or_organizational(self):
+        for donor in self.donors:
+            for consent in donor.research_consents:
+                if consent.no_scope_justification in {
+                    ResearchConsentNoScopeJustification.LE_TECH,
+                    ResearchConsentNoScopeJustification.LE_ORG,
+                }:
+                    message = f"Setting noScopeJustification to {consent.no_scope_justification} is no longer allowed starting 01.06.2026."
+                    if self.submission.submission_date >= date(2026, 6, 1):
+                        raise ValueError(message)
+                    else:
+                        log.warning(message)
         return self
 
 
