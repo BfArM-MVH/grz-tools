@@ -888,7 +888,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "grz-common", editable = "packages/grz-common" },
-    { name = "packaging" },
+    { name = "packaging", specifier = ">=23,<27" },
 ]
 
 [package.metadata.requires-dev]
@@ -926,13 +926,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.36,<2" },
-    { name = "botocore" },
+    { name = "botocore", specifier = ">=1.36,<2" },
     { name = "click", specifier = ">=8.2,<9" },
     { name = "crypt4gh", specifier = ">=1.8.6,<2" },
-    { name = "cryptography" },
+    { name = "cryptography", specifier = ">=45.0.3,<49" },
     { name = "grz-check", editable = "packages/grz-check" },
     { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
-    { name = "packaging" },
+    { name = "packaging", specifier = ">=23,<27" },
     { name = "platformdirs", specifier = ">=4.3.6,<5" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pydantic-settings", specifier = ">=2.11.0,<3" },
