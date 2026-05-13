@@ -58,6 +58,8 @@ class Crypt4GHDecryptor(Transformer):
         nonce = ciphersegment[:12]
         ciphertext = ciphersegment[12:]
 
+        if not self._session_keys:
+            raise ValueError("No session keys found in Crypt4GH header")
         errors = []
         for key in self._session_keys:
             try:
