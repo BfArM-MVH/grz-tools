@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.0.0...grz-common-v2.0.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **grz-common:** drop pynacl, use cryptography for X25519 keygen ([#572](https://github.com/BfArM-MVH/grz-tools/issues/572)) ([ea7b3f3](https://github.com/BfArM-MVH/grz-tools/commit/ea7b3f34446e855bcc7d1a551542ae5932577872))
+
 ## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.6.1...grz-common-v2.0.0) (2026-05-11)
 
 
