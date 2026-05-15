@@ -48,6 +48,9 @@ class IgnoringBaseSettings(BaseSettings):
     @classmethod
     def from_path(cls, path: str | PathLike | list[str | PathLike]) -> Self:
         """Reads the configuration file and validates it against the schema."""
+        if isinstance(path, tuple):
+            path = list(path)
+
         if not isinstance(path, list):
             path = [path]
 
