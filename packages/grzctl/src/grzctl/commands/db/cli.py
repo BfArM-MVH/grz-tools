@@ -48,8 +48,6 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
-    REDACTED_LOCAL_CASE_ID,
-    REDACTED_TAN,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
     LibraryType,
@@ -690,19 +688,15 @@ def populate(  # noqa: C901, PLR0913
     with open(metadata_path) as fd:
         metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
 
-    if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_field:
+    try:
+        SubmissionDb.assert_metadata_not_redacted(metadata, submission_id, set(ignore_field))
+    except ValueError as e:
         raise ValueError(
-            f"Submission {submission_id} has redacted tan_g in metadata.json: {metadata_path}. "
-            "Refusing to populate a seemingly-redacted TAN. "
-            "Add 'tan_g' to ignore fields and/or use 'grzctl db submission modify' directly."
-        )
-    if (
-        not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
-    ) and "pseudonym" not in ignore_field:
-        raise ValueError(
-            f"Submission {submission_id} has missing or redacted local_case_id in metadata.json: {metadata_path}. "
-            "Add 'pseudonym' to ignore fields and/or use 'grzctl db submission modify' directly."
-        )
+            f"Refusing to populate a seemingly-redacted submission: {e} "
+            f"(from {metadata_path}). "
+            "Add 'tan_g'/'pseudonym' to --ignore-field to bypass, "
+            "or use 'grzctl db submission modify' directly."
+        ) from e
 
     submission_diff, donors_diff = db_service.diff(
         submission_id,

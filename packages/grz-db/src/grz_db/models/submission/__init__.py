@@ -1282,6 +1282,34 @@ class SubmissionDb:
         if donors_diff.deleted:
             log.info("%s - Dropping donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.deleted))
 
+    @staticmethod
+    def assert_metadata_not_redacted(
+        metadata: GrzSubmissionMetadata,
+        submission_id: str,
+        ignore_fields: set[str] | None = None,
+    ) -> None:
+        """Raise ``ValueError`` if ``metadata`` has redacted/missing required fields.
+
+        Checks ``tan_g`` against :data:`REDACTED_TAN` and ``local_case_id``
+        against :data:`REDACTED_LOCAL_CASE_ID` / emptiness. Each check can be
+        bypassed by including the corresponding key in ``ignore_fields``:
+        ``"tan_g"`` bypasses the redacted-TAN check; ``"pseudonym"`` bypasses
+        the missing/redacted-``local_case_id`` check.
+
+        :param metadata: Parsed submission metadata.
+        :param submission_id: ID of the submission being populated.
+        :param ignore_fields: Field keys whose check should be skipped.
+        :raises ValueError: If ``tan_g`` or ``local_case_id`` is redacted/missing
+            and the corresponding key is not in ``ignore_fields``.
+        """
+        ignore_fields = ignore_fields or set()
+        if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_fields:
+            raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.")
+        if (
+            not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
+        ) and "pseudonym" not in ignore_fields:
+            raise ValueError(f"Submission {submission_id} has missing or redacted local_case_id in metadata.")
+
     def populate(
         self,
         submission_id: str,
@@ -1295,19 +1323,18 @@ class SubmissionDb:
         """Reconcile DB state for ``submission_id`` with ``metadata``.
 
         Creates the submission row if absent (then forces overwrite). Rejects
-        redacted ``tan_g`` or missing/redacted ``local_case_id`` unless the
-        corresponding key (``"tan_g"`` or ``"pseudonym"``) is in
-        ``ignore_fields``. Computes diffs via :meth:`diff`, rejects destructive
-        changes unless ``force``, and commits via :meth:`commit_changes`.
+        redacted ``tan_g`` or missing/redacted ``local_case_id`` via
+        :meth:`assert_metadata_not_redacted` unless the corresponding key
+        (``"tan_g"`` or ``"pseudonym"``) is in ``ignore_fields``. Computes diffs
+        via :meth:`diff`, rejects destructive changes unless ``force``, and
+        commits via :meth:`commit_changes`.
 
         :param submission_id: ID of the submission being populated.
         :param metadata: Parsed submission metadata.
         :param submission_date: S3 last-modified date of the metadata file, if known.
         :param force: If ``True``, allow destructive updates/deletes.
         :param ignore_fields: Field keys to skip during diff and redaction
-            validation. Use ``"tan_g"`` to bypass the redacted-TAN guard and
-            ``"pseudonym"`` to bypass the missing/redacted ``local_case_id``
-            guard.
+            validation. See :meth:`assert_metadata_not_redacted`.
         :param log: Logger for info/warning summaries; defaults to module logger.
         :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
             and the corresponding key is not in ``ignore_fields``.
@@ -1323,12 +1350,7 @@ class SubmissionDb:
             log.debug("Submission %s added to database. Force populate", submission_id)
             force = True
 
-        if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_fields:
-            raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.")
-        if (
-            not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
-        ) and "pseudonym" not in ignore_fields:
-            raise ValueError(f"Submission {submission_id} has missing or redacted local_case_id in metadata.")
+        self.assert_metadata_not_redacted(metadata, submission_id, ignore_fields)
 
         submission_diff, donors_diff = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields)
 
