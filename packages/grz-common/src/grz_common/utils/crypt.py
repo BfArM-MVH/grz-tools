@@ -1,13 +1,10 @@
 """Utilities for handling crypt4gh keys, encryption and decryption"""
 
-import io
 import logging
 import os
-import typing
 from functools import partial
 from getpass import getpass
 from os import PathLike
-from os.path import getsize
 from pathlib import Path
 
 import crypt4gh.header
@@ -15,10 +12,6 @@ import crypt4gh.keys
 import crypt4gh.lib
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-from tqdm.auto import tqdm
-
-from ..constants import TQDM_DEFAULTS
-from .io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
 
@@ -70,23 +63,17 @@ class Crypt4GH:
         :param input_path:
         :return: tuple with md5 values for original file, encrypted file
         """
-        # TODO: Progress bar?
         # TODO: store header in separate file?
         input_path = Path(input_path)
         output_path = Path(output_path)
 
-        total_size = getsize(input_path)
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="ENCRYPT ", postfix=f"{input_path.name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
         ):
             crypt4gh.lib.encrypt(
                 keys=public_keys,
-                infile=pbar_in_fd,
+                infile=in_fd,
                 outfile=out_fd,
             )
 
@@ -117,18 +104,12 @@ class Crypt4GH:
         :param output_path: Path to the decrypted file
         :param private_key: The private key
         """
-        total_size = getsize(input_path)
-        file_name = input_path.name
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="DECRYPT ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
         ):
             crypt4gh.lib.decrypt(
                 keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
-                infile=pbar_in_fd,
+                infile=in_fd,
                 outfile=out_fd,
             )
