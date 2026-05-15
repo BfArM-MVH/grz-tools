@@ -31,18 +31,34 @@ grz-pydantic-models = { workspace = true }
 grz-pydantic-models-testing = { workspace = true }
 grz-check = { workspace = true }
 
-[project.optional-dependencies]
-test = [
+[tool.uv]
+# Centralize test/dev tool version ranges here so each package's
+# `[dependency-groups]` only lists bare package names. uv applies these
+# constraints workspace-wide during `uv lock` and `uv sync`.
+constraint-dependencies = [
     "pytest >=8.3.3,<9",
     "pytest-cov >=5.0.0,<6",
     "pytest-mock >=3.14.0,<4",
-    "moto[s3] >=5.0.16,<6",
     "pytest-sugar >=1.0.0,<2",
     "pytest-postgresql ~=7.0.2",
-    "psycopg ~=3.2",
-    "ruff >=0.11.12,<1",
-    "numpy >=2.1.2,<3",
+    "moto[s3] >=5.0.16,<6",
     "responses ==0.25.*",
+    "numpy >=2.1.2,<3",
+    "ruff >=0.11.12,<1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-sugar",
+    "pytest-postgresql",
+    "psycopg",
+    "moto[s3]",
+    "ruff",
+    "numpy",
+    "responses",
     "grz-common",
     "grz-cli",
     "grz-db",

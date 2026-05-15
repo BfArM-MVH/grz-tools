@@ -17,6 +17,17 @@ members = [
     "grz-tools",
     "grzctl",
 ]
+constraints = [
+    { name = "moto", extras = ["s3"], specifier = ">=5.0.16,<6" },
+    { name = "numpy", specifier = ">=2.1.2,<3" },
+    { name = "pytest", specifier = ">=8.3.3,<9" },
+    { name = "pytest-cov", specifier = ">=5.0.0,<6" },
+    { name = "pytest-mock", specifier = ">=3.14.0,<4" },
+    { name = "pytest-postgresql", specifier = "~=7.0.2" },
+    { name = "pytest-sugar", specifier = ">=1.0.0,<2" },
+    { name = "responses", specifier = "==0.25.*" },
+    { name = "ruff", specifier = ">=0.11.12,<1" },
+]
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -903,10 +914,10 @@ dev = [
     { name = "tox-uv" },
 ]
 test = [
-    { name = "pytest", specifier = ">=8.3.3,<9" },
-    { name = "pytest-cov", specifier = ">=5.0.0,<6" },
-    { name = "pytest-mock", specifier = ">=3.14.0,<4" },
-    { name = "pytest-sugar", specifier = ">=1.0.0,<2" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-sugar" },
 ]
 
 [[package]]
@@ -968,11 +979,11 @@ dev = [
 ]
 test = [
     { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.0.16,<6" },
-    { name = "pytest", specifier = ">=8.3.3,<9" },
-    { name = "pytest-cov", specifier = ">=5.0.0,<6" },
-    { name = "pytest-mock", specifier = ">=3.14.0,<4" },
-    { name = "pytest-sugar", specifier = ">=1.0.0,<2" },
+    { name = "moto", extras = ["s3"] },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-sugar" },
 ]
 
 [[package]]
@@ -1017,12 +1028,12 @@ dev = [
 ]
 test = [
     { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },
-    { name = "psycopg", specifier = "~=3.2" },
-    { name = "pytest", specifier = ">=8.3.3,<9" },
-    { name = "pytest-cov", specifier = ">=5.0.0,<6" },
-    { name = "pytest-mock", specifier = ">=3.14.0,<4" },
-    { name = "pytest-postgresql", specifier = "~=7.0.2" },
-    { name = "pytest-sugar", specifier = ">=1.0.0,<2" },
+    { name = "psycopg" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-postgresql" },
+    { name = "pytest-sugar" },
 ]
 
 [[package]]
@@ -1151,16 +1162,16 @@ requires-dist = [
     { name = "grz-pydantic-models-testing", marker = "extra == 'test'", editable = "packages/grz-pydantic-models-testing" },
     { name = "grzctl", editable = "packages/grzctl" },
     { name = "grzctl", marker = "extra == 'test'", editable = "packages/grzctl" },
-    { name = "moto", extras = ["s3"], marker = "extra == 'test'", specifier = ">=5.0.16,<6" },
-    { name = "numpy", marker = "extra == 'test'", specifier = ">=2.1.2,<3" },
-    { name = "psycopg", marker = "extra == 'test'", specifier = "~=3.2" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3,<9" },
-    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5.0.0,<6" },
-    { name = "pytest-mock", marker = "extra == 'test'", specifier = ">=3.14.0,<4" },
-    { name = "pytest-postgresql", marker = "extra == 'test'", specifier = "~=7.0.2" },
-    { name = "pytest-sugar", marker = "extra == 'test'", specifier = ">=1.0.0,<2" },
-    { name = "responses", marker = "extra == 'test'", specifier = "==0.25.*" },
-    { name = "ruff", marker = "extra == 'test'", specifier = ">=0.11.12,<1" },
+    { name = "moto", extras = ["s3"], marker = "extra == 'test'" },
+    { name = "numpy", marker = "extra == 'test'" },
+    { name = "psycopg", marker = "extra == 'test'" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pytest-cov", marker = "extra == 'test'" },
+    { name = "pytest-mock", marker = "extra == 'test'" },
+    { name = "pytest-postgresql", marker = "extra == 'test'" },
+    { name = "pytest-sugar", marker = "extra == 'test'" },
+    { name = "responses", marker = "extra == 'test'" },
+    { name = "ruff", marker = "extra == 'test'" },
 ]
 provides-extras = ["test"]
 
@@ -1215,7 +1226,6 @@ test = [
     { name = "grz-cli" },
     { name = "grz-common" },
     { name = "grz-pydantic-models-testing" },
-    { name = "grzctl" },
     { name = "moto", extra = ["s3"] },
     { name = "numpy" },
     { name = "psycopg" },
@@ -1243,14 +1253,13 @@ test = [
     { name = "grz-cli", editable = "packages/grz-cli" },
     { name = "grz-common", editable = "packages/grz-common" },
     { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },
-    { name = "grzctl", editable = "packages/grzctl" },
     { name = "moto", extras = ["s3"] },
     { name = "numpy" },
     { name = "psycopg" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
-    { name = "pytest-postgresql", specifier = "~=7.0.2" },
+    { name = "pytest-postgresql" },
     { name = "pytest-sugar" },
 ]
 
