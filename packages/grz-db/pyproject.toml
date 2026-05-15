@@ -26,6 +26,15 @@ dependencies = [
 
 [dependency-groups]
 dev = ["tox", "tox-uv"]
+test = [
+    "pytest >=8.3.3,<9",
+    "pytest-cov >=5.0.0,<6",
+    "pytest-mock >=3.14.0,<4",
+    "pytest-sugar >=1.0.0,<2",
+    "pytest-postgresql ~=7.0.2",
+    "psycopg ~=3.2",
+    "grz-pydantic-models-testing",
+]
 
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"

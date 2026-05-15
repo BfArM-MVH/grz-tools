@@ -196,6 +196,12 @@ isolated_build = true
 runner = "uv-venv-lock-runner"
 description = "run unit tests"
 dependency_groups = ["test"]
+# Scope `uv sync` to a single workspace member when GRZ_TOX_PACKAGE is set.
+# Default `grz-tools` (the workspace root meta-package) preserves "install everything" for
+# local `tox` invocations; CI exports GRZ_TOX_PACKAGE=<pkg> so the per-package matrix only
+# installs that package's declared deps + its own `test` group, catching missing-dep
+# regressions like transitive-only `import grz_db` from grz-common.
+uv_sync_flags = ["--package", "{env:GRZ_TOX_PACKAGE:grz-tools}"]
 commands = [["pytest", { replace = "posargs", default = [], extend = true }]]
 # isolate Cargo build directories per tox environment, otherwise Cargo caches the compiled Rust extension (and then we end up with mismatches between ABI versions).
 setenv = { UV_REINSTALL_PACKAGE = "grz-check", CARGO_TARGET_DIR = "{work_dir}/cargo_target_{env_name}" }
