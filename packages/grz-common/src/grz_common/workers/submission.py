@@ -777,6 +777,7 @@ class EncryptedSubmission:
         files_dir: str | PathLike,
         progress_log_file: str | PathLike,
         recipient_private_key_path: str | PathLike,
+        threads: int | None = 1,
     ) -> Submission:
         """
         Decrypt this encrypted submission with a private key using Crypt4Gh
@@ -784,6 +785,7 @@ class EncryptedSubmission:
         :param files_dir: Output directory of the decrypted files
         :param progress_log_file: Path to a log file to store the progress of the decryption process
         :param recipient_private_key_path: Path to the private key file which will be used for decryption
+        :param threads: Number of threads to use for decryption
         :return: Submission instance
         """
         # Import here to avoid circular import issues
@@ -806,13 +808,20 @@ class EncryptedSubmission:
             self.__log.error(f"Error preparing private key: {e}")
             raise e
 
-        for encrypted_file_path, file_metadata in self.encrypted_files.items():
+        def _single_decrypt_task(
+            item: tuple[Path, SubmissionFileMetadata],
+            row: int,
+            lock: threading.Lock,
+            pbar_global: tqdm,
+        ) -> None:
+            encrypted_file_path, file_metadata = item
             logged_state = progress_logger.get_state(encrypted_file_path, file_metadata)
             self.__log.debug("state for %s: %s", encrypted_file_path, logged_state)
 
             decrypted_file_path = files_dir / file_metadata.file_path
             if not decrypted_file_path.parent.is_dir():
                 decrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=False)
+            filesize = encrypted_file_path.stat().st_size if encrypted_file_path.exists() else 0
 
             if (
                 (logged_state is None)
@@ -826,33 +835,74 @@ class EncryptedSubmission:
                     str(decrypted_file_path),
                 )
 
-                try:
-                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
+                with tqdm(
+                    total=filesize,
+                    desc="DECRYPT ",
+                    position=row,
+                    file=sys.stderr,
+                    postfix={"file": encrypted_file_path.name},
+                    **TQDM_DEFAULTS,
+                ) as pbar_local:
 
-                    self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
-                    progress_logger.set_state(
-                        encrypted_file_path,
-                        file_metadata,
-                        state=DecryptionState(decryption_successful=True, submission_id=self.submission_id),
-                    )
-                except Exception as e:
-                    self.__log.error("Decryption failed for '%s'", str(encrypted_file_path))
+                    class ProgressBar:
+                        def update(self, n):
+                            with lock:
+                                pbar_local.update(n)
+                                pbar_global.update(n)
 
-                    progress_logger.set_state(
-                        encrypted_file_path,
-                        file_metadata,
-                        state=DecryptionState(
-                            decryption_successful=False, errors=[str(e)], submission_id=self.submission_id
-                        ),
-                    )
+                    try:
+                        Crypt4GH.decrypt_file(
+                            encrypted_file_path,
+                            decrypted_file_path,
+                            private_key,
+                            progress_bar=ProgressBar(),
+                        )
 
-                    raise e
+                        self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
+                        progress_logger.set_state(
+                            encrypted_file_path,
+                            file_metadata,
+                            state=DecryptionState(decryption_successful=True, submission_id=self.submission_id),
+                        )
+                    except Exception as e:
+                        self.__log.error("Decryption failed for '%s'", str(encrypted_file_path))
+
+                        progress_logger.set_state(
+                            encrypted_file_path,
+                            file_metadata,
+                            state=DecryptionState(
+                                decryption_successful=False, errors=[str(e)], submission_id=self.submission_id
+                            ),
+                        )
+
+                        raise e
             else:
                 self.__log.info(
                     "File '%s' already decrypted in '%s'",
                     str(encrypted_file_path),
                     str(decrypted_file_path),
                 )
+
+                with (
+                    tqdm(
+                        total=filesize,
+                        desc="SKIPPED ",
+                        position=row,
+                        file=sys.stderr,
+                        postfix={"file": encrypted_file_path.name},
+                        **TQDM_DEFAULTS,
+                    ) as pbar_local,
+                    lock,
+                ):
+                    pbar_local.update(filesize)
+                    pbar_global.update(filesize)
+
+        _run_parallel_with_progress(
+            items=self.encrypted_files.items(),
+            get_size_fn=lambda i: i[0].stat().st_size if i[0].exists() else 0,
+            worker_fn=_single_decrypt_task,
+            threads=threads or 1,
+        )
 
         self.__log.info("File decryption completed.")
 
