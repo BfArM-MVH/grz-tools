@@ -145,7 +145,7 @@ class S3BotoUploadWorker(UploadWorker):
             use_threads=self._threads > 1,
         )
 
-        transfer = S3Transfer(self._s3_client, config)
+        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]  # ???
 
         with tqdm(  # type: ignore[call-overload]
             total=filesize,
