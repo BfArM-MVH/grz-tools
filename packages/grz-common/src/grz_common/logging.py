@@ -100,4 +100,5 @@ def setup_cli_logging(log_file: str | None, log_level: str):
             log_level.upper(),
         )
 
+    logging.getLogger("crypt4gh").setLevel(logging.WARNING)
     log.debug("Logging setup complete.")
