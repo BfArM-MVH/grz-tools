@@ -30,7 +30,7 @@ def _run_parallel_with_progress[T](
         position_queue.put(i)
 
     with (
-        tqdm(total=total_bytes, desc=global_desc, position=0, file=sys.stderr, **TQDM_DEFAULTS) as pbar_global,
+        tqdm(total=total_bytes, desc=global_desc, position=0, file=sys.stderr, **TQDM_DEFAULTS) as pbar_global,  # type: ignore[call-overload]
         ThreadPoolExecutor(max_workers=threads) as pool,
     ):
 

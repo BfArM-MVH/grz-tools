@@ -486,7 +486,7 @@ class Submission:
             task_type, paths, metas, kwargs = task
             task_size = _get_task_size(task)
 
-            with tqdm(
+            with tqdm(  # type: ignore[call-overload]
                 total=task_size,
                 desc="VALIDATE",
                 position=row,
@@ -612,7 +612,7 @@ class Submission:
                         f"'{encrypted_file_path}' already exists. Delete it or use --force to overwrite it."
                     )
 
-                with tqdm(
+                with tqdm(  # type: ignore[call-overload]
                     total=filesize,
                     desc="ENCRYPT ",
                     position=row,
@@ -652,7 +652,7 @@ class Submission:
                 )
 
                 with (
-                    tqdm(
+                    tqdm(  # type: ignore[call-overload]
                         total=filesize,
                         desc="SKIPPED ",
                         position=row,

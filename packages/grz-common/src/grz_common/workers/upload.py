@@ -147,7 +147,7 @@ class S3BotoUploadWorker(UploadWorker):
 
         transfer = S3Transfer(self._s3_client, config)
 
-        with tqdm(
+        with tqdm(  # type: ignore[call-overload]
             total=filesize,
             desc="UPLOAD  ",
             position=pbar_local_position,
@@ -252,7 +252,7 @@ class S3BotoUploadWorker(UploadWorker):
                     str(s3_object_id),
                 )
                 with (
-                    tqdm(
+                    tqdm(  # type: ignore[call-overload]
                         total=filesize,
                         desc="SKIPPED ",
                         position=row,
