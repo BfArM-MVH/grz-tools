@@ -716,8 +716,7 @@ def populate(  # noqa: C901, PLR0913
 
     if not submission_diff.has_pending and not donors_diff.has_pending:
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
-        ctx.exit()
-        return  # ctx.exit() raises SystemExit; this line satisfies static analysers
+        return
 
     console.print(
         rich.panel.Panel.fit(
