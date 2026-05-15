@@ -13,7 +13,7 @@ from importlib.metadata import version
 from os import PathLike
 from os.path import getsize
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, override
 
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
@@ -21,7 +21,6 @@ from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from tqdm.auto import tqdm
 
-from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
@@ -111,15 +110,15 @@ class S3BotoUploadWorker(UploadWorker):
         self,
         local_file_path: str | PathLike,
         s3_object_id: str,
-        ui_position: int = 1,
-        pbar_global: Any | None = None,
-        global_lock: Any | None = None,
+        pbar_local: tqdm | None = None,
+        pbar_global: tqdm | None = None,
+        global_lock: threading.Lock | None = None,
     ):
         """
         Upload a single file to the specified object ID
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
-        :param ui_position: Position of the progress bar in the UI
+        :param pbar_local: The pre-allocated local progress bar
         :param pbar_global: Global progress bar for the entire upload
         :param global_lock: Lock for the global progress bar
         """
@@ -145,26 +144,26 @@ class S3BotoUploadWorker(UploadWorker):
         )
 
         transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        with tqdm(
-            total=filesize,
-            desc="UPLOAD  ",
-            position=ui_position,
-            postfix=f"{s3_object_id}",
-            **TQDM_DEFAULTS,
-        ) as progress_bar:  # type: ignore[call-overload]
 
-            def _progress_callback(bytes_transferred):
-                progress_bar.update(bytes_transferred)
-                if pbar_global and global_lock:
-                    with global_lock:
-                        pbar_global.update(bytes_transferred)
+        if pbar_local:
+            pbar_local.reset(total=filesize)
+            pbar_local.set_description("UPLOAD  ")
+            pbar_local.set_postfix({"file": f"{s3_object_id}"})
+            pbar_local.refresh()
 
-            transfer.upload_file(
-                str(local_file_path),
-                self._s3_options.bucket,
-                s3_object_id,
-                callback=_progress_callback,
-            )
+        def _progress_callback(bytes_transferred):
+            if pbar_local:
+                pbar_local.update(bytes_transferred)
+            if pbar_global and global_lock:
+                with global_lock:
+                    pbar_global.update(bytes_transferred)
+
+        transfer.upload_file(
+            str(local_file_path),
+            self._s3_options.bucket,
+            s3_object_id,
+            callback=_progress_callback,
+        )
 
     def _remote_id_exists(self, s3_object_id: str) -> bool:
         """
@@ -191,7 +190,10 @@ class S3BotoUploadWorker(UploadWorker):
                 raise UploadError(f"File {file_path} does not exist")
 
         def _single_upload_task(
-            item: tuple[Path, SubmissionFileMetadata], ui_pos: int, lock: threading.Lock, pbar_global: tqdm | Any
+            item: tuple[Path, SubmissionFileMetadata],
+            pbar_local: tqdm,
+            lock: threading.Lock,
+            pbar_global: tqdm,
         ):
             file_path, file_metadata = item
             logged_state = progress_logger.get_state(file_path, file_metadata) if file_metadata else None
@@ -212,7 +214,7 @@ class S3BotoUploadWorker(UploadWorker):
 
                 try:
                     self.upload_file(
-                        file_path, s3_object_id, ui_position=ui_pos, pbar_global=pbar_global, global_lock=lock
+                        file_path, s3_object_id, pbar_local=pbar_local, pbar_global=pbar_global, global_lock=lock
                     )
 
                     self.__log.info(f"Upload complete for {str(file_path)}. ")

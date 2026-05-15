@@ -380,14 +380,19 @@ class Submission:
         def _get_task_size(task):
             return sum(meta.file_size_in_bytes for meta in task[2] if meta.file_size_in_bytes)
 
-        def _single_validate_task(  # noqa: C901
+        def _single_validate_task(  # noqa: C901, PLR0912
             task: tuple[str, list[Path], list[SubmissionFileMetadata], dict[str, Any]],
-            ui_pos: int,
+            pbar_local: tqdm,
             lock: threading.Lock,
-            pbar_global: tqdm | Any,
+            pbar_global: tqdm,
         ):
             task_type, paths, metas, kwargs = task
             task_size = _get_task_size(task)
+
+            pbar_local.reset(total=task_size)
+            pbar_local.set_description("VALIDATE")
+            pbar_local.set_postfix({"file": paths[0].name})
+            pbar_local.refresh()
 
             class TqdmFileReader:
                 def __init__(self, file_obj, pbar_loc):
@@ -403,78 +408,71 @@ class Submission:
                             pbar_global.update(chunk_len)
                     return data
 
-            with tqdm(  # type: ignore[call-overload]
-                total=task_size,
-                desc="VALIDATE",
-                position=ui_pos,
-                postfix={"file": paths[0].name},
-                **TQDM_DEFAULTS,
-            ) as pbar_local:
-                reports: list[grz_check.ValidationReport] = []
-                try:
-                    with ExitStack() as stack:
-                        sources: list[Any] = []
-                        for p in paths:
-                            if not p.exists() or p.stat().st_size == 0:
-                                sources.append(str(p))
+            reports: list[grz_check.ValidationReport] = []
+            try:
+                with ExitStack() as stack:
+                    sources: list[Any] = []
+                    for p in paths:
+                        if not p.exists() or p.stat().st_size == 0:
+                            sources.append(str(p))
+                        else:
+                            f = stack.enter_context(open(p, "rb"))
+                            if no_mmap:
+                                sources.append(TqdmFileReader(f, pbar_local))
                             else:
-                                f = stack.enter_context(open(p, "rb"))
-                                if no_mmap:
-                                    sources.append(TqdmFileReader(f, pbar_local))
-                                else:
-                                    mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
-                                    sources.append(mm)
+                                mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
+                                sources.append(mm)
 
-                        if task_type == "fastq_paired":
-                            reports = list(grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs))
-                        elif task_type == "fastq_single":
-                            reports = [grz_check.validate_fastq(sources[0], **kwargs)]
-                        elif task_type == "bam":
-                            reports = [grz_check.validate_bam(sources[0])]
-                        elif task_type == "raw":
-                            reports = [grz_check.validate_raw(sources[0])]
-                except Exception as e:
-                    raise e
+                    if task_type == "fastq_paired":
+                        reports = list(grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs))
+                    elif task_type == "fastq_single":
+                        reports = [grz_check.validate_fastq(sources[0], **kwargs)]
+                    elif task_type == "bam":
+                        reports = [grz_check.validate_bam(sources[0])]
+                    elif task_type == "raw":
+                        reports = [grz_check.validate_raw(sources[0])]
+            except Exception as e:
+                raise e
 
-                pbar_local.set_postfix({"finished": ", ".join(p.name for p in paths)})
+            pbar_local.set_postfix({"finished": ", ".join(p.name for p in paths)})
 
-                for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
-                    checksum_issues = []
+            for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
+                checksum_issues = []
 
-                    for w in report.warnings:
-                        self.__log.warning(f"{file_path.name}: {w}")
+                for w in report.warnings:
+                    self.__log.warning(f"{file_path.name}: {w}")
 
-                    if not report.sha256:
-                        checksum_issues.append("No checksum found.")
+                if not report.sha256:
+                    checksum_issues.append("No checksum found.")
 
-                    if (
-                        report.sha256
-                        and file_metadata.checksum_type == ChecksumType.sha256
-                        and file_metadata.file_checksum != report.sha256
-                    ):
-                        checksum_issues.append(
-                            f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
-                        )
-
-                    if file_path.exists() and file_path.is_file():
-                        if file_metadata.file_size_in_bytes != file_path.stat().st_size:
-                            checksum_issues.append(
-                                f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
-                            )
-                    else:
-                        checksum_issues.append("File not found for size check.")
-
-                    checksum_passed = not checksum_issues
-                    checksum_state = ValidationState(
-                        errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
+                if (
+                    report.sha256
+                    and file_metadata.checksum_type == ChecksumType.sha256
+                    and file_metadata.file_checksum != report.sha256
+                ):
+                    checksum_issues.append(
+                        f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
                     )
-                    checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
 
-                    if file_metadata.file_type in ("fastq", "bam"):
-                        seq_data_state = ValidationState(
-                            errors=report.errors, validation_passed=report.is_valid, submission_id=self.submission_id
+                if file_path.exists() and file_path.is_file():
+                    if file_metadata.file_size_in_bytes != file_path.stat().st_size:
+                        checksum_issues.append(
+                            f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
                         )
-                        seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
+                else:
+                    checksum_issues.append("File not found for size check.")
+
+                checksum_passed = not checksum_issues
+                checksum_state = ValidationState(
+                    errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
+                )
+                checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
+
+                if file_metadata.file_type in ("fastq", "bam"):
+                    seq_data_state = ValidationState(
+                        errors=report.errors, validation_passed=report.is_valid, submission_id=self.submission_id
+                    )
+                    seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
 
                 if not no_mmap:
                     pbar_local.update(task_size)
@@ -542,8 +540,11 @@ class Submission:
             raise e
 
         def _single_encrypt_task(
-            item: tuple[Path, SubmissionFileMetadata], ui_pos: int, lock: threading.Lock, pbar_global: tqdm | Any
-        ):
+            item: tuple[Path, SubmissionFileMetadata],
+            pbar_local: tqdm,
+            lock: threading.Lock,
+            pbar_global: tqdm,
+        ) -> None:
             file_path, file_metadata = item
             logged_state = progress_logger.get_state(file_path, file_metadata)
             self.__log.debug("state for %s: %s", file_path, logged_state)
@@ -571,38 +572,36 @@ class Submission:
                         f"'{encrypted_file_path}' already exists. Delete it or use --force to overwrite it."
                     )
 
-                with tqdm(  # type: ignore[call-overload]
-                    total=filesize,
-                    desc="ENCRYPT ",
-                    position=ui_pos,
-                    postfix={"file": file_path.name},
-                    **TQDM_DEFAULTS,
-                ) as pbar_local:
-                    try:
-                        Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
+                pbar_local.reset(total=filesize)
+                pbar_local.set_description("ENCRYPT ")
+                pbar_local.set_postfix({"file": file_path.name})
+                pbar_local.refresh()
 
-                        self.__log.info(f"Encryption complete for {str(file_path)}. ")
+                try:
+                    Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
 
-                        pbar_local.update(filesize)
-                        with lock:
-                            pbar_global.update(filesize)
+                    self.__log.info(f"Encryption complete for {str(file_path)}. ")
 
-                        progress_logger.set_state(
-                            file_path,
-                            file_metadata,
-                            state=EncryptionState(encryption_successful=True, submission_id=self.submission_id),
-                        )
-                    except Exception as e:
-                        self.__log.error("Encryption failed for '%s'", str(file_path))
+                    pbar_local.update(filesize)
+                    with lock:
+                        pbar_global.update(filesize)
 
-                        progress_logger.set_state(
-                            file_path,
-                            file_metadata,
-                            state=EncryptionState(
-                                encryption_successful=False, errors=[str(e)], submission_id=self.submission_id
-                            ),
-                        )
-                        raise e
+                    progress_logger.set_state(
+                        file_path,
+                        file_metadata,
+                        state=EncryptionState(encryption_successful=True, submission_id=self.submission_id),
+                    )
+                except Exception as e:
+                    self.__log.error("Encryption failed for '%s'", str(file_path))
+
+                    progress_logger.set_state(
+                        file_path,
+                        file_metadata,
+                        state=EncryptionState(
+                            encryption_successful=False, errors=[str(e)], submission_id=self.submission_id
+                        ),
+                    )
+                    raise e
             else:
                 self.__log.info(
                     "File '%s' already encrypted in '%s'",
