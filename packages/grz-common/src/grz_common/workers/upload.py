@@ -102,8 +102,9 @@ class S3BotoUploadWorker(UploadWorker):
         self._s3_options = s3_options
         self._threads = threads
 
-        self._s3_client = init_s3_client(s3_options)
-        self._s3_resource = init_s3_resource(s3_options)
+        pool_size = (self._threads * 10) + 1
+        self._s3_client = init_s3_client(s3_options, max_pool_connections=pool_size)
+        self._s3_resource = init_s3_resource(s3_options, max_pool_connections=pool_size)
 
     @override
     def upload_file(
