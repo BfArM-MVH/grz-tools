@@ -528,7 +528,7 @@ class Submission:
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
-    def encrypt(  # noqa: PLR0915, PLR0913, C901
+    def encrypt(  # noqa: PLR0913, C901
         self,
         encrypted_files_dir: str | PathLike,
         progress_log_file: str | PathLike,
