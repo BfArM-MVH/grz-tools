@@ -17,7 +17,7 @@ from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
-from ..transfer import init_s3_client
+from ..transfer import get_metadata_upload_timestamp, init_s3_client
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission, SubmissionValidationError
 from .upload import S3BotoUploadWorker, UploadError
@@ -318,13 +318,16 @@ class Worker:
     ) -> tuple[GrzSubmissionMetadata, datetime.date]:
         """Load the downloaded metadata.json and fetch its S3 last-modified date.
 
-        Returns the parsed :class:`GrzSubmissionMetadata` plus the date the
-        metadata.json was last modified on S3, suitable for feeding into
-        :meth:`grz_db.models.submission.SubmissionDb.populate`.
+        :param s3_options: S3 connection options for the inbox bucket.
+        :param submission_id: Submission identifier (the top-level S3 prefix).
+        :returns: The parsed :class:`GrzSubmissionMetadata` plus the inbox upload
+            date derived from
+            :func:`grz_common.transfer.get_metadata_upload_timestamp`, suitable
+            for feeding into
+            :meth:`grz_db.models.submission.SubmissionDb.populate`.
         """
         s3_client = init_s3_client(s3_options)
-        response = s3_client.head_object(Bucket=s3_options.bucket, Key=f"{submission_id}/metadata/metadata.json")
-        submission_date = response["LastModified"].date()
+        submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
 
         metadata_file_path = self.metadata_dir / "metadata.json"
         with open(metadata_file_path) as fd:

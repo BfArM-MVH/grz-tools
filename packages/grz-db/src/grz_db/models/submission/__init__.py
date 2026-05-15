@@ -1310,7 +1310,7 @@ class SubmissionDb:
         ) and "pseudonym" not in ignore_fields:
             raise ValueError(f"Submission {submission_id} has missing or redacted local_case_id in metadata.")
 
-    def populate(
+    def populate(  # noqa: PLR0913
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
