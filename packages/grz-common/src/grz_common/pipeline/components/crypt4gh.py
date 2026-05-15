@@ -3,10 +3,10 @@ import os
 
 import crypt4gh.header
 import crypt4gh.lib
+from crypt4gh.sodium import chacha20poly1305_decrypt, chacha20poly1305_encrypt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from grz_common.exceptions import DecryptionError
-from nacl.bindings import crypto_aead_chacha20poly1305_ietf_decrypt, crypto_aead_chacha20poly1305_ietf_encrypt
 
 from . import StreamConfigurationError, Transformer
 
@@ -33,6 +33,7 @@ class Crypt4GHDecryptor(Transformer):
         self._session_keys: bytes | None = None
         self._header_parsed = False
         self._buffer = bytearray()
+        self._out_buffer = bytearray(self.CIPHER_SEGMENT_SIZE)
 
     def _fill_buffer(self) -> bytes:
         if not self._header_parsed:
@@ -56,15 +57,17 @@ class Crypt4GHDecryptor(Transformer):
         if len(ciphersegment) <= self.CIPHER_DIFF:
             raise ValueError("Truncated cipher segment")
 
-        nonce = ciphersegment[:12]
-        ciphertext = ciphersegment[12:]
-
         if not self._session_keys:
             raise ValueError("No session keys found in Crypt4GH header")
+
+        segment_len = len(ciphersegment) - self.CIPHER_DIFF
         errors = []
+        out_view = memoryview(self._out_buffer)[:segment_len]
+
         for key in self._session_keys:
             try:
-                return crypto_aead_chacha20poly1305_ietf_decrypt(ciphertext, None, nonce, bytes(key))
+                out_len = chacha20poly1305_decrypt(out_view, ciphersegment, bytes(key))
+                return bytes(out_view[:out_len])
             except Exception as e:
                 errors.append(repr(e))
 
@@ -95,6 +98,7 @@ class Crypt4GHEncryptor(Transformer):
 
     NONCE_LENGTH = 12
     SEGMENT_SIZE = crypt4gh.lib.SEGMENT_SIZE
+    CIPHER_DIFF = crypt4gh.lib.CIPHER_DIFF
 
     def __init__(
         self,
@@ -121,6 +125,7 @@ class Crypt4GHEncryptor(Transformer):
         self._session_key = os.urandom(32)
         self._header_sent = False
         self._buffer = bytearray()
+        self._out_buffer = bytearray(self.SEGMENT_SIZE + self.CIPHER_DIFF)
 
     def _fill_buffer(self) -> bytes:
         if not self._header_sent:
@@ -144,9 +149,11 @@ class Crypt4GHEncryptor(Transformer):
         segment = bytes(self._buffer[:segment_len])
         del self._buffer[:segment_len]
 
-        nonce = os.urandom(self.NONCE_LENGTH)
-        ciphertext = crypto_aead_chacha20poly1305_ietf_encrypt(segment, None, nonce, self._session_key)
-        return nonce + ciphertext
+        out_length = segment_len + self.CIPHER_DIFF
+        out_view = memoryview(self._out_buffer)[:out_length]
+        out_len = chacha20poly1305_encrypt(out_view, segment, self._session_key)
+
+        return bytes(out_view[:out_len])
 
     def _compose_header(self) -> bytes:
         keys = [(0, self._sender_privkey, self._recipient_pubkey)]
