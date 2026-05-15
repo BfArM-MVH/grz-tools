@@ -29,7 +29,6 @@ from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import ValidationError
 from tqdm.auto import tqdm
 
-from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
@@ -298,7 +297,7 @@ class Submission:
                         all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
         yield from all_errors
 
-    def validate_files(  # noqa: C901, PLR0912, PLR0915
+    def validate_files(  # noqa: C901, PLR0915
         self,
         checksum_progress_file: str | PathLike,
         seq_data_progress_file: str | PathLike,
@@ -380,7 +379,7 @@ class Submission:
         def _get_task_size(task):
             return sum(meta.file_size_in_bytes for meta in task[2] if meta.file_size_in_bytes)
 
-        def _single_validate_task(  # noqa: C901, PLR0912
+        def _single_validate_task(  # noqa: C901, PLR0912, PLR0915
             task: tuple[str, list[Path], list[SubmissionFileMetadata], dict[str, Any]],
             pbar_local: tqdm,
             lock: threading.Lock,
@@ -488,7 +487,7 @@ class Submission:
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
-    def encrypt(
+    def encrypt(  # noqa: PLR0915, PLR0913
         self,
         encrypted_files_dir: str | PathLike,
         progress_log_file: str | PathLike,

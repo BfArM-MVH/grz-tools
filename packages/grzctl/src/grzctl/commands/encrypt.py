@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 )
 @grzcli.update_db
 @grzcli.threads
-def encrypt(
+def encrypt(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_dir,
     force,
