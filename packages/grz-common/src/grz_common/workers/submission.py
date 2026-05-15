@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import concurrent
 import json
 import logging
 import mmap
+import threading
 from collections.abc import Generator
 from contextlib import ExitStack
 from itertools import groupby
 from os import PathLike
 from pathlib import Path
+from typing import Any
 
 import grz_check
 from grz_pydantic_models.submission.metadata import get_accepted_versions
@@ -32,6 +33,7 @@ from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
+from ..utils.concurrency import _run_parallel_with_progress
 from ..utils.crypt import Crypt4GH
 
 log = logging.getLogger(__name__)
@@ -375,60 +377,67 @@ class Submission:
             yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
             return
 
-        total_bytes_to_process = sum(
-            meta.file_size_in_bytes for task in tasks for meta in task[2] if meta.file_size_in_bytes
-        )
+        def _get_task_size(task):
+            return sum(meta.file_size_in_bytes for meta in task[2] if meta.file_size_in_bytes)
 
-        class TqdmFileReader:
-            def __init__(self, file_obj, pbar):
-                self._file = file_obj
-                self._pbar = pbar
-
-            def read(self, size=-1):
-                data = self._file.read(size)
-                if data:
-                    self._pbar.update(len(data))
-                return data
-
-        def _execute_task(task_type, paths, metas, kwargs, pbar):
-            reports = []
-            try:
-                with ExitStack() as stack:
-                    sources = []
-                    for p in paths:
-                        if not p.exists() or p.stat().st_size == 0:
-                            sources.append(str(p))
-                        else:
-                            f = stack.enter_context(open(p, "rb"))
-                            if no_mmap:
-                                sources.append(TqdmFileReader(f, pbar))
-                            else:
-                                mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
-                                sources.append(mm)
-
-                    if task_type == "fastq_paired":
-                        reports = grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs)
-                    elif task_type == "fastq_single":
-                        reports = [grz_check.validate_fastq(sources[0], **kwargs)]
-                    elif task_type == "bam":
-                        reports = [grz_check.validate_bam(sources[0])]
-                    elif task_type == "raw":
-                        reports = [grz_check.validate_raw(sources[0])]
-            except Exception as e:
-                raise e
-
-            return paths, metas, reports
-
-        with (
-            concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor,
-            tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,  # type: ignore[call-overload]
+        def _single_validate_task(  # noqa: C901
+            task: tuple[str, list[Path], list[SubmissionFileMetadata], dict[str, Any]],
+            ui_pos: int,
+            lock: threading.Lock,
+            pbar_global: tqdm | Any,
         ):
-            futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
+            task_type, paths, metas, kwargs = task
+            task_size = _get_task_size(task)
 
-            for future in concurrent.futures.as_completed(futures):
-                paths, metas, reports = future.result()
+            class TqdmFileReader:
+                def __init__(self, file_obj, pbar_loc):
+                    self._file = file_obj
+                    self._pbar_loc = pbar_loc
 
-                pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
+                def read(self, size=-1):
+                    data = self._file.read(size)
+                    if data:
+                        chunk_len = len(data)
+                        self._pbar_loc.update(chunk_len)
+                        with lock:
+                            pbar_global.update(chunk_len)
+                    return data
+
+            with tqdm(  # type: ignore[call-overload]
+                total=task_size,
+                desc="VALIDATE",
+                position=ui_pos,
+                postfix={"file": paths[0].name},
+                leave=False,
+                **TQDM_DEFAULTS,
+            ) as pbar_local:
+                reports: list[grz_check.ValidationReport] = []
+                try:
+                    with ExitStack() as stack:
+                        sources: list[Any] = []
+                        for p in paths:
+                            if not p.exists() or p.stat().st_size == 0:
+                                sources.append(str(p))
+                            else:
+                                f = stack.enter_context(open(p, "rb"))
+                                if no_mmap:
+                                    sources.append(TqdmFileReader(f, pbar_local))
+                                else:
+                                    mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
+                                    sources.append(mm)
+
+                        if task_type == "fastq_paired":
+                            reports = list(grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs))
+                        elif task_type == "fastq_single":
+                            reports = [grz_check.validate_fastq(sources[0], **kwargs)]
+                        elif task_type == "bam":
+                            reports = [grz_check.validate_bam(sources[0])]
+                        elif task_type == "raw":
+                            reports = [grz_check.validate_raw(sources[0])]
+                except Exception as e:
+                    raise e
+
+                pbar_local.set_postfix({"finished": ", ".join(p.name for p in paths)})
 
                 for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
                     checksum_issues = []
@@ -469,8 +478,17 @@ class Submission:
                         seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
 
                 if not no_mmap:
-                    task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
-                    pbar.update(task_bytes)
+                    pbar_local.update(task_size)
+                    with lock:
+                        pbar_global.update(task_size)
+
+        _run_parallel_with_progress(
+            items=tasks,
+            get_size_fn=_get_task_size,
+            worker_fn=_single_validate_task,
+            threads=threads or 1,
+            global_desc="Global Validate",
+        )
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
@@ -523,8 +541,10 @@ class Submission:
             self.__log.error(f"Error preparing public keys: {e}")
             raise e
 
-        for file_path, file_metadata in self.files.items():
-            # encryption_successful = True
+        def _single_encrypt_task(
+            item: tuple[Path, SubmissionFileMetadata], ui_pos: int, lock: threading.Lock, pbar_global: tqdm | Any
+        ):
+            file_path, file_metadata = item
             logged_state = progress_logger.get_state(file_path, file_metadata)
             self.__log.debug("state for %s: %s", file_path, logged_state)
 
@@ -532,6 +552,7 @@ class Submission:
                 file_metadata.file_path
             )
             encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+            filesize = file_path.stat().st_size if file_path.exists() else 0
 
             if (
                 (logged_state is None)
@@ -550,33 +571,55 @@ class Submission:
                         f"'{encrypted_file_path}' already exists. Delete it or use --force to overwrite it."
                     )
 
-                try:
-                    Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
+                with tqdm(  # type: ignore[call-overload]
+                    total=filesize,
+                    desc="ENCRYPT ",
+                    position=ui_pos,
+                    postfix={"file": file_path.name},
+                    leave=False,
+                    **TQDM_DEFAULTS,
+                ) as pbar_local:
+                    try:
+                        Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
 
-                    self.__log.info(f"Encryption complete for {str(file_path)}. ")
-                    progress_logger.set_state(
-                        file_path,
-                        file_metadata,
-                        state=EncryptionState(encryption_successful=True, submission_id=self.submission_id),
-                    )
-                except Exception as e:
-                    self.__log.error("Encryption failed for '%s'", str(file_path))
+                        self.__log.info(f"Encryption complete for {str(file_path)}. ")
 
-                    progress_logger.set_state(
-                        file_path,
-                        file_metadata,
-                        state=EncryptionState(
-                            encryption_successful=False, errors=[str(e)], submission_id=self.submission_id
-                        ),
-                    )
+                        pbar_local.update(filesize)
+                        with lock:
+                            pbar_global.update(filesize)
 
-                    raise e
+                        progress_logger.set_state(
+                            file_path,
+                            file_metadata,
+                            state=EncryptionState(encryption_successful=True, submission_id=self.submission_id),
+                        )
+                    except Exception as e:
+                        self.__log.error("Encryption failed for '%s'", str(file_path))
+
+                        progress_logger.set_state(
+                            file_path,
+                            file_metadata,
+                            state=EncryptionState(
+                                encryption_successful=False, errors=[str(e)], submission_id=self.submission_id
+                            ),
+                        )
+                        raise e
             else:
                 self.__log.info(
                     "File '%s' already encrypted in '%s'",
                     str(file_path),
                     str(encrypted_file_path),
                 )
+                with lock:
+                    pbar_global.update(filesize)
+
+        _run_parallel_with_progress(
+            items=self.files.items(),
+            get_size_fn=lambda i: i[0].stat().st_size if i[0].exists() else 0,
+            worker_fn=_single_encrypt_task,
+            threads=1,
+            global_desc="Global Encrypt",
+        )
 
         self.__log.info("File encryption completed.")
 
