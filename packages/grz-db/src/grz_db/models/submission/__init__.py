@@ -7,7 +7,7 @@ import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
-from typing import Any, ClassVar, Optional, Self
+from typing import Any, ClassVar, Literal, Optional, Self
 
 import sqlalchemy as sa
 import sqlalchemy.dialects.postgresql as sa_psql
@@ -1251,7 +1251,6 @@ class SubmissionDb:
         submission_id: str,
         submission_diff: SubmissionDiffCollection,
         donors_diff: DonorsDiffCollection,
-        log: logging.Logger,
     ) -> None:
         """Emit info-level log lines summarising what is about to be committed."""
         sid = f"Submission: {submission_id}"
@@ -1259,28 +1258,28 @@ class SubmissionDb:
         pending_keys = [d.key for d in submission_diff.pending]
         unchanged_keys = [d.key for d in submission_diff.unchanged]
         if pending_keys:
-            log.info("%s - Updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in pending_keys))
+            logger.info("%s - Updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in pending_keys))
         if unchanged_keys:
-            log.info("%s - Not updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in unchanged_keys))
+            logger.info("%s - Not updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in unchanged_keys))
 
         if donors_diff.unchanged:
-            log.info(
+            logger.info(
                 "%s - Keep existing donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.unchanged)
             )
         if donors_diff.added:
-            log.info(
+            logger.info(
                 "%s - Adding new donor(s): %s",
                 sid,
                 ", ".join(f'"{d.pseudonym}"' for d in donors_diff.added),
             )
         if donors_diff.updated:
-            log.info(
+            logger.info(
                 "%s - Modifying existing donor(s): %s",
                 sid,
                 ", ".join(f'"{d.pseudonym}"' for d in donors_diff.updated),
             )
         if donors_diff.deleted:
-            log.info("%s - Dropping donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.deleted))
+            logger.info("%s - Dropping donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.deleted))
 
     @staticmethod
     def assert_metadata_not_redacted(
@@ -1317,38 +1316,44 @@ class SubmissionDb:
         submission_date: datetime.date | None,
         *,
         force: bool = False,
+        on_missing: Literal["create", "error"] = "error",
         ignore_fields: set[str] | None = None,
-        log: logging.Logger | None = None,
     ) -> None:
         """Reconcile DB state for ``submission_id`` with ``metadata``.
 
-        Creates the submission row if absent (then forces overwrite). Rejects
-        redacted ``tan_g`` or missing/redacted ``local_case_id`` via
+        Rejects redacted ``tan_g`` or missing/redacted ``local_case_id`` via
         :meth:`assert_metadata_not_redacted` unless the corresponding key
         (``"tan_g"`` or ``"pseudonym"``) is in ``ignore_fields``. Computes diffs
         via :meth:`diff`, rejects destructive changes unless ``force``, and
-        commits via :meth:`commit_changes`.
+        commits via :meth:`commit_changes`. Operational progress is logged via
+        the module-level logger; callers configure verbosity through
+        ``logging.getLogger("grz_db.models.submission")``.
 
         :param submission_id: ID of the submission being populated.
         :param metadata: Parsed submission metadata.
         :param submission_date: S3 last-modified date of the metadata file, if known.
-        :param force: If ``True``, allow destructive updates/deletes.
+        :param force: If ``True``, allow destructive updates/deletes of existing fields.
+        :param on_missing: What to do when ``submission_id`` is not yet in the
+            database. ``"error"`` (default) raises :class:`SubmissionNotFoundError`.
+            ``"create"`` calls :meth:`add_submission` first and then proceeds; the
+            resulting diff against the fresh row contains only additive changes,
+            so ``force`` does not need to be set.
         :param ignore_fields: Field keys to skip during diff and redaction
             validation. See :meth:`assert_metadata_not_redacted`.
-        :param log: Logger for info/warning summaries; defaults to module logger.
+        :raises SubmissionNotFoundError: if the submission row is absent and
+            ``on_missing`` is ``"error"``.
         :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
             and the corresponding key is not in ``ignore_fields``.
         :raises RuntimeError: if pending changes are destructive and ``force`` is False.
         """
-        if log is None:
-            log = logger
         ignore_fields = ignore_fields or set()
 
         if not self.get_submission(submission_id):
-            log.warning("Submission %s does not exist. Creating ...", submission_id)
+            if on_missing == "error":
+                raise SubmissionNotFoundError(submission_id)
+            logger.warning("Submission %s does not exist. Creating ...", submission_id)
             self.add_submission(submission_id)
-            log.debug("Submission %s added to database. Force populate", submission_id)
-            force = True
+            logger.debug("Submission %s added to database.", submission_id)
 
         self.assert_metadata_not_redacted(metadata, submission_id, ignore_fields)
 
@@ -1367,8 +1372,8 @@ class SubmissionDb:
             )
 
         if submission_diff.has_pending or donors_diff.has_pending:
-            log.info("Submission: %s - Updating...", submission_id)
-            self._log_pending_changes(submission_id, submission_diff, donors_diff, log)
+            logger.info("Submission: %s - Updating...", submission_id)
+            self._log_pending_changes(submission_id, submission_diff, donors_diff)
             self.commit_changes(submission_id, submission_diff, donors_diff)
         else:
-            log.info("Submission: %s - No updates necessary.", submission_id)
+            logger.info("Submission: %s - No updates necessary.", submission_id)
