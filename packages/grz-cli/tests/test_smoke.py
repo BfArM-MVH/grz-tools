@@ -4,7 +4,6 @@ def test_import_cli():
 
 def test_help(capsys):
     import click.testing
-
     from grz_cli.cli import build_cli
 
     result = click.testing.CliRunner().invoke(build_cli(), ["--help"])
