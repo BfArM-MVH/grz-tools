@@ -263,7 +263,7 @@ class S3BotoDownloadWorker:
                 self.__log.info("File '%s' already downloaded (at '%s'), skipping.", file_key, str(local_file_path))
 
                 with (
-                    tqdm(  # type: ignore[arg-type]
+                    tqdm(  # type: ignore[call-overload]
                         total=filesize,
                         desc="SKIPPED ",
                         position=ui_pos,
@@ -279,7 +279,7 @@ class S3BotoDownloadWorker:
 
             self.__log.info("Downloading file: '%s' -> '%s'", file_key, str(local_file_path))
 
-            with tqdm(  # type: ignore[arg-type]
+            with tqdm(  # type: ignore[call-overload]
                 total=filesize,
                 desc="DOWNLOAD",
                 position=ui_pos,
