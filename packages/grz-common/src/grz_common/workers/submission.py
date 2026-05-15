@@ -499,6 +499,7 @@ class Submission:
         recipient_public_key_path: str | PathLike,
         submitter_private_key_path: str | PathLike | None = None,
         force: bool = False,
+        threads: int | None = 1,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh
@@ -508,6 +509,7 @@ class Submission:
         :param recipient_public_key_path: Path to the public key file which will be used for encryption
         :param submitter_private_key_path: Path to the private key file which will be used to sign the encryption
         :param force: Force encryption even if target files already exist
+        :param threads: Number of threads to use for encryption
         :return: EncryptedSubmission instance
         """
         # Import here to avoid circular import issues
@@ -617,8 +619,7 @@ class Submission:
             items=self.files.items(),
             get_size_fn=lambda i: i[0].stat().st_size if i[0].exists() else 0,
             worker_fn=_single_encrypt_task,
-            threads=1,
-            global_desc="Global Encrypt",
+            threads=threads or 1,
         )
 
         self.__log.info("File encryption completed.")
