@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.6.0...grz-cli-v1.6.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** Fix version requirements ([#577](https://github.com/BfArM-MVH/grz-tools/issues/577)) ([5a50867](https://github.com/BfArM-MVH/grz-tools/commit/5a50867bebc7d4f9e5d1745f0800533e3f1926ae))
+
+
+### Documentation
+
+* **repo:** add version-compatibility-check.md ([#571](https://github.com/BfArM-MVH/grz-tools/issues/571)) ([8126026](https://github.com/BfArM-MVH/grz-tools/commit/81260261d54d2ba3e314fefd28d8345f71d371d4))
+
 ## [1.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.1...grz-cli-v1.6.0) (2026-05-11)
 
 

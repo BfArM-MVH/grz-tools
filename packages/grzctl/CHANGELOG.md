@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.0.0...grzctl-v2.0.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** Fix version requirements ([#577](https://github.com/BfArM-MVH/grz-tools/issues/577)) ([5a50867](https://github.com/BfArM-MVH/grz-tools/commit/5a50867bebc7d4f9e5d1745f0800533e3f1926ae))
+
 ## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v1.4.0...grzctl-v2.0.0) (2026-05-11)
 
 
