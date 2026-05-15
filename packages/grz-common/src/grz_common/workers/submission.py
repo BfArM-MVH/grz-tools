@@ -318,7 +318,84 @@ class Submission:
                         all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
         yield from all_errors
 
-    def validate_files(  # noqa: C901, PLR0915
+    def _execute_grz_check(  # noqa: PLR0913
+        self,
+        task_type: str,
+        paths: list[Path],
+        kwargs: dict[str, Any],
+        no_mmap: bool,
+        pbar_local: tqdm,
+        pbar_global: tqdm,
+        lock: threading.Lock,
+    ) -> list[grz_check.ValidationReport]:
+        """Wraps grz_check bindings with mmap or chunked reader configurations."""
+        with ExitStack() as stack:
+            sources: list[Any] = []
+            for p in paths:
+                if not p.exists() or p.stat().st_size == 0:
+                    sources.append(str(p))
+                else:
+                    f = stack.enter_context(open(p, "rb"))
+                    if no_mmap:
+                        sources.append(TqdmFileReader(f, pbar_local, pbar_global, lock))
+                    else:
+                        mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
+                        sources.append(mm)
+
+            if task_type == "fastq_paired":
+                return list(grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs))
+            if task_type == "fastq_single":
+                return [grz_check.validate_fastq(sources[0], **kwargs)]
+            if task_type == "bam":
+                return [grz_check.validate_bam(sources[0])]
+            if task_type == "raw":
+                return [grz_check.validate_raw(sources[0])]
+
+            return []
+
+    def _process_validation_reports(
+        self,
+        paths: list[Path],
+        metas: list[SubmissionFileMetadata],
+        reports: list[grz_check.ValidationReport],
+        checksum_logger: FileProgressLogger,
+        seq_data_logger: FileProgressLogger,
+    ) -> None:
+        """Evaluates grz-check reports and persists the state into progress loggers."""
+        for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
+            checksum_issues = []
+
+            for w in report.warnings:
+                self.__log.warning(f"{file_path.name}: {w}")
+
+            if not report.sha256:
+                checksum_issues.append("No checksum found.")
+            elif file_metadata.checksum_type == ChecksumType.sha256 and file_metadata.file_checksum != report.sha256:
+                checksum_issues.append(
+                    f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
+                )
+
+            if file_path.exists() and file_path.is_file():
+                if file_metadata.file_size_in_bytes != file_path.stat().st_size:
+                    checksum_issues.append(
+                        f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
+                    )
+            else:
+                checksum_issues.append("File not found for size check.")
+
+            checksum_passed = not checksum_issues
+            checksum_state = ValidationState(
+                errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
+            )
+            checksum_logger.set_state(file_path, file_metadata, checksum_state)
+
+            if file_metadata.file_type in ("fastq", "bam"):
+                seq_data_state = ValidationState(
+                    errors=report.errors, validation_passed=report.is_valid, submission_id=self.submission_id
+                )
+                seq_data_logger.set_state(file_path, file_metadata, seq_data_state)
+
+    def validate_files(  # noqa: C901
         self,
         checksum_progress_file: str | PathLike,
         seq_data_progress_file: str | PathLike,
