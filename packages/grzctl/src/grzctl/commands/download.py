@@ -72,6 +72,7 @@ def download(  # noqa: PLR0913
             if not db_context.db:
                 log.warning("Database context is not available, skipping population of submission metadata in DB.")
             else:
-                worker_inst.populate(config.s3, db_context.db, submission_id, force=force)
+                metadata, submission_date = worker_inst.load_metadata_with_submission_date(config.s3, submission_id)
+                db_context.db.populate(submission_id, metadata, submission_date, force=force, log=log)
 
     log.info("Download finished!")

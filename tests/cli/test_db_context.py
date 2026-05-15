@@ -1,4 +1,5 @@
 import contextlib
+import datetime
 import shutil
 from unittest.mock import MagicMock, patch
 
@@ -269,6 +270,14 @@ def test_db_wrappers(
     )
 
     with mock_command(command_spec, submission_id) as (mock_worker, mock_extra):
+        if mock_worker is not None:
+            # download.py's --populate path calls Worker.load_metadata_with_submission_date
+            # and unpacks (metadata, submission_date). Provide a usable return value so the
+            # mocked Worker plays along; harmless for commands that never call the method.
+            mock_worker.load_metadata_with_submission_date.return_value = (
+                parsed_metadata,
+                datetime.date.today(),
+            )
         result = runner.invoke(cli, args)
 
         assert result.exit_code == 0, f"Command failed: {result.output}"

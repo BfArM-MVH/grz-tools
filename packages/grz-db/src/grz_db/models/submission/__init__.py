@@ -17,6 +17,8 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
+    REDACTED_TAN,
     CoverageType,
     DiseaseType,
     GenomicDataCenterId,
@@ -1243,3 +1245,98 @@ class SubmissionDb:
             for donor_diff in donors_diff.deleted:
                 assert donor_diff.before is not None, "Removed NoneType donor, this should not happen"  # noqa: S101
                 self.delete_donor(donor_diff.before)
+
+    @staticmethod
+    def _log_pending_changes(
+        submission_id: str,
+        submission_diff: SubmissionDiffCollection,
+        donors_diff: DonorsDiffCollection,
+        log: logging.Logger,
+    ) -> None:
+        """Emit info-level log lines summarising what is about to be committed."""
+        sid = f"Submission: {submission_id}"
+
+        pending_keys = [d.key for d in submission_diff.pending]
+        unchanged_keys = [d.key for d in submission_diff.unchanged]
+        if pending_keys:
+            log.info("%s - Updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in pending_keys))
+        if unchanged_keys:
+            log.info("%s - Not updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in unchanged_keys))
+
+        if donors_diff.unchanged:
+            log.info(
+                "%s - Keep existing donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.unchanged)
+            )
+        if donors_diff.added:
+            log.info(
+                "%s - Adding new donor(s): %s",
+                sid,
+                ", ".join(f'"{d.pseudonym}"' for d in donors_diff.added),
+            )
+        if donors_diff.updated:
+            log.info(
+                "%s - Modifying existing donor(s): %s",
+                sid,
+                ", ".join(f'"{d.pseudonym}"' for d in donors_diff.updated),
+            )
+        if donors_diff.deleted:
+            log.info("%s - Dropping donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.deleted))
+
+    def populate(
+        self,
+        submission_id: str,
+        metadata: GrzSubmissionMetadata,
+        submission_date: datetime.date | None,
+        *,
+        force: bool = False,
+        log: logging.Logger | None = None,
+    ) -> None:
+        """Reconcile DB state for ``submission_id`` with ``metadata``.
+
+        Creates the submission row if absent (then forces overwrite). Rejects
+        redacted ``tan_g`` or missing/redacted ``local_case_id``. Computes diffs
+        via :meth:`diff`, rejects destructive changes unless ``force``, and
+        commits via :meth:`commit_changes`.
+
+        :param submission_id: ID of the submission being populated.
+        :param metadata: Parsed submission metadata.
+        :param submission_date: S3 last-modified date of the metadata file, if known.
+        :param force: If ``True``, allow destructive updates/deletes.
+        :param log: Logger for info/warning summaries; defaults to module logger.
+        :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing.
+        :raises RuntimeError: if pending changes are destructive and ``force`` is False.
+        """
+        if log is None:
+            log = logger
+
+        if not self.get_submission(submission_id):
+            log.warning("Submission %s does not exist. Creating ...", submission_id)
+            self.add_submission(submission_id)
+            log.debug("Submission %s added to database. Force populate", submission_id)
+            force = True
+
+        if metadata.submission.tan_g == REDACTED_TAN:
+            raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.")
+        if not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID:
+            raise ValueError(f"Submission {submission_id} has missing or redacted local_case_id in metadata.")
+
+        submission_diff, donors_diff = self.diff(submission_id, metadata, submission_date)
+
+        if not force and submission_diff.has_pending_destructive:
+            raise RuntimeError(
+                f"Would update/delete existing submission data in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, submission_diff={submission_diff!r}"
+            )
+
+        if not force and donors_diff.has_pending_destructive:
+            raise RuntimeError(
+                f"Would update/delete existing donors in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, donors_diff={donors_diff!r}"
+            )
+
+        if submission_diff.has_pending or donors_diff.has_pending:
+            log.info("Submission: %s - Updating...", submission_id)
+            self._log_pending_changes(submission_id, submission_diff, donors_diff, log)
+            self.commit_changes(submission_id, submission_diff, donors_diff)
+        else:
+            log.info("Submission: %s - No updates necessary.", submission_id)
