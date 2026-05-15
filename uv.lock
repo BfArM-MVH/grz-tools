@@ -1015,7 +1015,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", extras = ["tz"], specifier = ">=1.16.1" },
-    { name = "cryptography", specifier = ">=45.0.3" },
+    { name = "cryptography", specifier = ">=45.0.3,<49" },
     { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
     { name = "psycopg", extras = ["binary"], specifier = "~=3.2" },
     { name = "sqlmodel", specifier = ">=0.0.27" },
@@ -1057,7 +1057,7 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.9.2,<3" }]
+requires-dist = [{ name = "pydantic", specifier = ">=2.12,<3" }]
 
 [package.metadata.requires-dev]
 dev = [
