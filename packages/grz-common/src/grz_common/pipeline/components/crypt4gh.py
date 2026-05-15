@@ -3,9 +3,10 @@ import os
 
 import crypt4gh.header
 import crypt4gh.lib
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from grz_common.exceptions import DecryptionError
 from nacl.bindings import crypto_aead_chacha20poly1305_ietf_decrypt, crypto_aead_chacha20poly1305_ietf_encrypt
-from nacl.public import PrivateKey
 
 from . import StreamConfigurationError, Transformer
 
@@ -110,7 +111,13 @@ class Crypt4GHEncryptor(Transformer):
         """
         super().__init__(source)
         self._recipient_pubkey = recipient_pubkey
-        self._sender_privkey = sender_privkey or bytes(PrivateKey.generate())
+        self._sender_privkey = sender_privkey or (
+            X25519PrivateKey.generate().private_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PrivateFormat.Raw,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
         self._session_key = os.urandom(32)
         self._header_sent = False
         self._buffer = bytearray()
