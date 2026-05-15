@@ -118,7 +118,7 @@ class S3BotoDownloadWorker:
             self.__log.error("Download failed for metadata '%s'", metadata_key)
             raise e
 
-    def download_file(
+    def download_file(  # noqa: C901, PLR0913
         self,
         local_file_path: Path,
         s3_object_id: str,
