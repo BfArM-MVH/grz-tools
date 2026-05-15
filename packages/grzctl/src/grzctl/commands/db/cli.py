@@ -533,7 +533,7 @@ def update(  # noqa: C901, PLR0913
             console_err.print(f"  Data: {new_state_log.data}")
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except click.exceptions.Exit as e:
         if e.exit_code != 0:
@@ -567,7 +567,7 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         console_err.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -678,7 +678,7 @@ def populate(  # noqa: C901, PLR0913
             raise SubmissionNotFoundError(submission_id)
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -894,7 +894,7 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
 
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
