@@ -3,7 +3,7 @@ import contextlib
 import hashlib
 import logging
 import math
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any
 
 from . import DataIntegrityError, Observer, ReadStream
@@ -106,10 +106,31 @@ class S3MultipartUploader(Observer):
 
         self._buffer.extend(chunk)
         while len(self._buffer) >= self.part_size:
+            self._throttle_uploads()
             part_data = self._buffer[: self.part_size]
             del self._buffer[: self.part_size]
             self._submit_part(bytes(part_data), self._part_number)
             self._part_number += 1
+
+    def _throttle_uploads(self):
+        """
+        Don't read from disk if the executor queue is full.
+        """
+        # clean up any futures that have finished already
+        active = []
+        for f in self._futures:
+            if f.done():
+                self._parts.append(f.result())
+            else:
+                active.append(f)
+        self._futures = active
+
+        # if we have reached our max concurrency limit, wait for one to finish
+        if len(self._futures) >= self.max_threads:
+            done, not_done = wait(self._futures, return_when=FIRST_COMPLETED)
+            for f in done:
+                self._parts.append(f.result())
+            self._futures = list(not_done)
 
     def close(self) -> None:
         """
