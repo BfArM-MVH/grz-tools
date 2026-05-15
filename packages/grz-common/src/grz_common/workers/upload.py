@@ -250,7 +250,6 @@ class S3BotoUploadWorker(UploadWorker):
             get_size_fn=lambda item: getsize(item[0]),
             worker_fn=_single_upload_task,
             threads=self._threads,
-            global_desc="Global Upload",
         )
 
     def _upload_metadata(self, metadata_file_path, metadata_s3_object_id):

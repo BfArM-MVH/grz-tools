@@ -486,7 +486,6 @@ class Submission:
             get_size_fn=_get_task_size,
             worker_fn=_single_validate_task,
             threads=threads or 1,
-            global_desc="Global Validate",
         )
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)

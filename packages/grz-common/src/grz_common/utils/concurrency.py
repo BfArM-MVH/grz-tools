@@ -13,7 +13,7 @@ def _run_parallel_with_progress[T](
     get_size_fn: Callable[[T], int],
     worker_fn: Callable[[T, int, threading.Lock, tqdm | Any], None],
     threads: int,
-    global_desc: str = "Global Progress",
+    global_desc: str = "GLOBAL  ",
 ) -> None:
     """Generic runner handling a ThreadPool, a global progress bar, and a thread-safe queue for fixed UI positions."""
     items_list = list(items)
