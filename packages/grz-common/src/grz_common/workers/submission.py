@@ -835,7 +835,7 @@ class EncryptedSubmission:
                     str(decrypted_file_path),
                 )
 
-                with tqdm(
+                with tqdm(  # type: ignore[call-overload]
                     total=filesize,
                     desc="DECRYPT ",
                     position=row,
@@ -884,7 +884,7 @@ class EncryptedSubmission:
                 )
 
                 with (
-                    tqdm(
+                    tqdm(  # type: ignore[call-overload]
                         total=filesize,
                         desc="SKIPPED ",
                         position=row,
