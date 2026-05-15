@@ -3,11 +3,11 @@
 import io
 import logging
 import os
-from typing import Any, cast
 from functools import partial
 from getpass import getpass
 from os import PathLike
 from pathlib import Path
+from typing import Any, cast
 
 import crypt4gh.header
 import crypt4gh.keys
