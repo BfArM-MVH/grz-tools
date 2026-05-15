@@ -83,8 +83,10 @@ def setup_cli_logging(log_file: str | None, log_level: str):
     formatter = logging.Formatter(fmt=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT)
 
     # Remove existing handlers to avoid duplication (e.g. default handlers)
+    # i.e., do not remove pytest's LogCaptureHandler
     for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
+        if isinstance(handler, (logging.StreamHandler, TqdmLoggingHandler)) and "_pytest." not in str(type(handler)):
+            root_logger.removeHandler(handler)
 
     console_handler = TqdmLoggingHandler() if HAS_TQDM else logging.StreamHandler(sys.stderr)
 
