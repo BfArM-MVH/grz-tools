@@ -408,7 +408,6 @@ class Submission:
                 desc="VALIDATE",
                 position=ui_pos,
                 postfix={"file": paths[0].name},
-                leave=False,
                 **TQDM_DEFAULTS,
             ) as pbar_local:
                 reports: list[grz_check.ValidationReport] = []
@@ -578,7 +577,6 @@ class Submission:
                     desc="ENCRYPT ",
                     position=ui_pos,
                     postfix={"file": file_path.name},
-                    leave=False,
                     **TQDM_DEFAULTS,
                 ) as pbar_local:
                     try:

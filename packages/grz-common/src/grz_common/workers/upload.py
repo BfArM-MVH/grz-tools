@@ -148,7 +148,6 @@ class S3BotoUploadWorker(UploadWorker):
             total=filesize,
             desc="UPLOAD  ",
             position=ui_position,
-            leave=False,
             postfix=f"{s3_object_id}",
             **TQDM_DEFAULTS,
         ) as progress_bar:  # type: ignore[call-overload]

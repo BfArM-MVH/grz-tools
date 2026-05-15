@@ -8,4 +8,5 @@ TQDM_DEFAULTS = {
     "miniters": 1,
     "smoothing": 0.00001,
     "colour": "cyan",
+    "leave": False,
 }
