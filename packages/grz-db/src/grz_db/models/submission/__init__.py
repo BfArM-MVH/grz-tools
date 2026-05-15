@@ -1289,25 +1289,33 @@ class SubmissionDb:
         submission_date: datetime.date | None,
         *,
         force: bool = False,
+        ignore_fields: set[str] | None = None,
         log: logging.Logger | None = None,
     ) -> None:
         """Reconcile DB state for ``submission_id`` with ``metadata``.
 
         Creates the submission row if absent (then forces overwrite). Rejects
-        redacted ``tan_g`` or missing/redacted ``local_case_id``. Computes diffs
-        via :meth:`diff`, rejects destructive changes unless ``force``, and
-        commits via :meth:`commit_changes`.
+        redacted ``tan_g`` or missing/redacted ``local_case_id`` unless the
+        corresponding key (``"tan_g"`` or ``"pseudonym"``) is in
+        ``ignore_fields``. Computes diffs via :meth:`diff`, rejects destructive
+        changes unless ``force``, and commits via :meth:`commit_changes`.
 
         :param submission_id: ID of the submission being populated.
         :param metadata: Parsed submission metadata.
         :param submission_date: S3 last-modified date of the metadata file, if known.
         :param force: If ``True``, allow destructive updates/deletes.
+        :param ignore_fields: Field keys to skip during diff and redaction
+            validation. Use ``"tan_g"`` to bypass the redacted-TAN guard and
+            ``"pseudonym"`` to bypass the missing/redacted ``local_case_id``
+            guard.
         :param log: Logger for info/warning summaries; defaults to module logger.
-        :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing.
+        :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
+            and the corresponding key is not in ``ignore_fields``.
         :raises RuntimeError: if pending changes are destructive and ``force`` is False.
         """
         if log is None:
             log = logger
+        ignore_fields = ignore_fields or set()
 
         if not self.get_submission(submission_id):
             log.warning("Submission %s does not exist. Creating ...", submission_id)
@@ -1315,12 +1323,14 @@ class SubmissionDb:
             log.debug("Submission %s added to database. Force populate", submission_id)
             force = True
 
-        if metadata.submission.tan_g == REDACTED_TAN:
+        if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_fields:
             raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.")
-        if not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID:
+        if (
+            not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
+        ) and "pseudonym" not in ignore_fields:
             raise ValueError(f"Submission {submission_id} has missing or redacted local_case_id in metadata.")
 
-        submission_diff, donors_diff = self.diff(submission_id, metadata, submission_date)
+        submission_diff, donors_diff = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields)
 
         if not force and submission_diff.has_pending_destructive:
             raise RuntimeError(

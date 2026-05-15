@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from grz_db.models.submission import SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, DonorsDiffCollection, SubmissionDiffCollection
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import DbConfig
 
 SUBMISSION_DATE = date(2025, 9, 15)
@@ -101,6 +101,80 @@ def test_populate_raises_without_force_on_donor_deletion(db_ctx: SimpleNamespace
     with patch.object(ctx.db, "diff", return_value=(clean_submission_diff, donors_diff_with_deletion)):
         with pytest.raises(RuntimeError, match="donors"):
             ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=False)
+
+
+def test_populate_raises_on_redacted_tan_g(db_ctx: SimpleNamespace):
+    """ValueError when ``tan_g`` is redacted and ``"tan_g"`` is not in ``ignore_fields``."""
+    ctx = db_ctx
+    ctx.metadata_raw["submission"]["tanG"] = REDACTED_TAN
+    redacted_metadata = _parse(ctx.metadata_raw)
+
+    with pytest.raises(ValueError, match="redacted tan_g"):
+        ctx.db.populate(ctx.submission_id, redacted_metadata, SUBMISSION_DATE, force=True)
+
+
+def test_populate_skips_redacted_tan_g_when_ignored(db_ctx: SimpleNamespace):
+    """``ignore_fields={"tan_g"}`` bypasses the redacted-TAN guard."""
+    ctx = db_ctx
+    ctx.metadata_raw["submission"]["tanG"] = REDACTED_TAN
+    redacted_metadata = _parse(ctx.metadata_raw)
+
+    ctx.db.populate(
+        ctx.submission_id,
+        redacted_metadata,
+        SUBMISSION_DATE,
+        force=True,
+        ignore_fields={"tan_g"},
+    )
+
+    submission = ctx.db.get_submission(ctx.submission_id)
+    assert submission.pseudonym == ctx.metadata.submission.local_case_id
+
+
+def test_populate_raises_on_redacted_local_case_id(db_ctx: SimpleNamespace):
+    """ValueError when ``local_case_id`` is redacted and ``"pseudonym"`` is not in ``ignore_fields``."""
+    ctx = db_ctx
+    ctx.metadata_raw["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
+    redacted_metadata = _parse(ctx.metadata_raw)
+
+    with pytest.raises(ValueError, match="local_case_id"):
+        ctx.db.populate(ctx.submission_id, redacted_metadata, SUBMISSION_DATE, force=True)
+
+
+def test_populate_skips_redacted_local_case_id_when_ignored(db_ctx: SimpleNamespace):
+    """``ignore_fields={"pseudonym"}`` bypasses the missing/redacted local_case_id guard."""
+    ctx = db_ctx
+    ctx.metadata_raw["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
+    redacted_metadata = _parse(ctx.metadata_raw)
+
+    ctx.db.populate(
+        ctx.submission_id,
+        redacted_metadata,
+        SUBMISSION_DATE,
+        force=True,
+        ignore_fields={"pseudonym"},
+    )
+
+    submission = ctx.db.get_submission(ctx.submission_id)
+    assert submission.submitter_id == ctx.metadata.submission.submitter_id
+
+
+def test_populate_forwards_ignore_fields_to_diff(db_ctx: SimpleNamespace):
+    """``ignore_fields`` flows through to :meth:`SubmissionDb.diff`."""
+    ctx = db_ctx
+
+    with patch.object(ctx.db, "diff", wraps=ctx.db.diff) as diff_spy:
+        ctx.db.populate(
+            ctx.submission_id,
+            ctx.metadata,
+            SUBMISSION_DATE,
+            force=False,
+            ignore_fields={"submitter_id"},
+        )
+
+    diff_spy.assert_called_once()
+    _, kwargs = diff_spy.call_args
+    assert kwargs["ignore_fields"] == {"submitter_id"}
 
 
 def test_populate_force_commits_destructive_changes(db_ctx: SimpleNamespace):
