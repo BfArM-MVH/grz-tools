@@ -528,7 +528,7 @@ class Submission:
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
-    def encrypt(  # noqa: PLR0915, PLR0913
+    def encrypt(  # noqa: PLR0915, PLR0913, C901
         self,
         encrypted_files_dir: str | PathLike,
         progress_log_file: str | PathLike,
@@ -620,13 +620,16 @@ class Submission:
                     postfix={"file": file_path.name},
                     **TQDM_DEFAULTS,
                 ) as pbar_local:
-                    try:
-                        Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
-                        self.__log.info(f"Encryption complete for {str(file_path)}. ")
 
-                        with lock:
-                            pbar_local.update(filesize)
-                            pbar_global.update(filesize)
+                    class ProgressBar:
+                        def update(self, n):
+                            with lock:
+                                pbar_local.update(n)
+                                pbar_global.update(n)
+
+                    try:
+                        Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys, progress_bar=ProgressBar())
+                        self.__log.info(f"Encryption complete for {str(file_path)}. ")
 
                         progress_logger.set_state(
                             file_path,

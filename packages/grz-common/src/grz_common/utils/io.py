@@ -44,44 +44,53 @@ class TqdmIOWrapper(io.RawIOBase):
                     time.sleep(0.1)
     """
 
-    def __init__(self, io_buf: io.RawIOBase, progress_bar):
+    def __init__(self, io_buf: io.RawIOBase, progress_bar, chunk_size: int = 8 * 1024 * 1024):
         """
-
         :param io_buf: the buffer to wrap
-        :param progress_bar: tqdm progress bar
+        :param progress_bar: tqdm progress bar (or any object with an .update(n) method)
+        :param chunk_size: chunk to reduce number of callback updates
         """
         self.io_buf = io_buf
         self.callback = progress_bar.update
+        self._chunk_size = chunk_size
+        self._accumulated = 0
+
+    def _trigger_callback(self, nbytes: int):
+        self._accumulated += nbytes
+        if self._accumulated >= self._chunk_size:
+            self.callback(self._accumulated)
+            self._accumulated = 0
 
     def write(self, data):
         """Write data to the buffer and update the progress bar"""
         nbytes_written = self.io_buf.write(data)
         if nbytes_written:
-            self.callback(nbytes_written)
+            self._trigger_callback(nbytes_written)
         return nbytes_written
 
     def read(self, size=-1) -> bytes | None:
         """Read data from the buffer and update the progress bar"""
         data = self.io_buf.read(size)
         if data:
-            self.callback(len(data))
-
+            self._trigger_callback(len(data))
         return data
 
     def readinto(self, buffer, /):
         """Read data into a buffer and update the progress bar"""
-        nbytes_written = self.io_buf.readinto(buffer)
-        if nbytes_written:
-            self.callback(nbytes_written)
-
-        return nbytes_written
+        nbytes_read = self.io_buf.readinto(buffer)
+        if nbytes_read:
+            self._trigger_callback(nbytes_read)
+        return nbytes_read
 
     def flush(self):
-        """Flush the buffer"""
-        # Ensure all data is flushed to the underlying binary IO object
-        self.io_buf.flush()
+        """Flush the buffer and push any remaining accumulated progress"""
+        if self._accumulated > 0:
+            self.callback(self._accumulated)
+            self._accumulated = 0
+        if not self.io_buf.closed:
+            self.io_buf.flush()
 
     def close(self):
         """Close the buffer"""
-        # Close the underlying binary IO object
+        self.flush()
         self.io_buf.close()
