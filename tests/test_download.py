@@ -34,6 +34,7 @@ def test_boto_download(
     temp_fastq_file_sha256sum,
     temp_download_log_file_path,
     tmpdir_factory,
+    mocker,
 ):
     # Prepare directories
     submission_id = "submission123"  # Use the same submission ID as in the download method
@@ -50,13 +51,17 @@ def test_boto_download(
         status_file_path=temp_download_log_file_path,
     )
 
+    mock_logger = mocker.MagicMock()
+    mock_metadata = mocker.MagicMock()
+
     # Execute download
     local_file_path = files_dir / "large_test_file.fastq"
     s3_object_id = f"{submission_id}/large_test_file.fastq"
-    download_worker._download_with_progress(str(local_file_path), s3_object_id)
+    download_worker.download_file(local_file_path, s3_object_id, mock_logger, mock_metadata, submission_id)
+
     local_file_path = files_dir / "small_test_file.txt"
     s3_object_id = f"{submission_id}/small_test_file.txt"
-    download_worker._download_with_progress(str(local_file_path), s3_object_id)
+    download_worker.download_file(local_file_path, s3_object_id, mock_logger, mock_metadata, submission_id)
 
     # Assert that the files have been downloaded correctly
     assert (files_dir / "large_test_file.fastq").exists(), "Fastq file was not downloaded."
@@ -84,6 +89,9 @@ def test_download_skips_file_already_downloaded_for_same_submission(
         s3_options=s3_config_model.s3,
         status_file_path=temp_download_log_file_path,
     )
+
+    # mock head_object call to signal data is actually present
+    mocker.patch.object(download_worker._s3_client, "head_object", return_value={"ContentLength": 1024})
 
     progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
     for file_path, file_metadata in encrypted_submission.encrypted_files.items():
@@ -116,6 +124,9 @@ def test_download_redownloads_file_with_different_submission_id(
         s3_options=s3_config_model.s3,
         status_file_path=temp_download_log_file_path,
     )
+
+    # mock head_object call to signal data is actually present
+    mocker.patch.object(download_worker._s3_client, "head_object", return_value={"ContentLength": 1024})
 
     progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
     for file_path, file_metadata in encrypted_submission.encrypted_files.items():
@@ -150,6 +161,9 @@ def test_download_redownloads_file_after_failed_download(
         s3_options=s3_config_model.s3,
         status_file_path=temp_download_log_file_path,
     )
+
+    # mock head_object call to signal data is actually present
+    mocker.patch.object(download_worker._s3_client, "head_object", return_value={"ContentLength": 1024})
 
     progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
     for file_path, file_metadata in encrypted_submission.encrypted_files.items():
