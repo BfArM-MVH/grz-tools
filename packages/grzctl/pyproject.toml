@@ -59,12 +59,11 @@ test = [
     "pytest-mock",
     "pytest-cov",
     "pytest-sugar",
-    "pytest-postgresql ~=7.0.2",
+    "pytest-postgresql",
     "psycopg",
     "moto[s3]",
     "numpy",
     "grz-common",
-    "grzctl",
     "grz-cli",
     "grz-pydantic-models-testing",
 ]

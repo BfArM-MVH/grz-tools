@@ -1,4 +1,5 @@
 import contextlib
+import datetime
 import shutil
 from unittest.mock import MagicMock, patch
 
@@ -269,7 +270,19 @@ def test_db_wrappers(
     )
 
     with mock_command(command_spec, submission_id) as (mock_worker, mock_extra):
-        result = runner.invoke(cli, args)
+        # download.py's --populate path calls `worker.parse_submission().metadata.content`
+        # plus `get_metadata_upload_timestamp(...)`. Configure the mocked Worker and patch
+        # the S3 helpers so the populate runs end-to-end against the real db. Harmless for
+        # commands that never call these.
+        if mock_worker is not None:
+            mock_worker.parse_submission.return_value.metadata.content = parsed_metadata
+        with (
+            patch("grzctl.commands.download.init_s3_client") as mock_init_s3,
+            patch("grzctl.commands.download.get_metadata_upload_timestamp") as mock_get_ts,
+        ):
+            mock_init_s3.return_value = MagicMock()
+            mock_get_ts.return_value.date.return_value = datetime.date.today()
+            result = runner.invoke(cli, args)
 
         assert result.exit_code == 0, f"Command failed: {result.output}"
 

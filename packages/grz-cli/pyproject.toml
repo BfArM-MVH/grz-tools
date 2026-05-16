@@ -25,6 +25,12 @@ keywords = ["GRZ", "GDC", "S3"]
 
 [dependency-groups]
 dev = ["tox", "tox-uv"]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-sugar",
+]
 
 
 

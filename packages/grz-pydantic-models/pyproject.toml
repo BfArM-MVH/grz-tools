@@ -20,7 +20,7 @@ classifiers = [
 keywords = ["GRZ"]
 dynamic = ["version"]
 dependencies = [
-    "pydantic >=2.9.2,<3",
+    "pydantic >=2.12,<3",
 ]
 
 [project.urls]

@@ -40,6 +40,14 @@ dev = [
     "tox-uv",
     "boto3-stubs",
 ]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-sugar",
+    "moto[s3]",
+    "grz-pydantic-models-testing",
+]
 
 
 
