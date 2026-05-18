@@ -26,12 +26,14 @@ log = logging.getLogger(__name__)
     help="Check validation logs before encrypting.",
 )
 @grzcli.update_db
-def encrypt(
+@grzcli.threads
+def encrypt(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_dir,
     force,
     check_validation_logs,
     update_db,
+    threads,
     **kwargs,
 ):
     """
@@ -46,6 +48,7 @@ def encrypt(
             files_dir=submission_dir / "files",
             log_dir=submission_dir / "logs",
             encrypted_files_dir=submission_dir / "encrypted_files",
+            threads=threads,
         )
         submission = worker_inst.parse_submission()
         submission_id = submission.metadata.content.submission_id

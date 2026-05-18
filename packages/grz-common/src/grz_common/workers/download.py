@@ -8,6 +8,8 @@ import itertools
 import logging
 import math
 import re
+import sys
+import threading
 from collections import OrderedDict
 from collections.abc import Iterable
 from operator import attrgetter, itemgetter
@@ -25,6 +27,7 @@ from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
+from ..utils.concurrency import _run_parallel_with_progress
 
 MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
 MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
@@ -69,14 +72,10 @@ class S3BotoDownloadWorker:
         self._s3_options = s3_options
         self._threads = threads
 
-        self._s3_client = init_s3_client(s3_options)
+        pool_size = (self._threads * 10) + 1
+        self._s3_client = init_s3_client(s3_options, max_pool_connections=pool_size)
 
-    def prepare_download(
-        self,
-        metadata_dir: Path,
-        encrypted_files_dir: Path,
-        log_dir: Path,
-    ):
+    def prepare_download(self, metadata_dir: Path, encrypted_files_dir: Path, log_dir: Path):
         """
         Prepare the download of an encrypted submission
 
@@ -91,12 +90,7 @@ class S3BotoDownloadWorker:
             else:
                 self.__log.debug("Directory exists: %s", dir_path)
 
-    def download_metadata(
-        self,
-        submission_id: str,
-        metadata_dir: Path,
-        metadata_file_name: str = "metadata.json",
-    ):
+    def download_metadata(self, submission_id: str, metadata_dir: Path, metadata_file_name: str = "metadata.json"):
         """
         Download the metadata.json
 
@@ -124,60 +118,74 @@ class S3BotoDownloadWorker:
             self.__log.error("Download failed for metadata '%s'", metadata_key)
             raise e
 
-    def _download_with_progress(self, local_file_path: str, s3_object_id: str):
-        """
-        Download a single file from S3 to local storage.
-
-        :param local_file_path: Path to the local target file.
-        :param s3_object_id: The S3 object key to download.
-        """
-        s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
-        filesize = s3_object_meta["ContentLength"]
-
-        chunksize = (
-            math.ceil(filesize / MULTIPART_MAX_CHUNKS)
-            if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
-            else MULTIPART_CHUNKSIZE
-        )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunks"
-        )
-
-        config = TransferConfig(
-            multipart_threshold=MULTIPART_THRESHOLD,
-            multipart_chunksize=chunksize,
-            max_concurrency=self._threads,
-        )
-
-        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        with tqdm(total=filesize, postfix=f"{s3_object_id}", **TQDM_DEFAULTS) as progress_bar:  # type: ignore[call-overload]
-            transfer.download_file(
-                self._s3_options.bucket,
-                s3_object_id,
-                local_file_path,
-                callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-            )
-
-    def download_file(
+    def download_file(  # noqa: C901, PLR0913
         self,
         local_file_path: Path,
         s3_object_id: str,
         progress_logger: FileProgressLogger[DownloadState],
         file_metadata: SubmissionFileMetadata,
         submission_id: str,
+        filesize: int | None = None,
+        pbar_local: Any | None = None,
+        pbar_global: Any | None = None,
+        global_lock: threading.Lock | None = None,
     ):
         """
-        Download a single file from S3 to the specified local_file_path.
+        Download a single file from S3 to local storage.
 
-        :param local_file_path: Path to the local file.
-        :param s3_object_id: S3 key of the file to download.
-        :param progress_logger: The progress logger instance.
-        :param file_metadata: The metadata for the file.
+        :param local_file_path: Path to the local target file.
+        :param s3_object_id: The S3 object key to download.
         """
         try:
             local_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-            self._download_with_progress(str(local_file_path), s3_object_id)
+            if filesize is None:
+                s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
+                filesize = s3_object_meta["ContentLength"]
+
+            chunksize = (
+                math.ceil(filesize / MULTIPART_MAX_CHUNKS)
+                if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
+                else MULTIPART_CHUNKSIZE
+            )
+            self.__log.debug(
+                f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunks"
+            )
+
+            config = TransferConfig(
+                multipart_threshold=MULTIPART_THRESHOLD,
+                multipart_chunksize=chunksize,
+                max_concurrency=self._threads,
+                use_threads=self._threads > 1,
+            )
+
+            transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
+
+            if pbar_local:
+                pbar_local.reset(total=filesize)
+                pbar_local.set_description("DOWNLOAD")
+                pbar_local.set_postfix({"file": local_file_path.name})
+                pbar_local.refresh()
+
+            def _progress_callback(bytes_transferred):
+                if global_lock:
+                    with global_lock:
+                        if pbar_local:
+                            pbar_local.update(bytes_transferred)
+                        if pbar_global:
+                            pbar_global.update(bytes_transferred)
+                else:
+                    if pbar_local:
+                        pbar_local.update(bytes_transferred)
+                    if pbar_global:
+                        pbar_global.update(bytes_transferred)
+
+            transfer.download_file(
+                self._s3_options.bucket,
+                s3_object_id,
+                str(local_file_path),
+                callback=_progress_callback,
+            )
 
             self.__log.info(f"Download complete for {str(local_file_path)}.")
             progress_logger.set_state(
@@ -221,25 +229,85 @@ class S3BotoDownloadWorker:
         """
         progress_logger = FileProgressLogger[DownloadState](self._status_file_path)
 
-        for local_file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        self.__log.info("Fetching remote file sizes...")
+        remote_sizes = {}
+
+        for _local_file_path, file_metadata in encrypted_submission.encrypted_files.items():
+            key = f"{submission_id}/files/{file_metadata.encrypted_file_path()}"
+            meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=key)
+            remote_sizes[key] = meta["ContentLength"]
+
+        def _get_size(item: tuple[Path, SubmissionFileMetadata]) -> int:
+            file_meta = item[1]
+            key = f"{submission_id}/files/{file_meta.encrypted_file_path()}"
+            return remote_sizes.get(key, 0)
+
+        def _single_download_task(
+            item: tuple[Path, SubmissionFileMetadata],
+            ui_pos: int,
+            lock: threading.Lock,
+            pbar_global: tqdm,
+        ):
+            local_file_path, file_metadata = item
             relative_encrypted_path = file_metadata.encrypted_file_path()
             file_key = f"{submission_id}/files/{relative_encrypted_path}"
 
             logged_state = progress_logger.get_state(local_file_path, file_metadata)
+            filesize = _get_size(item)
+
             if (
                 logged_state
                 and logged_state.get("download_successful")
                 and logged_state.get("submission_id") == submission_id
             ):
-                self.__log.info(
-                    "File '%s' already downloaded (at '%s'), skipping.",
-                    file_key,
-                    str(local_file_path),
-                )
-                continue
+                self.__log.info("File '%s' already downloaded (at '%s'), skipping.", file_key, str(local_file_path))
+
+                with (
+                    tqdm(  # type: ignore[call-overload]
+                        total=filesize,
+                        desc="SKIPPED ",
+                        position=ui_pos,
+                        file=sys.stderr,
+                        postfix={"file": local_file_path.name},
+                        **TQDM_DEFAULTS,
+                    ) as pbar_local,
+                    lock,
+                ):
+                    pbar_local.update(filesize)
+                    pbar_global.update(filesize)
+                return
 
             self.__log.info("Downloading file: '%s' -> '%s'", file_key, str(local_file_path))
-            self.download_file(local_file_path, file_key, progress_logger, file_metadata, submission_id)
+
+            with tqdm(  # type: ignore[call-overload]
+                total=filesize,
+                desc="DOWNLOAD",
+                position=ui_pos,
+                file=sys.stderr,
+                postfix={"file": local_file_path.name},
+                **TQDM_DEFAULTS,
+            ) as pbar_local:
+                try:
+                    self.download_file(
+                        local_file_path=local_file_path,
+                        s3_object_id=file_key,
+                        progress_logger=progress_logger,
+                        file_metadata=file_metadata,
+                        submission_id=submission_id,
+                        filesize=filesize,
+                        pbar_local=pbar_local,
+                        pbar_global=pbar_global,
+                        global_lock=lock,
+                    )
+                except Exception as e:
+                    raise e
+
+        _run_parallel_with_progress(
+            items=encrypted_submission.encrypted_files.items(),
+            get_size_fn=_get_size,
+            worker_fn=_single_download_task,
+            threads=self._threads,
+        )
 
 
 class InboxSubmissionState(enum.StrEnum):

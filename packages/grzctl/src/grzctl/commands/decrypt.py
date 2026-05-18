@@ -21,12 +21,14 @@ log = logging.getLogger(__name__)
 @grzcli.submission_dir
 @grzcli.force
 @grzcli.update_db
-def decrypt(
+@grzcli.threads
+def decrypt(  # noqa: PLR0913
     configuration: dict[str, Any],
     config_file: tuple[Path],
     submission_dir,
     force,
     update_db,
+    threads,
     **kwargs,
 ):
     """
@@ -50,6 +52,7 @@ def decrypt(
         files_dir=submission_dir / "files",
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
+        threads=threads,
     )
     submission_id = worker_inst.parse_encrypted_submission().submission_id
     with DbContext(
