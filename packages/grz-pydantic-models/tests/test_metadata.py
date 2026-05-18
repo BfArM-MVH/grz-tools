@@ -12,7 +12,13 @@ from grz_pydantic_models.submission.metadata import (
     DiseaseType,
     ResearchConsentNoScopeJustification,
 )
-from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata, ResearchConsent
+from grz_pydantic_models.submission.metadata.v1 import (
+    File,
+    FileType,
+    GrzSubmissionMetadata,
+    LibraryType,
+    ResearchConsent,
+)
 from grz_pydantic_models_testing import example_metadata, example_research_consent
 from packaging.version import Version
 from pydantic import ValidationError
@@ -404,29 +410,26 @@ def test_research_consent_no_subprovisions():
         TESTED_VERSIONS,
     ),
 )
-def test_disease_type_rare_invalid_library_raises(dataset: str, version: str):
-    """These datasets natively use panel or wes. If diseaseType is rare, they must fail on/after 01.06.2026."""
+def test_disease_type_rare_missing_wgs_raises(dataset: str, version: str):
+    """
+    These datasets natively use panel or wes. For rare diseases, they fail the wgs check.
+    """
     metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
-    with pytest.raises(ValidationError, match=r"is no longer allowed starting 01\.06\.2026"):
+    with pytest.raises(
+        ValidationError, match=r"the index donor must have at least one lab datum with libraryType 'wgs' or 'wgs_lr'"
+    ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
 @pytest.mark.parametrize(
     "dataset,version",
-    itertools.product(
-        [
-            "oncomine_panel_tumor_only",
-            "panel_tumor_only",
-            "wes_tumor_germline",
-        ],
-        TESTED_VERSIONS,
-    ),
+    itertools.product(["wes_tumor_germline"], TESTED_VERSIONS),
 )
-def test_disease_type_rare_invalid_library_warns(dataset: str, version: str, caplog):
-    """These datasets natively use panel or wes. If diseaseType is rare, they warn before 01.06.2026."""
+def test_disease_type_rare_missing_wgs_warns_before_cutoff(dataset: str, version: str, caplog):
+    """Before the cutoff, missing wgs for a rare disease should only log a warning."""
     metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-05-31"
@@ -434,11 +437,44 @@ def test_disease_type_rare_invalid_library_warns(dataset: str, version: str, cap
     try:
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
     except ValidationError as e:
-        # If mutating diseaseType triggers an unrelated structural error in the mock,
-        # we just ensure our target date error isn't the one blocking it.
-        assert "is no longer allowed starting 01.06.2026" not in str(e)
+        assert "starting 01.06.2026" not in str(e)
 
-    assert "is no longer allowed starting 01.06.2026" in caplog.text
+    assert "starting 01.06.2026" in caplog.text
+
+
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_disease_type_rare_index_has_wgs_and_panel_passes(version: str):
+    """
+    If the index donor has at least WGS but additionally some panel data, it should still pass.
+    """
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    # duplicate the WGS lab datum but change its type to panel
+    panel_datum = copy.deepcopy(metadata["donors"][0]["labData"][0])
+    panel_datum["libraryType"] = LibraryType.panel.value
+    panel_datum["labDataName"] += "_panel"
+
+    # panels require a BED file
+    panel_datum["sequenceData"]["files"].append(
+        {"filePath": "dummy_panel_target.bed", "fileType": "bed", "fileChecksum": "c" * 64, "fileSizeInBytes": 1000}
+    )
+
+    # change file paths/checksums so it doesn't fail unique run/checksum validators
+    for i, file in enumerate(panel_datum["sequenceData"]["files"]):
+        file["fileChecksum"] = f"c{i:063d}"
+        if file["fileType"] == "fastq":
+            file["filePath"] = f"panel_{i}.fastq.gz"
+
+    metadata["donors"][0]["labData"].append(panel_datum)
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "starting 01.06.2026" not in str(e)
 
 
 @pytest.mark.parametrize(
@@ -453,7 +489,7 @@ def test_disease_type_rare_invalid_library_warns(dataset: str, version: str, cap
     ),
 )
 def test_disease_type_rare_valid_library_passes(dataset: str, version: str):
-    """These datasets natively use wgs or wgs_lr. If diseaseType is rare, they must pass."""
+    """These datasets natively use wgs or wgs_lr. For rare diseases, they must pass."""
     metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-06-01"
@@ -461,7 +497,37 @@ def test_disease_type_rare_valid_library_passes(dataset: str, version: str):
     try:
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
     except ValidationError as e:
-        assert "is no longer allowed starting 01.06.2026" not in str(e)
+        assert "starting 01.06.2026" not in str(e)
+
+
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_disease_type_rare_non_index_unrestricted(version: str):
+    """Non-index donors (e.g., parents in a trio) are exempt from the WGS rule."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    # modify a non-index donor (donor[1]) to use a panel
+    for idx, datum in enumerate(metadata["donors"][1]["labData"]):
+        datum["libraryType"] = LibraryType.panel.value
+
+        # panels require a BED file
+        datum["sequenceData"]["files"].append(
+            {
+                "filePath": f"dummy_target_{idx}.bed",
+                "fileType": "bed",
+                "fileChecksum": f"c{idx:063d}",
+                "fileSizeInBytes": 1000,
+            }
+        )
+
+    try:
+        # should pass because the index donor still has WGS
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "starting 01.06.2026" not in str(e)
 
 
 @pytest.mark.parametrize(

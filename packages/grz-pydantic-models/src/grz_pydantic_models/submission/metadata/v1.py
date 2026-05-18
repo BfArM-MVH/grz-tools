@@ -1267,23 +1267,20 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
     @model_validator(mode="after")
     def ensure_disease_type_rare_has_matching_library_types(self):
-        allowed_library_types: set[LibraryType] = {
-            LibraryType.wgs,
-            LibraryType.wgs_lr,
-            LibraryType.wxs,
-            LibraryType.wxs_lr,
-            LibraryType.other,
-            LibraryType.unknown,
-        }
         if self.submission.disease_type == DiseaseType.rare:
-            for donor in self.donors:
-                for lab_datum in donor.lab_data:
-                    if lab_datum.library_type not in allowed_library_types:
-                        message = f"Using libraryType {lab_datum.library_type} for diseaseType {DiseaseType.rare} is no longer allowed starting 01.06.2026"
-                        if self.submission.submission_date >= date(2026, 6, 1):
-                            raise ValueError(message)
-                        else:
-                            log.warning(message)
+            mandatory_index_types: set[LibraryType] = {LibraryType.wgs, LibraryType.wgs_lr}
+            index_library_types = {datum.library_type for datum in self.index_donor.lab_data}
+
+            if not (index_library_types & mandatory_index_types):
+                message = (
+                    f"For diseaseType '{DiseaseType.rare}', the index donor must have at least one lab datum with "
+                    f"libraryType 'wgs' or 'wgs_lr', starting 01.06.2026."
+                )
+                if self.submission.submission_date >= date(2026, 6, 1):
+                    raise ValueError(message)
+                else:
+                    log.warning(message)
+
         return self
 
     @model_validator(mode="after")
