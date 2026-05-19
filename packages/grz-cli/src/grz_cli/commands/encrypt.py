@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
     default=True,
     help="Check validation logs before encrypting.",
 )
-def encrypt(configuration: dict[str, Any], submission_dir, force, check_validation_logs, **kwargs):
+@grzcli.threads
+def encrypt(configuration: dict[str, Any], submission_dir, force, check_validation_logs, threads, **kwargs):
     """
     Encrypt a submission.
 
@@ -47,6 +48,7 @@ def encrypt(configuration: dict[str, Any], submission_dir, force, check_validati
         files_dir=submission_dir / "files",
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
+        threads=threads,
     )
     if pubkey := config.keys.grz_public_key:
         with NamedTemporaryFile("w") as f:

@@ -3,22 +3,18 @@
 import io
 import logging
 import os
-import typing
 from functools import partial
 from getpass import getpass
 from os import PathLike
-from os.path import getsize
 from pathlib import Path
+from typing import Any, cast
 
 import crypt4gh.header
 import crypt4gh.keys
 import crypt4gh.lib
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-from tqdm.auto import tqdm
-
-from ..constants import TQDM_DEFAULTS
-from .io import TqdmIOWrapper
+from grz_common.utils.io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +57,7 @@ class Crypt4GH:
         input_path: str | PathLike,
         output_path: str | PathLike,
         public_keys: tuple[Key],
+        progress_bar: Any | None = None,
     ):
         """
         Encrypt the file, properly handling the Crypt4GH header.
@@ -68,27 +65,26 @@ class Crypt4GH:
         :param public_keys:
         :param output_path:
         :param input_path:
-        :return: tuple with md5 values for original file, encrypted file
+        :param progress_bar: Anything that has an update(n) method, e.g., tqdm.tqdm
         """
-        # TODO: Progress bar?
         # TODO: store header in separate file?
         input_path = Path(input_path)
         output_path = Path(output_path)
 
-        total_size = getsize(input_path)
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="ENCRYPT ", postfix=f"{input_path.name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
         ):
+            wrapped_in_fd = TqdmIOWrapper(cast(io.RawIOBase, in_fd), progress_bar) if progress_bar else in_fd
+
             crypt4gh.lib.encrypt(
                 keys=public_keys,
-                infile=pbar_in_fd,
+                infile=wrapped_in_fd,
                 outfile=out_fd,
             )
+
+            if progress_bar:
+                wrapped_in_fd.flush()
 
     @staticmethod
     def retrieve_private_key(seckey_path) -> bytes:
@@ -110,25 +106,29 @@ class Crypt4GH:
         return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
 
     @staticmethod
-    def decrypt_file(input_path: Path, output_path: Path, private_key: bytes):
+    def decrypt_file(
+        input_path: Path,
+        output_path: Path,
+        private_key: bytes,
+        progress_bar: Any | None = None,
+    ):
         """
         Decrypt a file using the provided private key
         :param input_path: Path to the encrypted file
         :param output_path: Path to the decrypted file
         :param private_key: The private key
+        :param progress_bar: Anything that has an update(n) method, e.g., tqdm.tqdm
         """
-        total_size = getsize(input_path)
-        file_name = input_path.name
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="DECRYPT ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
         ):
+            wrapped_in_fd = TqdmIOWrapper(cast(io.RawIOBase, in_fd), progress_bar) if progress_bar else in_fd
             crypt4gh.lib.decrypt(
-                keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
-                infile=pbar_in_fd,
+                keys=[(0, private_key, None)],
+                infile=wrapped_in_fd,
                 outfile=out_fd,
             )
+
+            if progress_bar:
+                wrapped_in_fd.flush()

@@ -205,6 +205,7 @@ class Worker:
                 recipient_public_key_path=recipient_public_key_path,
                 submitter_private_key_path=submitter_private_key_path,
                 force=force,
+                threads=self._threads,
             )
         except Exception as e:
             raise EncryptionError(str(e)) from e
@@ -229,6 +230,7 @@ class Worker:
                 files_dir=self.files_dir,
                 progress_log_file=self.progress_file_decrypt,
                 recipient_private_key_path=recipient_private_key_path,
+                threads=self._threads,
             )
         except Exception as e:
             raise DecryptionError(str(e)) from e

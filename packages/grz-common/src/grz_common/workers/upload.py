@@ -7,7 +7,9 @@ import json
 import logging
 import math
 import re
+import sys
 import tempfile
+import threading
 from importlib.metadata import version
 from os import PathLike
 from os.path import getsize
@@ -17,12 +19,14 @@ from typing import TYPE_CHECKING, override
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
+from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
+from ..utils.concurrency import _run_parallel_with_progress
 from ..utils.redaction import redact_file
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
@@ -99,15 +103,26 @@ class S3BotoUploadWorker(UploadWorker):
         self._s3_options = s3_options
         self._threads = threads
 
-        self._s3_client = init_s3_client(s3_options)
-        self._s3_resource = init_s3_resource(s3_options)
+        pool_size = (self._threads * 10) + 1
+        self._s3_client = init_s3_client(s3_options, max_pool_connections=pool_size)
+        self._s3_resource = init_s3_resource(s3_options, max_pool_connections=pool_size)
 
     @override
-    def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):
+    def upload_file(
+        self,
+        local_file_path: str | PathLike,
+        s3_object_id: str,
+        pbar_local_position: int | None = None,
+        pbar_global: tqdm | None = None,
+        global_lock: threading.Lock | None = None,
+    ):
         """
         Upload a single file to the specified object ID
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
+        :param pbar_local_position: Position of the progress bar on the cli
+        :param pbar_global: Global progress bar for the entire upload
+        :param global_lock: Lock for the global progress bar
         """
         self.__log.info(f"Uploading {local_file_path} to {s3_object_id}...")
 
@@ -130,14 +145,31 @@ class S3BotoUploadWorker(UploadWorker):
             use_threads=self._threads > 1,
         )
 
-        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        progress_bar = tqdm(total=filesize, desc="UPLOAD  ", **TQDM_DEFAULTS, postfix=f"{s3_object_id}")  # type: ignore[call-overload]
-        transfer.upload_file(
-            str(local_file_path),
-            self._s3_options.bucket,
-            s3_object_id,
-            callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-        )
+        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]  # ???
+
+        with tqdm(  # type: ignore[call-overload]
+            total=filesize,
+            desc="UPLOAD  ",
+            position=pbar_local_position,
+            file=sys.stderr,
+            postfix={"file": f"{s3_object_id}"},
+            **TQDM_DEFAULTS,
+        ) as pbar_local:
+
+            def _progress_callback(bytes_transferred):
+                if global_lock:
+                    with global_lock:
+                        pbar_local.update(bytes_transferred)
+                        if pbar_global:
+                            pbar_global.update(bytes_transferred)
+                else:
+                    pbar_local.update(bytes_transferred)
+                    if pbar_global:
+                        pbar_global.update(bytes_transferred)
+
+            transfer.upload_file(
+                str(local_file_path), self._s3_options.bucket, s3_object_id, callback=_progress_callback
+            )
 
     def _remote_id_exists(self, s3_object_id: str) -> bool:
         """
@@ -163,11 +195,19 @@ class S3BotoUploadWorker(UploadWorker):
             if not Path(file_path).exists():
                 raise UploadError(f"File {file_path} does not exist")
 
-        for file_path, file_metadata in encrypted_submission.encrypted_files.items():
-            logged_state = progress_logger.get_state(file_path, file_metadata)
+        def _single_upload_task(
+            item: tuple[Path, SubmissionFileMetadata],
+            row: int,
+            lock: threading.Lock,
+            pbar_global: tqdm,
+        ):
+            file_path, file_metadata = item
+            logged_state = progress_logger.get_state(file_path, file_metadata) if file_metadata else None
             self.__log.debug("state for %s: %s", file_path, logged_state)
 
             s3_object_id = files_to_upload[file_path]
+            filesize = getsize(file_path)
+
             if (
                 (logged_state is None)
                 or not logged_state.get("upload_successful", False)
@@ -180,25 +220,29 @@ class S3BotoUploadWorker(UploadWorker):
                 )
 
                 try:
-                    self.upload_file(file_path, s3_object_id)
+                    self.upload_file(
+                        file_path, s3_object_id, pbar_local_position=row, pbar_global=pbar_global, global_lock=lock
+                    )
 
                     self.__log.info(f"Upload complete for {str(file_path)}. ")
-                    progress_logger.set_state(
-                        file_path,
-                        file_metadata,
-                        state=UploadState(upload_successful=True, submission_id=encrypted_submission.submission_id),
-                    )
+                    if file_metadata:
+                        progress_logger.set_state(
+                            file_path,
+                            file_metadata,
+                            state=UploadState(upload_successful=True, submission_id=encrypted_submission.submission_id),
+                        )
                 except Exception as e:
                     self.__log.error("Upload failed for '%s'", str(file_path))
-
-                    progress_logger.set_state(
-                        file_path,
-                        file_metadata,
-                        state=UploadState(
-                            upload_successful=False, errors=[str(e)], submission_id=encrypted_submission.submission_id
-                        ),
-                    )
-
+                    if file_metadata:
+                        progress_logger.set_state(
+                            file_path,
+                            file_metadata,
+                            state=UploadState(
+                                upload_successful=False,
+                                errors=[str(e)],
+                                submission_id=encrypted_submission.submission_id,
+                            ),
+                        )
                     raise e
             else:
                 self.__log.info(
@@ -207,6 +251,26 @@ class S3BotoUploadWorker(UploadWorker):
                     encrypted_submission.submission_id,
                     str(s3_object_id),
                 )
+                with (
+                    tqdm(  # type: ignore[call-overload]
+                        total=filesize,
+                        desc="SKIPPED ",
+                        position=row,
+                        file=sys.stderr,
+                        postfix={"file": file_path.name},
+                        **TQDM_DEFAULTS,
+                    ) as pbar_local,
+                    lock,
+                ):
+                    pbar_local.update(filesize)
+                    pbar_global.update(filesize)
+
+        _run_parallel_with_progress(
+            items=encrypted_submission.encrypted_files.items(),
+            get_size_fn=lambda item: getsize(item[0]),
+            worker_fn=_single_upload_task,
+            threads=self._threads,
+        )
 
     def _upload_metadata(self, metadata_file_path, metadata_s3_object_id):
         # upload metadata unconditionally

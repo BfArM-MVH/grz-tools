@@ -32,12 +32,13 @@ def _empty_str_to_none(string: str | None) -> str | None:
         return string
 
 
-def init_s3_client(s3_options: S3Options) -> S3Client:
+def init_s3_client(s3_options: S3Options, max_pool_connections: int = 10) -> S3Client:
     """Create a boto3 Client from a grz-cli configuration."""
     # configure proxies if proxy_url is defined
     proxy_url = s3_options.proxy_url
     proxies_config = s3_options.proxy_config.model_dump(exclude_none=True) if s3_options.proxy_config else None
     s3_config = Boto3Config(
+        max_pool_connections=max_pool_connections,
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config,  # type: ignore
         request_checksum_calculation=s3_options.request_checksum_calculation,
@@ -59,11 +60,12 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
     return s3_client
 
 
-def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
+def init_s3_resource(s3_options: S3Options, max_pool_connections: int = 10) -> S3ServiceResource:
     """Create a boto3 Resource from a grz-cli configuration."""
     proxy_url = s3_options.proxy_url
     proxies_config = s3_options.proxy_config.model_dump(exclude_none=True) if s3_options.proxy_config else None
     s3_config = Boto3Config(
+        max_pool_connections=max_pool_connections,
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config,  # type: ignore
         request_checksum_calculation=s3_options.request_checksum_calculation,
