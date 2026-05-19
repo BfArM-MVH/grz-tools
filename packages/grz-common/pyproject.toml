@@ -24,8 +24,8 @@ dependencies = [
     "pydantic >=2.12,<3",
     "pydantic-settings >=2.11.0,<3",
     "platformdirs >=4.3.6,<5",
-    "grz-pydantic-models >=2.5,<3",
-    "grz-check >=0.2.1",
+    "grz-pydantic-models >=2.7,<3",
+    "grz-check >=0.3.1",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

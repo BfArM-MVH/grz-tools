@@ -16,7 +16,7 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "grz-pydantic-models >=2.5,<3",
+    "grz-pydantic-models >=2.7,<3",
 ]
 
 [project.urls]

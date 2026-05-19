@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.7.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.6.0...grz-pydantic-models-v2.7.0) (2026-05-19)
+
+
+### Features
+
+* **grz-db,grz-common:** clean up SubmissionDb.populate API surface ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
+
+### Bug Fixes
+
+* **grz-common,grz-db,grzctl:** move populate logic into SubmissionDb ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grz-pydantic-models,grz-cli,grz-common:** adapt to 01.06.2026 changes ([#570](https://github.com/BfArM-MVH/grz-tools/issues/570)) ([4879288](https://github.com/BfArM-MVH/grz-tools/commit/48792883d4d23847e5547af5dd7f3f8543364d9d))
+* **grz-pydantic-models,grz-db:** align inconsistent version pins ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grzctl:** correct stale grz-cli hint in submission-not-found errors ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
 ## [2.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.5.0...grz-pydantic-models-v2.6.0) (2026-05-11)
 
 
