@@ -1266,6 +1266,24 @@ class GrzSubmissionMetadata(StrictBaseModel):
             return self
 
     @model_validator(mode="after")
+    def ensure_disease_type_rare_has_matching_library_types(self):
+        if self.submission.disease_type == DiseaseType.rare:
+            mandatory_index_types: set[LibraryType] = {LibraryType.wgs, LibraryType.wgs_lr}
+            index_library_types = {datum.library_type for datum in self.index_donor.lab_data}
+
+            if not (index_library_types & mandatory_index_types):
+                message = (
+                    f"For diseaseType '{DiseaseType.rare}', the index donor must have at least one lab datum with "
+                    f"libraryType 'wgs' or 'wgs_lr', starting 01.06.2026."
+                )
+                if self.submission.submission_date >= date(2026, 6, 1):
+                    raise ValueError(message)
+                else:
+                    log.warning(message)
+
+        return self
+
+    @model_validator(mode="after")
     def check_for_tumor_cell_count(self):
         """
         Check if oncology samples have tumor cell counts.
@@ -1451,6 +1469,21 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 f"Reference genomes: {reference_genomes}"
             )
 
+        return self
+
+    @model_validator(mode="after")
+    def ensure_no_scope_justification_is_not_technical_or_organizational(self):
+        for donor in self.donors:
+            for consent in donor.research_consents:
+                if consent.no_scope_justification in {
+                    ResearchConsentNoScopeJustification.LE_TECH,
+                    ResearchConsentNoScopeJustification.LE_ORG,
+                }:
+                    message = f"Setting noScopeJustification to {consent.no_scope_justification} is no longer allowed starting 01.06.2026."
+                    if self.submission.submission_date >= date(2026, 6, 1):
+                        raise ValueError(message)
+                    else:
+                        log.warning(message)
         return self
 
 
