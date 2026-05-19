@@ -14,8 +14,8 @@ authors = [
 dynamic = ["version"]
 dependencies = [
     "requests >=2.32.3,<3",
-    "grz-db >=2,<3",
-    "grz-cli >=1.6,<2",
+    "grz-db >=2.1,<3",
+    "grz-cli >=1.7,<2",
     "textual~=5.3"
 ]
 classifiers = [
