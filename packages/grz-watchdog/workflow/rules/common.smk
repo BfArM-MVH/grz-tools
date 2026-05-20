@@ -40,6 +40,7 @@ def cleanup_stale_temp_outputs():
     logger.info("Checking for stale temporary state files...")
     relevant_temp_outputs = [
         str(rules.scan_inbox.output.submissions),
+        str(rules.sync_db_from_inbox.output.marker),
     ]
     if hasattr(rules, "daemon_keepalive"):
         relevant_temp_outputs.append(str(rules.daemon_keepalive.output.marker))
@@ -75,18 +76,6 @@ def all_pending_submissions(wildcards: Wildcards):
     return targets
 
 
-def get_submission_to_sync(wildcards: Wildcards):
-    if hasattr(wildcards, "submission_id"):
-        return [rules.filter_single_submission.output.filtered_submission]
-    else:
-        return expand(
-            "<results>/scan_inbox/{submitter}/{inbox}/submissions.json",
-            zip,
-            submitter=map(itemgetter(0), ALL_INBOX_PAIRS),
-            inbox=map(itemgetter(1), ALL_INBOX_PAIRS),
-        )
-
-
 def get_cleanup_prerequisite(wildcards: Wildcards):
     """
     Determines the prerequisite for the 'clean' rule.
@@ -120,7 +109,9 @@ def should_run_qc(
     with open(db_config_path) as f:
         db_url = yaml.safe_load(f)["db"]["database_url"]
     db = SubmissionDb(db_url=db_url, author=None)
-    return db.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)
+    return db.should_qc(
+        submission_id=submission_id, target_percentage=target_percentage, salt=salt
+    )
 
 
 def get_validation_state(wildcards):

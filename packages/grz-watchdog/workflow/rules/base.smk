@@ -28,15 +28,15 @@ rule scan_inbox:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
     output:
         submissions=temp("<results>/scan_inbox/{submitter_id}/{inbox}/submissions.json"),
-    benchmark:
-        "<benchmarks>/scan_inbox/{submitter_id}/{inbox}/benchmark.tsv"
-    params:
-        s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
-        s3_secret=os.environ.get("GRZ_S3__SECRET"),
     log:
         stdout="<logs>/scan_inbox/{submitter_id}/{inbox}.stdout.log",
         stderr="<logs>/scan_inbox/{submitter_id}/{inbox}.stderr.log",
+    benchmark:
+        "<benchmarks>/scan_inbox/{submitter_id}/{inbox}/benchmark.tsv"
     priority: 2
+    params:
+        s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
+        s3_secret=os.environ.get("GRZ_S3__SECRET"),
     script:
         "../scripts/scan_inbox.py"
 
@@ -51,11 +51,11 @@ rule filter_single_submission:
         filtered_submission=temp(
             "<results>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.json"
         ),
-    params:
-        submission_id=lambda wildcards: wildcards.submission_id,
     log:
         stderr="<logs>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.stderr.log",
     priority: 1
+    params:
+        submission_id=lambda wildcards: wildcards.submission_id,
     shell:
         """(
         jq --arg sid "{params.submission_id}" '[.[] | select(.submission_id == $sid)]' {input.submissions} > {output.filtered_submission}
@@ -63,10 +63,12 @@ rule filter_single_submission:
         """
 
 
-rule check_and_register:
+rule sync_db_from_inbox:
     """
-    Checks S3 for a 'complete' submission status and ensures the
-    submission is registered in the DB with the state 'uploaded'.
+    Scan an inbox and register all new/updated submissions in the database.
+    Sets state to 'uploading' or 'uploaded' mirroring S3 status, and transitions
+    'uploading' → 'uploaded' when an upload completes.
+    Runs once per inbox per workflow cycle (temp output is cleaned up on completion).
     """
     input:
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
@@ -74,16 +76,16 @@ rule check_and_register:
         db_initialized=ancient(rules.init_db.output.marker),
     output:
         marker=touch(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/registered.marker"
+            temp("<results>/sync_db_from_inbox/{submitter_id}/{inbox}/synced.marker")
         ),
     log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/check_and_register.stderr.log",
+        stdout="<logs>/{submitter_id}/{inbox}/sync_db_from_inbox.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/sync_db_from_inbox.stderr.log",
     priority: 2
     resources:
         db_handles=1,
     script:
-        "../scripts/check_and_register.py"
+        "../scripts/sync_db_from_inbox.sh"
 
 
 checkpoint select_submissions:
@@ -100,20 +102,20 @@ checkpoint select_submissions:
         db_config_path=cfg_path("config_paths/db"),
     output:
         submissions_batch=temp("<results>/select_submissions/pending_batch.txt"),
-    params:
-        batch_limit=config["batch"].get("limit", None),
     log:
         stdout="<logs>/select_submissions.stdout.log",
         stderr="<logs>/select_submissions.stderr.log",
     priority: 2
+    params:
+        batch_limit=config["batch"].get("limit", None),
     script:
         "../scripts/select_submissions.py"
 
 
 rule pending:
+    default_target: True
     input:
         all_pending_submissions,
-    default_target: True
     priority: 3
 
 
@@ -129,19 +131,17 @@ rule metadata:
         metadata=temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json"
         ),
-        timestamp=temp(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/timestamp.txt"
-        )
+        timestamp=temp("<results>/{submitter_id}/{inbox}/{submission_id}/timestamp.txt"),
+    log:
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stderr.log",
+    priority: 1
     params:
         s3_access_key=register_s3_access_key,
         s3_secret=register_s3_secret,
         s3_bucket=get_s3_bucket,
         s3_metadata_key=get_s3_metadata_key,
         s3_endpoint_url=get_endpoint_url,
-    log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stderr.log",
-    priority: 1
     shell:
         """(
         s5cmd --endpoint-url {params.s3_endpoint_url} cp s3://{params.s3_bucket}/{params.s3_metadata_key} {output.metadata}
@@ -154,7 +154,7 @@ rule download:
     Download a submission from S3 to the local filesystem.
     """
     input:
-        registered_marker=rules.check_and_register.output.marker,
+        db_synced_marker=rules.sync_db_from_inbox.output.marker,
         inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         metadata=rules.metadata.output.metadata,
         db_config_path=cfg_path("config_paths/db"),
@@ -173,19 +173,19 @@ rule download:
             )
         ),
         progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_download.cjson",
+    log:
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
     benchmark:
         "<benchmarks>/download/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
-    params:
-        s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
-        s3_secret=os.environ.get("GRZ_S3__SECRET"),
+    priority: 1
     resources:
         disk=estimate_download_size,
         runtime=estimate_download_runtime,
         db_handles=1,
-    log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.stderr.log",
-    priority: 1
+    params:
+        s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
+        s3_secret=os.environ.get("GRZ_S3__SECRET"),
     script:
         "../scripts/download.sh"
 
@@ -212,20 +212,20 @@ rule decrypt:
             )
         ),
         progress_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_decrypt.cjson",
+    log:
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
     benchmark:
         "<benchmarks>/decrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
-    params:
-        grz_private_key_passphrase=os.environ.get(
-            "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"
-        ),
+    priority: 1
     resources:
         disk=estimate_decrypt_size,
         runtime=estimate_decrypt_runtime,
         db_handles=1,
-    log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/decrypt.stderr.log",
-    priority: 1
+    params:
+        grz_private_key_passphrase=os.environ.get(
+            "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"
+        ),
     script:
         "../scripts/decrypt.sh"
 
@@ -263,16 +263,16 @@ checkpoint validate:
         seq_data_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_sequencing_data_validation.cjson",
         validation_flag="<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
         validation_errors="<results>/{submitter_id}/{inbox}/{submission_id}/validation_errors.txt",
-    benchmark:
-        "<benchmarks>/validate/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/validate.stderr.log",
+    benchmark:
+        "<benchmarks>/validate/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
+    priority: 2
     threads: 4
     resources:
         runtime=estimate_validate_runtime,
         db_handles=1,
-    priority: 2
     script:
         "../scripts/validate.sh"
 
@@ -337,16 +337,16 @@ rule re_encrypt:
             )
         ),
         encryption_log="<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_encrypt.cjson",
+    log:
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
     benchmark:
         "<benchmarks>/re_encrypt/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
+    priority: 1
     resources:
         disk=estimate_re_encrypt_size,
         runtime=estimate_encrypt_runtime,
         db_handles=1,
-    log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/re_encrypt.stderr.log",
-    priority: 1
     script:
         "../scripts/re_encrypt.sh"
 
@@ -377,15 +377,15 @@ rule archive:
         db_config_path=cfg_path("config_paths/db"),
     output:
         marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/archived"),
-    benchmark:
-        "<benchmarks>/archive/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
-    resources:
-        runtime=estimate_archive_runtime,
-        db_handles=1,
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/archive.stderr.log",
+    benchmark:
+        "<benchmarks>/archive/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
     priority: 2
+    resources:
+        runtime=estimate_archive_runtime,
+        db_handles=1,
     script:
         "../scripts/archive.sh"
 
@@ -401,7 +401,7 @@ rule generate_pruefbericht:
         archived_marker=rules.archive.output.marker,
     output:
         pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
-        tmp="<results>/{submitter_id}/{inbox}/{submission_id}/.metadata.with-updated-timestamp.json"
+        tmp="<results>/{submitter_id}/{inbox}/{submission_id}/.metadata.with-updated-timestamp.json",
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",
@@ -420,18 +420,18 @@ rule submit_pruefbericht:
         db_config_path=cfg_path("config_paths/db"),
     output:
         answer="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer",
-    params:
-        custom_ca_cert=lambda _: (
-            "/workdir/config/cert.pem"
-            if os.environ.get("GRZ_PRUEFBERICHT_MOCK", False)
-            else ""
-        ),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/submit_pruefbericht.stderr.log",
     priority: 2
     resources:
         db_handles=1,
+    params:
+        custom_ca_cert=lambda _: (
+            "/workdir/config/cert.pem"
+            if os.environ.get("GRZ_PRUEFBERICHT_MOCK", False)
+            else ""
+        ),
     script:
         "../scripts/submit_pruefbericht.sh"
 
@@ -440,12 +440,12 @@ rule setup_qc_workflow:
     output:
         workflow_dir=directory("<resources>/GRZ_QC_Workflow/"),
         pipeline="<resources>/GRZ_QC_Workflow/main.nf",
-    params:
-        revision=get_qc_workflow_revision,
     log:
         stdout="<logs>/qc/setup_qc_workflow.stdout.log",
         stderr="<logs>/qc/setup_qc_workflow.stderr.log",
     priority: 0
+    params:
+        revision=get_qc_workflow_revision,
     shell:
         """
         (
@@ -466,9 +466,9 @@ if qc_prepare_references_mode == "download":
         output:
             references_dir=get_qc_workflow_references_directory(),
             launch_dir=directory("<resources>/shared_qc_launchdir"),
+        priority: 0
         resources:
             disk="50G",
-        priority: 0
         shell:
             """
             mkdir -p {output.references_dir}
@@ -493,23 +493,23 @@ else:
             references_dir=get_qc_workflow_references_directory(),
             launch_dir=directory("<resources>/shared_qc_launchdir"),
             work_dir=temp(directory("<resources>/prepare_qc_workflow/work")),
+        log:
+            stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
+            stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
         benchmark:
             "<benchmarks>/prepare_qc_workflow_references/benchmark.tsv"
-        params:
-            profiles=get_prepare_qc_nextflow_profiles,
-            configs=get_prepare_qc_nextflow_configs,
-            extra=get_prepare_qc_nextflow_extra_params,
+        priority: 0
+        handover: True
         threads: 1
         resources:
             mem="90G",
             disk="60G",
             runtime="3h",
             tmpdir=get_nextflow_tmpdir,
-        log:
-            stdout="<logs>/qc/prepare_qc_workflow_references.stdout.log",
-            stderr="<logs>/qc/prepare_qc_workflow_references.stderr.log",
-        priority: 0
-        handover: True
+        params:
+            profiles=get_prepare_qc_nextflow_profiles,
+            configs=get_prepare_qc_nextflow_configs,
+            extra=get_prepare_qc_nextflow_extra_params,
         script:
             "../scripts/prepare_qc.sh"
 
@@ -552,23 +552,23 @@ rule qc:
         marker=touch(
             "<results>/{submitter_id}/{inbox}/{submission_id}/qc/success.marker"
         ),
+    log:
+        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
+        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
     benchmark:
         "<benchmarks>/qc/{submitter_id}/{inbox}/{submission_id}/benchmark.tsv"
+    priority: 0
+    handover: True
     resources:
         runtime=estimate_qc_runtime,
         mem=estimate_qc_memory,
         disk=estimate_qc_disk,
         tmpdir=get_nextflow_tmpdir,
         db_handles=1,
-    log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/qc.stderr.log",
     params:
         profiles=get_run_qc_nextflow_profiles,
         configs=get_run_qc_nextflow_configs,
         extra=get_run_qc_nextflow_extra_params,
-    handover: True
-    priority: 0
     script:
         "../scripts/run_qc.sh"
 
@@ -582,13 +582,13 @@ rule process_qc_results:
         marker=touch(
             "<results>/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"
         ),
-    params:
-        report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
-        qc_workflow_version=lambda wildcards: config["qc"]["revision"],
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
     priority: 1
+    params:
+        report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
+        qc_workflow_version=lambda wildcards: config["qc"]["revision"],
     script:
         "../scripts/process_qc_results.sh"
 
@@ -627,16 +627,16 @@ rule clean:
         ),
     output:
         clean_results="<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
-    benchmark:
-        "<benchmarks>/clean/{submitter_id}/{inbox}/{submission_id}/{qc_status}/benchmark.tsv"
-    params:
-        mode=config.get("auto-cleanup", "none"),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}.stderr.log",
+    benchmark:
+        "<benchmarks>/clean/{submitter_id}/{inbox}/{submission_id}/{qc_status}/benchmark.tsv"
     priority: 2
     resources:
         db_handles=1,
+    params:
+        mode=config.get("auto-cleanup", "none"),
     script:
         "../scripts/clean.sh"
 

@@ -210,11 +210,11 @@ if "daemon" in sys.argv:
 
 
 rule daemon_keepalive:
-    localrule: True
-    output:
-        marker=touch(temp(daemon_keepalive_marker)),
     input:
         rules.init_db.output.marker,
+    output:
+        marker=touch(temp(daemon_keepalive_marker)),
+    localrule: True
     params:
         delay=lambda wildcards: int(config["monitor"]["interval"]) * 2 + 3,
     shell:
@@ -225,8 +225,8 @@ rule daemon:
     """
     Consumes submissions from monitoring queue and sends them off for processing.
     """
-    localrule: True
+    default_target: True
     input:
         rules.daemon_keepalive.output.marker,
         from_queue(submission_queue, finish_sentinel=finish_sentinel),
-    default_target: True
+    localrule: True

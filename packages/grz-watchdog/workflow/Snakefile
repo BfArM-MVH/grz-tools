@@ -3,7 +3,6 @@ from operator import itemgetter
 
 from snakemake.utils import min_version, validate
 
-
 min_version("9.13.2")
 
 
