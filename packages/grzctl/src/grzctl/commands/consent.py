@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.submission_di
+@grzcli.submission_dir
 @click.option(
     "--metadata-file",
     metavar="PATH",

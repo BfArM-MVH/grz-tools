@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import click
-import grz_cli.commands.validate as validate_module
 import grz_common.cli as grzcli
+from grz_cli.models.config import ValidateConfig
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
@@ -18,6 +18,9 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzcli.configuration
 @grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.files_dir
+@grzcli.logs_dir
 @grzcli.force
 @grzcli.threads
 @click.option(
@@ -31,6 +34,9 @@ log = logging.getLogger(__name__)
 def validate(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_dir,
+    metadata_dir,
+    files_dir,
+    logs_dir,
     force,
     threads,
     mmap,
@@ -40,17 +46,46 @@ def validate(  # noqa: PLR0913
     """
     Validate the submission (wrapper with DB updates).
     """
-    submission_dir = Path(submission_dir)
+    bundled_mode = submission_dir is not None
+    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, logs_dir]))
+
+    if bundled_mode and granular_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
+
+    if bundled_mode:
+        base = Path(submission_dir)
+        _metadata_dir = base / "metadata"
+        _files_dir = base / "files"
+        _logs_dir = base / "logs"
+    elif granular_mode:
+        required = {
+            "--metadata-dir": metadata_dir,
+            "--files-dir": files_dir,
+            "--logs-dir": logs_dir,
+        }
+        missing = [name for name, path in required.items() if path is None]
+        if missing:
+            raise click.UsageError(f"Flexible mode requires: {', '.join(missing)}")
+        _metadata_dir, _files_dir, _logs_dir = Path(metadata_dir), Path(files_dir), Path(logs_dir)
+    else:
+        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
+
+    config = ValidateConfig.model_validate(configuration)
+    log.info("Starting validation...")
+
+    _logs_dir.mkdir(parents=True, exist_ok=True)
+
+    worker_inst = Worker(
+        metadata_dir=_metadata_dir,
+        files_dir=_files_dir,
+        log_dir=_logs_dir,
+        # encrypted_files_dir is not used by validate, but required by Worker
+        encrypted_files_dir=_files_dir.parent / "encrypted_files",
+        threads=threads,
+    )
 
     submission_id = ""
     if update_db:
-        worker_inst = Worker(
-            metadata_dir=submission_dir / "metadata",
-            files_dir=submission_dir / "files",
-            log_dir=submission_dir / "logs",
-            encrypted_files_dir=submission_dir / "encrypted_files",
-            threads=threads,
-        )
         submission = worker_inst.parse_submission()
         submission_id = submission.metadata.content.submission_id
 
@@ -61,11 +96,6 @@ def validate(  # noqa: PLR0913
         end_state=SubmissionStateEnum.VALIDATED,
         enabled=update_db,
     ):
-        validate_module.validate.callback(  # type: ignore[misc]
-            configuration=configuration,
-            submission_dir=submission_dir,
-            force=force,
-            threads=threads,
-            no_mmap=not mmap,
-            **kwargs,
-        )
+        worker_inst.validate(identifiers=config.identifiers, force=force, no_mmap=not mmap)
+
+    log.info("Validation finished!")

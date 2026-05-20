@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-submission_id="${snakemake_wildcards[submission_id]}"
 db_config="${snakemake_input[db_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
@@ -14,25 +13,9 @@ nonconsented_config_path="${snakemake_input[nonconsented_config_path]}"
 
 read -r -a progress_logs_to_archive <<<"${snakemake_input[progress_logs_to_archive]}"
 
-_error_handler() {
-	local exit_code="$1"
-	local line_no="$2"
-	local command="$3"
-
-	local error_message="[ERROR] Script '$0' failed on line $line_no with exit code $exit_code while executing command: $command"
-	echo "$error_message" >&2
-	echo "$error_message" >>"${log_stderr}"
-
-	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
-}
-
-trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
-
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" archiving >"$log_stdout" 2>"$log_stderr"
-
 staging_dir=$(mktemp -d -p "$(dirname ${snakemake_output[marker]})" "archive_staging_XXXXXX")
 trap 'rm -rf "$staging_dir"' EXIT
-echo "Created temporary archive staging directory: $staging_dir" >>"$log_stdout"
+echo "Created temporary archive staging directory: $staging_dir" >"$log_stdout"
 
 echo "Assembling archive package..." >>"$log_stdout"
 redacted_metadata_dir="${staging_dir}/metadata"
@@ -65,11 +48,12 @@ fi
 
 echo "Consent: $CONSENT. Using config file for archiving: $CONFIG_FILE" >>"$log_stdout"
 
+# grzctl archive handles DB state transitions (ARCHIVING → ARCHIVED) via DbContext.
 grzctl archive \
 	--config-file "$CONFIG_FILE" \
+	--config-file "${db_config}" \
 	--metadata-dir "${redacted_metadata_dir}" \
 	--logs-dir "${redacted_logs_dir}" \
 	--encrypted-files-dir "${re_encrypted_files_dir}" \
 	>>"$log_stdout" 2>>"$log_stderr"
 
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" archived >>"$log_stdout" 2>>"${log_stderr}"

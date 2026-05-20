@@ -584,6 +584,7 @@ rule process_qc_results:
         ),
     params:
         report_csv=lambda wildcards, input: Path(input.qc_results) / "report.csv",
+        qc_workflow_version=lambda wildcards: config["qc"]["revision"],
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/process_qc_results/stderr.log",
@@ -660,7 +661,7 @@ rule finalize_fail:
         """
         (
         echo "Submission {wildcards.submission_id} failed validation."
-        grzctl db --config-file {input.db_config_path} submission update {wildcards.submission_id} error --data '{{"reason": "validation failed"}}'
+        grzctl db --config-file {input.db_config_path} submission update --ignore-error-state {wildcards.submission_id} error --data '{{"reason": "validation failed"}}'
         echo "Submission {wildcards.submission_id} processing finished due to validation failure." > {output.target}
         ) > {log.stdout} 2> {log.stderr}
         """

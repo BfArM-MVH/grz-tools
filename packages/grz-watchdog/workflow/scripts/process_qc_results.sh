@@ -26,6 +26,7 @@ fi
 submission_id="${snakemake_wildcards[submission_id]}"
 db_config="${snakemake_input[db_config_path]}"
 report_csv="${snakemake_params[report_csv]}"
+qc_workflow_version="${snakemake_params[qc_workflow_version]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
@@ -33,4 +34,4 @@ index_detailed_qc_status=$(awk -F, '$2 == "index"' <"${report_csv}" | cut -d, -f
 qc_status=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'yes'; else echo 'no'; fi)
 
 grzctl db --config-file "${db_config}" submission modify "${submission_id}" detailed_qc_passed "${qc_status}" >"$log_stdout" 2>"$log_stderr"
-grzctl db --config-file "${db_config}" submission populate-qc --no-confirm "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission populate-qc --no-confirm --qc-workflow-version "${qc_workflow_version}" "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"

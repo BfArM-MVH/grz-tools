@@ -16,16 +16,17 @@ validation_errors="${snakemake_output[validation_errors]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" validating >"$log_stdout" 2>"$log_stderr"
-
+# grzctl validate handles DB state transitions (VALIDATING → VALIDATED on success,
+# VALIDATING → ERROR on exception) via DbContext (--update-db is the default).
 # We expect `grzctl validate` to return a non-zero code on validation failure,
 # which is not a script error. So we handle its exit code manually instead of relying on `set -e`.
 if grzctl validate \
 	--config-file "${inbox_config}" \
+	--config-file "${db_config}" \
 	--metadata-dir "${metadata_dir}" \
 	--files-dir "${files_dir}" \
 	--logs-dir "${progress_logs_dir}" \
-	>>"$log_stdout" 2>"$validation_errors"; then
+	>"$log_stdout" 2>"$validation_errors"; then
 	echo "true" >"$validation_flag"
 	grzctl db --config-file "${db_config}" submission modify "${submission_id}" basic_qc_passed yes
 else
@@ -35,4 +36,3 @@ else
 	grzctl db --config-file "${db_config}" submission modify "${submission_id}" basic_qc_passed no
 fi
 
-grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" validated >>"$log_stdout" 2>>"$log_stderr"

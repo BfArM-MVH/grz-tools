@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import click
-from grz_common.cli import DIR_RW_C, config_file, logs_dir, submission_dir, threads
+import grz_common.cli as grzcli
+from grz_common.cli import DIR_RW_C
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
@@ -14,21 +15,21 @@ from ..models.config import ArchiveConfig
 
 log = logging.getLogger(__name__)
 
-import grz_common.cli as grzcli
-
 
 @click.command()
 @grzcli.configuration
 @grzcli.submission_dir
 @click.option("--metadata-dir", type=DIR_RW_C, required=False)
 @click.option("--encrypted-files-dir", type=DIR_RW_C, required=False)
+@grzcli.logs_dir
 @grzcli.threads
 @grzcli.update_db
-def archive(
+def archive(  # noqa: PLR0913
     configuration: dict[str, Any],
     submission_dir,
     metadata_dir,
     encrypted_files_dir,
+    logs_dir,
     threads,
     update_db,
     **kwargs,
@@ -42,7 +43,7 @@ def archive(
     granular_mode = any([metadata_dir, encrypted_files_dir, logs_dir])
 
     if bundled_mode and granular_mode:
-        raise click.UsageError("'--output-dir' is mutually exclusive with explicit path options.")
+        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
 
     if bundled_mode:
         base = Path(submission_dir)
