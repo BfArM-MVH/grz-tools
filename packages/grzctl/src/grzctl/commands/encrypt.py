@@ -8,12 +8,11 @@ from typing import Any
 
 import click
 import grz_common.cli as grzcli
+from grz_cli.models.config import EncryptConfig
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from grzctl.dbcontext import DbContext
-
-from ..models.config import EncryptConfig
 
 log = logging.getLogger(__name__)
 
