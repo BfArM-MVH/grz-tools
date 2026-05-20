@@ -3,6 +3,8 @@
 from pathlib import Path
 
 import pytest
+from grz_common.progress.progress_logging import FileProgressLogger
+from grz_common.progress.states import UploadState
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.upload import S3BotoUploadWorker
 
@@ -113,3 +115,103 @@ def test__gather_files_to_upload(encrypted_submission):
     ]
     expected_files = sorted(expected_files)
     assert gathered_files == expected_files
+
+
+def test_upload_skips_file_already_uploaded_for_same_submission(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    temp_upload_log_file_path,
+    mocker,
+):
+    """Files with upload_successful=True and matching submission_id should be skipped."""
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_upload_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[UploadState](temp_upload_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=UploadState(upload_successful=True, submission_id=encrypted_submission.submission_id),
+        )
+
+    files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
+    metadata_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+    files_to_upload[metadata_path] = metadata_s3_object_id
+
+    upload_spy = mocker.spy(upload_worker, "upload_file")
+    upload_worker._upload_logged_files(encrypted_submission, progress_logger, files_to_upload)
+
+    assert upload_spy.call_count == 0, f"Expected all files to be skipped, but {upload_spy.call_count} were uploaded"
+
+
+def test_upload_rereuploads_file_with_different_submission_id(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    temp_upload_log_file_path,
+    mocker,
+):
+    """Files logged as upload_successful=True for a different submission_id must be re-uploaded."""
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_upload_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[UploadState](temp_upload_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=UploadState(upload_successful=True, submission_id="different-submission-id-9999"),
+        )
+
+    files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
+    metadata_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+    files_to_upload[metadata_path] = metadata_s3_object_id
+
+    upload_spy = mocker.spy(upload_worker, "upload_file")
+    upload_worker._upload_logged_files(encrypted_submission, progress_logger, files_to_upload)
+
+    expected = len(encrypted_submission.encrypted_files)
+    assert upload_spy.call_count == expected, (
+        f"Expected {expected} files to be re-uploaded for a different submission_id, "
+        f"but only {upload_spy.call_count} were uploaded"
+    )
+
+
+def test_upload_rereuploads_file_after_failed_upload(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    temp_upload_log_file_path,
+    mocker,
+):
+    """Files logged as upload_successful=False must be retried even with matching submission_id."""
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_upload_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[UploadState](temp_upload_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=UploadState(upload_successful=False, submission_id=encrypted_submission.submission_id),
+        )
+
+    files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
+    metadata_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+    files_to_upload[metadata_path] = metadata_s3_object_id
+
+    upload_spy = mocker.spy(upload_worker, "upload_file")
+    upload_worker._upload_logged_files(encrypted_submission, progress_logger, files_to_upload)
+
+    expected = len(encrypted_submission.encrypted_files)
+    assert upload_spy.call_count == expected, (
+        f"Expected {expected} failed files to be retried, but only {upload_spy.call_count} were uploaded"
+    )

@@ -131,6 +131,7 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
             temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
+            "--no-update-db",
         ]
         submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
 
@@ -169,6 +170,7 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_
             str(pruefbericht_json_path),
             "--token",
             "my_token",
+            "--no-update-db",
         ]
         submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
 
@@ -209,6 +211,7 @@ def test_valid_submission_with_expired_token(
             str(pruefbericht_json_path),
             "--token",
             "expired_token",
+            "--no-update-db",
         ]
         submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
 

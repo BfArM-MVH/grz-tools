@@ -370,7 +370,9 @@ class DetailedQCPassedReportState(StrEnum):
     NO = "no"
 
 
-def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, quarter: int) -> None:
+def _dump_dataset_report(
+    output_path: Path, database: SubmissionDb, year: int, quarter: int, with_submission_ids: bool = False
+) -> None:
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     with database._get_session() as session:
@@ -437,6 +439,7 @@ def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, q
                 "relation",
                 "sequenceSubtype",
             ]
+            + (["submission_id"] if with_submission_ids else [])
         )
         for submission in submissions:
             detailed_qc_passed = DetailedQCPassedReportState.NOT_PERFORMED
@@ -475,10 +478,13 @@ def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, q
                     "index",
                     id2sequence_subtypes_index.get(submission.id, "NA"),
                 ]
+                + ([submission.id] if with_submission_ids else [])
             )
 
 
-def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarter: int) -> None:
+def _dump_qc_report(
+    output_path: Path, database: SubmissionDb, year: int, quarter: int, with_submission_ids: bool = False
+) -> None:
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     with database._get_session() as session:
@@ -539,6 +545,7 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
                 "targetedRegionsAboveMinCoverage_detailedQC_passed",
                 "targetedRegionsAboveMinCoverage_detailedQC_deviation%",
             ]
+            + (["submission_id"] if with_submission_ids else [])
         )
 
         for report in reports_of_failed_submissions:
@@ -571,6 +578,7 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
                     "yes" if report.targeted_regions_above_min_coverage_passed_qc else "no",
                     report.targeted_regions_above_min_coverage_percent_deviation,
                 ]
+                + ([report.submission_id] if with_submission_ids else [])
             )
 
 
@@ -595,8 +603,17 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
     ),
     help="Directory to output TSV files. Defaults to current directory.",
 )
+@click.option(
+    "--with-submission-ids",
+    "with_submission_ids",
+    is_flag=True,
+    default=False,
+    help="Append a 'submission_id' column to per-submission tables (dataset and detailed QC).",
+)
 @click.pass_context
-def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_directory: Path | None):
+def quarterly(
+    ctx: click.Context, year: int | None, quarter: int | None, output_directory: Path | None, with_submission_ids: bool
+):
     """
     Generate the tables for the quarterly report.
     """
@@ -625,7 +642,7 @@ def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_
     _dump_overview_report(overview_output_path, submission_db, year, quarter)
 
     dataset_output_path = output_directory / f"2-Infos_zu_Datensätzen_{grz_id}_{quarter}_{year}.tsv"
-    _dump_dataset_report(dataset_output_path, submission_db, year, quarter)
+    _dump_dataset_report(dataset_output_path, submission_db, year, quarter, with_submission_ids=with_submission_ids)
 
     qc_output_path = output_directory / f"3-Detailprüfung_{grz_id}_{quarter}_{year}.tsv"
-    _dump_qc_report(qc_output_path, submission_db, year, quarter)
+    _dump_qc_report(qc_output_path, submission_db, year, quarter, with_submission_ids=with_submission_ids)

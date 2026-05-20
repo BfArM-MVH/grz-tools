@@ -4,7 +4,7 @@ use indicatif::ProgressBar;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use noodles::fastq;
-use std::io::{BufReader, Read};
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Copy, Clone)]
@@ -64,6 +64,16 @@ impl FastqCheckProcessor {
             )
         })?;
 
+        if record.sequence().len() != record.quality_scores().len() {
+            return Err(format!(
+                "Failed to parse {} record #{}: sequence length ({}) does not match quality scores length ({})",
+                file_id,
+                self.num_records,
+                record.sequence().len(),
+                record.quality_scores().len()
+            ));
+        }
+
         self.total_read_length = self
             .total_read_length
             .checked_add(
@@ -88,9 +98,9 @@ impl FastqCheckProcessor {
                 // if mean_read_length is NaN (num_records is zero) then following conditional will
                 // be false and the error correctly not reported, since the empty file error was
                 // already recorded above.
-                if mean_read_length <= (min_mean_read_length as f64) {
+                if mean_read_length < (min_mean_read_length as f64) {
                     self.errors.push(format!(
-                        "Mean read length ({}) is not greater than minimum required ({})",
+                        "Mean read length ({}) is less than minimum required ({})",
                         mean_read_length, min_mean_read_length
                     ))
                 }
@@ -113,6 +123,25 @@ impl FastqCheckProcessor {
     }
 }
 
+/// Validate FASTQ data from any BufRead source.
+/// This is the core validation logic, independent of file I/O.
+pub fn validate_fastq_data<R: BufRead>(
+    reader: R,
+    length_check: ReadLengthCheck,
+) -> Result<CheckOutcome, String> {
+    let mut fastq_reader = fastq::io::Reader::new(reader);
+    let mut processor = FastqCheckProcessor::new(length_check);
+
+    for record_res in fastq_reader.records() {
+        processor.process_record(record_res, "record")?;
+        if !processor.is_ok() {
+            break;
+        }
+    }
+
+    Ok(processor.finalize())
+}
+
 pub fn check_single_fastq(
     path: &Path,
     length_check: ReadLengthCheck,
@@ -120,17 +149,7 @@ pub fn check_single_fastq(
     global_pb: &ProgressBar,
 ) -> FileReport {
     check_file(path, file_pb, global_pb, true, |reader| {
-        let mut fastq_reader = fastq::io::Reader::new(BufReader::new(reader));
-        let mut processor = FastqCheckProcessor::new(length_check);
-
-        for record_res in fastq_reader.records() {
-            processor.process_record(record_res, "record")?;
-            if !processor.is_ok() {
-                break;
-            }
-        }
-
-        Ok(processor.finalize())
+        validate_fastq_data(reader, length_check)
     })
 }
 
@@ -140,11 +159,11 @@ pub fn process_paired_readers<R1, R2>(
     length_check: ReadLengthCheck,
 ) -> Result<(CheckOutcome, CheckOutcome, Vec<String>), String>
 where
-    R1: Read,
-    R2: Read,
+    R1: BufRead,
+    R2: BufRead,
 {
-    let mut fq1_reader = fastq::io::Reader::new(BufReader::new(reader1));
-    let mut fq2_reader = fastq::io::Reader::new(BufReader::new(reader2));
+    let mut fq1_reader = fastq::io::Reader::new(reader1);
+    let mut fq2_reader = fastq::io::Reader::new(reader2);
 
     let mut fq1_processor = FastqCheckProcessor::new(length_check);
     let mut fq2_processor = FastqCheckProcessor::new(length_check);
@@ -176,4 +195,100 @@ where
     let outcome2 = fq2_processor.finalize();
 
     Ok((outcome1, outcome2, pair_errors))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID_FASTQ: &[u8] = b"@read1\nACGT\n+\n!!!!\n";
+    const INVALID_FASTQ_LEN: &[u8] = b"@read1\nACGT\n+\n!!!\n";
+    const VALID_FASTQ_2_RECORDS: &[u8] = b"@read1\nACGT\n+\n!!!!\n@read2\nACGT\n+\n!!!!\n";
+
+    #[test]
+    fn test_valid_single_fastq() {
+        let outcome = validate_fastq_data(VALID_FASTQ, ReadLengthCheck::Skip).unwrap();
+
+        assert!(outcome.errors.is_empty());
+        let stats = outcome
+            .stats
+            .expect("Stats should be present for non-empty file");
+        assert_eq!(stats.num_records, 1);
+        assert_eq!(stats.total_read_length, Some(4));
+    }
+
+    #[test]
+    fn test_mismatched_sequence_and_quality() {
+        let err = validate_fastq_data(INVALID_FASTQ_LEN, ReadLengthCheck::Skip).unwrap_err();
+
+        assert!(err.contains("sequence length (4) does not match quality scores length (3)"));
+    }
+
+    #[test]
+    fn test_mean_read_length_pass() {
+        let outcome = validate_fastq_data(VALID_FASTQ, ReadLengthCheck::Fixed(4)).unwrap();
+        assert!(outcome.errors.is_empty());
+    }
+
+    #[test]
+    fn test_mean_read_length_fail() {
+        let outcome = validate_fastq_data(VALID_FASTQ, ReadLengthCheck::Fixed(5)).unwrap();
+
+        assert_eq!(
+            outcome.errors,
+            vec!["Mean read length (4) is less than minimum required (5)"]
+        );
+    }
+
+    #[test]
+    fn test_invalid_fastq_syntax() {
+        let invalid_syntax: &[u8] = b"NOT_A_FASTQ_RECORD\nACGT\n+\n!!!!\n";
+        let res = validate_fastq_data(invalid_syntax, ReadLengthCheck::Skip);
+
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .contains("Failed to parse record record #1")
+        );
+    }
+
+    #[test]
+    fn test_paired_readers_valid() {
+        let (out1, out2, pair_errors) =
+            process_paired_readers(VALID_FASTQ, VALID_FASTQ, ReadLengthCheck::Skip).unwrap();
+
+        assert!(out1.errors.is_empty());
+        assert!(out2.errors.is_empty());
+        assert!(pair_errors.is_empty());
+
+        assert_eq!(out1.stats.unwrap().num_records, 1);
+        assert_eq!(out2.stats.unwrap().num_records, 1);
+    }
+
+    #[test]
+    fn test_paired_readers_r1_longer() {
+        let (out1, out2, pair_errors) =
+            process_paired_readers(VALID_FASTQ_2_RECORDS, VALID_FASTQ, ReadLengthCheck::Skip)
+                .unwrap();
+
+        assert_eq!(
+            pair_errors,
+            vec!["Mismatched read counts: R1 has more records than R2."]
+        );
+
+        assert_eq!(out1.stats.unwrap().num_records, 2);
+        assert_eq!(out2.stats.unwrap().num_records, 1);
+    }
+
+    #[test]
+    fn test_paired_readers_r2_longer() {
+        let (_out1, _out2, pair_errors) =
+            process_paired_readers(VALID_FASTQ, VALID_FASTQ_2_RECORDS, ReadLengthCheck::Skip)
+                .unwrap();
+
+        assert_eq!(
+            pair_errors,
+            vec!["Mismatched read counts: R2 has more records than R1."]
+        );
+    }
 }

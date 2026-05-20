@@ -1,5 +1,55 @@
 # Changelog
 
+## [1.7.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.6.1...grz-cli-v1.7.0) (2026-05-19)
+
+
+### Features
+
+* **grz-db,grz-common:** clean up SubmissionDb.populate API surface ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
+
+### Bug Fixes
+
+* **grz-common,grz-db,grzctl:** move populate logic into SubmissionDb ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grz-pydantic-models,grz-db:** align inconsistent version pins ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grzctl:** correct stale grz-cli hint in submission-not-found errors ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
+## [1.6.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.6.0...grz-cli-v1.6.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** Fix version requirements ([#577](https://github.com/BfArM-MVH/grz-tools/issues/577)) ([5a50867](https://github.com/BfArM-MVH/grz-tools/commit/5a50867bebc7d4f9e5d1745f0800533e3f1926ae))
+
+
+### Documentation
+
+* **repo:** add version-compatibility-check.md ([#571](https://github.com/BfArM-MVH/grz-tools/issues/571)) ([8126026](https://github.com/BfArM-MVH/grz-tools/commit/81260261d54d2ba3e314fefd28d8345f71d371d4))
+
+## [1.6.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.1...grz-cli-v1.6.0) (2026-05-11)
+
+
+### Features
+
+* **grz-cli,grz-common:** Add version checks to upload/submit ([#477](https://github.com/BfArM-MVH/grz-tools/issues/477)) ([289683d](https://github.com/BfArM-MVH/grz-tools/commit/289683d6154df7fb175ad4db9671f28e1cdd0eb3))
+* **grz-cli,grzctl,grz-common,grz-check:** use grz check python bindings ([#554](https://github.com/BfArM-MVH/grz-tools/issues/554)) ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-cli,grzctl,grz-common:** use grz-check python bindings instead ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grzctl,grz-cli,grz-common:** Merge multiple configuration files ([#490](https://github.com/BfArM-MVH/grz-tools/issues/490)) ([8ae881d](https://github.com/BfArM-MVH/grz-tools/commit/8ae881d4f65882ae5d8823bdb00971eec246a395))
+
+
+### Bug Fixes
+
+* **grz-check:** actually calculate checksums in python exposed API ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** add return types to public python functions ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** do not silently ignore pair errors ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** expose validate_raw* functions that also return a ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** set source.name as path in report as a fallback ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** use 8MB as buffer size to match python codebase defaults ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-common,grzctl,grz-cli:** add pynacl to dependencies, update crypt4gh ([#560](https://github.com/BfArM-MVH/grz-tools/issues/560)) ([9060876](https://github.com/BfArM-MVH/grz-tools/commit/9060876094d9f2a97ea7d351e0adcfc34a6bbd39))
+* **grz-common,grzctl,grz-cli:** update crypt4gh dependency version ([9060876](https://github.com/BfArM-MVH/grz-tools/commit/9060876094d9f2a97ea7d351e0adcfc34a6bbd39))
+* **grz-common:** add pynacl to dependencies ([9060876](https://github.com/BfArM-MVH/grz-tools/commit/9060876094d9f2a97ea7d351e0adcfc34a6bbd39))
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.5.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.5.0...grz-cli-v1.5.1) (2025-12-04)
 
 

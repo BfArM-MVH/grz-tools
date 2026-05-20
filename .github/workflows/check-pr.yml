@@ -21,6 +21,7 @@ jobs:
             grz-cli
             grzctl
             grz-pydantic-models
+            grz-pydantic-models-testing
             grz-db
             grz-tools
             grz-check

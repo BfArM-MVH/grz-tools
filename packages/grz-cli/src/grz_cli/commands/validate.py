@@ -21,11 +21,11 @@ log = logging.getLogger(__name__)
 @grzcli.force
 @grzcli.threads
 @click.option(
-    "--with-grz-check/--no-grz-check",
-    "with_grz_check",
+    "--mmap/--no-mmap",
+    "mmap",
     default=True,
     hidden=True,
-    help="Whether to use grz-check to perform validation",
+    help="Whether to use mmap.",
 )
 def validate(
     configuration: dict[str, Any],
@@ -35,7 +35,7 @@ def validate(
     logs_dir,
     force,
     threads,
-    with_grz_check,
+    mmap,
     **kwargs,
 ):
     """
@@ -82,6 +82,6 @@ def validate(
         encrypted_files_dir=_files_dir.parent / "encrypted_files",
         threads=threads,
     )
-    worker_inst.validate(identifiers=config.identifiers, force=force, with_grz_check=with_grz_check)
+    worker_inst.validate(identifiers=config.identifiers, force=force, no_mmap=not mmap)
 
     log.info("Validation finished!")

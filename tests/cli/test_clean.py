@@ -67,6 +67,7 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, wo
             "--config-file",
             temp_s3_config_file_path,
             "--yes-i-really-mean-it",
+            "--no-update-db",
         ]
 
         result_clean = runner.invoke(cli, clean_args, catch_exceptions=False)

@@ -185,7 +185,7 @@ fn main() -> Result<()> {
 
     let (jobs, total_bytes) = create_jobs(&fastq_paired, &fastq_single, &bam, &raw)?;
 
-    checker::run_check(jobs, total_bytes, &output, continue_on_error, show_progress)?;
+    crate::checker::run_check(jobs, total_bytes, &output, continue_on_error, show_progress)?;
 
     Ok(())
 }

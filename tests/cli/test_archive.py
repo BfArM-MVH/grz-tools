@@ -38,6 +38,7 @@ def test_archive(temp_s3_config_file_path, remote_bucket_with_version, working_d
             temp_s3_config_file_path,
             "--submission-dir",
             str(working_dir_path),
+            "--no-update-db",
         ]
 
         runner = click.testing.CliRunner(

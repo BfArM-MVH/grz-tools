@@ -12,3 +12,23 @@ class VersionFileAccessError(VersionFileError):
 
 class VersionFileValidationError(VersionFileError):
     """Raised when the version file content is invalid or cannot be parsed."""
+
+
+class DecryptionError(Exception):
+    """Raised when decryption of a submission file fails."""
+
+
+class EncryptionError(Exception):
+    """Raised when encryption of a submission file fails."""
+
+
+class NetworkError(Exception):
+    """Raised when a network-related operation fails."""
+
+
+class UploadError(Exception):
+    """Raised when uploading a submission file fails."""
+
+
+class IncompleteSubmissionError(Exception):
+    """Raised when a submission is missing required files or metadata."""

@@ -32,14 +32,6 @@ uv sync --all-packages --all-groups --all-extras
 To run integration tests for all packages in this monorepo, run the following from the repository root:
 
 ```bash
-for d in packages/*; do
-   if [ -f "$d/pyproject.toml" ]; then
-      printf '\n\033[1;97;44m  RUNNING TESTS: %s  \033[0m\n\n' "$d"
-      (cd "$d" && uv run tox)
-   fi
-done
-
-printf '\n\033[1;97;44m  RUNNING GLOBAL TESTS  \033[0m\n\n'
 uv run tox
 ```
 

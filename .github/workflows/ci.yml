@@ -5,8 +5,6 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 env:
@@ -61,10 +59,11 @@ jobs:
           # Define dependency graph (source package name -> space-separated list of dependent package names)
           declare -A DEPENDENCY_GRAPH
           DEPENDENCY_GRAPH["grz-pydantic-models"]="grz-cli grzctl grz-common grz-db grz-watchdog"
+          DEPENDENCY_GRAPH["grz-pydantic-models-testing"]="grz-pydantic-models grzctl grz-db grz-watchdog"
           DEPENDENCY_GRAPH["grz-common"]="grz-cli grzctl grz-watchdog"
           DEPENDENCY_GRAPH["grz-db"]="grzctl grz-watchdog"
           DEPENDENCY_GRAPH["grz-cli"]="grzctl grz-watchdog"
-          DEPENDENCY_GRAPH["grz-check"]="grz-cli grz-watchdog"
+          DEPENDENCY_GRAPH["grz-check"]="grz-cli grzctl grz-common grz-watchdog"
           # Add other dependencies as needed: DEPENDENCY_GRAPH["pkg-x"]="pkg-y pkg-z"
 
           final_test_dirs=("${directly_changed_package_dirs[@]}")
@@ -92,10 +91,12 @@ jobs:
           rust_json_objects=""
 
           for pkg_path in "${unique_test_dirs_array[@]}"; do
-            if [[ -f "$pkg_path/pyproject.toml" ]]; then
+            if [[ -f "$pkg_path/pyproject.toml" && -d "$pkg_path/tests" ]]; then
               # Note: We only need the path in the matrix object now
               python_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
-            elif [[ -f "$pkg_path/Cargo.toml" ]]; then
+            fi
+
+            if [[ -f "$pkg_path/Cargo.toml" ]]; then
               rust_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
             fi
           done
@@ -290,7 +291,7 @@ jobs:
         run: which grz-check && grz-check --version
 
       - name: Test ${{ matrix.python-version }}
-        run: uv run tox -e ${{ matrix.python-version }}
+        run: uv run tox -e ${{ matrix.python-version }} -- tests/
 
   test-changed-packages-python:
     name: Test Changed Python Packages
@@ -359,7 +360,9 @@ jobs:
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
         if: steps.pkg_info.outputs.name != 'grz-watchdog'
-        run: cd ${{ matrix.package.path }} && uv run tox -e py${{ matrix.python-version }}
+        env:
+          GRZ_TOX_PACKAGE: ${{ steps.pkg_info.outputs.name }}
+        run: uv run tox -e py${{ matrix.python-version }} -- ${{ matrix.package.path }}
 
   test-grz-watchdog:
     name: Test grz-watchdog

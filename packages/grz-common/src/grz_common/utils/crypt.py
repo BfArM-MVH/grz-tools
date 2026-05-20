@@ -13,7 +13,8 @@ from pathlib import Path
 import crypt4gh.header
 import crypt4gh.keys
 import crypt4gh.lib
-from nacl.public import PrivateKey
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
@@ -47,7 +48,11 @@ class Crypt4GH:
         if sender_private_key is not None:
             sk = Crypt4GH.retrieve_private_key(sender_private_key)
         else:
-            sk = bytes(PrivateKey.generate())
+            sk = X25519PrivateKey.generate().private_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PrivateFormat.Raw,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
         keys = ((0, sk, crypt4gh.keys.get_public_key(recipient_key_file_path)),)
         return keys
 
