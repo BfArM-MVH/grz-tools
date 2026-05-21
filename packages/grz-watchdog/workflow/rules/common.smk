@@ -11,7 +11,8 @@ import humanfriendly
 import yaml
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
-from snakemake.io import InputFiles, Wildcards, ancient
+from snakemake.iocontainers import InputFiles, Wildcards
+from snakemake.io import ancient
 
 cfg_path = lambda dpath: lambda wildcards: (
     lookup(dpath=dpath, within=config)(wildcards)
