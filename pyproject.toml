@@ -3,12 +3,13 @@ name = "grz-tools"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "grz-common",
+    "grz-check",
     "grz-cli",
-    "grzctl",
+    "grz-common",
     "grz-db",
     "grz-pydantic-models",
     "grz-pydantic-models-testing",
+    "grzctl"
 ]
 
 [tool.uv.workspace]
