@@ -205,6 +205,7 @@ class Submission(SubmissionBase, table=True):
             old_value = getattr(self, key)
             new_value = getattr(other, key)
 
+            # Ensure fields are cast to date
             if key == "submission_date":
                 if isinstance(old_value, datetime.datetime):
                     old_value = old_value.date()
