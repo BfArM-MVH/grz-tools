@@ -114,10 +114,10 @@ def test_backfill_submission_happy_path(
     assert persisted.submission_metadata == metadata.to_redacted_dict()
 
 
-def test_backfill_submission_skips_when_metadata_missing_in_s3(
+def test_backfill_submission_returns_not_found_when_metadata_missing_in_s3(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
-    """When metadata.json does not exist in S3, the submission is recorded as skipped and the row stays NULL."""
+    """When metadata.json does not exist in S3, the submission is recorded as NOT_FOUND and the row stays NULL."""
     current = db.add_submission(submission_id)
 
     result = _backfill_submission(
@@ -130,7 +130,7 @@ def test_backfill_submission_skips_when_metadata_missing_in_s3(
         ignore_fields=IGNORE_FIELDS,
     )
 
-    assert result == _BackfillResult.SKIPPED
+    assert result == _BackfillResult.NOT_FOUND
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size is None
     assert persisted.submission_metadata is None
@@ -163,10 +163,10 @@ def test_backfill_submission_records_error_on_invalid_json(
     assert persisted.submission_metadata is None
 
 
-def test_backfill_submission_skips_when_no_pending_diff(
+def test_backfill_submission_returns_up_to_date_when_no_pending_diff(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
-    """With force=True against an already-in-sync row, the diff path runs and reports skipped (no updates)."""
+    """With force=True against an already-in-sync row, the diff path runs and reports UP_TO_DATE (no updates)."""
     current = _populate_full_row(db, submission_id, metadata)
     _put_metadata(s3_client_mock, submission_id, metadata)
 
@@ -180,13 +180,13 @@ def test_backfill_submission_skips_when_no_pending_diff(
         ignore_fields=IGNORE_FIELDS,
     )
 
-    assert result == _BackfillResult.SKIPPED
+    assert result == _BackfillResult.UP_TO_DATE
 
 
-def test_backfill_submission_skips_destructive_changes_without_force(
+def test_backfill_submission_returns_would_overwrite_for_destructive_changes_without_force(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
-    """Without --force, a submission whose non-NULL field differs from S3 is skipped and the DB is unchanged."""
+    """Without --force, a submission whose non-NULL field differs from S3 returns WOULD_OVERWRITE and the DB is unchanged."""
     current = db.add_submission(submission_id)
     current.submission_size = 1  # non-NULL value that will differ from metadata
     db.update_submission(current)
@@ -203,7 +203,7 @@ def test_backfill_submission_skips_destructive_changes_without_force(
         ignore_fields=IGNORE_FIELDS,
     )
 
-    assert result == _BackfillResult.SKIPPED
+    assert result == _BackfillResult.WOULD_OVERWRITE
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == 1
 
