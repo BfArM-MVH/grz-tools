@@ -1023,7 +1023,9 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
 
 class _BackfillResult(StrEnum):
     UPDATED = "updated"
-    SKIPPED = "skipped"
+    UP_TO_DATE = "up_to_date"
+    NOT_FOUND = "not_found"
+    WOULD_OVERWRITE = "would_overwrite"
     ERROR = "error"
 
 
@@ -1057,8 +1059,9 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     if raw_json is None:
-        console_err.print(f"[yellow]  {submission_id}: metadata.json not found in S3, skipping.[/yellow]")
-        return _BackfillResult.SKIPPED
+        # this is expected for submissions residing in the other consent bucket, so we do not explicitly log that here
+        # but still report them in the final stats
+        return _BackfillResult.NOT_FOUND
 
     try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
@@ -1079,7 +1082,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 
     if not submission_diff.has_pending and not donors_diff.has_pending:
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
-        return _BackfillResult.SKIPPED
+        return _BackfillResult.UP_TO_DATE
 
     if dry_run:
         console_err.print(
@@ -1091,7 +1094,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         console_err.print(
             f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}, skipping (use --force to overwrite).[/dim]"
         )
-        return _BackfillResult.SKIPPED
+        return _BackfillResult.WOULD_OVERWRITE
 
     try:
         db_service.commit_changes(submission_id, submission_diff, donors_diff)
@@ -1225,9 +1228,11 @@ def backfill(  # noqa: PLR0913
     prefix = "[dry-run] " if dry_run else ""
     verb = "Would update" if dry_run else "Updated"
     console_err.print(
-        f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}, "
-        f"Skipped (already populated, no S3 object, up to date, or would overwrite without --force): {counts[_BackfillResult.SKIPPED]}, "
-        f"Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
+        f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}\n"
+        f"  Up to date: {counts[_BackfillResult.UP_TO_DATE]}\n"
+        f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
+        f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
+        f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
     if counts[_BackfillResult.ERROR]:
         sys.exit(1)
