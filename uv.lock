@@ -1080,6 +1080,7 @@ name = "grz-tools"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "grz-check" },
     { name = "grz-cli" },
     { name = "grz-common" },
     { name = "grz-db" },
@@ -1142,6 +1143,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "grz-check", editable = "packages/grz-check" },
     { name = "grz-check", marker = "extra == 'test'", editable = "packages/grz-check" },
     { name = "grz-cli", editable = "packages/grz-cli" },
     { name = "grz-cli", marker = "extra == 'test'", editable = "packages/grz-cli" },
