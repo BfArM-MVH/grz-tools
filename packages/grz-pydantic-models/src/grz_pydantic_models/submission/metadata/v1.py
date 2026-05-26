@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, tzinfo
 from enum import StrEnum
 from functools import cache
 from importlib.resources import files
@@ -342,16 +342,21 @@ class ResearchConsent(StrictBaseModel):
         return self
 
     @staticmethod
-    def _as_utc_datetime(value: date | datetime, time_default: time = time.min) -> datetime:
-        """Coerce a date or datetime to a timezone-aware UTC datetime.
+    def _as_utc_datetime(
+        value: date | datetime,
+        time_default: time = time.min,
+        zone_default: tzinfo = UTC,
+    ) -> datetime:
+        """Coerce a date or datetime to a timezone-aware datetime.
 
         :param value: date or datetime to coerce.
         :param time_default: time to use when ``value`` is a plain date (no time component).
-        :returns: timezone-aware UTC datetime.
+        :param zone_default: tzinfo to attach when ``value`` is naive (no tzinfo).
+        :returns: timezone-aware datetime.
         """
         if isinstance(value, datetime):
-            return value.replace(tzinfo=UTC) if value.tzinfo is None else value
-        return datetime.combine(value, time_default, tzinfo=UTC)
+            return value.replace(tzinfo=zone_default) if value.tzinfo is None else value
+        return datetime.combine(value, time_default, tzinfo=zone_default)
 
     def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
         dt = self._as_utc_datetime(dt)
