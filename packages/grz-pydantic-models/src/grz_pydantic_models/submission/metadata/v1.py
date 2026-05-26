@@ -341,27 +341,26 @@ class ResearchConsent(StrictBaseModel):
 
         return self
 
-    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:  # noqa: C901, PLR0912
-        if isinstance(dt, date) and not isinstance(dt, datetime):
-            dt = datetime.combine(dt, time.min, tzinfo=UTC)
-        elif dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
+    @staticmethod
+    def _as_utc_datetime(value: date | datetime, time_default: time = time.min) -> datetime:
+        """Coerce a date or datetime to a timezone-aware UTC datetime.
+
+        :param value: date or datetime to coerce.
+        :param time_default: time to use when ``value`` is a plain date (no time component).
+        :returns: timezone-aware UTC datetime.
+        """
+        if isinstance(value, datetime):
+            return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+        return datetime.combine(value, time_default, tzinfo=UTC)
+
+    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
+        dt = self._as_utc_datetime(dt)
 
         code2consent: dict[str, bool] = {}
         if isinstance(self.scope, Consent) and (self.scope.provision is not None):
             for provision in self.scope.provision.provision:
-                start = provision.period.start
-                end = provision.period.end
-
-                if isinstance(start, datetime) and start.tzinfo is None:
-                    start = start.replace(tzinfo=UTC)
-                elif isinstance(start, date) and not isinstance(start, datetime):
-                    start = datetime.combine(start, time.min, tzinfo=UTC)
-
-                if isinstance(end, datetime) and end.tzinfo is None:
-                    end = end.replace(tzinfo=UTC)
-                elif isinstance(end, date) and not isinstance(end, datetime):
-                    end = datetime.combine(end, time.max, tzinfo=UTC)
+                start = self._as_utc_datetime(provision.period.start, time.min)
+                end = self._as_utc_datetime(provision.period.end, time.max)
 
                 if start <= dt <= end:
                     for codeable_concept in provision.code:
