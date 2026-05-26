@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time, tzinfo
 from enum import StrEnum
 from functools import cache
 from importlib.resources import files
@@ -341,15 +341,32 @@ class ResearchConsent(StrictBaseModel):
 
         return self
 
+    @staticmethod
+    def _as_utc_datetime(
+        value: date | datetime,
+        time_default: time = time.min,
+        zone_default: tzinfo = UTC,
+    ) -> datetime:
+        """Coerce a date or datetime to a timezone-aware datetime.
+
+        :param value: date or datetime to coerce.
+        :param time_default: time to use when ``value`` is a plain date (no time component).
+        :param zone_default: tzinfo to attach when ``value`` is naive (no tzinfo).
+        :returns: timezone-aware datetime.
+        """
+        if isinstance(value, datetime):
+            return value.replace(tzinfo=zone_default) if value.tzinfo is None else value
+        return datetime.combine(value, time_default, tzinfo=zone_default)
+
     def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
-        if isinstance(dt, date) and not isinstance(dt, datetime):
-            dt = datetime.combine(dt, time.min)
+        dt = self._as_utc_datetime(dt)
 
         code2consent: dict[str, bool] = {}
         if isinstance(self.scope, Consent) and (self.scope.provision is not None):
             for provision in self.scope.provision.provision:
-                start = provision.period.start
-                end = provision.period.end
+                start = self._as_utc_datetime(provision.period.start, time.min)
+                end = self._as_utc_datetime(provision.period.end, time.max)
+
                 if start <= dt <= end:
                     for codeable_concept in provision.code:
                         for coding in codeable_concept.coding:

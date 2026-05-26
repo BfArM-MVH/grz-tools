@@ -202,7 +202,17 @@ class Submission(SubmissionBase, table=True):
         """
         result = SubmissionDiffCollection()
         for key in other.model_fields_set - (ignore_fields or set()):
-            field_diff = FieldDiff.classify_field(key, getattr(self, key), getattr(other, key))
+            old_value = getattr(self, key)
+            new_value = getattr(other, key)
+
+            # Ensure fields are cast to date
+            if key == "submission_date":
+                if isinstance(old_value, datetime.datetime):
+                    old_value = old_value.date()
+                if isinstance(new_value, datetime.datetime):
+                    new_value = new_value.date()
+
+            field_diff = FieldDiff.classify_field(key, old_value, new_value)
             if key in other.immutable_fields and field_diff.diff.state != DiffState.UNCHANGED:
                 raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
             result.append(field_diff)
@@ -227,6 +237,13 @@ class Submission(SubmissionBase, table=True):
         defaults so that ``model_fields_set`` reliably indicates which fields to
         compare during a diff.
         """
+        metadata_submission_date = metadata.submission.submission_date
+        if isinstance(metadata_submission_date, datetime.datetime):
+            metadata_submission_date = metadata_submission_date.date()
+
+        if isinstance(submission_date, datetime.datetime):
+            submission_date = submission_date.date()
+
         return cls.model_validate(
             {
                 "id": submission_id,
@@ -241,9 +258,7 @@ class Submission(SubmissionBase, table=True):
                 "data_node_id": metadata.submission.genomic_data_center_id,
                 "consented": metadata.consents_to_research(date=datetime.date.today()),
                 "submission_size": metadata.get_submission_size(),
-                "submission_date": submission_date
-                if submission_date is not None
-                else metadata.submission.submission_date,
+                "submission_date": submission_date if submission_date is not None else metadata_submission_date,
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
