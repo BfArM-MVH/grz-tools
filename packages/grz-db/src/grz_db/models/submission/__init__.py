@@ -202,7 +202,16 @@ class Submission(SubmissionBase, table=True):
         """
         result = SubmissionDiffCollection()
         for key in other.model_fields_set - (ignore_fields or set()):
-            field_diff = FieldDiff.classify_field(key, getattr(self, key), getattr(other, key))
+            old_value = getattr(self, key)
+            new_value = getattr(other, key)
+
+            if key == "submission_date":
+                if isinstance(old_value, datetime.datetime):
+                    old_value = old_value.date()
+                if isinstance(new_value, datetime.datetime):
+                    new_value = new_value.date()
+
+            field_diff = FieldDiff.classify_field(key, old_value, new_value)
             if key in other.immutable_fields and field_diff.diff.state != DiffState.UNCHANGED:
                 raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
             result.append(field_diff)
