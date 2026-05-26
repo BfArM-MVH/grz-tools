@@ -1127,13 +1127,13 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 @click.option(
     "--start-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
-    default=date.min,
+    default=datetime.min,
     help="Process only submissions processed on or after this date (inclusive). Defaults to the beginning of time.",
 )
 @click.option(
     "--end-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
-    default=date.max,
+    default=datetime.max,
     help="Process only submissions processed on or before this date (inclusive). Defaults to the end of time.",
 )
 @_ignore_field_option
@@ -1168,7 +1168,7 @@ def backfill(  # noqa: PLR0913
     This command is idempotent: re-running it is always safe.
     """
     # ── Validate option combinations ────────────────────────────────────────
-    if submission_ids and (start_date != date.min or end_date != date.max):
+    if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
     ignore_fields = set(ignore_field) | {
