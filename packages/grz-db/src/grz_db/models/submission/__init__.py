@@ -7,7 +7,7 @@ import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
-from typing import Any, ClassVar, Optional, Self
+from typing import Any, ClassVar, Literal, Optional, Self
 
 import sqlalchemy as sa
 import sqlalchemy.dialects.postgresql as sa_psql
@@ -17,6 +17,8 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
+    REDACTED_TAN,
     CoverageType,
     DiseaseType,
     GenomicDataCenterId,
@@ -202,7 +204,17 @@ class Submission(SubmissionBase, table=True):
         """
         result = SubmissionDiffCollection()
         for key in other.model_fields_set - (ignore_fields or set()):
-            field_diff = FieldDiff.classify_field(key, getattr(self, key), getattr(other, key))
+            old_value = getattr(self, key)
+            new_value = getattr(other, key)
+
+            # Ensure fields are cast to date
+            if key == "submission_date":
+                if isinstance(old_value, datetime.datetime):
+                    old_value = old_value.date()
+                if isinstance(new_value, datetime.datetime):
+                    new_value = new_value.date()
+
+            field_diff = FieldDiff.classify_field(key, old_value, new_value)
             if key in other.immutable_fields and field_diff.diff.state != DiffState.UNCHANGED:
                 raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
             result.append(field_diff)
@@ -227,6 +239,13 @@ class Submission(SubmissionBase, table=True):
         defaults so that ``model_fields_set`` reliably indicates which fields to
         compare during a diff.
         """
+        metadata_submission_date = metadata.submission.submission_date
+        if isinstance(metadata_submission_date, datetime.datetime):
+            metadata_submission_date = metadata_submission_date.date()
+
+        if isinstance(submission_date, datetime.datetime):
+            submission_date = submission_date.date()
+
         return cls.model_validate(
             {
                 "id": submission_id,
@@ -241,9 +260,7 @@ class Submission(SubmissionBase, table=True):
                 "data_node_id": metadata.submission.genomic_data_center_id,
                 "consented": metadata.consents_to_research(date=datetime.date.today()),
                 "submission_size": metadata.get_submission_size(),
-                "submission_date": submission_date
-                if submission_date is not None
-                else metadata.submission.submission_date,
+                "submission_date": submission_date if submission_date is not None else metadata_submission_date,
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
@@ -1245,3 +1262,135 @@ class SubmissionDb:
             for donor_diff in donors_diff.deleted:
                 assert donor_diff.before is not None, "Removed NoneType donor, this should not happen"  # noqa: S101
                 self.delete_donor(donor_diff.before)
+
+    @staticmethod
+    def _log_pending_changes(
+        submission_id: str,
+        submission_diff: SubmissionDiffCollection,
+        donors_diff: DonorsDiffCollection,
+    ) -> None:
+        """Emit info-level log lines summarising what is about to be committed."""
+        sid = f"Submission: {submission_id}"
+
+        pending_keys = [d.key for d in submission_diff.pending]
+        unchanged_keys = [d.key for d in submission_diff.unchanged]
+        if pending_keys:
+            logger.info("%s - Updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in pending_keys))
+        if unchanged_keys:
+            logger.info("%s - Not updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in unchanged_keys))
+
+        if donors_diff.unchanged:
+            logger.info(
+                "%s - Keep existing donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.unchanged)
+            )
+        if donors_diff.added:
+            logger.info(
+                "%s - Adding new donor(s): %s",
+                sid,
+                ", ".join(f'"{d.pseudonym}"' for d in donors_diff.added),
+            )
+        if donors_diff.updated:
+            logger.info(
+                "%s - Modifying existing donor(s): %s",
+                sid,
+                ", ".join(f'"{d.pseudonym}"' for d in donors_diff.updated),
+            )
+        if donors_diff.deleted:
+            logger.info("%s - Dropping donor(s): %s", sid, ", ".join(f'"{d.pseudonym}"' for d in donors_diff.deleted))
+
+    @staticmethod
+    def assert_metadata_not_redacted(
+        metadata: GrzSubmissionMetadata,
+        submission_id: str,
+        ignore_fields: set[str] | None = None,
+    ) -> None:
+        """Raise ``ValueError`` if ``metadata`` has redacted/missing required fields.
+
+        Checks ``tan_g`` against :data:`REDACTED_TAN` and ``local_case_id``
+        against :data:`REDACTED_LOCAL_CASE_ID` / emptiness. Each check can be
+        bypassed by including the corresponding key in ``ignore_fields``:
+        ``"tan_g"`` bypasses the redacted-TAN check; ``"pseudonym"`` bypasses
+        the missing/redacted-``local_case_id`` check.
+
+        :param metadata: Parsed submission metadata.
+        :param submission_id: ID of the submission being populated.
+        :param ignore_fields: Field keys whose check should be skipped.
+        :raises ValueError: If ``tan_g`` or ``local_case_id`` is redacted/missing
+            and the corresponding key is not in ``ignore_fields``.
+        """
+        ignore_fields = ignore_fields or set()
+        if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_fields:
+            raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.")
+        if (
+            not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
+        ) and "pseudonym" not in ignore_fields:
+            raise ValueError(f"Submission {submission_id} has missing or redacted local_case_id in metadata.")
+
+    def populate(  # noqa: PLR0913
+        self,
+        submission_id: str,
+        metadata: GrzSubmissionMetadata,
+        submission_date: datetime.date | None,
+        *,
+        force: bool = False,
+        on_missing: Literal["create", "error"] = "error",
+        ignore_fields: set[str] | None = None,
+    ) -> None:
+        """Reconcile DB state for ``submission_id`` with ``metadata``.
+
+        Rejects redacted ``tan_g`` or missing/redacted ``local_case_id`` via
+        :meth:`assert_metadata_not_redacted` unless the corresponding key
+        (``"tan_g"`` or ``"pseudonym"``) is in ``ignore_fields``. Computes diffs
+        via :meth:`diff`, rejects destructive changes unless ``force``, and
+        commits via :meth:`commit_changes`. Operational progress is logged via
+        the module-level logger; callers configure verbosity through
+        ``logging.getLogger("grz_db.models.submission")``.
+
+        :param submission_id: ID of the submission being populated.
+        :param metadata: Parsed submission metadata.
+        :param submission_date: S3 last-modified date of the metadata file, if known.
+        :param force: If ``True``, allow destructive updates/deletes of existing fields.
+        :param on_missing: What to do when ``submission_id`` is not yet in the
+            database. ``"error"`` (default) raises :class:`SubmissionNotFoundError`.
+            ``"create"`` calls :meth:`add_submission` first and then proceeds; the
+            resulting diff against the fresh row contains only additive changes,
+            so ``force`` does not need to be set.
+        :param ignore_fields: Field keys to skip during diff and redaction
+            validation. See :meth:`assert_metadata_not_redacted`.
+        :raises SubmissionNotFoundError: if the submission row is absent and
+            ``on_missing`` is ``"error"``.
+        :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
+            and the corresponding key is not in ``ignore_fields``.
+        :raises RuntimeError: if pending changes are destructive and ``force`` is False.
+        """
+        ignore_fields = ignore_fields or set()
+
+        if not self.get_submission(submission_id):
+            if on_missing == "error":
+                raise SubmissionNotFoundError(submission_id)
+            logger.warning("Submission %s does not exist. Creating ...", submission_id)
+            self.add_submission(submission_id)
+            logger.debug("Submission %s added to database.", submission_id)
+
+        self.assert_metadata_not_redacted(metadata, submission_id, ignore_fields)
+
+        submission_diff, donors_diff = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields)
+
+        if not force and submission_diff.has_pending_destructive:
+            raise RuntimeError(
+                f"Would update/delete existing submission data in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, submission_diff={submission_diff!r}"
+            )
+
+        if not force and donors_diff.has_pending_destructive:
+            raise RuntimeError(
+                f"Would update/delete existing donors in the database, but `force` not set. "
+                f"submission_id={submission_id!r}, donors_diff={donors_diff!r}"
+            )
+
+        if submission_diff.has_pending or donors_diff.has_pending:
+            logger.info("Submission: %s - Updating...", submission_id)
+            self._log_pending_changes(submission_id, submission_diff, donors_diff)
+            self.commit_changes(submission_id, submission_diff, donors_diff)
+        else:
+            logger.info("Submission: %s - No updates necessary.", submission_id)

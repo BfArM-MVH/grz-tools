@@ -190,7 +190,7 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path, tes
     with open(metadata_path, "w") as metadata_file:
         metadata_file.write(metadata.model_dump_json(by_alias=True))
 
-    with pytest.raises(ValueError, match="Refusing to populate a seemingly-redacted TAN"):
+    with pytest.raises(ValueError, match="Refusing to populate a seemingly-redacted submission"):
         _ = runner.invoke(
             cli,
             [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],

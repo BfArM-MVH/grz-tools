@@ -3,12 +3,13 @@ name = "grz-tools"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "grz-common",
+    "grz-check",
     "grz-cli",
-    "grzctl",
+    "grz-common",
     "grz-db",
     "grz-pydantic-models",
     "grz-pydantic-models-testing",
+    "grzctl"
 ]
 
 [tool.uv.workspace]
@@ -31,18 +32,34 @@ grz-pydantic-models = { workspace = true }
 grz-pydantic-models-testing = { workspace = true }
 grz-check = { workspace = true }
 
-[project.optional-dependencies]
-test = [
+[tool.uv]
+# Centralize test/dev tool version ranges here so each package's
+# `[dependency-groups]` only lists bare package names. uv applies these
+# constraints workspace-wide during `uv lock` and `uv sync`.
+constraint-dependencies = [
     "pytest >=8.3.3,<9",
     "pytest-cov >=5.0.0,<6",
     "pytest-mock >=3.14.0,<4",
-    "moto[s3] >=5.0.16,<6",
     "pytest-sugar >=1.0.0,<2",
     "pytest-postgresql ~=7.0.2",
-    "psycopg ~=3.2",
-    "ruff >=0.11.12,<1",
-    "numpy >=2.1.2,<3",
+    "moto[s3] >=5.0.16,<6",
     "responses ==0.25.*",
+    "numpy >=2.1.2,<3",
+    "ruff >=0.11.12,<1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-sugar",
+    "pytest-postgresql",
+    "psycopg",
+    "moto[s3]",
+    "ruff",
+    "numpy",
+    "responses",
     "grz-common",
     "grz-cli",
     "grz-db",
@@ -200,6 +217,12 @@ isolated_build = true
 runner = "uv-venv-lock-runner"
 description = "run unit tests"
 dependency_groups = ["test"]
+# Scope `uv sync` to a single workspace member when GRZ_TOX_PACKAGE is set.
+# Default `grz-tools` (the workspace root meta-package) preserves "install everything" for
+# local `tox` invocations; CI exports GRZ_TOX_PACKAGE=<pkg> so the per-package matrix only
+# installs that package's declared deps + its own `test` group, catching missing-dep
+# regressions like transitive-only `import grz_db` from grz-common.
+uv_sync_flags = ["--package", "{env:GRZ_TOX_PACKAGE:grz-tools}"]
 commands = [["pytest", { replace = "posargs", default = [], extend = true }]]
 # isolate Cargo build directories per tox environment, otherwise Cargo caches the compiled Rust extension (and then we end up with mismatches between ABI versions).
 setenv = { UV_REINSTALL_PACKAGE = "grz-check", CARGO_TARGET_DIR = "{work_dir}/cargo_target_{env_name}" }

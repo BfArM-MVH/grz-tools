@@ -48,8 +48,6 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
-    REDACTED_LOCAL_CASE_ID,
-    REDACTED_TAN,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
     LibraryType,
@@ -535,7 +533,7 @@ def update(  # noqa: C901, PLR0913
             console_err.print(f"  Data: {new_state_log.data}")
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except click.exceptions.Exit as e:
         if e.exit_code != 0:
@@ -569,7 +567,7 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         console_err.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -680,7 +678,7 @@ def populate(  # noqa: C901, PLR0913
             raise SubmissionNotFoundError(submission_id)
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -690,19 +688,15 @@ def populate(  # noqa: C901, PLR0913
     with open(metadata_path) as fd:
         metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
 
-    if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_field:
+    try:
+        SubmissionDb.assert_metadata_not_redacted(metadata, submission_id, set(ignore_field))
+    except ValueError as e:
         raise ValueError(
-            f"Submission {submission_id} has redacted tan_g in metadata.json: {metadata_path}. "
-            "Refusing to populate a seemingly-redacted TAN. "
-            "Add 'tan_g' to ignore fields and/or use 'grzctl db submission modify' directly."
-        )
-    if (
-        not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
-    ) and "pseudonym" not in ignore_field:
-        raise ValueError(
-            f"Submission {submission_id} has missing or redacted local_case_id in metadata.json: {metadata_path}. "
-            "Add 'pseudonym' to ignore fields and/or use 'grzctl db submission modify' directly."
-        )
+            f"Refusing to populate a seemingly-redacted submission: {e} "
+            f"(from {metadata_path}). "
+            "Add 'tan_g'/'pseudonym' to --ignore-field to bypass, "
+            "or use 'grzctl db submission modify' directly."
+        ) from e
 
     submission_diff, donors_diff = db_service.diff(
         submission_id,
@@ -722,8 +716,7 @@ def populate(  # noqa: C901, PLR0913
 
     if not submission_diff.has_pending and not donors_diff.has_pending:
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
-        ctx.exit()
-        return  # ctx.exit() raises SystemExit; this line satisfies static analysers
+        return
 
     console.print(
         rich.panel.Panel.fit(
@@ -900,7 +893,7 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
 
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -1030,7 +1023,9 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
 
 class _BackfillResult(StrEnum):
     UPDATED = "updated"
-    SKIPPED = "skipped"
+    UP_TO_DATE = "up_to_date"
+    NOT_FOUND = "not_found"
+    WOULD_OVERWRITE = "would_overwrite"
     ERROR = "error"
 
 
@@ -1064,8 +1059,9 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     if raw_json is None:
-        console_err.print(f"[yellow]  {submission_id}: metadata.json not found in S3, skipping.[/yellow]")
-        return _BackfillResult.SKIPPED
+        # this is expected for submissions residing in the other consent bucket, so we do not explicitly log that here
+        # but still report them in the final stats
+        return _BackfillResult.NOT_FOUND
 
     try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
@@ -1086,7 +1082,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 
     if not submission_diff.has_pending and not donors_diff.has_pending:
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
-        return _BackfillResult.SKIPPED
+        return _BackfillResult.UP_TO_DATE
 
     if dry_run:
         console_err.print(
@@ -1098,7 +1094,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         console_err.print(
             f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}, skipping (use --force to overwrite).[/dim]"
         )
-        return _BackfillResult.SKIPPED
+        return _BackfillResult.WOULD_OVERWRITE
 
     try:
         db_service.commit_changes(submission_id, submission_diff, donors_diff)
@@ -1134,13 +1130,13 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 @click.option(
     "--start-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
-    default=date.min,
+    default=datetime.min,
     help="Process only submissions processed on or after this date (inclusive). Defaults to the beginning of time.",
 )
 @click.option(
     "--end-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
-    default=date.max,
+    default=datetime.max,
     help="Process only submissions processed on or before this date (inclusive). Defaults to the end of time.",
 )
 @_ignore_field_option
@@ -1175,7 +1171,7 @@ def backfill(  # noqa: PLR0913
     This command is idempotent: re-running it is always safe.
     """
     # ── Validate option combinations ────────────────────────────────────────
-    if submission_ids and (start_date != date.min or end_date != date.max):
+    if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
     ignore_fields = set(ignore_field) | {
@@ -1232,9 +1228,11 @@ def backfill(  # noqa: PLR0913
     prefix = "[dry-run] " if dry_run else ""
     verb = "Would update" if dry_run else "Updated"
     console_err.print(
-        f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}, "
-        f"Skipped (already populated, no S3 object, up to date, or would overwrite without --force): {counts[_BackfillResult.SKIPPED]}, "
-        f"Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
+        f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}\n"
+        f"  Up to date: {counts[_BackfillResult.UP_TO_DATE]}\n"
+        f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
+        f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
+        f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
     if counts[_BackfillResult.ERROR]:
         sys.exit(1)

@@ -2,6 +2,7 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
+import datetime
 import logging
 from typing import TYPE_CHECKING
 
@@ -84,3 +85,24 @@ def init_s3_resource(s3_options: S3Options, max_pool_connections: int = 10) -> S
     )
 
     return s3_resource
+
+
+def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_id: str) -> datetime.datetime:
+    """Return the S3 last-modified timestamp of a submission's ``metadata/metadata.json`` object.
+
+    This is the authoritative "received at the inbox" timestamp: it cannot be forged by
+    the submitter (unlike ``submission.submissionDate`` inside the JSON itself) and is
+    only meaningful while the object still lives in the inbox bucket. Do **not** call
+    this against the archive bucket: the archive's ``LastModified`` reflects the time
+    of archival, not the time of submission.
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :returns: ``LastModified`` (timezone-aware ``datetime``) for
+        ``<submission_id>/metadata/metadata.json``. Callers that only need the date
+        portion should call ``.date()`` themselves.
+    :raises botocore.exceptions.ClientError: If the object does not exist or S3 returns an error.
+    """
+    response = s3_client.head_object(Bucket=bucket, Key=f"{submission_id}/metadata/metadata.json")
+    return response["LastModified"]

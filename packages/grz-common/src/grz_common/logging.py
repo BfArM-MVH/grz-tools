@@ -39,6 +39,17 @@ class TqdmLoggingHandler(logging.Handler):
             self.handleError(record)
 
 
+class AlembicInfoNoiseFilter(logging.Filter):
+    """Filter out repetitive initialization messages from Alembic."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == "alembic.runtime.migration":
+            msg = record.getMessage()
+            if "Context impl" in msg or "Will assume transactional DDL" in msg:
+                return False
+        return True
+
+
 def add_filelogger(file_path: str | PathLike, level: str = "INFO", logger_name: str | None = None) -> None:
     """
     Add file logging for the specified package.
@@ -97,5 +108,6 @@ def setup_cli_logging(log_file: str | None, log_level: str):
             log_file,
             log_level.upper(),
         )
+    logging.getLogger("alembic.runtime.migration").addFilter(AlembicInfoNoiseFilter())
 
     log.debug("Logging setup complete.")

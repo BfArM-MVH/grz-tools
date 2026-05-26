@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-check-v0.3.0...grz-check-v0.3.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* **grz-check:** minimum readlength check, seq len + qual len comparison ([#569](https://github.com/BfArM-MVH/grz-tools/issues/569)) ([265ce32](https://github.com/BfArM-MVH/grz-tools/commit/265ce3256ecb4fbe2b0b4253032cada17cff41f4))
+
 ## [0.3.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-check-v0.2.1...grz-check-v0.3.0) (2026-05-11)
 
 

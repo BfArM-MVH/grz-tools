@@ -14,9 +14,8 @@ authors = [
 dynamic = ["version"]
 dependencies = [
     "requests >=2.32.3,<3",
-    "grz-db >=1.2,<2",
-    "grz-common >=1.5.0,<2",
-    "grz-cli >=1.3,<2",
+    "grz-db >=2.1,<3",
+    "grz-cli >=1.7,<2",
     "textual~=5.3"
 ]
 classifiers = [
@@ -60,12 +59,11 @@ test = [
     "pytest-mock",
     "pytest-cov",
     "pytest-sugar",
-    "pytest-postgresql ~=7.0.2",
+    "pytest-postgresql",
     "psycopg",
     "moto[s3]",
     "numpy",
     "grz-common",
-    "grzctl",
     "grz-cli",
     "grz-pydantic-models-testing",
 ]
