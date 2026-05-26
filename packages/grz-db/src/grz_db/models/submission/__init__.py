@@ -236,6 +236,13 @@ class Submission(SubmissionBase, table=True):
         defaults so that ``model_fields_set`` reliably indicates which fields to
         compare during a diff.
         """
+        metadata_submission_date = metadata.submission.submission_date
+        if isinstance(metadata_submission_date, datetime.datetime):
+            metadata_submission_date = metadata_submission_date.date()
+
+        if isinstance(submission_date, datetime.datetime):
+            submission_date = submission_date.date()
+
         return cls.model_validate(
             {
                 "id": submission_id,
@@ -250,9 +257,7 @@ class Submission(SubmissionBase, table=True):
                 "data_node_id": metadata.submission.genomic_data_center_id,
                 "consented": metadata.consents_to_research(date=datetime.date.today()),
                 "submission_size": metadata.get_submission_size(),
-                "submission_date": submission_date
-                if submission_date is not None
-                else metadata.submission.submission_date,
+                "submission_date": submission_date if submission_date is not None else metadata_submission_date,
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
