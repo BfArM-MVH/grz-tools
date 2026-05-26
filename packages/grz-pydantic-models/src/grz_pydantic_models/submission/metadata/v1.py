@@ -341,7 +341,7 @@ class ResearchConsent(StrictBaseModel):
 
         return self
 
-    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
+    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:  # noqa: C901, PLR0912
         if isinstance(dt, date) and not isinstance(dt, datetime):
             dt = datetime.combine(dt, time.min, tzinfo=UTC)
         elif dt.tzinfo is None:
