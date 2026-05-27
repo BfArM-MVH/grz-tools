@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.0...grz-db-v2.1.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** force timezone during consent_by_code ([98571dd](https://github.com/BfArM-MVH/grz-tools/commit/98571dd409e98dedb29d74360d21ee726f3f5617))
+* **grzctl:** fix backfill datetime vs date issues ([98571dd](https://github.com/BfArM-MVH/grz-tools/commit/98571dd409e98dedb29d74360d21ee726f3f5617))
+* **grzctl:** fix backfill datetime vs date issues ([#583](https://github.com/BfArM-MVH/grz-tools/issues/583)) ([98571dd](https://github.com/BfArM-MVH/grz-tools/commit/98571dd409e98dedb29d74360d21ee726f3f5617))
+
 ## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.0.0...grz-db-v2.1.0) (2026-05-19)
 
 
