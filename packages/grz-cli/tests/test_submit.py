@@ -5,9 +5,8 @@ from pathlib import Path
 import click.testing
 import pytest
 import yaml
-from pytest_mock import MockerFixture
-
 from grz_cli.cli import build_cli
+from pytest_mock import MockerFixture
 
 
 @pytest.fixture
@@ -38,8 +37,10 @@ def test_submit_runs_subcommands_in_order(
     stub_subcommands: dict[str, object],
 ) -> None:
     result = _invoke_submit(
-        "--submission-dir", str(submission_dir),
-        "--config-file", str(s3_config_path),
+        "--submission-dir",
+        str(submission_dir),
+        "--config-file",
+        str(s3_config_path),
     )
 
     assert result.exit_code == 0, result.output
@@ -59,9 +60,12 @@ def test_submit_accepts_multiple_config_files(
     override_path.write_text(yaml.dump({"s3": {"access_key": "override-key"}}))
 
     result = _invoke_submit(
-        "--submission-dir", str(submission_dir),
-        "--config-file", str(s3_config_path),
-        "--config-file", str(override_path),
+        "--submission-dir",
+        str(submission_dir),
+        "--config-file",
+        str(s3_config_path),
+        "--config-file",
+        str(override_path),
     )
 
     assert result.exit_code == 0, result.output
