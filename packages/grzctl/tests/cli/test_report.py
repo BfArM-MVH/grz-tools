@@ -1,4 +1,5 @@
 import csv
+import gzip
 import importlib.resources
 import json
 from datetime import date
@@ -8,6 +9,7 @@ from textwrap import dedent
 
 import grzctl.cli
 import sqlalchemy
+import yaml
 from click.testing import CliRunner
 from grz_db.models.submission import Submission
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
@@ -460,3 +462,164 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
 
 def test_date_to_quarter_year():
     assert date_to_quarter_year(date(year=2025, month=9, day=22)) == (3, 2025)
+
+
+def test_status_report_writes_json_and_filters_by_le(blank_database_config_path: Path, tmp_path: Path):
+    env = {
+        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
+        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "GRZ_IDENTIFIERS__LE": "123456789",
+    }
+    runner = CliRunner(env=env)
+    cli = grzctl.cli.build_cli()
+
+    le_submission_id = "123456789_2025-09-15_d0f805c5"
+    other_submission_id = "987654321_2025-09-15_d0f805c5"
+
+    for submission_id, submitter_id in ((le_submission_id, "123456789"), (other_submission_id, "987654321")):
+        result_add = runner.invoke(
+            cli, ["db", "--config-file", blank_database_config_path, "submission", "add", submission_id]
+        )
+        assert result_add.exit_code == 0, result_add.output
+
+        for key, value in (
+            ("submitter_id", submitter_id),
+            ("submission_date", "2025-09-15"),
+            ("basic_qc_passed", "yes"),
+        ):
+            result_modify = runner.invoke(
+                cli,
+                ["db", "--config-file", blank_database_config_path, "submission", "modify", submission_id, key, value],
+            )
+            assert result_modify.exit_code == 0, result_modify.output
+
+        result_update_reported = runner.invoke(
+            cli,
+            ["db", "--config-file", blank_database_config_path, "submission", "update", submission_id, "reported"],
+        )
+        assert result_update_reported.exit_code == 0, result_update_reported.output
+
+    result_modify_qc = runner.invoke(
+        cli,
+        [
+            "db",
+            "--config-file",
+            blank_database_config_path,
+            "submission",
+            "modify",
+            le_submission_id,
+            "detailed_qc_passed",
+            "no",
+        ],
+    )
+    assert result_modify_qc.exit_code == 0, result_modify_qc.output
+
+    result_update_error = runner.invoke(
+        cli,
+        [
+            "db",
+            "--config-file",
+            blank_database_config_path,
+            "submission",
+            "update",
+            le_submission_id,
+            "error",
+            "--failure-reason",
+            "validation_error",
+            "--data",
+            '{"error":"secret details"}',
+            "--ignore-error-state",
+        ],
+    )
+    assert result_update_error.exit_code == 0, result_update_error.output
+
+    output_path = tmp_path / "status.json"
+    result_status = runner.invoke(
+        cli,
+        [
+            "report",
+            "--config-file",
+            blank_database_config_path,
+            "status",
+            "--output",
+            str(output_path),
+        ],
+        catch_exceptions=False,
+    )
+    assert result_status.exit_code == 0, result_status.output
+
+    payload = json.loads(gzip.decompress(output_path.read_bytes()))
+    assert payload["grz_id"] == "GRZX00000"
+    assert payload["le_id"] == "123456789"
+    assert len(payload["submissions"]) == 1
+    assert payload["submissions"][0]["submission_id"] == le_submission_id
+    assert payload["submissions"][0]["failure_reason"] == "validation_error"
+    assert payload["submissions"][0]["has_detailed_qc_report"] is True
+    assert "error" not in payload["submissions"][0]
+
+
+def test_status_report_can_push_to_s3_with_merged_configs(
+    blank_database_config_path: Path, tmp_path: Path, monkeypatch
+):
+    env = {
+        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
+    }
+    runner = CliRunner(env=env)
+    cli = grzctl.cli.build_cli()
+
+    submission_id = "123456789_2025-09-15_d0f805c5"
+    result_add = runner.invoke(
+        cli, ["db", "--config-file", blank_database_config_path, "submission", "add", submission_id]
+    )
+    assert result_add.exit_code == 0, result_add.output
+
+    for key, value in (("submitter_id", "123456789"), ("submission_date", "2025-09-15")):
+        result_modify = runner.invoke(
+            cli,
+            ["db", "--config-file", blank_database_config_path, "submission", "modify", submission_id, key, value],
+        )
+        assert result_modify.exit_code == 0, result_modify.output
+
+    status_config_path = tmp_path / "config.status.yaml"
+    status_config = {
+        "identifiers": {"grz": "GRZX00000", "le": "123456789"},
+        "s3": {
+            "endpoint_url": "https://example.invalid",
+            "bucket": "le-status-bucket",
+            "access_key": "foo",
+            "secret": "bar",
+        },
+    }
+    status_config_path.write_text(yaml.safe_dump(status_config), encoding="utf-8")
+
+    put_calls: list[dict] = []
+
+    class _FakeS3Client:
+        def put_object(self, **kwargs):
+            put_calls.append(kwargs)
+
+    monkeypatch.setattr("grzctl.commands.report.init_s3_client", lambda _opts: _FakeS3Client())
+
+    result_status = runner.invoke(
+        cli,
+        [
+            "report",
+            "--config-file",
+            blank_database_config_path,
+            "--config-file",
+            str(status_config_path),
+            "status",
+            "--push",
+        ],
+        catch_exceptions=False,
+    )
+    assert result_status.exit_code == 0, result_status.output
+    assert len(put_calls) == 1
+    assert put_calls[0]["Bucket"] == "le-status-bucket"
+    assert put_calls[0]["Key"] == ".status.json.gz"
+    assert put_calls[0]["ContentType"] == "application/json"
+    assert put_calls[0]["ContentEncoding"] == "gzip"
+
+    pushed_payload = json.loads(gzip.decompress(put_calls[0]["Body"]).decode("utf-8"))
+    assert pushed_payload["le_id"] == "123456789"
+    assert [entry["submission_id"] for entry in pushed_payload["submissions"]] == [submission_id]

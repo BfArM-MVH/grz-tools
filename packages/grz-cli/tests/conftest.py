@@ -6,6 +6,10 @@ import pytest
 import yaml
 
 MINIMAL_S3_CONFIG: dict[str, dict[str, str]] = {
+    "identifiers": {
+        "grz": "GRZX00000",
+        "le": "123456789",
+    },
     "s3": {
         "endpoint_url": "https://example.invalid",
         "bucket": "test-bucket",

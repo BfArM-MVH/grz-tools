@@ -200,6 +200,18 @@ Example usage:
 grz-cli get-id path/to/metadata.json
 ```
 
+### report pull
+
+Download and show a status report of submissions.
+
+Use `--json` for machine-readable output. Without `--json`, an overall summary with aggregated counts is shown.
+
+Example usage:
+
+```bash
+grz-cli --config-file path/to/config.yaml report pull --json
+```
+
 ## Contributing
 
 ### Running unreleased/development versions

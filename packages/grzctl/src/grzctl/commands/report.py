@@ -2,6 +2,7 @@
 
 import csv
 import datetime
+import gzip
 import itertools
 import logging
 import typing
@@ -14,6 +15,8 @@ from typing import Any
 import click
 import grz_common.cli as grzctl
 import sqlalchemy as sa
+from grz_common.models.s3 import S3ConfigModel
+from grz_common.transfer import init_s3_client
 from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
@@ -25,6 +28,7 @@ from grz_db.models.submission import (
     SubmissionStateEnum,
 )
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
+from grz_pydantic_models.status import SubmissionStatusEntry, SubmissionStatusReport
 from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, SubmissionType
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
@@ -111,6 +115,106 @@ def processed(ctx: click.Context, since: datetime.date | None, until: datetime.d
                 ]
             )
         )
+
+
+def _build_status_report(
+    submission_db: SubmissionDb,
+    grz_id: str,
+    le_id: str,
+) -> SubmissionStatusReport:
+    submissions = submission_db.list_submissions(limit=None)
+    status_entries: list[SubmissionStatusEntry] = []
+
+    for submission in submissions:
+        if submission.submitter_id != le_id:
+            continue
+
+        latest_state = submission.get_latest_state()
+        latest_reported_state = submission.get_latest_state(filter_to_type=SubmissionStateEnum.REPORTED)
+
+        status_entries.append(
+            SubmissionStatusEntry(
+                submission_id=submission.id,
+                submission_date=submission.submission_date,
+                latest_state=latest_state.state.value if latest_state else None,
+                latest_state_at=latest_state.timestamp if latest_state else None,
+                failure_reason=(
+                    latest_state.failure_reason.value if latest_state and latest_state.failure_reason else None
+                ),
+                basic_qc_passed=submission.basic_qc_passed,
+                detailed_qc_passed=submission.detailed_qc_passed,
+                has_detailed_qc_report=submission.detailed_qc_passed is not None,
+                reported_date=(latest_reported_state.timestamp.date() if latest_reported_state else None),
+            )
+        )
+
+    return SubmissionStatusReport(
+        generated_at=datetime.datetime.now(datetime.UTC),
+        grz_id=grz_id,
+        le_id=le_id,
+        submissions=sorted(status_entries, key=lambda s: (s.submission_date, s.submission_id)),
+    )
+
+
+@report.command()
+@click.option(
+    "--output",
+    "output_path",
+    type=click.Path(dir_okay=False, writable=True, resolve_path=True, path_type=Path),
+    default=None,
+    help="Optional local output path for the generated status report.",
+)
+@click.option("--push/--no-push", default=False, help="Upload to the configured S3 bucket as '.status.json.gz'.")
+@click.pass_context
+def status(
+    ctx: click.Context,
+    output_path: Path | None,
+    push: bool,
+):
+    """Generate an LE-scoped status report from the submission database.
+
+    The LE id and the corresponding S3 target bucket is read from the config.
+    By default this command only writes locally via ``--output``.
+    With ``--push``, the archive is uploaded to ``.status.json.gz`` in the configured S3 bucket.
+    """
+    merged_config = grzctl.read_config_from_ctx(ctx)
+    config = ReportConfig.model_validate(merged_config)
+    resolved_le_id = config.identifiers.le
+    if resolved_le_id is None:
+        raise click.UsageError("LE ID is required via identifiers.le in config/environment.")
+
+    if not push and output_path is None:
+        raise click.UsageError("Nothing to do: specify --output and/or --push.")
+
+    submission_db = get_submission_db_instance(ctx.obj["db_url"])
+    report_payload = _build_status_report(
+        submission_db=submission_db,
+        grz_id=ctx.obj["grz_id"],
+        le_id=resolved_le_id,
+    )
+    payload = gzip.compress(report_payload.model_dump_json(by_alias=True, indent=2).encode("utf-8"))
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(payload)
+        click.echo(f"Wrote status report to {output_path}")
+
+    if push:
+        try:
+            s3_config = S3ConfigModel.model_validate(merged_config)
+        except Exception as exc:
+            raise click.UsageError("Missing S3 config. Provide an 's3' section or skip --push.") from exc
+        key = ".status.json.gz"
+        s3_client = init_s3_client(s3_config.s3)
+        put_object_kwargs: dict[str, typing.Any] = {
+            "Bucket": s3_config.s3.bucket,
+            "Key": key,
+            "Body": payload,
+            "ContentType": "application/json",
+            "ContentEncoding": "gzip",
+        }
+        s3_client.put_object(**put_object_kwargs)
+        click.echo(f"Uploaded status report to s3://{s3_config.s3.bucket}/.status.json.gz")
 
 
 def _get_consent_revocations(
