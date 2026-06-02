@@ -66,6 +66,6 @@ def validate(  # noqa: PLR0913
             submission_dir=submission_dir,
             force=force,
             threads=threads,
-            no_mmap=not mmap,
+            mmap=mmap,
             **kwargs,
         )
