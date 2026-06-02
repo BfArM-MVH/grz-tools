@@ -6,7 +6,14 @@ import grzctl.cli
 import pytest
 
 
-@pytest.mark.parametrize(("flag", "expected"), [("--mmap", True), ("--no-mmap", False)])
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        ("--mmap", True),
+        ("--no-mmap", False),
+        (None, False),  # default is no-mmap
+    ],
+)
 def test_validate_forwards_mmap_to_inner_callback(tmp_path, monkeypatch, flag, expected):
     """The grzctl ``validate`` wrapper must forward the ``mmap`` flag to the inner
     grz-cli ``validate`` callback under the parameter name it actually expects
@@ -26,12 +33,13 @@ def test_validate_forwards_mmap_to_inner_callback(tmp_path, monkeypatch, flag, e
 
     monkeypatch.setattr(grz_cli_validate.validate, "callback", fake_callback)
 
+    args = ["validate", "--submission-dir", str(tmp_path), "--no-update-db"]
+    if flag is not None:
+        args.append(flag)
+
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    result = runner.invoke(
-        cli,
-        ["validate", "--submission-dir", str(tmp_path), "--no-update-db", flag],
-    )
+    result = runner.invoke(cli, args)
 
     assert result.exit_code == 0, result.output
     assert received["mmap"] is expected
