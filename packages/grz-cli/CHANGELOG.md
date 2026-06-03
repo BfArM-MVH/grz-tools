@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.7.1...grz-cli-v1.7.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **grzctl,grz-cli:** use correct argument name "mmap" in validate callback function ([#590](https://github.com/BfArM-MVH/grz-tools/issues/590)) ([9f5cc42](https://github.com/BfArM-MVH/grz-tools/commit/9f5cc425bd1626f65dfb197d21c27eccb02f16b1))
+
 ## [1.7.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.7.0...grz-cli-v1.7.1) (2026-05-29)
 
 
