@@ -287,11 +287,11 @@ class SubmissionStateLogBase(SQLModel):
     """
 
     state: SubmissionStateEnum
-    data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql")))
     grzctl_versions: dict[str, str] | None = Field(
         default=None,
         description="grzctl versions that created this state log (nullable for backward compatibility with old state logs)",
-        sa_column=Column(JSON),
+        sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql")),
     )
     failure_reason: FailureReasonEnum | None = Field(
         default=None,
@@ -370,7 +370,7 @@ class ChangeRequestLogBase(SQLModel):
     """
 
     change: ChangeRequestEnum
-    data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql")))
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
