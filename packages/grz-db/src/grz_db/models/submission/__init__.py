@@ -437,19 +437,27 @@ class Donor(SQLModel, table=True):
     # values because it doesn't have native Enum support, so this keeps things
     # consistent with other SQL server implementations.
     relation: Relation = Field(sa_column=Column(Enum(Relation, values_callable=lambda e: [x.name for x in e])))
-    library_types: set[LibraryType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
-    sequence_types: set[SequenceType] = Field(sa_column=Column(SemicolonSeparatedStringSet))
-    sequence_subtypes: set[SequenceSubtype] = Field(sa_column=Column(SemicolonSeparatedStringSet))
+    library_types: set[LibraryType] = Field(
+        sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql"), nullable=False)
+    )
+    sequence_types: set[SequenceType] = Field(
+        sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql"), nullable=False)
+    )
+    sequence_subtypes: set[SequenceSubtype] = Field(
+        sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql"), nullable=False)
+    )
     mv_consented: bool
     research_consented: bool | None = None
     research_consent_missing_justifications: set[ResearchConsentNoScopeJustification] | None = Field(
-        default=None, sa_column=Column(SemicolonSeparatedStringSet, nullable=True)
+        default=None, sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql"), nullable=True)
     )
 
-    @field_validator("research_consent_missing_justifications")
+    @field_validator("research_consent_missing_justifications", "library_types", "sequence_types", "sequence_subtypes", mode="before")
     @classmethod
-    def validate_and_coerce_justifications(cls, v: set | None) -> set | None:
-        return coerce_empty_set_to_none(v)
+    def validate_sets(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            return set(v)
+        return v
 
     @classmethod
     def from_donor_metadata(
@@ -478,6 +486,22 @@ class Donor(SQLModel, table=True):
         )
 
 
+class QCResultMetrics(SQLModel):
+    """Detailed QC pipeline result metrics."""
+
+    percent_bases_above_quality_threshold_minimum_quality: float
+    percent_bases_above_quality_threshold_percent: float
+    percent_bases_above_quality_threshold_passed_qc: bool
+    percent_bases_above_quality_threshold_percent_deviation: float
+    mean_depth_of_coverage: float
+    mean_depth_of_coverage_passed_qc: bool
+    mean_depth_of_coverage_percent_deviation: float
+    targeted_regions_min_coverage: float
+    targeted_regions_above_min_coverage: float
+    targeted_regions_above_min_coverage_passed_qc: bool
+    targeted_regions_above_min_coverage_percent_deviation: float
+
+
 class DetailedQCResult(SQLModel, table=True):
     """Detailed QC pipeline result model."""
 
@@ -497,22 +521,60 @@ class DetailedQCResult(SQLModel, table=True):
     sequence_type: SequenceType
     sequence_subtype: SequenceSubtype
     library_type: LibraryType
-    percent_bases_above_quality_threshold_minimum_quality: float
-    percent_bases_above_quality_threshold_percent: float
-    percent_bases_above_quality_threshold_passed_qc: bool
-    percent_bases_above_quality_threshold_percent_deviation: float
-    mean_depth_of_coverage: float
-    mean_depth_of_coverage_passed_qc: bool
-    mean_depth_of_coverage_percent_deviation: float
-    targeted_regions_min_coverage: float
-    targeted_regions_above_min_coverage: float
-    targeted_regions_above_min_coverage_passed_qc: bool
-    targeted_regions_above_min_coverage_percent_deviation: float
+
+    metrics: QCResultMetrics = Field(
+        sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql"), nullable=False),
+    )
+
     qc_workflow_version: str | None = Field(
         default=None,
         sa_column=Column(sa.String(length=64), nullable=True),
         description="QC workflow version (nullable for backward compatibility with old results)",
     )
+
+    @property
+    def percent_bases_above_quality_threshold_minimum_quality(self) -> float:
+        return self.metrics.percent_bases_above_quality_threshold_minimum_quality
+
+    @property
+    def percent_bases_above_quality_threshold_percent(self) -> float:
+        return self.metrics.percent_bases_above_quality_threshold_percent
+
+    @property
+    def percent_bases_above_quality_threshold_passed_qc(self) -> bool:
+        return self.metrics.percent_bases_above_quality_threshold_passed_qc
+
+    @property
+    def percent_bases_above_quality_threshold_percent_deviation(self) -> float:
+        return self.metrics.percent_bases_above_quality_threshold_percent_deviation
+
+    @property
+    def mean_depth_of_coverage(self) -> float:
+        return self.metrics.mean_depth_of_coverage
+
+    @property
+    def mean_depth_of_coverage_passed_qc(self) -> bool:
+        return self.metrics.mean_depth_of_coverage_passed_qc
+
+    @property
+    def mean_depth_of_coverage_percent_deviation(self) -> float:
+        return self.metrics.mean_depth_of_coverage_percent_deviation
+
+    @property
+    def targeted_regions_min_coverage(self) -> float:
+        return self.metrics.targeted_regions_min_coverage
+
+    @property
+    def targeted_regions_above_min_coverage(self) -> float:
+        return self.metrics.targeted_regions_above_min_coverage
+
+    @property
+    def targeted_regions_above_min_coverage_passed_qc(self) -> bool:
+        return self.metrics.targeted_regions_above_min_coverage_passed_qc
+
+    @property
+    def targeted_regions_above_min_coverage_percent_deviation(self) -> float:
+        return self.metrics.targeted_regions_above_min_coverage_percent_deviation
 
     model_config = ConfigDict(  # type: ignore
         populate_by_name=True,

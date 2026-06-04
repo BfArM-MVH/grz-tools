@@ -38,6 +38,7 @@ from grz_db.models.submission import (
     DetailedQCResult,
     FailureReasonEnum,
     FieldDiff,
+    QCResultMetrics,
     Submission,
     SubmissionBase,
     SubmissionDb,
@@ -810,19 +811,21 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, qc
                 sequence_type=SequenceType.dna,  # pipeline only supports DNA and doesn't pass type to report.csv
                 sequence_subtype=report.sequence_subtype,
                 library_type=report.library_type,
-                percent_bases_above_quality_threshold_minimum_quality=report.quality_threshold,
-                percent_bases_above_quality_threshold_percent=report.percent_bases_above_quality_threshold,
-                percent_bases_above_quality_threshold_passed_qc=report.percent_bases_above_quality_threshold_qc_status
-                == QCStatus.PASS,
-                percent_bases_above_quality_threshold_percent_deviation=report.percent_bases_above_quality_threshold_deviation,
-                mean_depth_of_coverage=report.mean_depth_of_coverage,
-                mean_depth_of_coverage_passed_qc=report.mean_depth_of_coverage_qc_status == QCStatus.PASS,
-                mean_depth_of_coverage_percent_deviation=report.mean_depth_of_coverage_deviation,
-                targeted_regions_min_coverage=report.min_coverage,
-                targeted_regions_above_min_coverage=report.targeted_regions_above_min_coverage,
-                targeted_regions_above_min_coverage_passed_qc=report.targeted_regions_above_min_coverage_qc_status
-                == QCStatus.PASS,
-                targeted_regions_above_min_coverage_percent_deviation=report.targeted_regions_above_min_coverage_deviation,
+                metrics=QCResultMetrics(
+                    percent_bases_above_quality_threshold_minimum_quality=report.quality_threshold,
+                    percent_bases_above_quality_threshold_percent=report.percent_bases_above_quality_threshold,
+                    percent_bases_above_quality_threshold_passed_qc=report.percent_bases_above_quality_threshold_qc_status
+                    == QCStatus.PASS,
+                    percent_bases_above_quality_threshold_percent_deviation=report.percent_bases_above_quality_threshold_deviation,
+                    mean_depth_of_coverage=report.mean_depth_of_coverage,
+                    mean_depth_of_coverage_passed_qc=report.mean_depth_of_coverage_qc_status == QCStatus.PASS,
+                    mean_depth_of_coverage_percent_deviation=report.mean_depth_of_coverage_deviation,
+                    targeted_regions_min_coverage=report.min_coverage,
+                    targeted_regions_above_min_coverage=report.targeted_regions_above_min_coverage,
+                    targeted_regions_above_min_coverage_passed_qc=report.targeted_regions_above_min_coverage_qc_status
+                    == QCStatus.PASS,
+                    targeted_regions_above_min_coverage_percent_deviation=report.targeted_regions_above_min_coverage_deviation,
+                ),
                 qc_workflow_version=qc_workflow_version,
             )
         )
