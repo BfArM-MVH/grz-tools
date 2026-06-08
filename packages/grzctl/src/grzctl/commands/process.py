@@ -14,12 +14,13 @@ from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
 from grz_db.models.submission import SubmissionStateEnum
+from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from ..dbcontext import DbContext
 from ..models.config import InboxTarget, ProcessConfig
 from ..models.pruefbericht import PruefberichtModel
 from .db.cli import get_submission_db_instance
-from .pruefbericht import _generate_pruefbericht_from_metadata
+from .pruefbericht import _generate_pruefbericht_from_database
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,11 @@ log = logging.getLogger(__name__)
     type=click.Path(),
     default=None,
     help="Save generated Prüfbericht to the specified path.",
+)
+@click.option(
+    "--redact-pruefbericht/--no-redact-pruefbericht",
+    default=True,
+    help="Whether to redact sensitive information from written Prüfbericht",
 )
 @click.option(
     "--redact-logs/--no-redact-logs",
@@ -71,6 +77,7 @@ def process(  # noqa: PLR0913
     update_db: bool,
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
+    redact_pruefbericht: bool,
     redact_logs: bool,
     concurrent_uploads: int,
     inbox_bucket: str | None = None,
@@ -129,21 +136,15 @@ def process(  # noqa: PLR0913
     ):
         processor.run(submission_metadata)
 
-    # TODO: have a pruefbericht function that doesn't need an EncryptedSubmission instance?
-    encrypted_submission = EncryptedSubmission(
-        metadata_dir=metadata_dir,
-        encrypted_files_dir=encrypted_files_dir,
-        log_dir=log_dir,
-    )
-
     _handle_pruefbericht(
         config=config,
         configuration=configuration,
-        encrypted_submission=encrypted_submission,
         submission_id=submission_id,
         log_dir=log_dir,
         submit_pruefbericht=submit_pruefbericht,
         save_pruefbericht=save_pruefbericht,
+        redact_pruefbericht=redact_pruefbericht,
+        redact_logs=redact_logs,
         update_db=update_db,
     )
 
@@ -203,11 +204,12 @@ def _prepare_redact_patterns(encrypted_submission: EncryptedSubmission) -> list[
 def _handle_pruefbericht(  # noqa: C901, PLR0913
     config: ProcessConfig,
     configuration: dict[str, Any],
-    encrypted_submission: EncryptedSubmission,
     submission_id: str,
     log_dir: Path,
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
+    redact_pruefbericht: bool,
+    redact_logs: bool,
     update_db: bool,
     max_retries: int = 10,
 ) -> None:
@@ -216,12 +218,11 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913
 
     This implements steps 1.8 of the SOP: Prüfbericht generation and submission.
     """
-    metadata = encrypted_submission.metadata.content
-
-    # generate the Prüfbericht
     log.info("Generating Prüfbericht...")
     try:
-        pruefbericht = _generate_pruefbericht_from_metadata(metadata, failed=False)
+        # TODO: check validation status, but should be fine here, otherwise would have errored and bailed out earlier
+        failed = False
+        pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed)
         log.info("Prüfbericht generated successfully")
     except Exception as e:
         log.error(f"Failed to generate Prüfbericht: {e}")
@@ -229,19 +230,22 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913
             raise
         return
 
-    # save Prüfbericht with redacted TAN if requested
+    # save Prüfbericht
     if save_pruefbericht:
         save_path = Path(save_pruefbericht)
-        redacted_data = pruefbericht.model_dump(by_alias=True, mode="json")
-        redacted_data["SubmittedCase"]["tan"] = "<REDACTED>"
+        pruefbericht_data = pruefbericht.model_dump(by_alias=True, mode="json")
+        # ... with redacted TAN if requested
+        if redact_pruefbericht:
+            pruefbericht_data["SubmittedCase"]["tan"] = REDACTED_TAN
         with open(save_path, "w") as f:
-            json.dump(redacted_data, f, indent=2)
+            json.dump(pruefbericht_data, f, indent=2)
         log.info(f"Saved Prüfbericht (with redacted TAN) to: {save_path}")
 
     # also save a copy to the logs directory (with redacted TAN)
     pruefbericht_log_path = log_dir / "pruefbericht.json"
     redacted_for_log = pruefbericht.model_dump(by_alias=True, mode="json")
-    redacted_for_log["SubmittedCase"]["tan"] = "<REDACTED>"
+    if redact_logs:
+        redacted_for_log["SubmittedCase"]["tan"] = REDACTED_TAN
     with open(pruefbericht_log_path, "w") as f:
         json.dump(redacted_for_log, f, indent=2)
     log.info(f"Saved Prüfbericht copy to logs: {pruefbericht_log_path}")
