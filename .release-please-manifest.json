@@ -2,9 +2,9 @@
   "packages/grz-cli": "1.7.2",
   "packages/grz-pydantic-models": "2.7.1",
   "packages/grz-pydantic-models-testing": "0.1.0",
-  "packages/grz-db": "2.1.1",
+  "packages/grz-db": "2.1.2",
   "packages/grz-common": "2.1.0",
-  "packages/grzctl": "2.1.2",
+  "packages/grzctl": "2.1.3",
   "packages/grz-check": "0.3.1",
   "packages/grz-watchdog": "0.1.0"
 }
