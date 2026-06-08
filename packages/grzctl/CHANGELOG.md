@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.1.3](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.2...grzctl-v2.1.3) (2026-06-08)
+
+
+### Bug Fixes
+
+* **grzctl:** bump minimum grz-db version to 2.1.2 ([#596](https://github.com/BfArM-MVH/grz-tools/issues/596)) ([9740878](https://github.com/BfArM-MVH/grz-tools/commit/97408785db8a28dcb779653f1a2d97ded488f894))
+
+## [2.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.1...grzctl-v2.1.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **grzctl,grz-cli:** use correct argument name "mmap" in validate callback function ([#590](https://github.com/BfArM-MVH/grz-tools/issues/590)) ([9f5cc42](https://github.com/BfArM-MVH/grz-tools/commit/9f5cc425bd1626f65dfb197d21c27eccb02f16b1))
+
 ## [2.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.0...grzctl-v2.1.1) (2026-05-26)
 
 

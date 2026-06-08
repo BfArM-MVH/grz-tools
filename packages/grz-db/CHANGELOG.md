@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.1...grz-db-v2.1.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **grz-db:** correct tan_g population by raising sqlmodel floor ([#594](https://github.com/BfArM-MVH/grz-tools/issues/594)) ([abaa69f](https://github.com/BfArM-MVH/grz-tools/commit/abaa69f85ce84c0e3f69feaac0223b2622d16916))
+
 ## [2.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.0...grz-db-v2.1.1) (2026-05-26)
 
 
