@@ -1,0 +1,9 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - grzctl =1.0.0
+  - grz-check =0.1.0
+  - jq =1.8.1
+  - ripgrep =14.1.1

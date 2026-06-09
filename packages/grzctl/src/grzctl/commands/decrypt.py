@@ -19,12 +19,19 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzcli.configuration
 @grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.encrypted_files_dir
+@grzcli.files_dir
+@grzcli.logs_dir
 @grzcli.force
 @grzcli.update_db
 def decrypt(
     configuration: dict[str, Any],
-    config_file: tuple[Path],
     submission_dir,
+    metadata_dir,
+    encrypted_files_dir,
+    files_dir,
+    logs_dir,
     force,
     update_db,
     **kwargs,
@@ -34,6 +41,37 @@ def decrypt(
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
+    bundled_mode = submission_dir is not None
+    granular_mode = any([metadata_dir, encrypted_files_dir, files_dir, logs_dir])
+
+    if bundled_mode and granular_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
+
+    if bundled_mode:
+        base = Path(submission_dir)
+        _metadata_dir = base / "metadata"
+        _encrypted_files_dir = base / "encrypted_files"
+        _files_dir = base / "files"
+        _logs_dir = base / "logs"
+    elif granular_mode:
+        required = {
+            "--metadata-dir": metadata_dir,
+            "--encrypted-files-dir": encrypted_files_dir,
+            "--files-dir": files_dir,
+            "--logs-dir": logs_dir,
+        }
+        missing = [name for name, path in required.items() if path is None]
+        if missing:
+            raise click.UsageError(f"Flexible mode requires: {', '.join(missing)}")
+        _metadata_dir, _encrypted_files_dir, _files_dir, _logs_dir = (
+            Path(metadata_dir),
+            Path(encrypted_files_dir),
+            Path(files_dir),
+            Path(logs_dir),
+        )
+    else:
+        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
+
     config = DecryptConfig.model_validate(configuration)
 
     grz_privkey_path = config.keys.grz_private_key_path
@@ -43,13 +81,14 @@ def decrypt(
 
     log.info("Starting decryption...")
 
-    submission_dir = Path(submission_dir)
+    _files_dir.parent.mkdir(parents=True, exist_ok=True)
+    _logs_dir.parent.mkdir(parents=True, exist_ok=True)
 
     worker_inst = Worker(
-        metadata_dir=submission_dir / "metadata",
-        files_dir=submission_dir / "files",
-        log_dir=submission_dir / "logs",
-        encrypted_files_dir=submission_dir / "encrypted_files",
+        metadata_dir=_metadata_dir,
+        files_dir=_files_dir,
+        log_dir=_logs_dir,
+        encrypted_files_dir=_encrypted_files_dir,
     )
     submission_id = worker_inst.parse_encrypted_submission().submission_id
     with DbContext(

@@ -36,7 +36,24 @@ def submit(ctx, configuration: dict[str, Any], submission_dir, threads, force, *
     check_version_and_exit_if_needed(config.s3)
 
     click.echo("Starting submission process...")
-    ctx.invoke(validate, submission_dir=submission_dir, force=force)
-    ctx.invoke(encrypt, submission_dir=submission_dir, force=force, check_validation_logs=True)
+    ctx.invoke(
+        validate,
+        submission_dir=submission_dir,
+        metadata_dir=None,
+        files_dir=None,
+        logs_dir=None,
+        force=force,
+        threads=threads,
+    )
+    ctx.invoke(
+        encrypt,
+        submission_dir=submission_dir,
+        metadata_dir=None,
+        files_dir=None,
+        logs_dir=None,
+        output_encrypted_files_dir=None,
+        force=force,
+        check_validation_logs=True,
+    )
     ctx.invoke(upload, submission_dir=submission_dir, threads=threads)
     click.echo("Submission finished!")
