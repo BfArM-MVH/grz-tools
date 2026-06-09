@@ -36,7 +36,7 @@ details=""
 if [[ "$mode" == "inbox" ]]; then
 	echo "Cleaning S3 inbox..." >>"$log_stdout"
 	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaning >"$log_stdout" 2>"$log_stderr"
-	grzctl clean --config-file "${inbox_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"${log_stderr}"
+	grzctl clean --config-file "${inbox_config}" --config-file "${db_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"${log_stderr}"
 	details='"inbox"'
 fi
 
