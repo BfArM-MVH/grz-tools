@@ -376,7 +376,7 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
 
     db.add_submission(TEST_SUBMISSION_ID)
     # Populate submission fields to match the mock data used in other tests
-    db.modify_submission(TEST_SUBMISSION_ID, "submission_date", datetime.date(2024, 7, 15))
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_finished_date", datetime.date(2024, 7, 15))
     db.modify_submission(TEST_SUBMISSION_ID, "submission_type", SubmissionType.test)
     db.modify_submission(
         TEST_SUBMISSION_ID, "tan_g", "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
@@ -522,7 +522,7 @@ def test_generate_from_database_no_index_donor(pruefbericht_db_config):
     db.add_submission(TEST_SUBMISSION_ID)
 
     # Populate all required fields (matching the pattern from test_generate_from_database)
-    db.modify_submission(TEST_SUBMISSION_ID, "submission_date", datetime.date(2024, 7, 15))
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_finished_date", datetime.date(2024, 7, 15))
     db.modify_submission(TEST_SUBMISSION_ID, "submission_type", SubmissionType.test)
     db.modify_submission(
         TEST_SUBMISSION_ID, "tan_g", "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"

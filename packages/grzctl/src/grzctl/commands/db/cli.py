@@ -698,10 +698,20 @@ def populate(  # noqa: C901, PLR0913
             "or use 'grzctl db submission modify' directly."
         ) from e
 
+    submission_finished_date = (
+        submission_date.date() if submission_date is not None else submission.submission_finished_date
+    )
+    if submission_date is None:
+        log.warning(
+            "No submission date provided and submission date is missing in the database. "
+            "Will use submission date from metadata.json..."
+        )
+        submission_finished_date = metadata.submission.submission_date
+
     submission_diff, donors_diff = db_service.diff(
         submission_id,
         metadata,
-        submission_date,
+        submission_finished_date=submission_finished_date,
         ignore_fields=set(ignore_field),
     )
 
@@ -943,7 +953,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
     for label, attr_name in (
         ("tanG", "tan_g"),
         ("Pseudonym", "pseudonym"),
-        ("Submission Date", "submission_date"),
+        ("Submission Date", "submission_finished_date"),
         ("Submission Size", "submission_size"),
         ("Submission Type", "submission_type"),
         ("Submitter ID", "submitter_id"),
@@ -1070,10 +1080,18 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     try:
+        # If submission_finished_date is not set in the DB, replace it with the one from metadata.json.
+        # This case is expected for submissions that were created before the submission_date field was added.
+        submission_finished_date = (
+            current_submission.submission_finished_date
+            if current_submission.submission_finished_date
+            else metadata.submission.submission_date
+        )
+
         submission_diff, donors_diff = db_service.diff(
             submission_id,
             metadata,
-            submission_date=None,
+            submission_finished_date=submission_finished_date,
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
@@ -1175,7 +1193,7 @@ def backfill(  # noqa: PLR0913
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
     ignore_fields = set(ignore_field) | {
-        "submission_date",
+        "submission_finished_date",
         "tan_g",
         "local_case_id",
     }
