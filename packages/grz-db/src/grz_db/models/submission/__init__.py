@@ -244,6 +244,9 @@ class Submission(SubmissionBase, table=True):
         if isinstance(submission_date, datetime.datetime):
             submission_date = submission_date.date()
 
+        resolved_submission_date = submission_date if submission_date is not None else metadata_submission_date
+        consent_date = resolved_submission_date if resolved_submission_date is not None else datetime.date.today()
+
         return cls.model_validate(
             {
                 "id": submission_id,
@@ -256,9 +259,9 @@ class Submission(SubmissionBase, table=True):
                 "genomic_study_subtype": metadata.submission.genomic_study_subtype,
                 "pseudonym": metadata.submission.local_case_id,
                 "data_node_id": metadata.submission.genomic_data_center_id,
-                "consented": metadata.consents_to_research(date=datetime.date.today()),
+                "consented": metadata.consents_to_research(date=consent_date),
                 "submission_size": metadata.get_submission_size(),
-                "submission_date": submission_date if submission_date is not None else metadata_submission_date,
+                "submission_date": resolved_submission_date,
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
@@ -456,7 +459,15 @@ class Donor(SQLModel, table=True):
         cls,
         submission_id: str,
         donor: MetadataDonor,
+        submission_date: datetime.date | None,
     ) -> Self:
+        """Construct a Donor populated from parsed metadata.
+
+        :param submission_date: Resolved submission date used to evaluate research
+            consent at the time the submission was completed. Falls back to
+            ``datetime.date.today()`` only when no submission date is known.
+        """
+        consent_date = submission_date if submission_date is not None else datetime.date.today()
         return cls.model_validate(
             dict(
                 submission_id=submission_id,
@@ -466,7 +477,7 @@ class Donor(SQLModel, table=True):
                 sequence_types={datum.sequence_type for datum in donor.lab_data},
                 sequence_subtypes={datum.sequence_subtype for datum in donor.lab_data},
                 mv_consented=donor.consents_to_mv(),
-                research_consented=donor.consents_to_research(date=datetime.date.today()),
+                research_consented=donor.consents_to_research(date=consent_date),
                 research_consent_missing_justifications={
                     consent.no_scope_justification
                     for consent in donor.research_consents
@@ -1199,16 +1210,28 @@ class SubmissionDb:
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
+        submission_date: datetime.date | None,
     ) -> DonorsDiffCollection:
         """Diff all donors in *metadata* against the current database state.
 
         :param submission_id: Submission ID to look up donors for.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
+        :param submission_date: Explicit submission date used to evaluate research
+            consent at submission-completion time. Falls back to the value in
+            *metadata* when ``None``.
         :returns: A fully populated :class:`DonorDiff`.
         """
+        metadata_submission_date = metadata.submission.submission_date
+        if isinstance(metadata_submission_date, datetime.datetime):
+            metadata_submission_date = metadata_submission_date.date()
+        if isinstance(submission_date, datetime.datetime):
+            submission_date = submission_date.date()
+        resolved_submission_date = submission_date if submission_date is not None else metadata_submission_date
+
         donors_in_db_submission = {donor.pseudonym: donor for donor in self.get_donors(submission_id=submission_id)}
         donors_in_metadata = {
-            (d := Donor.from_donor_metadata(submission_id, donor)).pseudonym: d for donor in metadata.donors
+            (d := Donor.from_donor_metadata(submission_id, donor, resolved_submission_date)).pseudonym: d
+            for donor in metadata.donors
         }
 
         result = DonorsDiffCollection()
@@ -1230,7 +1253,7 @@ class SubmissionDb:
         ignore_fields: set[str] | None = None,
     ) -> tuple[SubmissionDiffCollection, DonorsDiffCollection]:
         submission_diff = self._diff_metadata(submission_id, metadata, submission_date, ignore_fields)
-        donor_diff = self._diff_donors(submission_id, metadata)
+        donor_diff = self._diff_donors(submission_id, metadata, submission_date)
         return submission_diff, donor_diff
 
     def commit_changes(
