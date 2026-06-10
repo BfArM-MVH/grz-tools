@@ -48,7 +48,7 @@ class VerifiableLog[P: BaseSignablePayload]:
     signature: str
     _payload_model_class: ClassVar  # ClassVar[P] or ClassVar[type[P]] are invalid, see https://typing.python.org/en/latest/spec/class-compat.html#classvar
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:  # noqa: D105
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not hasattr(cls, "_payload_model_class"):
             raise TypeError(f"Class {cls.__name__} lacks '_payload_model_class' attribute required by VerifiableLog.")

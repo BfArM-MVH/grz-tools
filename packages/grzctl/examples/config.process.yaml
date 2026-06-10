@@ -1,0 +1,49 @@
+definitions:
+  - &default_inbox_connection
+    endpoint_url: https://inbox.s3.example.com
+    access_key: ${GRZ_S3__ACCESS_KEY}
+    secret: ${GRZ_S3__SECRET}
+    private_key_path: /path/to/grz-default-inbox.sec
+
+  - &default_archive_s3_connection
+    endpoint_url: https://archive.s3.example.com
+    access_key: ${GRZ_S3__ACCESS_KEY}
+    secret: ${GRZ_S3__SECRET}
+
+s3:
+  inboxes:
+    "123456789":
+      grz-inbox: *default_inbox_connection
+
+    "987654321":
+      some-other-bucket: *default_inbox_connection
+
+      bucket-with-different-key:
+        <<: *default_inbox_connection
+        private_key_path: /path/to/grz-key-for-bucket-with-different-key.sec
+
+archives:
+  consented:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-consented
+    public_key_path: /path/to/archive-consented.pub
+
+  non_consented:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-nonconsented
+    public_key_path: /path/to/archive-nonconsented.pub
+
+pruefbericht:
+  authorization_url: ${GRZ_PRUEFBERICHT__AUTHORIZATION_URL}
+  client_id: ${GRZ_PRUEFBERICHT__CLIENT_ID}
+  client_secret: ${GRZ_PRUEFBERICHT__CLIENT_SECRET}
+  api_base_url: ${GRZ_PRUEFBERICHT__API_BASE_URL}
+
+db:
+  database_url: sqlite:///path/to/submission.db.sqlite
+  author:
+    name: steward-name
+    private_key_path: /path/to/steward-name.ssh
+    private_key_passphrase: ${GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE}
