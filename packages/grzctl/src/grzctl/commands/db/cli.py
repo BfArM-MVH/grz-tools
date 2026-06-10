@@ -698,10 +698,18 @@ def populate(  # noqa: C901, PLR0913
             "or use 'grzctl db submission modify' directly."
         ) from e
 
+    submission_finished_date = submission_date.date() if submission_date is not None else submission.submission_date
+    if submission_date is None:
+        log.warning(
+            "No submission date provided and submission date is missing in the database. "
+            "Will use submission date from metadata.json..."
+        )
+        submission_finished_date = metadata.submission.submission_date
+
     submission_diff, donors_diff = db_service.diff(
         submission_id,
         metadata,
-        submission_date,
+        submission_finished_date=submission_finished_date,
         ignore_fields=set(ignore_field),
     )
 
