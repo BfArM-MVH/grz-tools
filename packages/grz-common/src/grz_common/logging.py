@@ -7,12 +7,18 @@ This module provides functions for setting up logging configuration.
 from __future__ import annotations
 
 import logging
+import socket
 from os import PathLike
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-LOGGING_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+try:
+    HOSTNAME: str | None = socket.gethostname()
+except OSError:
+    HOSTNAME = None
+_hostname_part = f"{HOSTNAME} " if HOSTNAME is not None else ""
+LOGGING_FORMAT = f"%(asctime)s [%(levelname)s] {_hostname_part}%(name)s: %(message)s"
 LOGGING_DATEFMT = "%Y-%m-%d %I:%M %p"
 
 
