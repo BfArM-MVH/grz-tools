@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 @click.option(
     "--mmap/--no-mmap",
     "mmap",
-    default=True,
+    default=False,
     hidden=True,
     help="Whether to use mmap.",
 )
