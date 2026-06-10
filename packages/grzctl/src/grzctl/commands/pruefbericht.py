@@ -106,7 +106,7 @@ def _generate_pruefbericht_from_database(
 
     # Check if submission has the required fields populated
     required_fields = [
-        "submission_date",
+        "submission_finished_date",
         "submission_type",
         "tan_g",
         "submitter_id",
@@ -137,7 +137,7 @@ def _generate_pruefbericht_from_database(
     # Generate the Prüfbericht
     return Pruefbericht(
         SubmittedCase=SubmittedCase(
-            submissionDate=submission.submission_date,
+            submissionDate=submission.submission_finished_date,
             submissionType=submission.submission_type,
             tan=submission.tan_g,
             submitterId=submission.submitter_id,
