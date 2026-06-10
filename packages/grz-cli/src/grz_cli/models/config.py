@@ -1,6 +1,6 @@
 import logging
 
-from grz_common.models.identifiers import IdentifiersConfigModel
+from grz_common.models.identifiers import IdentifiersConfigModel, IdentifiersModel
 from grz_common.models.keys import KeyConfigModel
 from grz_common.models.s3 import S3ConfigModel
 
@@ -17,3 +17,7 @@ class EncryptConfig(KeyConfigModel):
 
 class ValidateConfig(IdentifiersConfigModel):
     pass
+
+
+class ReportPullConfig(S3ConfigModel):
+    identifiers: IdentifiersModel
