@@ -1070,10 +1070,18 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     try:
+        # If submission_finished_date is not set in the DB, replace it with the one from metadata.json.
+        # This case is expected for submissions that were created before the submission_date field was added.
+        submission_finished_date = (
+            current_submission.submission_date
+            if current_submission.submission_date
+            else metadata.submission.submission_date
+        )
+
         submission_diff, donors_diff = db_service.diff(
             submission_id,
             metadata,
-            submission_date=None,
+            submission_finished_date=submission_finished_date,
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:

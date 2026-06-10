@@ -84,7 +84,7 @@ def _put_metadata(s3_client: Any, submission_id: str, metadata: GrzSubmissionMet
 def _populate_full_row(db: SubmissionDb, submission_id: str, metadata: GrzSubmissionMetadata) -> Submission:
     """Persist a fully-populated row by running the same diff/commit path the production code uses."""
     db.add_submission(submission_id)
-    submission_diff, donors_diff = db.diff(submission_id, metadata, submission_date=None)
+    submission_diff, donors_diff = db.diff(submission_id, metadata, submission_finished_date=None)
     db.commit_changes(submission_id, submission_diff, donors_diff)
     return db.get_submission(submission_id)
 
