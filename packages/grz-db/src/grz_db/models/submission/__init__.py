@@ -143,7 +143,7 @@ class SubmissionBase(SQLModel):
     pseudonym: str | None = Field(default=None, index=True)
 
     # fields from Prüfbericht
-    submission_date: datetime.date | None = None
+    submission_finished_date: datetime.date | None = None
     submission_type: SubmissionType | None = None
     submitter_id: SubmitterId | None = None
     data_node_id: GenomicDataCenterId | None = None
@@ -206,7 +206,7 @@ class Submission(SubmissionBase, table=True):
             new_value = getattr(other, key)
 
             # Ensure fields are cast to date
-            if key == "submission_date":
+            if key == "submission_finished_date":
                 if isinstance(old_value, datetime.datetime):
                     old_value = old_value.date()
                 if isinstance(new_value, datetime.datetime):
@@ -258,7 +258,7 @@ class Submission(SubmissionBase, table=True):
                 "data_node_id": metadata.submission.genomic_data_center_id,
                 "consented": metadata.consents_to_research(date=metadata_submission_date),
                 "submission_size": metadata.get_submission_size(),
-                "submission_date": submission_finished_date,
+                "submission_finished_date": submission_finished_date,
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
@@ -735,7 +735,7 @@ class SubmissionDb:
                 .join(QCQueueEntry, QCQueueEntry.submission_id == Submission.id)  # type: ignore[arg-type]
                 .where(Submission.submission_type == SubmissionType.initial)
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
-                .where(Submission.submission_date.between(start_date, end_date))  # type: ignore[union-attr]
+                .where(Submission.submission_finished_date.between(start_date, end_date))  # type: ignore[union-attr]
                 .where(Submission.submitter_id == submitter_id)
                 .order_by(QCQueueEntry.basic_qc_passed_at, Submission.id)  # type: ignore[arg-type]
             ).all()
@@ -780,7 +780,7 @@ class SubmissionDb:
 
         block_size = math.floor(1 / target_proportion)
         block_index = absolute_index // block_size
-        submission_quarter, submission_year = date_to_quarter_year(submission.submission_date)  # type: ignore[arg-type]
+        submission_quarter, submission_year = date_to_quarter_year(submission.submission_finished_date)  # type: ignore[arg-type]
         seed = f"{submission.submitter_id}-{submission_year}-{submission_quarter}-{block_index}-{salt}"
         rng = random.Random(seed)  # noqa: S311
 
@@ -1033,7 +1033,7 @@ class SubmissionDb:
                     isouter=True,
                 )
                 .order_by(
-                    sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_date)
+                    sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_finished_date)
                     .desc()
                     .nulls_first()
                 )
@@ -1117,7 +1117,7 @@ class SubmissionDb:
 
         if submission is None:
             raise SubmissionNotFoundError(submission_id)
-        submission_date = submission.submission_date
+        submission_date = submission.submission_finished_date
         if submission_date is None:
             raise SubmissionDateIsNoneError()
         submission_type = submission.submission_type
@@ -1266,7 +1266,7 @@ class SubmissionDb:
 
             # Add submission date to ignore fields
             ignore_fields = ignore_fields or set()
-            ignore_fields.add("submission_date")
+            ignore_fields.add("submission_finished_date")
 
         submission_diff = self._diff_metadata(submission_id, metadata, submission_finished_date, ignore_fields)
         donor_diff = self._diff_donors(submission_id, metadata)

@@ -79,7 +79,7 @@ def _add_submission_with_history(
     """
     db.add_submission(submission_id)
 
-    db.modify_submission(submission_id, "submission_date", str(submission_date.isoformat()))
+    db.modify_submission(submission_id, "submission_finished_date", str(submission_date.isoformat()))
     db.modify_submission(submission_id, "submission_type", SubmissionType.initial)
     db.modify_submission(submission_id, "submitter_id", submitter_id)
     db.modify_submission(submission_id, "basic_qc_passed", "true")
@@ -488,7 +488,7 @@ class TestQcStrategy:
         """Verify SubmissionTypeIsNoneError when submission_type is None."""
         submission_id = f"{SUBMITTER_ID}_2025-12-01_00000000"
         db.add_submission(submission_id)
-        db.modify_submission(submission_id, "submission_date", "2025-12-01")
+        db.modify_submission(submission_id, "submission_finished_date", "2025-12-01")
         db.modify_submission(submission_id, "basic_qc_passed", "true")
 
         with pytest.raises(SubmissionTypeIsNoneError):
