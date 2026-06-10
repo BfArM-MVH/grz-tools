@@ -1181,14 +1181,14 @@ class SubmissionDb:
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_finished_date: datetime.date,
         ignore_fields: set[str] | None = None,
     ) -> SubmissionDiffCollection:
         """Compare a submission's current database state against fresh metadata.
 
         :param submission_id: Submission ID to look up.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
-        :param submission_date: Explicit submission date; falls back to the value in *metadata* when ``None``.
+        :param submission_finished_date: Date of submission upload finish
         :param ignore_fields: Field names to skip entirely during the comparison.
         :returns: A :class:`SubmissionDiffCollection` instance summarising all detected differences.
         """
@@ -1199,7 +1199,10 @@ class SubmissionDb:
         if ignore_fields is None:
             ignore_fields = set()
 
-        new_submission = Submission.from_metadata(submission_id, metadata, submission_date)
+        if isinstance(submission_finished_date, datetime.datetime):
+            submission_finished_date = submission_finished_date.date()
+
+        new_submission = Submission.from_metadata(submission_id, metadata, submission_finished_date)
 
         return current_submission.diff(new_submission, ignore_fields)
 
@@ -1212,9 +1215,6 @@ class SubmissionDb:
 
         :param submission_id: Submission ID to look up donors for.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
-        :param submission_date: Explicit submission date used to evaluate research
-            consent at submission-completion time. Falls back to the value in
-            *metadata* when ``None``.
         :returns: A fully populated :class:`DonorDiff`.
         """
         metadata_submission_date = metadata.submission.submission_date
@@ -1242,11 +1242,34 @@ class SubmissionDb:
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_finished_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
     ) -> tuple[SubmissionDiffCollection, DonorsDiffCollection]:
-        submission_diff = self._diff_metadata(submission_id, metadata, submission_date, ignore_fields)
-        donor_diff = self._diff_donors(submission_id, metadata, submission_date)
+        """
+        Generates differences between the current and previous states of submission metadata
+        and donors data.
+
+        This function compares the provided metadata and donors data with the existing
+        state in the system for a specific submission ID and returns the differences in two
+        separate collections.
+
+        :param submission_id: The unique identifier of the submission to be compared.
+        :param metadata: The metadata of the submission to compare against.
+        :param submission_finished_date: The date when the submission process was finished.
+            If None, the field will not be included in the comparison.
+        :param ignore_fields: Optional set of field names to be ignored during the metadata comparison.
+        :returns: A tuple containing the differences in the submission metadata and the corresponding donor entries.
+        """
+        if submission_finished_date is None:
+            # set arbitrary date if not provided
+            submission_finished_date = metadata.submission.submission_date
+
+            # Add submission date to ignore fields
+            ignore_fields = ignore_fields or set()
+            ignore_fields.add("submission_date")
+
+        submission_diff = self._diff_metadata(submission_id, metadata, submission_finished_date, ignore_fields)
+        donor_diff = self._diff_donors(submission_id, metadata)
         return submission_diff, donor_diff
 
     def commit_changes(
