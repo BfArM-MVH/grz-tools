@@ -120,7 +120,7 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
 
     submission = db.get_submission(metadata.submission_id)
     assert submission.pseudonym == metadata.submission.local_case_id
-    assert submission.consented == metadata.consents_to_research(date(2026, 1, 1))
+    assert submission.consented == metadata.consents_to_research(metadata.submission.submission_date)
 
     # check that the consent records were populated
     meta_father = metadata.donors[1]
@@ -729,7 +729,7 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
         "coverage_type": metadata.submission.coverage_type,
         "disease_type": metadata.submission.disease_type,
         "basic_qc_passed": None,
-        "consented": metadata.consents_to_research(date=date.today()),
+        "consented": metadata.consents_to_research(date=metadata.submission.submission_date),
         "selected_for_qc": None,
         "detailed_qc_passed": None,
         "genomic_study_type": metadata.submission.genomic_study_type,
