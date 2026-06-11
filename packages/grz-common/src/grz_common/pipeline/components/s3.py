@@ -80,6 +80,14 @@ class S3MultipartUploader(Observer):
         self._part_number = 1
         self._closed = False
 
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        # Commit on clean exit, abort (discard staged parts) on error.
+        if exc_type is None:
+            self.close()
+        else:
+            self.abort()
+        return False  # never suppress the original exception
+
     def _start_multipart_upload(self):
         if self._upload_id:
             return
@@ -169,6 +177,7 @@ class S3MultipartUploader(Observer):
             with contextlib.suppress(Exception):
                 self.s3.abort_multipart_upload(Bucket=self.bucket, Key=self.key, UploadId=self._upload_id)
         self._cleanup()
+        self._closed = True  # prevent a later close()/finalizer from re-running on an aborted upload
 
     def _submit_part(self, data: bytes, part_num: int):
         if not self._executor:
