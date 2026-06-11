@@ -13,12 +13,32 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-try:
-    HOSTNAME: str | None = socket.gethostname()
-except OSError:
-    HOSTNAME = None
-_hostname_part = f"{HOSTNAME} " if HOSTNAME is not None else ""
-LOGGING_FORMAT = f"%(asctime)s [%(levelname)s] {_hostname_part}%(name)s: %(message)s"
+
+def get_hostname() -> str | None:
+    """
+    Return the current host name, or ``None`` if it cannot be determined.
+
+    :return: The host name, or ``None`` if :func:`socket.gethostname` fails.
+    """
+    try:
+        return socket.gethostname()
+    except OSError:
+        return None
+
+
+def build_logging_format(hostname: str | None) -> str:
+    """
+    Build the logging format string, including the host name when available.
+
+    :param hostname: The host name to embed, or ``None`` to omit it.
+    :return: A :mod:`logging` format string.
+    """
+    hostname_part = f"{hostname} " if hostname is not None else ""
+    return f"%(asctime)s [%(levelname)s] {hostname_part}%(name)s: %(message)s"
+
+
+HOSTNAME: str | None = get_hostname()
+LOGGING_FORMAT = build_logging_format(HOSTNAME)
 LOGGING_DATEFMT = "%Y-%m-%d %I:%M %p"
 
 
