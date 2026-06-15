@@ -282,7 +282,10 @@ rule consent:
     Check if a submission is research consented.
     """
     input:
-        metadata=rules.metadata.output.metadata,
+        metadata=anchor(
+            "<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag",
+            rules.metadata.output.metadata,
+        ),
     output:
         consent_flag="<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag",
     log:
