@@ -399,9 +399,9 @@ rule generate_pruefbericht:
         timestamp=rules.metadata.output.timestamp,
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
+        db_config_path=cfg_path("config_paths/db"),
     output:
         pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
-        tmp="<results>/{submitter_id}/{inbox}/{submission_id}/.metadata.with-updated-timestamp.json",
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/generate_pruefbericht.stderr.log",

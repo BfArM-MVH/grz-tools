@@ -28,11 +28,11 @@ if grzctl validate \
 	--logs-dir "${progress_logs_dir}" \
 	>"$log_stdout" 2>"$validation_errors"; then
 	echo "true" >"$validation_flag"
-	grzctl db --config-file "${db_config}" submission modify "${submission_id}" basic_qc_passed yes
+	grzctl db --config-file "${db_config}" submission modify "${submission_id}" basic_qc_passed true
 else
 	# Failure: Validation found errors. This is an expected outcome.
 	# The errors are already captured in the validation_errors file.
 	echo "false" >"$validation_flag"
-	grzctl db --config-file "${db_config}" submission modify "${submission_id}" basic_qc_passed no
+	grzctl db --config-file "${db_config}" submission modify "${submission_id}" basic_qc_passed false
 fi
 

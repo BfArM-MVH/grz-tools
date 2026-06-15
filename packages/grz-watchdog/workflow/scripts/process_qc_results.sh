@@ -30,8 +30,8 @@ qc_workflow_version="${snakemake_params[qc_workflow_version]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-index_detailed_qc_status=$(awk -F, '$2 == "index"' <"${report_csv}" | cut -d, -f7,7) # FIXME: brittle
-qc_status=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'yes'; else echo 'no'; fi)
+index_detailed_qc_status=$(awk -F, '$2 == "index"' <"${report_csv}" | python3 -c 'import csv,sys; print("\n".join(row[6] for row in csv.reader(sys.stdin)))' | sort -u)
+qc_status=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'true'; else echo 'false'; fi)
 
 grzctl db --config-file "${db_config}" submission modify "${submission_id}" detailed_qc_passed "${qc_status}" >"$log_stdout" 2>"$log_stderr"
 grzctl db --config-file "${db_config}" submission populate-qc --no-confirm --qc-workflow-version "${qc_workflow_version}" "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"

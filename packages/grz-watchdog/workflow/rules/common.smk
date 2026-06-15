@@ -107,12 +107,23 @@ def should_run_qc(
     """
     Determines if a validated submission should undergo QC.
     """
-    with open(db_config_path) as f:
-        db_url = yaml.safe_load(f)["db"]["database_url"]
-    db = SubmissionDb(db_url=db_url, author=None)
-    return db.should_qc(
-        submission_id=submission_id, target_percentage=target_percentage, salt=salt
-    )
+    import subprocess
+
+    cmd = [
+        "grzctl",
+        "--config-file",
+        db_config_path,
+        "db",
+        "should-qc",
+        "--target-percentage",
+        str(target_percentage),
+    ]
+    if salt:
+        cmd.extend(["--salt", salt])
+    cmd.append(submission_id)
+
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return result.stdout.strip() == "true"
 
 
 def get_validation_state(wildcards):
