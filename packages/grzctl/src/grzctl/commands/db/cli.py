@@ -783,9 +783,8 @@ class QCReportRow(StrictBaseModel):
     required=False,
     default=None,
     envvar="GRZCTL_QC_WORKFLOW_VERSION",
-    help="Override the QC workflow version stored with the detailed QC results. By default the "
-    "version is taken from the report's 'grzQcWorkflowVersion' column. Can also be provided via "
-    "GRZCTL_QC_WORKFLOW_VERSION.",
+    help="QC workflow version to record when the report has no 'grzQcWorkflowVersion' column. "
+    "If the report carries one, it takes precedence. Env: GRZCTL_QC_WORKFLOW_VERSION.",
 )
 @click.option(
     "--confirm/--no-confirm",
