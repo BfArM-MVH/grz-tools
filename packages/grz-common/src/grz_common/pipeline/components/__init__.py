@@ -117,9 +117,10 @@ class Pipeable:
         if not isinstance(self, Readable):
             raise TypeError(f"Cannot drive pipeline: {type(self)} is not Readable.")
 
-        # Drive the sink as a transaction: its __exit__ commits on clean exit and aborts on
-        # error. self.close() runs the deferred validators; if they raise, it surfaces inside
-        # the sink's __exit__ -> abort (no committed partial object, no dangling upload).
+        # Drive everything through the destination's context manager: it finalizes the write
+        # on a clean exit and aborts it on error. Close the source inside the block so that a
+        # validation failure there also triggers the abort, rather than leaving a half-uploaded
+        # object behind.
         with other:
             try:
                 shutil.copyfileobj(self, other, length=READ_CHUNK_SIZE)
