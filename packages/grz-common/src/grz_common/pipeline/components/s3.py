@@ -1,5 +1,4 @@
 import base64
-import contextlib
 import hashlib
 import logging
 import math
@@ -174,8 +173,13 @@ class S3MultipartUploader(Observer):
     def abort(self) -> None:
         """Abort the multipart upload on S3."""
         if self._upload_id:
-            with contextlib.suppress(Exception):
+            try:
                 self.s3.abort_multipart_upload(Bucket=self.bucket, Key=self.key, UploadId=self._upload_id)
+            except Exception as e:
+                # Don't let a failed abort hide the original error; just log it and move on.
+                # A likely cause is missing abort permission, in which case the staged parts
+                # stay in the bucket until a lifecycle rule or an admin removes them.
+                log.warning(f"Could not abort multipart upload for {self.key}: {e}. Incomplete parts may remain.")
         self._cleanup()
         self._closed = True  # prevent a later close()/finalizer from re-running on an aborted upload
 
