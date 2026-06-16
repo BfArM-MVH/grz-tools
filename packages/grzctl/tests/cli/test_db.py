@@ -512,7 +512,7 @@ def test_populate_qc_missing_qc_workflow_version(
             """)
         )
 
-    # Test without --qc-workflow-version flag and without env var (should fail)
+    # No --qc-workflow-version flag/env var and no grzQcWorkflowVersion column in the report → fail
     result_populate_qc = runner.invoke(
         cli,
         [
@@ -525,7 +525,99 @@ def test_populate_qc_missing_qc_workflow_version(
         ],
     )
     assert result_populate_qc.exit_code != 0
-    assert "Missing option '--qc-workflow-version'" in result_populate_qc.output
+    assert "No QC workflow version found" in result_populate_qc.output
+
+
+def test_populate_qc_version_from_report(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    """populate-qc takes the version from the report's grzQcWorkflowVersion column when no flag is given."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus,grzQcWorkflowVersion
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS,2.1.0+nonredundant
+            """)
+        )
+
+    result_populate_qc = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate-qc", metadata.submission_id, str(report_csv_path), "--no-confirm"],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
+        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "2.1.0+nonredundant"
+
+
+def test_populate_qc_flag_report_mismatch(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    """populate-qc errors when --qc-workflow-version disagrees with the report's grzQcWorkflowVersion."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus,grzQcWorkflowVersion
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS,2.1.0+nonredundant
+            """)
+        )
+
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v9.9.9",
+        ],
+    )
+    assert result_populate_qc.exit_code != 0
+    assert "disagrees" in result_populate_qc.output
 
 
 def test_update_error_confirm(blank_database_config_path: Path, test_metadata_path: Path):
