@@ -4,14 +4,24 @@ import os
 from io import BytesIO
 
 from crypt4gh import SEGMENT_SIZE
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
-from nacl.public import PrivateKey
 
 
 def generate_keypair() -> tuple[bytes, bytes]:
-    """Generate a Crypt4GH keypair (private, public)."""
-    private = PrivateKey.generate()
-    return bytes(private), bytes(private.public_key)
+    """Generate a Crypt4GH keypair (private, public) as raw X25519 keys."""
+    private = X25519PrivateKey.generate()
+    private_bytes = private.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_bytes = private.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return private_bytes, public_bytes
 
 
 class TestCrypt4GHEncryptor:
