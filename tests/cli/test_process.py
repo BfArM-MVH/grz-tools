@@ -66,6 +66,15 @@ def process_config_content(
                 },
                 "public_key_path": str(crypt4gh_grz_public_key_file_path),
             },
+            "interrogation": {
+                "s3": {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "bucket": "interrogation-archive",
+                    "access_key": "testing",
+                    "secret": "testing",
+                },
+                "keep_failed": False,
+            },
         },
         "pruefbericht": {
             "authorization_url": "https://bfarm.localhost/token",
@@ -108,19 +117,21 @@ def aws_credentials_for_process():
 
 @pytest.fixture
 def s3_buckets(aws_credentials_for_process):
-    """Create the three S3 buckets needed for processing."""
+    """Create the four S3 buckets needed for processing."""
     conn = boto3.client("s3")
 
-    # Create inbox, consented-archive, and non-consented-archive buckets
+    # Create inbox, consented-archive, non-consented-archive and interrogation-archive buckets
     conn.create_bucket(Bucket="inbox")
     conn.create_bucket(Bucket="consented-archive")
     conn.create_bucket(Bucket="non-consented-archive")
+    conn.create_bucket(Bucket="interrogation-archive")
 
     s3 = boto3.resource("s3")
     return {
         "inbox": s3.Bucket("inbox"),
         "consented": s3.Bucket("consented-archive"),
         "non_consented": s3.Bucket("non-consented-archive"),
+        "interrogation": s3.Bucket("interrogation-archive"),
     }
 
 
@@ -329,6 +340,7 @@ class TestGrzctlProcess:
         conn.create_bucket(Bucket="inbox-b")
         conn.create_bucket(Bucket="consented-archive")
         conn.create_bucket(Bucket="non-consented-archive")
+        conn.create_bucket(Bucket="interrogation-archive")
 
         s3_resource = boto3.resource("s3")
         _inbox_a = s3_resource.Bucket("inbox-a")

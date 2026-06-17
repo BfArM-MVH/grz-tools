@@ -43,11 +43,14 @@ else:
 @dataclass
 class SubmissionRunState:
     submission_metadata: SubmissionMetadata
-    target_s3: S3Client
-    target_bucket: str
+    interrogation_s3: S3Client
+    interrogation_bucket: str
+    final_s3: S3Client
+    final_bucket: str
     target_public_key: bytes
     should_qc: bool
     context: SubmissionContext = field(default_factory=SubmissionContext)
+    uploaded_keys: list[str] = field(default_factory=list)
     consistency_validator: ReadPairConsistencyValidator = field(init=False)
 
     def __post_init__(self) -> None:
@@ -104,17 +107,20 @@ class RunSetupCoordinator:
         target_archive = (
             self._config.archives.consented if is_research_consented else self._config.archives.non_consented
         )
+        interrogation_archive = self._config.archives.interrogation
 
         run_state = SubmissionRunState(
             submission_metadata=submission_metadata,
-            target_s3=self._s3_client_cache.get(target_archive.s3),
-            target_bucket=target_archive.s3.bucket,
+            interrogation_s3=self._s3_client_cache.get(interrogation_archive.s3),
+            interrogation_bucket=interrogation_archive.s3.bucket,
+            final_s3=self._s3_client_cache.get(target_archive.s3),
+            final_bucket=target_archive.s3.bucket,
             target_public_key=self._consented_pub_key if is_research_consented else self._non_consented_pub_key,
             should_qc=self._determine_qc_flag(submission_metadata.content.submission_id),
         )
 
         log.info(f"Consent Status: {'Consented' if is_research_consented else 'Non-Consented'}")
-        log.info(f"Target Archive: {run_state.target_bucket}")
+        log.info(f"Target Archive: {run_state.final_bucket} (via Interrogation: {run_state.interrogation_bucket})")
 
         return run_state
 
@@ -282,9 +288,9 @@ class FilePipelineExecutor:
     ) -> None:
         if not run_state.target_public_key:
             raise RuntimeError("Target public key not set.")
-        if not run_state.target_bucket:
+        if not run_state.final_bucket or not run_state.interrogation_bucket:
             raise RuntimeError("Target bucket not set.")
-        if run_state.target_s3 is None:
+        if run_state.final_s3 is None or run_state.interrogation_s3 is None:
             raise RuntimeError("Target S3 client not set.")
 
         src_key = f"{run_state.submission_id}/files/{file_meta.file_path}.c4gh"
@@ -345,8 +351,8 @@ class FilePipelineExecutor:
             # upload to archive bucket
             part_size = calculate_s3_part_size(file_meta.file_size_in_bytes, None)
             uploader = S3MultipartUploader(
-                run_state.target_s3,
-                run_state.target_bucket,
+                run_state.interrogation_s3,
+                run_state.interrogation_bucket,
                 dest_key,
                 part_size=part_size,
                 max_threads=self._max_concurrent_uploads,
@@ -354,6 +360,8 @@ class FilePipelineExecutor:
 
             # run the whole pipeline
             pipeline >> uploader
+
+        run_state.uploaded_keys.append(dest_key)
 
         stats = checksum_validator.metrics
         if format_validator:
@@ -436,11 +444,12 @@ class SubmissionProcessor:
         dest_key = f"{run_state.submission_id}/metadata/metadata.json"
         redacted_metadata = submission_metadata.content.to_redacted_dict()
 
-        run_state.target_s3.put_object(
-            Bucket=run_state.target_bucket,
+        run_state.interrogation_s3.put_object(
+            Bucket=run_state.interrogation_bucket,
             Key=dest_key,
             Body=json.dumps(redacted_metadata).encode("utf-8"),
         )
+        run_state.uploaded_keys.append(dest_key)
 
     def _maybe_cleanup_inbox(self, run_state: SubmissionRunState) -> None:
         if not self._clean_inbox:
@@ -479,7 +488,34 @@ class SubmissionProcessor:
             else:
                 body = file_path.read_bytes()
 
-            run_state.target_s3.put_object(Bucket=run_state.target_bucket, Key=dest_key, Body=body)
+            run_state.interrogation_s3.put_object(Bucket=run_state.interrogation_bucket, Key=dest_key, Body=body)
+            run_state.uploaded_keys.append(dest_key)
+
+    def _commit_to_archive(self, run_state: SubmissionRunState) -> None:
+        log.info(f"Copying {len(run_state.uploaded_keys)} files from interrogation bucket to final archive...")
+        for key in run_state.uploaded_keys:
+            log.debug(f"Copying {key}...")
+            run_state.final_s3.copy(
+                CopySource={"Bucket": run_state.interrogation_bucket, "Key": key},
+                Bucket=run_state.final_bucket,
+                Key=key,
+            )
+
+        log.info("Copy complete. Removing files from interrogation bucket...")
+        for key in run_state.uploaded_keys:
+            run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
+
+    def _handle_interrogation_failure(self, run_state: SubmissionRunState) -> None:
+        if self.config.archives.interrogation.keep_failed:
+            log.info("Interrogation config keep_failed is True. Leaving failed files in interrogation bucket.")
+            return
+
+        log.info("Cleaning up interrogation bucket due to failure...")
+        for key in run_state.uploaded_keys:
+            try:
+                run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
+            except Exception as e:
+                log.warning(f"Failed to delete {key} from interrogation bucket during cleanup: {e}")
 
     def run(self, submission_metadata: SubmissionMetadata) -> None:
         """
@@ -496,13 +532,21 @@ class SubmissionProcessor:
         :raises RuntimeError: If consistency checks fail or any file fails validation.
         """
         submission_run = self._setup.new_submission_run(submission_metadata)
-        self._pipeline_executor.process_submission_files(submission_run)
+        try:
+            self._pipeline_executor.process_submission_files(submission_run)
 
-        if submission_run.context.has_errors:
-            log.error(f"Pipeline errors: {submission_run.context._errors}")
-            raise RuntimeError("Submission failed consistency checks or validation.")
+            if submission_run.context.has_errors:
+                log.error(f"Pipeline errors: {submission_run.context._errors}")
+                raise RuntimeError("Submission failed consistency checks or validation.")
 
-        self._upload_final_metadata(submission_metadata, submission_run)
-        self._upload_redacted_logs(submission_metadata, submission_run)
-        log.info(f"Submission {submission_run.submission_id} processed successfully.")
-        self._maybe_cleanup_inbox(submission_run)
+            self._upload_final_metadata(submission_metadata, submission_run)
+            self._upload_redacted_logs(submission_metadata, submission_run)
+
+            # Commit files from interrogation bucket to final archive
+            self._commit_to_archive(submission_run)
+
+            log.info(f"Submission {submission_run.submission_id} processed successfully.")
+            self._maybe_cleanup_inbox(submission_run)
+        except Exception:
+            self._handle_interrogation_failure(submission_run)
+            raise

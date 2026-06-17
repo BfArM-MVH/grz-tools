@@ -35,6 +35,12 @@ archives:
       bucket: grz-archive-nonconsented
     public_key_path: /path/to/archive-nonconsented.pub
 
+  interrogation:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-interrogation
+    keep_failed: false
+
 pruefbericht:
   authorization_url: ${GRZ_PRUEFBERICHT__AUTHORIZATION_URL}
   client_id: ${GRZ_PRUEFBERICHT__CLIENT_ID}

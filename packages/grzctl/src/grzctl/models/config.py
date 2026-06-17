@@ -1,10 +1,13 @@
+import logging
 from typing import Annotated
 
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.keys import KeyConfigModel
 from grz_common.models.s3 import S3ConfigModel, S3ConnectionBase, S3Options
 from grz_pydantic_models.submission.metadata import GenomicDataCenterId
-from pydantic import Field
+from pydantic import Field, model_validator
+
+log = logging.getLogger(__name__)
 
 from .db import DbModel
 from .pruefbericht import PruefberichtModel
@@ -104,6 +107,16 @@ class ArchiveTarget(IgnoringBaseModel):
     """Path to the public key for re-encryption of files destined for this archive."""
 
 
+class InterrogationConfig(IgnoringBaseModel):
+    """Configuration for the staging interrogation bucket."""
+
+    s3: S3Options
+    """S3 connection details and bucket for the staging interrogation bucket."""
+
+    keep_failed: bool = False
+    """If true, leaves the failed submission files in the interrogation bucket. Otherwise deletes them."""
+
+
 class ArchivesConfig(IgnoringBaseModel):
     """Configuration for consented and non-consented archives."""
 
@@ -112,6 +125,40 @@ class ArchivesConfig(IgnoringBaseModel):
 
     non_consented: ArchiveTarget
     """Target definition for non-consented submissions."""
+
+    interrogation: InterrogationConfig
+    """Target definition for the intermediate interrogation bucket."""
+
+    @model_validator(mode="after")
+    def check_endpoints_match(self) -> "ArchivesConfig":
+        consented_endpoint = str(self.consented.s3.endpoint_url) if self.consented.s3.endpoint_url else None
+        non_consented_endpoint = str(self.non_consented.s3.endpoint_url) if self.non_consented.s3.endpoint_url else None
+        interrogation_endpoint = str(self.interrogation.s3.endpoint_url) if self.interrogation.s3.endpoint_url else None
+
+        if interrogation_endpoint != consented_endpoint:
+            log.warning(
+                "Interrogation bucket endpoint (%s) differs from consented archive endpoint (%s). "
+                "Server-side copying might be slow or fail.",
+                interrogation_endpoint,
+                consented_endpoint,
+            )
+
+        if interrogation_endpoint != non_consented_endpoint:
+            log.warning(
+                "Interrogation bucket endpoint (%s) differs from non-consented archive endpoint (%s). "
+                "Server-side copying might be slow or fail.",
+                interrogation_endpoint,
+                non_consented_endpoint,
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def check_buckets_are_unique(self) -> "ArchivesConfig":
+        buckets = {self.consented.s3.bucket, self.non_consented.s3.bucket, self.interrogation.s3.bucket}
+        if len(buckets) != 3:
+            raise ValueError("consented, non-consented and interrogation buckets must be distinct.")
+        return self
 
 
 class ProcessConfig(IgnoringBaseSettings):
