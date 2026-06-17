@@ -316,6 +316,7 @@ def test_file_extensions():
     (
         ("minimal_consented", True),
         ("minimal_consented_with_datetime", True),
+        ("minimal_consented_with_nonzero_datetime", True),
         ("extra_consented", True),
         ("minimal_nonconsented", True),
         ("minimal_consented_expired", True),
