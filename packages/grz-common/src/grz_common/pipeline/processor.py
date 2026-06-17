@@ -549,8 +549,9 @@ class SubmissionProcessor:
         1. Determine the target archive based on consent status (at the time of execution!).
         2. Check if submission should undergo detailed QC, in which case the decrypted files are written to local storage.
         3. Spawn threads to process files (Download -> Decrypt -> Validate -> Encrypt -> Archive).
-        4. Archive redacted metadata.
-        5. Optionally clean the inbox.
+        4. Stage redacted metadata.
+        5. Move encrypted submission from interrogation bucket to target archive bucket.
+        6. Optionally clean the inbox.
 
         :param submission_metadata: The parsed metadata object containing donor and file information.
         :raises RuntimeError: If consistency checks fail or any file fails validation.
