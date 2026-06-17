@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.4](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.3...grzctl-v2.1.4) (2026-06-16)
+
+
+### Bug Fixes
+
+* **grzctl:** take QC workflow version from the report in populate-qc ([#607](https://github.com/BfArM-MVH/grz-tools/issues/607)) ([f1d60f8](https://github.com/BfArM-MVH/grz-tools/commit/f1d60f846895abf7c7c511f565ef7c6e3e4e2e7e))
+
 ## [2.1.3](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.2...grzctl-v2.1.3) (2026-06-08)
 
 
