@@ -32,6 +32,19 @@ from .components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_
 from .components.validation import BamValidator, ChecksumValidator, FastqValidator
 from .context import ReadPairConsistencyValidator, SubmissionContext
 
+
+class InterrogationFailedError(Exception):
+    """Raised when the submission fails during the interrogation stage."""
+
+    pass
+
+
+class PipelineValidationError(InterrogationFailedError):
+    """Raised when submission fails consistency checks or validation."""
+
+    pass
+
+
 log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -50,7 +63,6 @@ class SubmissionRunState:
     target_public_key: bytes
     should_qc: bool
     context: SubmissionContext = field(default_factory=SubmissionContext)
-    uploaded_keys: list[str] = field(default_factory=list)
     consistency_validator: ReadPairConsistencyValidator = field(init=False)
 
     def __post_init__(self) -> None:
@@ -361,8 +373,6 @@ class FilePipelineExecutor:
             # run the whole pipeline
             pipeline >> uploader
 
-        run_state.uploaded_keys.append(dest_key)
-
         stats = checksum_validator.metrics
         if format_validator:
             stats.update(format_validator.metrics)
@@ -449,7 +459,6 @@ class SubmissionProcessor:
             Key=dest_key,
             Body=json.dumps(redacted_metadata).encode("utf-8"),
         )
-        run_state.uploaded_keys.append(dest_key)
 
     def _maybe_cleanup_inbox(self, run_state: SubmissionRunState) -> None:
         if not self._clean_inbox:
@@ -489,11 +498,25 @@ class SubmissionProcessor:
                 body = file_path.read_bytes()
 
             run_state.interrogation_s3.put_object(Bucket=run_state.interrogation_bucket, Key=dest_key, Body=body)
-            run_state.uploaded_keys.append(dest_key)
+
+    def _get_expected_keys(self, run_state: SubmissionRunState) -> set[str]:
+        keys: set[str] = {f"{run_state.submission_id}/metadata/metadata.json"}
+
+        for file_meta in run_state.submission_metadata.files.values():
+            keys.add(f"{run_state.submission_id}/files/{file_meta.encrypted_file_path()}")
+
+        if self._log_dir.exists():
+            for file_path in sorted(self._log_dir.rglob("*")):
+                if file_path.is_file():
+                    key_suffix = file_path.relative_to(self._log_dir).as_posix()
+                    keys.add(f"{run_state.submission_id}/logs/{key_suffix}")
+
+        return keys
 
     def _commit_to_archive(self, run_state: SubmissionRunState) -> None:
-        log.info(f"Copying {len(run_state.uploaded_keys)} files from interrogation bucket to final archive...")
-        for key in run_state.uploaded_keys:
+        expected_keys = self._get_expected_keys(run_state)
+        log.info(f"Copying {len(expected_keys)} files from interrogation bucket to final archive...")
+        for key in tqdm(expected_keys, desc="Copying to final archive", leave=False, **TQDM_DEFAULTS):
             log.debug(f"Copying {key}...")
             run_state.final_s3.copy(
                 CopySource={"Bucket": run_state.interrogation_bucket, "Key": key},
@@ -502,8 +525,9 @@ class SubmissionProcessor:
             )
 
         log.info("Copy complete. Removing files from interrogation bucket...")
-        for key in run_state.uploaded_keys:
+        for key in tqdm(expected_keys, desc="Cleaning staging area", leave=False, **TQDM_DEFAULTS):
             run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
+        log.info("Finished removing temporary files from interrogation bucket.")
 
     def _handle_interrogation_failure(self, run_state: SubmissionRunState) -> None:
         if self.config.archives.interrogation.keep_failed:
@@ -511,7 +535,7 @@ class SubmissionProcessor:
             return
 
         log.info("Cleaning up interrogation bucket due to failure...")
-        for key in run_state.uploaded_keys:
+        for key in self._get_expected_keys(run_state):
             try:
                 run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
             except Exception as e:
@@ -537,7 +561,7 @@ class SubmissionProcessor:
 
             if submission_run.context.has_errors:
                 log.error(f"Pipeline errors: {submission_run.context._errors}")
-                raise RuntimeError("Submission failed consistency checks or validation.")
+                raise PipelineValidationError("Submission failed consistency checks or validation.")
 
             self._upload_final_metadata(submission_metadata, submission_run)
             self._upload_redacted_logs(submission_metadata, submission_run)
@@ -547,6 +571,6 @@ class SubmissionProcessor:
 
             log.info(f"Submission {submission_run.submission_id} processed successfully.")
             self._maybe_cleanup_inbox(submission_run)
-        except Exception:
+        except InterrogationFailedError:
             self._handle_interrogation_failure(submission_run)
             raise
