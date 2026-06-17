@@ -90,7 +90,7 @@ def process(  # noqa: PLR0913
     config = ProcessConfig.model_validate(configuration)
 
     inbox = _resolve_inbox_target(config, submission_id, inbox_bucket)
-    _, metadata_dir, log_dir, encrypted_files_dir = _setup_directories(output_dir)
+    _, metadata_dir, log_dir, _encrypted_files_dir = _setup_directories(output_dir)
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
 
@@ -201,7 +201,7 @@ def _prepare_redact_patterns(encrypted_submission: EncryptedSubmission) -> list[
     return patterns
 
 
-def _handle_pruefbericht(  # noqa: C901, PLR0913
+def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
     config: ProcessConfig,
     configuration: dict[str, Any],
     submission_id: str,

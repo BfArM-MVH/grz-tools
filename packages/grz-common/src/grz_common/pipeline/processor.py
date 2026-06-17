@@ -516,7 +516,7 @@ class SubmissionProcessor:
     def _commit_to_archive(self, run_state: SubmissionRunState) -> None:
         expected_keys = self._get_expected_keys(run_state)
         log.info(f"Copying {len(expected_keys)} files from interrogation bucket to final archive...")
-        for key in tqdm(expected_keys, desc="Copying to final archive", leave=False, **TQDM_DEFAULTS):
+        for key in tqdm(expected_keys, desc="Copying to final archive", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
             log.debug(f"Copying {key}...")
             run_state.final_s3.copy(
                 CopySource={"Bucket": run_state.interrogation_bucket, "Key": key},
@@ -525,7 +525,7 @@ class SubmissionProcessor:
             )
 
         log.info("Copy complete. Removing files from interrogation bucket...")
-        for key in tqdm(expected_keys, desc="Cleaning staging area", leave=False, **TQDM_DEFAULTS):
+        for key in tqdm(expected_keys, desc="Cleaning staging area", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
             run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
         log.info("Finished removing temporary files from interrogation bucket.")
 
