@@ -768,6 +768,10 @@ class QCReportRow(StrictBaseModel):
     targeted_regions_above_min_coverage_required: float
     targeted_regions_above_min_coverage_deviation: float
     targeted_regions_above_min_coverage_qc_status: QCStatus = Field(alias="targetedRegionsAboveMinCoverageQCStatus")
+    # Written by GRZ_QC_Workflow >= v2.1.0. Optional so reports from older workflow
+    # versions (without the column) still parse. Auto-aliased to "grzQcWorkflowVersion"
+    # via StrictBaseModel's to_camel alias generator.
+    grz_qc_workflow_version: str | None = None
 
 
 @submission.command()
@@ -776,9 +780,11 @@ class QCReportRow(StrictBaseModel):
 @click.option(
     "--qc-workflow-version",
     type=str,
-    required=True,
+    required=False,
+    default=None,
     envvar="GRZCTL_QC_WORKFLOW_VERSION",
-    help="QC workflow version to store with detailed QC results. Can also be provided via GRZCTL_QC_WORKFLOW_VERSION.",
+    help="QC workflow version to record when the report has no 'grzQcWorkflowVersion' column. "
+    "If the report carries one, it takes precedence. Env: GRZCTL_QC_WORKFLOW_VERSION.",
 )
 @click.option(
     "--confirm/--no-confirm",
@@ -786,7 +792,9 @@ class QCReportRow(StrictBaseModel):
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
 @click.pass_context
-def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, qc_workflow_version: str, confirm: bool):
+def populate_qc(
+    ctx: click.Context, submission_id: str, report_csv_path: str, qc_workflow_version: str | None, confirm: bool
+):
     """Populate the submission database from a detailed QC pipeline report."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -797,6 +805,28 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, qc
         reports = []
         for row in reader:
             reports.append(QCReportRow(**dict(zip(header, row, strict=True))))
+
+    # The report (GRZ_QC_Workflow >= v2.1.0) carries its own version in the
+    # 'grzQcWorkflowVersion' column; treat that as the source of truth and only fall back to
+    # --qc-workflow-version for older reports that lack the column.
+    report_versions = {report.grz_qc_workflow_version for report in reports if report.grz_qc_workflow_version}
+    if len(report_versions) > 1:
+        raise click.ClickException(f"Inconsistent grzQcWorkflowVersion values in report: {sorted(report_versions)}")
+    report_version = report_versions.pop() if report_versions else None
+
+    if report_version and qc_workflow_version and report_version != qc_workflow_version:
+        raise click.ClickException(
+            f"--qc-workflow-version ({qc_workflow_version}) disagrees with the report's "
+            f"grzQcWorkflowVersion ({report_version}). Omit --qc-workflow-version to use the report "
+            "value, which is authoritative."
+        )
+
+    effective_qc_workflow_version = report_version or qc_workflow_version
+    if not effective_qc_workflow_version:
+        raise click.ClickException(
+            "No QC workflow version found: the report has no 'grzQcWorkflowVersion' column and "
+            "--qc-workflow-version was not provided."
+        )
 
     report_mtime = datetime.fromtimestamp(Path(report_csv_path).stat().st_mtime, tz=UTC)
     results = []
@@ -823,7 +853,7 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, qc
                 targeted_regions_above_min_coverage_passed_qc=report.targeted_regions_above_min_coverage_qc_status
                 == QCStatus.PASS,
                 targeted_regions_above_min_coverage_percent_deviation=report.targeted_regions_above_min_coverage_deviation,
-                qc_workflow_version=qc_workflow_version,
+                qc_workflow_version=effective_qc_workflow_version,
             )
         )
     table = rich.table.Table(
