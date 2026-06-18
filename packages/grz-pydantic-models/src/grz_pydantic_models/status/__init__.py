@@ -1,3 +1,3 @@
-from .v1 import SubmissionStatusEntry, SubmissionStatusReport
+from .v1 import FailureReasonEnum, SubmissionStatusEntry, SubmissionStatusReport
 
-__all__ = ["SubmissionStatusEntry", "SubmissionStatusReport"]
+__all__ = ["FailureReasonEnum", "SubmissionStatusEntry", "SubmissionStatusReport"]

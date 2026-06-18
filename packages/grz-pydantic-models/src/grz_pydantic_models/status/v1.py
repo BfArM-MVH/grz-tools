@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from enum import StrEnum
 from typing import Annotated
 
+from grz_common.utils.types import CaseInsensitiveStrEnum, ListableEnum
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from grz_pydantic_models.submission.metadata import GenomicDataCenterId, SubmitterId
 
-# TODO: re-use SubmissionId/FailureReason definitions from shared modules once to avoid local re-definitions here.
 SubmissionId = Annotated[str, StringConstraints(pattern=r"^[0-9]{9}_\d{4}-\d{2}-\d{2}_[a-f0-9]{8}$")]
 
 
-class FailureReason(StrEnum):
+class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Failure reason enum for submissions in ERROR state."""
+
     DUPLICATE_TANG = "duplicate_tang"
     INCOMPLETE_SUBMISSION = "incomplete_submission"
     DECRYPTION_ERROR = "decryption_error"
@@ -33,7 +34,7 @@ class SubmissionStatusEntry(_StatusBaseModel):
     submission_date: date | None = None
     latest_state: str | None = None
     latest_state_at: datetime | None = None
-    failure_reason: FailureReason | None = None
+    failure_reason: FailureReasonEnum | None = None
     basic_qc_passed: bool | None = None
     detailed_qc_passed: bool | None = None
     has_detailed_qc_report: bool = False
