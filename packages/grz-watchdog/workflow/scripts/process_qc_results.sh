@@ -34,4 +34,4 @@ index_detailed_qc_status=$(awk -F, '$2 == "index"' <"${report_csv}" | python3 -c
 qc_status=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'true'; else echo 'false'; fi)
 
 grzctl db --config-file "${db_config}" submission modify "${submission_id}" detailed_qc_passed "${qc_status}" >"$log_stdout" 2>"$log_stderr"
-grzctl db --config-file "${db_config}" submission populate-qc --no-confirm --qc-workflow-version "${qc_workflow_version}" "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"
+grzctl db --config-file "${db_config}" submission populate-qc --no-confirm "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"
