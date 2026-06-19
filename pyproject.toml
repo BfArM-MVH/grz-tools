@@ -33,6 +33,12 @@ grz-pydantic-models-testing = { workspace = true }
 grz-check = { workspace = true }
 
 [tool.uv]
+# Single source of truth for the uv version. CI reads this via
+# `astral-sh/setup-uv` (`version-file: pyproject.toml`), and uv itself
+# enforces it on every local invocation. (The conda `environment-dev.yml`
+# pin must be kept in sync by hand.)
+required-version = "==0.11.22"
+
 # Centralize test/dev tool version ranges here so each package's
 # `[dependency-groups]` only lists bare package names. uv applies these
 # constraints workspace-wide during `uv lock` and `uv sync`.
