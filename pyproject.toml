@@ -35,8 +35,9 @@ grz-check = { workspace = true }
 [tool.uv]
 # Single source of truth for the uv version. CI reads this via
 # `astral-sh/setup-uv` (`version-file: pyproject.toml`), and uv itself
-# enforces it on every local invocation. (The conda `environment-dev.yml`
-# pin must be kept in sync by hand.)
+# enforces it on every local invocation. (The constraint-dependencies 
+# below as well as conda `environment-dev.yml`pin must be kept in sync 
+# by hand.)
 required-version = "==0.11.22"
 
 # Centralize test/dev tool version ranges here so each package's
@@ -52,6 +53,7 @@ constraint-dependencies = [
     "responses ==0.25.*",
     "numpy >=2.1.2,<3",
     "ruff >=0.11.12,<1",
+    "uv ==0.11.22"
 ]
 
 [project.optional-dependencies]
