@@ -83,7 +83,7 @@ def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata
     assert submission.genomic_study_subtype == metadata.submission.genomic_study_subtype
     assert submission.pseudonym == metadata.submission.local_case_id
     assert submission.data_node_id == metadata.submission.genomic_data_center_id
-    assert submission.submission_finished_date == explicit_date  # explicit date takes precedence
+    assert submission.submission_uploaded_date == explicit_date  # explicit date takes precedence
     assert submission.submission_size == metadata.get_submission_size()
     assert submission.submission_metadata == metadata.to_redacted_dict()
 

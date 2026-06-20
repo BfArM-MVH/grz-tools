@@ -127,7 +127,7 @@ def _get_consent_revocations(
     """
     subquery_quarter_submissions = (
         select(Submission)
-        .where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+        .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
         .subquery()
     )
     query_quarter_donors = (
@@ -138,7 +138,7 @@ def _get_consent_revocations(
             Donor,
         )
         .join(subquery_quarter_submissions, subquery_quarter_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_quarter_submissions.c.submission_finished_date)
+        .order_by(subquery_quarter_submissions.c.submission_uploaded_date)
     )
     quarter_donors = session.exec(query_quarter_donors).all()
 
@@ -169,7 +169,7 @@ def _get_consent_revocations(
 
     # now query before the current quarter
     subquery_prior_submissions = (
-        select(Submission).where(Submission.submission_finished_date < quarter_start_date).subquery()
+        select(Submission).where(Submission.submission_uploaded_date < quarter_start_date).subquery()
     )
     query_prior_donors = (
         select(
@@ -179,7 +179,7 @@ def _get_consent_revocations(
             Donor,
         )
         .join(subquery_prior_submissions, subquery_prior_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_prior_submissions.c.submission_finished_date)
+        .order_by(subquery_prior_submissions.c.submission_uploaded_date)
     )
     prior_donors = session.exec(query_prior_donors).all()
 
@@ -236,7 +236,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_end-to-end_tests
         stmt_number_of_end_to_end_tests = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .where(Submission.submission_type == SubmissionType.test)
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
         )
@@ -248,7 +248,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_passed_end-to-end_tests
         stmt_number_of_passed_end_to_end_tests = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .where(Submission.submission_type == SubmissionType.test)
             .filter(Submission.basic_qc_passed)  # type: ignore[arg-type]
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
@@ -262,7 +262,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_submissions_*
         stmt_number_of_submissions = (
             select(Submission.data_node_id, Submission.submitter_id, Submission.genomic_study_type, sqlfn.count(1))
-            .where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .group_by(Submission.data_node_id, Submission.submitter_id, Submission.genomic_study_type)  # type: ignore[arg-type]
         )
         number_of_submissions_by_genomic_study_type = {
@@ -277,7 +277,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_failed_qcs
         stmt_number_of_failed_qcs = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
         )
@@ -294,7 +294,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_deletions
         stmt_number_of_deletions = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .join(
                 select(ChangeRequestLog.submission_id)
                 .where(ChangeRequestLog.change == ChangeRequestEnum.DELETE)
@@ -379,7 +379,7 @@ def _dump_dataset_report(
 
     with database._get_session() as session:
         query_quarter_submissions = (
-            select(Submission).where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            select(Submission).where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
         )
         submissions = session.exec(query_quarter_submissions).all()
 
@@ -492,7 +492,7 @@ def _dump_qc_report(
     with database._get_session() as session:
         query_submissions_that_failed_detailed_qc = (
             select(Submission)
-            .where(Submission.submission_finished_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
         )
         submissions_that_failed_detailed_qc = session.exec(query_submissions_that_failed_detailed_qc).all()
@@ -559,7 +559,7 @@ def _dump_qc_report(
                     quarter,
                     year,
                     submission.submitter_id,
-                    submission.submission_finished_date,
+                    submission.submission_uploaded_date,
                     submission.submission_type,
                     submission.disease_type,
                     submission.genomic_study_type,
