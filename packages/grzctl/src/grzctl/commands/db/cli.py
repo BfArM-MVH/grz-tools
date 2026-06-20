@@ -54,7 +54,7 @@ from grz_pydantic_models.submission.metadata import (
     SequenceSubtype,
     SequenceType,
 )
-from pydantic import Field
+from pydantic import Field, ValidationError
 from tqdm.auto import tqdm
 
 from ... import get_versions
@@ -698,20 +698,20 @@ def populate(  # noqa: C901, PLR0913
             "or use 'grzctl db submission modify' directly."
         ) from e
 
-    submission_finished_date = (
-        submission_date.date() if submission_date is not None else submission.submission_finished_date
+    submission_uploaded_date = (
+        submission_date.date() if submission_date is not None else submission.submission_uploaded_date
     )
     if submission_date is None:
         log.warning(
             "No submission date provided and submission date is missing in the database. "
             "Will use submission date from metadata.json..."
         )
-        submission_finished_date = metadata.submission.submission_date
+        submission_uploaded_date = metadata.submission.submission_date
 
     submission_diff, donors_diff = db_service.diff(
         submission_id,
         metadata,
-        submission_finished_date=submission_finished_date,
+        submission_uploaded_date=submission_uploaded_date,
         ignore_fields=set(ignore_field),
     )
 
@@ -941,6 +941,69 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
+def _research_consented_today(submission: Submission) -> bool | None:
+    """Research consent for the submission re-evaluated as of today.
+
+    Unlike the persisted ``consented`` field (evaluated at the submission date),
+    this recomputes consent from the stored redacted metadata using today's date.
+
+    :param submission: Submission whose stored metadata to evaluate.
+    :returns: ``True``/``False`` for the consent decision today, or ``None`` when
+        no metadata is stored (e.g. rows migrated without backpopulated metadata)
+        or when the stored metadata cannot be parsed.
+    """
+    if not submission.submission_metadata:
+        return None
+    try:
+        metadata = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
+    except ValidationError:
+        log.debug("Could not parse stored metadata for submission %s to evaluate consent today.", submission.id)
+        return None
+    return metadata.consents_to_research(date=date.today())
+
+
+def _build_attribute_table(submission: Submission, research_consented_today: bool | None) -> rich.table.Table:
+    """Build the attribute table shown by ``submission show``.
+
+    :param submission: Submission to render.
+    :param research_consented_today: Research consent re-evaluated as of today
+        (see :func:`_research_consented_today`), or ``None`` when unavailable.
+    :returns: A populated rich table of submission attributes.
+    """
+    attribute_table = rich.table.Table(box=None)
+    attribute_table.add_column("Attribute", justify="right")
+    attribute_table.add_column("Value")
+    for label, attr_name in (
+        ("tanG", "tan_g"),
+        ("Pseudonym", "pseudonym"),
+        ("Submission Uploaded Date", "submission_uploaded_date"),
+        ("Submission Size", "submission_size"),
+        ("Submission Type", "submission_type"),
+        ("Submitter ID", "submitter_id"),
+        ("Data Node ID", "data_node_id"),
+        ("Disease Type", "disease_type"),
+        ("Genomic Study Type", "genomic_study_type"),
+        ("Genomic Study Subtype", "genomic_study_subtype"),
+        ("Basic QC Passed", "basic_qc_passed"),
+        ("Research consent (at submission)", "consented"),
+        ("Selected For QC", "selected_for_qc"),
+        ("Detailed QC Passed", "detailed_qc_passed"),
+    ):
+        attr = getattr(submission, attr_name)
+        attribute_table.add_row(
+            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
+        )
+        if attr_name == "consented":
+            # Adjacent row: research consent re-evaluated as of today (recomputed from stored metadata).
+            attribute_table.add_row(
+                rich.text.Text("Research consent (today)", style="cyan"),
+                rich.text.Text(str(research_consented_today))
+                if research_consented_today is not None
+                else _TEXT_MISSING,
+            )
+    return attribute_table
+
+
 @submission.command("show")
 @click.argument("submission_id", type=str)
 @output_json
@@ -956,8 +1019,11 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
 
+    research_consented_today = _research_consented_today(submission)
+
     if output_json:
         submission_dict = submission.model_dump(mode="json")
+        submission_dict["research_consented_today"] = research_consented_today
         submission_dict["states"] = []
 
         for state_log in sorted(submission.states, key=lambda s: s.timestamp):
@@ -977,29 +1043,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         sys.stdout.write("\n")
         return
 
-    attribute_table = rich.table.Table(box=None)
-    attribute_table.add_column("Attribute", justify="right")
-    attribute_table.add_column("Value")
-    for label, attr_name in (
-        ("tanG", "tan_g"),
-        ("Pseudonym", "pseudonym"),
-        ("Submission Date", "submission_finished_date"),
-        ("Submission Size", "submission_size"),
-        ("Submission Type", "submission_type"),
-        ("Submitter ID", "submitter_id"),
-        ("Data Node ID", "data_node_id"),
-        ("Disease Type", "disease_type"),
-        ("Genomic Study Type", "genomic_study_type"),
-        ("Genomic Study Subtype", "genomic_study_subtype"),
-        ("Basic QC Passed", "basic_qc_passed"),
-        ("Consented", "consented"),
-        ("Selected For QC", "selected_for_qc"),
-        ("Detailed QC Passed", "detailed_qc_passed"),
-    ):
-        attr = getattr(submission, attr_name)
-        attribute_table.add_row(
-            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
-        )
+    attribute_table = _build_attribute_table(submission, research_consented_today)
 
     renderables: list[rich.console.RenderableType] = [rich.padding.Padding(attribute_table, (1, 0))]
     if submission.states:
@@ -1110,18 +1154,18 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     try:
-        # If submission_finished_date is not set in the DB, replace it with the one from metadata.json.
+        # If submission_uploaded_date is not set in the DB, replace it with the one from metadata.json.
         # This case is expected for submissions that were created before the submission_date field was added.
-        submission_finished_date = (
-            current_submission.submission_finished_date
-            if current_submission.submission_finished_date
+        submission_uploaded_date = (
+            current_submission.submission_uploaded_date
+            if current_submission.submission_uploaded_date
             else metadata.submission.submission_date
         )
 
         submission_diff, donors_diff = db_service.diff(
             submission_id,
             metadata,
-            submission_finished_date=submission_finished_date,
+            submission_uploaded_date=submission_uploaded_date,
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
@@ -1223,7 +1267,7 @@ def backfill(  # noqa: PLR0913
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
     ignore_fields = set(ignore_field) | {
-        "submission_finished_date",
+        "submission_uploaded_date",
         "tan_g",
         "local_case_id",
     }

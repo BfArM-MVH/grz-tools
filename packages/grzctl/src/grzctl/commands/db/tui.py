@@ -120,7 +120,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
         with database._get_session() as session:
             statement = (
                 select(  # type: ignore[type-var]
-                    Submission.submitter_id, Submission.submission_finished_date, Submission.detailed_qc_passed
+                    Submission.submitter_id, Submission.submission_uploaded_date, Submission.detailed_qc_passed
                 )
                 .where(Submission.submission_type == SubmissionType.initial)
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
@@ -238,7 +238,7 @@ class SearchResultsDataTable(DataTable):
                 Submission.id == latest_state_per_submission.c.submission_id,  # type: ignore[arg-type]
                 isouter=True,
             ).order_by(
-                sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_finished_date)
+                sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_uploaded_date)
                 .desc()
                 .nulls_first()
             )

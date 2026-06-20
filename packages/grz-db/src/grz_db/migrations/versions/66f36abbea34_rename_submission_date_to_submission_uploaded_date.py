@@ -1,4 +1,4 @@
-"""rename submission_date to submission_finished_date
+"""rename submission_date to submission_uploaded_date
 
 Revision ID: 66f36abbea34
 Revises: 09602efd9105
@@ -19,7 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.alter_column("submissions", "submission_date", new_column_name="submission_finished_date")
+    op.alter_column("submissions", "submission_date", new_column_name="submission_uploaded_date")
 
 
 def downgrade() -> None:
