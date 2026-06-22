@@ -18,6 +18,7 @@ from grz_common.logging import setup_cli_logging
 
 from .commands.encrypt import encrypt
 from .commands.get_id import get_id
+from .commands.report import report
 from .commands.submit import submit
 from .commands.upload import upload
 from .commands.validate import validate
@@ -85,6 +86,7 @@ def build_cli():
     cli.add_command(upload)
     cli.add_command(submit)
     cli.add_command(get_id)
+    cli.add_command(report)
     cli.add_command(dump_config)
 
     return cli
