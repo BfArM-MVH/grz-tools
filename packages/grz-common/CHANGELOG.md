@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.1.0...grz-common-v2.2.0) (2026-06-22)
+
+
+### Features
+
+* **grz-common:** Log hostname ([#599](https://github.com/BfArM-MVH/grz-tools/issues/599)) ([9e5b74e](https://github.com/BfArM-MVH/grz-tools/commit/9e5b74e9643f9f8f426bdcd2af2aee7fd81c4acc))
+
 ## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.0.1...grz-common-v2.1.0) (2026-05-19)
 
 
