@@ -120,7 +120,7 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
 
     submission = db.get_submission(metadata.submission_id)
     assert submission.pseudonym == metadata.submission.local_case_id
-    assert submission.consented == metadata.consents_to_research(date(2026, 1, 1))
+    assert submission.consented == metadata.consents_to_research(metadata.submission.submission_date)
 
     # check that the consent records were populated
     meta_father = metadata.donors[1]
@@ -169,7 +169,7 @@ def test_populate_date(blank_database_config_path: Path, test_metadata_path: Pat
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
-    assert submission.submission_date == changed_date
+    assert submission.submission_uploaded_date == changed_date
 
 
 def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path, test_metadata_path: Path):
@@ -297,7 +297,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metad
     assert donors_s1[1].research_consent_missing_justifications == {"other patient-related reason"}
 
     submission_s1 = db.get_submission(metadata_s1.submission_id)
-    assert submission_s1.submission_date == changed_date
+    assert submission_s1.submission_uploaded_date == changed_date
 
     donors_s2 = sorted(db.get_donors(metadata_s2.submission_id), key=attrgetter("pseudonym"))
     assert len(donors_s2) == 2, "Expected two donors in submission 2"
@@ -668,7 +668,8 @@ def test_list_sort(blank_database_config_path: Path):
 
         if (submission_date := submission.get("date", None)) is not None:
             result_modify = runner.invoke(
-                cli, [*args_common, "submission", "modify", submission["id"], "submission_date", submission_date]
+                cli,
+                [*args_common, "submission", "modify", submission["id"], "submission_uploaded_date", submission_date],
             )
             assert result_modify.exit_code == 0, result_modify.stderr
 
@@ -718,7 +719,7 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
         "id": metadata.submission_id,
         "tan_g": metadata.submission.tan_g,
         "pseudonym": metadata.submission.local_case_id,
-        "submission_date": metadata.submission.submission_date.isoformat()
+        "submission_uploaded_date": metadata.submission.submission_date.isoformat()
         if metadata.submission.submission_date
         else None,
         "submission_size": metadata.get_submission_size(),
@@ -729,7 +730,8 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
         "coverage_type": metadata.submission.coverage_type,
         "disease_type": metadata.submission.disease_type,
         "basic_qc_passed": None,
-        "consented": metadata.consents_to_research(date=date.today()),
+        "consented": metadata.consents_to_research(date=metadata.submission.submission_date),
+        "research_consented_today": metadata.consents_to_research(date=date.today()),
         "selected_for_qc": None,
         "detailed_qc_passed": None,
         "genomic_study_type": metadata.submission.genomic_study_type,
@@ -1112,3 +1114,5 @@ def test_submission_show_json_includes_failure_reason(blank_database_config_path
     parsed = json.loads(result_show.stdout)
     error_state = next(s for s in parsed["states"] if s["state"] == "Error")
     assert error_state["failure_reason"] == "decryption_error"
+    # No metadata stored for this submission -> today's research consent cannot be evaluated.
+    assert parsed["research_consented_today"] is None
