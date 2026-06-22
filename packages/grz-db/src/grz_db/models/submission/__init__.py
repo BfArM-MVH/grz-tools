@@ -634,6 +634,19 @@ class SubmissionDb:
                 session.rollback()
                 raise
 
+    @staticmethod
+    def _is_tan_g_unique_violation(e: IntegrityError) -> bool:
+        # SQLite
+        if "UNIQUE constraint failed: submissions.tan_g" in str(e):
+            return True
+        # PostgreSQL (psycopg / psycopg2)
+        orig = getattr(e, "orig", None)
+        if orig is not None:
+            diag = getattr(orig, "diag", None)
+            if diag is not None:
+                return getattr(diag, "constraint_name", None) == "ix_submissions_tan_g"
+        return False
+
     def modify_submission(self, submission_id: str, key: str, value: Any) -> Submission:  # noqa: C901
         if key not in SubmissionBase.model_fields:
             raise ValueError(f"Unknown column key '{key}'")
@@ -667,7 +680,7 @@ class SubmissionDb:
                 return submission
             except IntegrityError as e:
                 session.rollback()
-                if "UNIQUE constraint failed: submissions.tanG" in str(e) and key == "tan_g":
+                if self._is_tan_g_unique_violation(e) and key == "tan_g":
                     raise DuplicateTanGError() from e
                 raise
             except Exception:
@@ -698,7 +711,7 @@ class SubmissionDb:
                 return db_submission
             except IntegrityError as e:
                 session.rollback()
-                if "UNIQUE constraint failed: submissions.tanG" in str(e):
+                if self._is_tan_g_unique_violation(e):
                     raise DuplicateTanGError() from e
                 raise
             except Exception:
