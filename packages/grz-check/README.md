@@ -1,3 +1,7 @@
+# grz-check
+A Rust implementation of the sequence file validation.
+Will be used as a drop-in replacement for the python-based sequence validation, if installed.
+
 ## Usage
 
 ```sh
