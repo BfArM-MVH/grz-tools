@@ -8,7 +8,6 @@ on:
   workflow_dispatch:
 
 env:
-  UV_VERSION: '0.8.5'
   GRZ_CHECK_WORKSPACE: "packages/grz-check"
   RUST_TOOLCHAIN_VERSION: "1.89.0"
 
@@ -136,7 +135,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: "pyproject.toml"
           enable-cache: true
 
       - name: Set up Python
@@ -268,7 +267,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: "pyproject.toml"
           enable-cache: true
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -316,7 +315,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: "pyproject.toml"
           enable-cache: true
 
       - name: Set up Python ${{ matrix.python-version }}
