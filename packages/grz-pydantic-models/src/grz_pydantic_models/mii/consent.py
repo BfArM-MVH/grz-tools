@@ -96,7 +96,7 @@ class Consent(StrictIgnoringBaseModel):
     scope: CodeableConcept
     category: Annotated[list[CodeableConcept], Field(min_length=2)]
     patient: Patient
-    date_time: date
+    date_time: datetime
     policy: Annotated[list[Policy], Field(min_length=1)]
     provision: RootConsentProvision | None = None
 
