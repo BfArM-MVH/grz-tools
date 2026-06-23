@@ -82,7 +82,7 @@ class S3MultipartUploader(Observer):
     def __exit__(self, exc_type, exc, tb) -> None:
         # Finish the upload on a clean exit; abort and discard staged parts on error.
         # Returns None (never True), so the original exception is never suppressed.
-        if exc_type is None:
+        if exc is None:
             self.close()
         else:
             self.abort()
