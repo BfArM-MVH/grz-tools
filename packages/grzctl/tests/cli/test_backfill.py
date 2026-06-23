@@ -25,6 +25,9 @@ from grzctl.commands.db.cli import _backfill_submission, _BackfillResult
 from moto import mock_aws
 
 BUCKET = "test-backfill-bucket"
+# "us-east-1" is just a placeholder for the moto mock -- no real AWS or region is involved.
+# We pick it specifically because it's S3's default region, so create_bucket() works without
+# an extra CreateBucketConfiguration/LocationConstraint argument.
 REGION = "us-east-1"
 IGNORE_FIELDS = {"submission_date", "tan_g", "pseudonym"}
 DIFFERENT_TAN_G = "b" * 64
