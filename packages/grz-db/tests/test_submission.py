@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Callable
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -152,23 +153,28 @@ def test_get_submissions_includes_states(db: SubmissionDb) -> None:
     assert len(result[0].states) >= 1
 
 
-def test_modify_submission_raises_on_duplicate_tan_g(db: SubmissionDb) -> None:
-    """Raise DuplicateTanGError when tan_g collides with an existing row."""
-    db.add_submission(SUBMISSION_ID)
-    db.modify_submission(SUBMISSION_ID, "tan_g", TAN_G_1)
-
-    db.add_submission(SUBMISSION_ID_2)
-    with pytest.raises(DuplicateTanGError):
-        db.modify_submission(SUBMISSION_ID_2, "tan_g", TAN_G_1)
+def _set_tan_g_via_modify(db: SubmissionDb, sub: Submission, tan_g: str) -> None:
+    db.modify_submission(sub.id, "tan_g", tan_g)
 
 
-def test_update_submission_raises_on_duplicate_tan_g(db: SubmissionDb) -> None:
+def _set_tan_g_via_update(db: SubmissionDb, sub: Submission, tan_g: str) -> None:
+    sub.tan_g = tan_g
+    db.update_submission(sub)
+
+
+@pytest.mark.parametrize(
+    "set_tan_g",
+    [_set_tan_g_via_modify, _set_tan_g_via_update],
+    ids=["modify_submission", "update_submission"],
+)
+def test_raises_on_duplicate_tan_g(
+    db: SubmissionDb,
+    set_tan_g: Callable[[SubmissionDb, Submission, str], None],
+) -> None:
     """Raise DuplicateTanGError when tan_g collides with an existing row."""
     sub1 = db.add_submission(SUBMISSION_ID)
-    sub1.tan_g = TAN_G_1
-    db.update_submission(sub1)
+    set_tan_g(db, sub1, TAN_G_1)
 
     sub2 = db.add_submission(SUBMISSION_ID_2)
-    sub2.tan_g = TAN_G_1  # same tan_g as sub1
     with pytest.raises(DuplicateTanGError):
-        db.update_submission(sub2)
+        set_tan_g(db, sub2, TAN_G_1)
