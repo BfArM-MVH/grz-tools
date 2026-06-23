@@ -7,6 +7,7 @@ This module provides functions for setting up logging configuration.
 from __future__ import annotations
 
 import logging
+import socket
 import sys
 from os import PathLike
 from pathlib import Path
@@ -20,7 +21,32 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-LOGGING_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+def get_hostname() -> str | None:
+    """
+    Return the current host name, or ``None`` if it cannot be determined.
+
+    :return: The host name, or ``None`` if :func:`socket.gethostname` fails.
+    """
+    try:
+        return socket.gethostname()
+    except OSError:
+        return None
+
+
+def build_logging_format(hostname: str | None) -> str:
+    """
+    Build the logging format string, including the host name when available.
+
+    :param hostname: The host name to embed, or ``None`` to omit it.
+    :return: A :mod:`logging` format string.
+    """
+    hostname_part = f"{hostname} " if hostname is not None else ""
+    return f"%(asctime)s [%(levelname)s] {hostname_part}%(name)s: %(message)s"
+
+
+HOSTNAME: str | None = get_hostname()
+LOGGING_FORMAT = build_logging_format(HOSTNAME)
 LOGGING_DATEFMT = "%Y-%m-%d %I:%M %p"
 
 
