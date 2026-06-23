@@ -1,0 +1,2 @@
+conda-prefix: /conda-envs
+configfile: /config/config.yaml
