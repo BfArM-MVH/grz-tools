@@ -11,7 +11,8 @@ import queue
 import shutil
 import threading
 from collections.abc import Buffer
-from typing import Any, Protocol, runtime_checkable
+from types import TracebackType
+from typing import Any, Protocol, Self, runtime_checkable
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,12 @@ class Writable(Protocol):
     @property
     def closed(self) -> bool: ...
     def close(self) -> None: ...
+    # Sinks are driven as context managers by '>>' so they can finalize or abort.
+    # Signature matches io.IOBase so io-based sinks satisfy the protocol cleanly.
+    def __enter__(self) -> Self: ...
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
+    ) -> None: ...
 
 
 class Pipeable:
@@ -117,14 +124,15 @@ class Pipeable:
         if not isinstance(self, Readable):
             raise TypeError(f"Cannot drive pipeline: {type(self)} is not Readable.")
 
-        try:
-            shutil.copyfileobj(self, other, length=READ_CHUNK_SIZE)
-        finally:
-            # Ensure close propagates down the whole chain to join threads and flush buffers
-            if hasattr(self, "close"):
+        # Drive everything through the destination's context manager: it finalizes the write
+        # on a clean exit and aborts it on error. Close the source inside the block so that a
+        # validation failure there also triggers the abort, rather than leaving a half-uploaded
+        # object behind.
+        with other:
+            try:
+                shutil.copyfileobj(self, other, length=READ_CHUNK_SIZE)
+            finally:
                 self.close()
-            # Sinks like open files or DevNullSink need closing to ensure flush
-            other.close()
         return other
 
 
