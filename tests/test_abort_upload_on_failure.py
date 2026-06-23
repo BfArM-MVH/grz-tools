@@ -57,13 +57,14 @@ def test_failed_pipeline_aborts_upload():
     with pytest.raises(RuntimeError):
         chain >> uploader
 
-    # A failure must not commit a (partial) object.
-    objects = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET).get("Contents", [])]
-    assert objects == [], f"failure must not commit an object, found: {objects}"
+    # A failure must not commit a (partial) object. S3 omits "Contents" entirely for an empty
+    # bucket, so assert the key is absent rather than hiding it behind a default empty list.
+    objects = s3.list_objects_v2(Bucket=BUCKET)
+    assert "Contents" not in objects, f"failure must not commit an object, found: {objects.get('Contents')}"
 
     # A failure must not leave an incomplete multipart upload dangling on the server.
-    uploads = [u["Key"] for u in s3.list_multipart_uploads(Bucket=BUCKET).get("Uploads", [])]
-    assert uploads == [], f"failure must abort the upload, dangling multipart upload(s): {uploads}"
+    uploads = s3.list_multipart_uploads(Bucket=BUCKET)
+    assert "Uploads" not in uploads, f"failure must abort the upload, dangling: {uploads.get('Uploads')}"
 
 
 @mock_aws
@@ -97,5 +98,5 @@ def test_failed_pipeline_surfaces_original_error_when_abort_is_denied(caplog):
     assert any("Could not abort multipart upload" in r.message for r in caplog.records)
 
     # Even when abort is denied, no (partial) object may be committed.
-    objects = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET).get("Contents", [])]
-    assert objects == [], f"failure must not commit an object, found: {objects}"
+    objects = s3.list_objects_v2(Bucket=BUCKET)
+    assert "Contents" not in objects, f"failure must not commit an object, found: {objects.get('Contents')}"
