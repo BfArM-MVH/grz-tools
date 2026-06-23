@@ -13,9 +13,11 @@ upload is neither completed nor aborted).
 """
 
 import io
+import logging
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from grz_common.pipeline.components import Observer, ReadStream, Tee
 from grz_common.pipeline.components.s3 import S3MultipartUploader
 from moto import mock_aws
@@ -40,10 +42,15 @@ class _FailOnCloseObserver(Observer):
 
 @mock_aws
 def test_failed_pipeline_aborts_upload():
+    # "us-east-1" is just a placeholder for the moto mock -- no real AWS or region is involved.
+    # We pick it specifically because it's S3's default region, so create_bucket() below works
+    # without an extra CreateBucketConfiguration/LocationConstraint argument.
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket=BUCKET)
 
-    source = ReadStream(io.BytesIO(b"x" * (1024 * 1024)))  # 1 MiB -> starts a multipart upload
+    # 9 MiB is larger than the default 8 MiB part size, so at least one part is actually
+    # uploaded before the failure -- not just the create_multipart_upload call.
+    source = ReadStream(io.BytesIO(b"x" * (9 * 1024 * 1024)))
     chain = source | Tee(_FailOnCloseObserver())
     uploader = S3MultipartUploader(s3, BUCKET, KEY)
 
@@ -57,3 +64,38 @@ def test_failed_pipeline_aborts_upload():
     # A failure must not leave an incomplete multipart upload dangling on the server.
     uploads = [u["Key"] for u in s3.list_multipart_uploads(Bucket=BUCKET).get("Uploads", [])]
     assert uploads == [], f"failure must abort the upload, dangling multipart upload(s): {uploads}"
+
+
+@mock_aws
+def test_failed_pipeline_surfaces_original_error_when_abort_is_denied(caplog):
+    """On a bucket where we may write parts but lack s3:AbortMultipartUpload, a failed abort
+    must not hide the real error: the original validation failure still has to surface, and the
+    denied abort is only logged as a warning. The dangling upload is then left for a bucket
+    lifecycle rule or an admin to reap.
+    """
+    s3 = boto3.client("s3", region_name="us-east-1")  # moto placeholder, see note above
+    s3.create_bucket(Bucket=BUCKET)
+
+    source = ReadStream(io.BytesIO(b"x" * (9 * 1024 * 1024)))
+    chain = source | Tee(_FailOnCloseObserver())
+    uploader = S3MultipartUploader(s3, BUCKET, KEY)
+
+    def _deny_abort(*args, **kwargs):
+        raise ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "abort not permitted"}},
+            "AbortMultipartUpload",
+        )
+
+    uploader.s3.abort_multipart_upload = _deny_abort
+
+    # The real validation failure must still surface -- a denied abort must not mask it.
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="simulated validation failure"):
+            chain >> uploader
+
+    # The denied abort is reported, not raised.
+    assert any("Could not abort multipart upload" in r.message for r in caplog.records)
+
+    # Even when abort is denied, no (partial) object may be committed.
+    objects = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET).get("Contents", [])]
+    assert objects == [], f"failure must not commit an object, found: {objects}"
