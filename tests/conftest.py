@@ -172,6 +172,14 @@ def remote_bucket_with_version(remote_bucket):
                 "enforced_from": datetime.now().isoformat(),
             }
         ],
+        "metadata_version": [
+            {
+                "minimal_version": "1.3.0",
+                "recommended_version": "1.3.0",
+                "max_version": None,
+                "enforced_from": datetime.now().isoformat(),
+            }
+        ],
     }
 
     remote_bucket.put_object(
