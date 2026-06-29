@@ -12,11 +12,14 @@ from grz_common.workers.submission import SubmissionValidationError
 @pytest.mark.parametrize("grz_check_mmap", ["--mmap", "--no-mmap"])
 def test_validate_submission(
     temp_identifiers_config_file_path,
+    temp_s3_config_file_path,  # <-- add this fixture
     working_dir_path,
     grz_check_mmap,
     caplog,
+    mocker,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
+    mocker.patch("grz_cli.commands.validate.check_metadata_version_and_exit_if_needed")
 
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
     shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
@@ -25,6 +28,8 @@ def test_validate_submission(
         "validate",
         "--config-file",
         temp_identifiers_config_file_path,
+        "--config-file",
+        temp_s3_config_file_path,
         "--submission-dir",
         str(working_dir_path),
         grz_check_mmap,
@@ -43,19 +48,17 @@ def test_validate_submission(
         result = runner.invoke(cli, testargs, catch_exceptions=False)
         assert "Starting file validation with `grz-check`..." in caplog.text
 
-    # test if command has correctly checked for:
-    # - mismatched md5sums
-    # - all files existing
-
     assert result.exit_code == 0, result.output
 
 
 def test_validate_submission_incorrect_grz_id(
     temp_identifiers_config_file_path,
     working_dir_path,
+    mocker,
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
+    mocker.patch("grz_cli.commands.validate.check_metadata_version_and_exit_if_needed")
     shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
     shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
@@ -86,3 +89,30 @@ def test_validate_submission_incorrect_grz_id(
     assert "does not match genomic data center identifier" in str(exc)
 
     assert result.exit_code == 1, result.output
+
+
+def test_validate_submission_with_metadata_version_check(
+    temp_identifiers_config_file_path,
+    temp_s3_config_file_path,
+    remote_bucket_with_version,
+    working_dir_path,
+    caplog,
+):
+    submission_dir = Path("tests/mock_files/submissions/valid_submission")
+    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
+    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+
+    testargs = [
+        "validate",
+        "--config-file",
+        temp_identifiers_config_file_path,
+        "--config-file",
+        temp_s3_config_file_path,  # <-- provides S3 config
+        "--submission-dir",
+        str(working_dir_path),
+    ]
+
+    runner = CliRunner()
+    cli = grz_cli.cli.build_cli()
+    result = runner.invoke(cli, testargs, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
