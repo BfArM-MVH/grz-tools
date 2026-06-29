@@ -58,4 +58,4 @@ def serialize_datetime_to_iso_z(dt: datetime.datetime) -> str:
     if dt.tzinfo != datetime.UTC and dt.utcoffset() != datetime.timedelta(0):
         dt = dt.astimezone(datetime.UTC)
 
-    return dt.isoformat()
+    return dt.isoformat().replace("+00:00", "Z")
