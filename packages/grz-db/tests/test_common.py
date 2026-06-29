@@ -18,7 +18,6 @@ from grz_db.common import serialize_datetime_to_iso_z
         ),
     ],
 )
-
 def test_serialize_datetime_to_iso_z_database_agnostic(dt, description):
     """
     serialize_datetime_to_iso_z must produce identical 'Z'-suffixed output
