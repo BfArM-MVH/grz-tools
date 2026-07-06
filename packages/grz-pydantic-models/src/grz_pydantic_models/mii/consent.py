@@ -88,6 +88,11 @@ class Patient(StrictIgnoringBaseModel):
     reference: str | None = None
 
 
+class Verification(StrictIgnoringBaseModel):
+    verified: bool
+    verification_date: datetime | None = None
+
+
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
 EXPECTED_SCOPE_CODING_CODE = "research"
 EXPECTED_CATEGORIES = {
@@ -110,6 +115,7 @@ class Consent(StrictIgnoringBaseModel):
     patient: Patient
     date_time: datetime
     policy: Annotated[list[Policy], Field(min_length=1)]
+    verification: list[Verification] | None = None
     provision: RootConsentProvision | None = None
 
     @model_validator(mode="after")
