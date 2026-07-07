@@ -11,6 +11,18 @@ class StrictIgnoringBaseModel(StrictBaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class Extension(StrictBaseModel):
+    # Extensions carry an open-ended value[x] payload, so extra keys are allowed here only.
+    model_config = ConfigDict(extra="allow")
+    url: str
+
+
+class FhirElement(StrictBaseModel):
+    # Every FHIR element may carry an id and extensions; any other unknown field stays forbidden.
+    id: str | None = None
+    extension: list[Extension] | None = None
+
+
 class ProvisionType(StrEnum):
     DENY = "deny"
     PERMIT = "permit"
@@ -25,7 +37,7 @@ class Status(StrEnum):
     ENTERED_IN_ERROR = "entered-in-error"
 
 
-class Period(StrictBaseModel):
+class Period(FhirElement):
     start: datetime
     end: datetime
 
@@ -48,7 +60,7 @@ class Policy(StrictIgnoringBaseModel):
     uri: str
 
 
-class Coding(StrictBaseModel):
+class Coding(FhirElement):
     system: str
     version: str | None = None
     code: str
@@ -56,7 +68,7 @@ class Coding(StrictBaseModel):
     user_selected: bool | None = None
 
 
-class CodeableConcept(StrictBaseModel):
+class CodeableConcept(FhirElement):
     coding: Annotated[list[Coding], Field(min_length=1)]
     text: str | None = None
 
@@ -74,6 +86,11 @@ class RootConsentProvision(StrictIgnoringBaseModel):
 
 class Patient(StrictIgnoringBaseModel):
     reference: str | None = None
+
+
+class Verification(StrictIgnoringBaseModel):
+    verified: bool
+    verification_date: datetime | None = None
 
 
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
@@ -98,6 +115,7 @@ class Consent(StrictIgnoringBaseModel):
     patient: Patient
     date_time: datetime
     policy: Annotated[list[Policy], Field(min_length=1)]
+    verification: list[Verification] | None = None
     provision: RootConsentProvision | None = None
 
     @model_validator(mode="after")
