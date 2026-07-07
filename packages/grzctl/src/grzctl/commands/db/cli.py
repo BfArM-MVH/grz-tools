@@ -941,14 +941,14 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-def _research_consented_today(submission: Submission) -> bool | None:
-    """Research consent for the submission re-evaluated as of today.
+def _research_consented_now(submission: Submission) -> bool | None:
+    """Research consent for the submission re-evaluated as of now.
 
     Unlike the persisted ``consented`` field (evaluated at the submission date),
-    this recomputes consent from the stored redacted metadata using today's date.
+    this recomputes consent from the stored redacted metadata using the current date.
 
     :param submission: Submission whose stored metadata to evaluate.
-    :returns: ``True``/``False`` for the consent decision today, or ``None`` when
+    :returns: ``True``/``False`` for the consent decision now, or ``None`` when
         no metadata is stored (e.g. rows migrated without backpopulated metadata)
         or when the stored metadata cannot be parsed.
     """
@@ -957,17 +957,17 @@ def _research_consented_today(submission: Submission) -> bool | None:
     try:
         metadata = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
     except ValidationError:
-        log.debug("Could not parse stored metadata for submission %s to evaluate consent today.", submission.id)
+        log.debug("Could not parse stored metadata for submission %s to evaluate consent now.", submission.id)
         return None
     return metadata.consents_to_research(date=date.today())
 
 
-def _build_attribute_table(submission: Submission, research_consented_today: bool | None) -> rich.table.Table:
+def _build_attribute_table(submission: Submission, research_consented_now: bool | None) -> rich.table.Table:
     """Build the attribute table shown by ``submission show``.
 
     :param submission: Submission to render.
-    :param research_consented_today: Research consent re-evaluated as of today
-        (see :func:`_research_consented_today`), or ``None`` when unavailable.
+    :param research_consented_now: Research consent re-evaluated as of now
+        (see :func:`_research_consented_now`), or ``None`` when unavailable.
     :returns: A populated rich table of submission attributes.
     """
     attribute_table = rich.table.Table(box=None)
@@ -994,11 +994,11 @@ def _build_attribute_table(submission: Submission, research_consented_today: boo
             rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
         )
         if attr_name == "consented":
-            # Adjacent row: research consent re-evaluated as of today (recomputed from stored metadata).
+            # Adjacent row: research consent re-evaluated as of now (recomputed from stored metadata).
             attribute_table.add_row(
-                rich.text.Text("Research consent (today)", style="cyan"),
-                rich.text.Text(str(research_consented_today))
-                if research_consented_today is not None
+                rich.text.Text("Research consent (now)", style="cyan"),
+                rich.text.Text(str(research_consented_now))
+                if research_consented_now is not None
                 else _TEXT_MISSING,
             )
     return attribute_table
@@ -1019,11 +1019,11 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
 
-    research_consented_today = _research_consented_today(submission)
+    research_consented_now = _research_consented_now(submission)
 
     if output_json:
         submission_dict = submission.model_dump(mode="json")
-        submission_dict["research_consented_today"] = research_consented_today
+        submission_dict["research_consented_now"] = research_consented_now
         submission_dict["states"] = []
 
         for state_log in sorted(submission.states, key=lambda s: s.timestamp):
@@ -1043,7 +1043,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         sys.stdout.write("\n")
         return
 
-    attribute_table = _build_attribute_table(submission, research_consented_today)
+    attribute_table = _build_attribute_table(submission, research_consented_now)
 
     renderables: list[rich.console.RenderableType] = [rich.padding.Padding(attribute_table, (1, 0))]
     if submission.states:

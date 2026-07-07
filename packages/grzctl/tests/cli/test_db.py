@@ -731,7 +731,7 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
         "disease_type": metadata.submission.disease_type,
         "basic_qc_passed": None,
         "consented": metadata.consents_to_research(date=metadata.submission.submission_date),
-        "research_consented_today": metadata.consents_to_research(date=date.today()),
+        "research_consented_now": metadata.consents_to_research(date=date.today()),
         "selected_for_qc": None,
         "detailed_qc_passed": None,
         "genomic_study_type": metadata.submission.genomic_study_type,
@@ -1114,5 +1114,5 @@ def test_submission_show_json_includes_failure_reason(blank_database_config_path
     parsed = json.loads(result_show.stdout)
     error_state = next(s for s in parsed["states"] if s["state"] == "Error")
     assert error_state["failure_reason"] == "decryption_error"
-    # No metadata stored for this submission -> today's research consent cannot be evaluated.
-    assert parsed["research_consented_today"] is None
+    # No metadata stored for this submission -> current research consent cannot be evaluated.
+    assert parsed["research_consented_now"] is None
