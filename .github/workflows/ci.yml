@@ -5,6 +5,9 @@ on:
     branches:
       - main
   pull_request:
+  # Merge queue: required checks must report on the queue's speculative merge
+  # commit, which arrives via the merge_group event (not pull_request).
+  merge_group:
   workflow_dispatch:
 
 env:
@@ -125,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     # Run always on PRs to main, or if determine-changes says something relevant changed on push to main.
     # This ensures quality checks run even if no "package" code changed but e.g. a workflow file did.
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -159,7 +162,7 @@ jobs:
   quality-checks-rust:
     name: Global Quality Checks (Rust)
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -184,7 +187,7 @@ jobs:
     name: Build grz-check Binary
     needs: [ quality-checks-rust ]
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -242,7 +245,7 @@ jobs:
         python-version:
           - "3.12"
           - "3.13"
-    if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.build-grz-check-binary.result == 'success' && (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.build-grz-check-binary.result == 'success' && (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

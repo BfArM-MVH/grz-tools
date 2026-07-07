@@ -6,10 +6,20 @@ on:
       - opened
       - edited
       - reopened
+      # Required-check safety: re-run on every push so the check stamps each new
+      # head commit, otherwise a required title check gets stuck "Expected".
+      - synchronize
+  # Merge queue: the workflow must run on merge_group so the required
+  # "Conventional commit PRs" check reports on the queue's merge commit.
+  merge_group:
 
 jobs:
   main:
     name: Validate PR title
+    # No PR context in a merge_group event, and the title was already validated
+    # before the PR entered the queue. Skip here - the aggregator below still
+    # reports success (a skipped need is allowed), satisfying the required check.
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
