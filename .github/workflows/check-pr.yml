@@ -32,3 +32,20 @@ jobs:
           requireScope: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Aggregator job: a single, stable check-run name to use as the required
+  # status check in branch protection, independent of the underlying job name.
+  conventional-commit-pr:
+    name: Conventional commit PRs
+    needs: [main]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify PR title validation did not fail
+        run: |
+          # Fail only on failure/cancelled; a skipped run is allowed.
+          result="${{ needs.main.result }}"
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            echo "PR title validation did not pass: $result"
+            exit 1
+          fi

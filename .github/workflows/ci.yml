@@ -335,3 +335,47 @@ jobs:
         env:
           GRZ_TOX_PACKAGE: ${{ steps.pkg_info.outputs.name }}
         run: uv run tox -e py${{ matrix.python-version }} -- ${{ matrix.package.path }}
+
+  # Aggregator job: a single, stable check-run name to use as the required
+  # status check in branch protection. Stays valid even when matrix jobs are
+  # skipped (nothing changed) or individual job names change. Lists every leaf
+  # job below - keep this in sync when adding or removing jobs.
+  ci:
+    name: CI
+    needs:
+      - determine-changes
+      - quality-checks-python
+      - quality-checks-rust
+      - build-grz-check-binary
+      - test-changed-packages-rust
+      - run-workspace-tests-python
+      - test-changed-packages-python
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify no upstream job failed
+        shell: bash
+        run: |
+          # Fail only on failure/cancelled. A skipped job is allowed.
+          declare -A results=(
+            [determine-changes]="${{ needs.determine-changes.result }}"
+            [quality-checks-python]="${{ needs.quality-checks-python.result }}"
+            [quality-checks-rust]="${{ needs.quality-checks-rust.result }}"
+            [build-grz-check-binary]="${{ needs.build-grz-check-binary.result }}"
+            [test-changed-packages-rust]="${{ needs.test-changed-packages-rust.result }}"
+            [run-workspace-tests-python]="${{ needs.run-workspace-tests-python.result }}"
+            [test-changed-packages-python]="${{ needs.test-changed-packages-python.result }}"
+          )
+          failed=0
+          for job in "${!results[@]}"; do
+            result="${results[$job]}"
+            echo "$job=$result"
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "::error::Upstream job did not pass: $job=$result"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All upstream jobs passed or were skipped."
