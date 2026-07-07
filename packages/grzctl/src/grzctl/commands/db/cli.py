@@ -997,9 +997,7 @@ def _build_attribute_table(submission: Submission, research_consented_now: bool 
             # Adjacent row: research consent re-evaluated as of now (recomputed from stored metadata).
             attribute_table.add_row(
                 rich.text.Text("Research consent (now)", style="cyan"),
-                rich.text.Text(str(research_consented_now))
-                if research_consented_now is not None
-                else _TEXT_MISSING,
+                rich.text.Text(str(research_consented_now)) if research_consented_now is not None else _TEXT_MISSING,
             )
     return attribute_table
 
