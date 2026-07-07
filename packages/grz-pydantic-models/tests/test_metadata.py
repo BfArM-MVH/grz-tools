@@ -333,6 +333,57 @@ def test_research_consent_parse(case: str, valid: bool):
         )
 
 
+def test_research_consent_tolerates_fhir_extensions():
+    """FHIR allows id/extension on every element, so they must not be rejected on codings, concepts, or periods."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+
+    consent_raw["scope"]["coding"][0]["extension"] = [{"url": "http://example.org/ext", "valueString": "x"}]
+    consent_raw["scope"]["coding"][0]["id"] = "coding-1"
+    consent_raw["category"][0]["extension"] = [{"url": "http://example.org/ext"}]
+    consent_raw["provision"]["provision"][0]["period"]["extension"] = [{"url": "http://example.org/ext"}]
+    consent_raw["provision"]["provision"][0]["period"]["id"] = "period-1"
+
+    Consent.model_validate(consent_raw)
+
+
+def test_research_consent_parses_verification_date():
+    """A well-formed FHIR verification block (verified + verificationDate) must be parsed, not ignored."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+    consent_raw["verification"] = [{"verified": True, "verificationDate": "2026-03-27T11:27:01+01:00"}]
+
+    consent = Consent.model_validate(consent_raw)
+
+    assert consent.verification is not None
+    assert consent.verification[0].verified is True
+    assert consent.verification[0].verification_date is not None
+
+
+def test_research_consent_rejects_verification_without_verified():
+    """`verified` is required (FHIR 1..1), so a verification entry missing it must be rejected."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+    consent_raw["verification"] = [{"verificationDate": "2026-03-27T11:27:01+01:00"}]
+
+    with pytest.raises(ValidationError):
+        Consent.model_validate(consent_raw)
+
+
+def test_research_consent_still_rejects_unknown_fields():
+    """Allowing id/extension must not turn into accepting arbitrary unknown fields."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+    consent_raw["scope"]["coding"][0]["pandorras-box"] = "I am in"
+
+    with pytest.raises(ValidationError):
+        Consent.model_validate(consent_raw)
+
+
 @pytest.mark.parametrize(
     "cases,consenting",
     (
