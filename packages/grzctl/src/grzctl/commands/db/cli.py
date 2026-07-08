@@ -27,12 +27,17 @@ from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.transfer import init_s3_client
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
+    CaseHasLinkedSubmissionsError,
+    CaseNotFoundError,
     DatabaseConfigurationError,
+    DuplicatePsnError,
     SubmissionError,
     SubmissionNotFoundError,
+    SubmissionTypeInvalidForCaseError,
 )
 from grz_db.models.author import Author
 from grz_db.models.submission import (
+    Case,
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
@@ -48,6 +53,7 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
     LibraryType,
@@ -130,6 +136,171 @@ def db(
 def submission(ctx: click.Context):
     """Submission operations"""
     pass
+
+
+@db.group()
+@click.pass_context
+def case(ctx: click.Context):
+    """Case operations"""
+    pass
+
+
+_CASE_MUTABLE_KEYS = sorted(set(Case.__table__.columns.keys()) - Case.immutable_fields)
+
+
+@case.command("list")
+@output_json
+@click.pass_context
+def case_list(ctx: click.Context, output_json: bool):
+    """List all cases with their linked-submission counts."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    cases = db_service.list_cases()
+
+    if output_json:
+        payload = [{**case_obj.model_dump(), "submission_count": count} for case_obj, count in cases]
+        console.print_json(json.dumps(payload, default=str))
+        return
+
+    table = rich.table.Table(title="Cases")
+    table.add_column("ID", justify="right")
+    table.add_column("PSN")
+    table.add_column("Submitter ID")
+    table.add_column("Local Case ID")
+    table.add_column("Submissions", justify="right")
+    for case_obj, count in cases:
+        table.add_row(
+            str(case_obj.id),
+            case_obj.psn if case_obj.psn is not None else "-",
+            case_obj.submitter_id if case_obj.submitter_id is not None else "-",
+            case_obj.local_case_id if case_obj.local_case_id is not None else "-",
+            str(count),
+        )
+    console.print(table)
+
+
+@case.command("show")
+@click.argument("case_id", type=int)
+@output_json
+@click.pass_context
+def case_show(ctx: click.Context, case_id: int, output_json: bool):
+    """Show a case and its linked submissions."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    case_obj = db_service.get_case(case_id)
+    if case_obj is None:
+        console_err.print(f"[red]Error: {CaseNotFoundError(case_id)}[/red]")
+        raise click.Abort()
+    submissions = db_service.list_submissions_for_case(case_id)
+
+    if output_json:
+        payload = {
+            **case_obj.model_dump(),
+            "submissions": [
+                {
+                    "id": s.id,
+                    "submission_type": s.submission_type,
+                    "latest_state": (latest.state if (latest := s.get_latest_state()) else None),
+                }
+                for s in submissions
+            ],
+        }
+        console.print_json(json.dumps(payload, default=str))
+        return
+
+    attribute_table = rich.table.Table(box=None)
+    attribute_table.add_column("Attribute", justify="right")
+    attribute_table.add_column("Value")
+    for label, value in (
+        ("ID", str(case_obj.id)),
+        ("PSN", case_obj.psn),
+        ("Submitter ID", case_obj.submitter_id),
+        ("Local Case ID", case_obj.local_case_id),
+    ):
+        attribute_table.add_row(
+            rich.text.Text(label, style="cyan"),
+            rich.text.Text(str(value)) if value is not None else _TEXT_MISSING,
+        )
+
+    submissions_table = rich.table.Table(title="Submissions")
+    submissions_table.add_column("Submission ID")
+    submissions_table.add_column("Type")
+    submissions_table.add_column("Latest State")
+    for s in submissions:
+        latest = s.get_latest_state()
+        submissions_table.add_row(
+            s.id,
+            str(s.submission_type) if s.submission_type is not None else "-",
+            str(latest.state) if latest is not None else "-",
+        )
+    console.print(rich.panel.Panel.fit(rich.console.Group(attribute_table, submissions_table), title=f"Case {case_id}"))
+
+
+@case.command("modify", epilog="Currently available KEYs are: " + ", ".join(_CASE_MUTABLE_KEYS))
+@click.argument("case_id", type=int)
+@click.argument("key", metavar="KEY", type=click.Choice(_CASE_MUTABLE_KEYS))
+@click.argument("value", metavar="VALUE", type=str)
+@click.pass_context
+def case_modify(ctx: click.Context, case_id: int, key: str, value: str):
+    """Modify a mutable field of a case (``psn``, ``submitter_id``, ``local_case_id``)."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.modify_case(case_id, key, value)
+        console_err.print(f"[green]Updated {key} of case {case_id}[/green]")
+    except (CaseNotFoundError, DuplicatePsnError) as e:
+        console_err.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
+
+
+@case.command("create")
+@click.argument("submitter_id", type=str)
+@click.argument("local_case_id", type=str)
+@click.option("--psn", default=None, help="RKI pseudonym (must be unique).")
+@click.pass_context
+def case_create(ctx: click.Context, submitter_id: str, local_case_id: str, psn: str | None):
+    """Manually create a case (cases are normally created during populate)."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        case_obj = db_service.create_case(submitter_id=submitter_id, local_case_id=local_case_id, psn=psn)
+        console_err.print(
+            f"[green]Created case {case_obj.id} for submitter '{submitter_id}', local case '{local_case_id}'[/green]"
+        )
+    except DuplicatePsnError as e:
+        console_err.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
+
+
+@case.command("relink")
+@click.argument("submission_id", type=str)
+@click.argument("case_id", type=int)
+@click.pass_context
+def case_relink(ctx: click.Context, submission_id: str, case_id: int):
+    """Relink a submission to a different case (repair; respects one-initial-per-case)."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.set_submission_case(submission_id, case_id)
+        console_err.print(f"[green]Linked submission '{submission_id}' to case {case_id}[/green]")
+    except (SubmissionNotFoundError, CaseNotFoundError, SubmissionTypeInvalidForCaseError) as e:
+        console_err.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
+
+
+@case.command("delete")
+@click.argument("case_id", type=int)
+@click.pass_context
+def case_delete(ctx: click.Context, case_id: int):
+    """Delete an empty case (refuses when submissions are still linked)."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.delete_case(case_id)
+        console_err.print(f"[green]Deleted case {case_id}[/green]")
+    except (CaseNotFoundError, CaseHasLinkedSubmissionsError) as e:
+        console_err.print(f"[red]Error: {e}[/red]")
+        raise click.Abort() from e
 
 
 @db.command()
@@ -649,7 +820,7 @@ def _prepare_donor_console_table(
 )
 @_ignore_field_option
 @click.pass_context
-def populate(  # noqa: C901, PLR0913
+def populate(  # noqa: C901, PLR0912, PLR0913
     ctx: click.Context,
     submission_id: str,
     metadata_path: str,
@@ -697,6 +868,19 @@ def populate(  # noqa: C901, PLR0913
             "Add 'tan_g'/'pseudonym' to --ignore-field to bypass, "
             "or use 'grzctl db submission modify' directly."
         ) from e
+
+    if "pseudonym" not in set(ignore_field) and metadata.submission.local_case_id != REDACTED_LOCAL_CASE_ID:
+        try:
+            case = db_service.assign_case(
+                submission_id,
+                submitter_id=metadata.submission.submitter_id,
+                local_case_id=metadata.submission.local_case_id,
+                submission_type=metadata.submission.submission_type,
+            )
+        except SubmissionError as e:
+            console_err.print(f"[red]Error: {e}[/red]")
+            raise click.Abort() from e
+        console_err.print(f"[green]Submission linked to case {case.id}.[/green]")
 
     submission_uploaded_date = (
         submission_date.date() if submission_date is not None else submission.submission_uploaded_date
@@ -1021,6 +1205,8 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
 
     if output_json:
         submission_dict = submission.model_dump(mode="json")
+        # case_id is an internal FK; the submitter_id contract is served directly from the submission.
+        submission_dict.pop("case_id", None)
         submission_dict["research_consented_now"] = research_consented_now
         submission_dict["states"] = []
 
