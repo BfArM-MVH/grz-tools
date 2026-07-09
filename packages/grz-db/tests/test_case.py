@@ -76,7 +76,9 @@ def test_assign_case_addition_links_existing_case(db: SubmissionDb):
     _add(db, initial, SubmissionType.initial)
     _add(db, addition, SubmissionType.addition)
 
-    case = db.assign_case(initial, submitter_id=SUBMITTER_A, local_case_id="caseX", submission_type=SubmissionType.initial)
+    case = db.assign_case(
+        initial, submitter_id=SUBMITTER_A, local_case_id="caseX", submission_type=SubmissionType.initial
+    )
     case2 = db.assign_case(
         addition, submitter_id=SUBMITTER_A, local_case_id="caseX", submission_type=SubmissionType.addition
     )
