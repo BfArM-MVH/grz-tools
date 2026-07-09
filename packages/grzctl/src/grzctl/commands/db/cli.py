@@ -75,6 +75,9 @@ console_err = rich.console.Console(stderr=True)
 log = logging.getLogger(__name__)
 _TEXT_MISSING = rich.text.Text("missing", style="italic yellow")
 
+# Shared positional argument for the many subcommands that take a submission ID.
+_submission_id_argument = click.argument("submission_id", type=str)
+
 
 def get_submission_db_instance(db_url: str, author: Author | None = None) -> SubmissionDb:
     """Creates and returns an instance of SubmissionDb."""
@@ -145,7 +148,10 @@ def case(ctx: click.Context):
     pass
 
 
-_CASE_MUTABLE_KEYS = sorted(set(Case.__table__.columns.keys()) - Case.immutable_fields)
+_CASE_MUTABLE_KEYS = sorted(Case.mutable_fields())
+
+# Shared positional argument for the ``case`` subcommands that take a case primary key.
+_case_id_argument = click.argument("case_id", type=int)
 
 
 @case.command("list")
@@ -180,7 +186,7 @@ def case_list(ctx: click.Context, output_json: bool):
 
 
 @case.command("show")
-@click.argument("case_id", type=int)
+@_case_id_argument
 @output_json
 @click.pass_context
 def case_show(ctx: click.Context, case_id: int, output_json: bool):
@@ -237,7 +243,7 @@ def case_show(ctx: click.Context, case_id: int, output_json: bool):
 
 
 @case.command("modify", epilog="Currently available KEYs are: " + ", ".join(_CASE_MUTABLE_KEYS))
-@click.argument("case_id", type=int)
+@_case_id_argument
 @click.argument("key", metavar="KEY", type=click.Choice(_CASE_MUTABLE_KEYS))
 @click.argument("value", metavar="VALUE", type=str)
 @click.pass_context
@@ -273,8 +279,8 @@ def case_create(ctx: click.Context, submitter_id: str, local_case_id: str, psn: 
 
 
 @case.command("relink")
-@click.argument("submission_id", type=str)
-@click.argument("case_id", type=int)
+@_submission_id_argument
+@_case_id_argument
 @click.pass_context
 def case_relink(ctx: click.Context, submission_id: str, case_id: int):
     """Relink a submission to a different case (repair; respects one-initial-per-case)."""
@@ -289,7 +295,7 @@ def case_relink(ctx: click.Context, submission_id: str, case_id: int):
 
 
 @case.command("delete")
-@click.argument("case_id", type=int)
+@_case_id_argument
 @click.pass_context
 def case_delete(ctx: click.Context, case_id: int):
     """Delete an empty case (refuses when submissions are still linked)."""
@@ -539,7 +545,7 @@ def tui(ctx: click.Context, quarter: int | None, year: int | None):
 
 
 @db.command("should-qc")
-@click.argument("submission_id")
+@_submission_id_argument
 @click.option(
     "--target-percentage",
     "target_percentage",
@@ -614,7 +620,7 @@ def _build_submission_dict_from(
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.pass_context
 def add(ctx: click.Context, submission_id: str):
     """
@@ -634,7 +640,7 @@ def add(ctx: click.Context, submission_id: str):
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.option(
@@ -719,7 +725,7 @@ def update(  # noqa: C901, PLR0913
     epilog="Currently available KEYs are: "
     + ", ".join(sorted(Submission.model_fields.keys() - Submission.immutable_fields))
 )
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("key", metavar="KEY", type=click.Choice(Submission.model_fields.keys()))
 @click.argument("value", metavar="VALUE", type=str)
 @click.pass_context
@@ -805,7 +811,7 @@ def _prepare_donor_console_table(
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
 @click.option(
     "--submission_date",
@@ -969,7 +975,7 @@ class QCReportRow(StrictBaseModel):
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("report_csv_path", metavar="path/to/report.csv", type=grzcli.FILE_R_E)
 @click.option(
     "--qc-workflow-version",
@@ -1086,7 +1092,7 @@ def populate_qc(
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.pass_context
@@ -1187,7 +1193,7 @@ def _build_attribute_table(submission: Submission, research_consented_now: bool 
 
 
 @submission.command("show")
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @output_json
 @click.pass_context
 def show(ctx: click.Context, submission_id: str, output_json: bool):

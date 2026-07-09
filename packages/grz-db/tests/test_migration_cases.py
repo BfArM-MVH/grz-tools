@@ -7,6 +7,7 @@ keeps distinct submitters apart, and leaves unkeyable rows unlinked.
 
 from pathlib import Path
 
+import pytest
 import sqlalchemy
 from grz_db.models.submission import SubmissionDb
 
@@ -68,3 +69,34 @@ def test_cases_backfill_groups_by_submitter_and_local_case(tmp_path: Path):
     assert db.get_submission(null_submitter).case_id is None
 
     assert len(db.list_cases()) == 2
+
+
+def test_cases_backfill_rejects_duplicate_initials(tmp_path: Path):
+    """Two 'initial' submissions sharing (submitter_id, pseudonym) are genuinely inconsistent.
+
+    The migration must fail fast rather than silently pick a winner, exercising the
+    duplicate-detection query (COUNT(*) ... GROUP BY ... HAVING COUNT(*) > 1).
+    """
+    db_url = f"sqlite:///{(tmp_path / 'migrate.sqlite').resolve()}"
+    db = SubmissionDb(db_url=db_url, author=None)
+    db.upgrade_schema(revision=PRE_CASES_REVISION)
+
+    engine = sqlalchemy.create_engine(db_url)
+    submissions = sqlalchemy.Table("submissions", sqlalchemy.MetaData(), autoload_with=engine)
+
+    initial_a = "111111111_2025-01-01_00000001"
+    initial_b = "111111111_2025-01-02_00000002"
+    rows = [
+        # two 'initial' submissions for the same (submitter, local case id) -> inconsistent
+        dict(id=initial_a, tan_g=_tan(1), pseudonym="caseX", submitter_id="111111111", submission_type="initial"),
+        dict(id=initial_b, tan_g=_tan(2), pseudonym="caseX", submitter_id="111111111", submission_type="initial"),
+    ]
+    with engine.begin() as conn:
+        conn.execute(submissions.insert(), rows)
+
+    with pytest.raises(RuntimeError, match="more than one 'initial' submission shares"):
+        db.upgrade_schema(revision=CASES_REVISION)
+
+    # the failed upgrade must not have created the cases table
+    inspector = sqlalchemy.inspect(engine)
+    assert "cases" not in inspector.get_table_names()
