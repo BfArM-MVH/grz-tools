@@ -1164,7 +1164,7 @@ class SubmissionDb:
         :param submitter_id: Submitter identifier resolution key.
         :param local_case_id: Submitter-local case identifier resolution key.
         :param psn: RKI pseudonym; must be unique across cases when set.
-        :returns: The newly created, refreshed :class:`Case`.
+        :returns: The newly created :class:`Case`, with its database-assigned ``id`` populated.
         :raises DuplicatePsnError: if ``psn`` is already assigned to another case.
         """
         with self._get_session() as session:
@@ -1192,7 +1192,7 @@ class SubmissionDb:
         :param key: Name of the column to set (e.g. ``"psn"``, ``"submitter_id"``,
             ``"local_case_id"``).
         :param value: New value for the column.
-        :returns: The updated, refreshed :class:`Case`.
+        :returns: The updated :class:`Case`, reloaded from the database.
         :raises ValueError: if ``key`` is not a column of ``cases`` or is read-only.
         :raises CaseNotFoundError: if no case has the given ``case_id``.
         :raises DuplicatePsnError: if ``key`` is ``"psn"`` and ``value`` is
@@ -1241,13 +1241,13 @@ class SubmissionDb:
     def set_submission_case(self, submission_id: str, case_id: int) -> Submission:
         """Link (or relink) a submission to an existing case.
 
-        The one-initial-per-case invariant is enforced at commit time by a
-        partial unique index; a violation raises rather than silently
-        overwriting the existing link.
+        The one-initial-per-case rule is enforced at commit time by a partial
+        unique index (a unique index limited to ``initial`` submissions); a
+        violation raises rather than silently overwriting the existing link.
 
         :param submission_id: ID of the submission to link.
         :param case_id: Primary key of the target case.
-        :returns: The updated, refreshed :class:`Submission`.
+        :returns: The updated :class:`Submission`, reloaded from the database.
         :raises SubmissionNotFoundError: if no submission has the given
             ``submission_id``.
         :raises CaseNotFoundError: if no case has the given ``case_id``.
@@ -1284,12 +1284,13 @@ class SubmissionDb:
         submission_type: SubmissionType,
         resolver: CaseResolver | None = None,
     ) -> Case:
-        """Resolve or create the case for a submission and link it, enforcing the initial invariant.
+        """Resolve or create the case for a submission and link it, keeping exactly one initial per case.
 
         The *resolver* strategy decides how an existing case is located (default:
         ``(submitter_id, local_case_id)``). A brand-new case requires an ``initial`` submission; a
         non-initial submission requires the case to already have a (different) initial submission.
-        ``test`` submissions are exempt. Re-running for an already-linked submission is idempotent.
+        ``test`` submissions are exempt. Re-running for an already-linked submission makes no further
+        change (safe to repeat).
 
         :param submission_id: ID of the submission to assign.
         :param submitter_id: Submitter identifier passed to the resolver and
@@ -1298,9 +1299,9 @@ class SubmissionDb:
             resolver and stored on a newly created case.
         :param psn: RKI pseudonym passed to the resolver and stored on a newly
             created case.
-        :param submission_type: Type of the submission, used to enforce the
-            initial invariant (``initial``/``test`` may open a new case; other
-            types require the case to already have an initial submission).
+        :param submission_type: Type of the submission. Decides which links are
+            allowed: ``initial`` and ``test`` may open a new case, while other
+            types require the case to already have an initial submission.
         :param resolver: Strategy used to locate an existing case; defaults to
             :data:`DEFAULT_CASE_RESOLVER` (:class:`SubmitterLocalCaseResolver`).
         :returns: The resolved or newly created :class:`Case` the submission is

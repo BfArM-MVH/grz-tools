@@ -1,5 +1,5 @@
 """Tests for the case tracking layer: the ``Case`` model, the case service methods, the pluggable
-case resolver, and the initial/non-initial invariant enforced by ``SubmissionDb.assign_case``.
+case resolver, and the one-initial-per-case rule enforced by ``SubmissionDb.assign_case``.
 """
 
 from pathlib import Path
@@ -175,7 +175,7 @@ def test_delete_case_empty_and_refuses_when_linked(db: SubmissionDb):
 
 
 def test_relink_rejects_second_initial_via_db_constraint(db: SubmissionDb):
-    """set_submission_case bypasses the app invariant; the partial unique index is the backstop."""
+    """set_submission_case skips the application-level check; the partial unique index is the last line of defense."""
     sid_a = _sid(SUBMITTER_A, "0000000a")
     sid_b = _sid(SUBMITTER_B, "0000000b")
     _add(db, sid_a, SubmissionType.initial)
