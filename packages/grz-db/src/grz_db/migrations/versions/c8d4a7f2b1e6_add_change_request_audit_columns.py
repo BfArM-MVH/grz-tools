@@ -1,7 +1,7 @@
 """add change-request audit columns
 
 Revision ID: c8d4a7f2b1e6
-Revises: 834bd50b8734
+Revises: 66f36abbea34
 Create Date: 2026-05-08 00:00:00.000000+00:00
 
 """
@@ -14,7 +14,7 @@ from sqlmodel.sql.sqltypes import AutoString
 
 # revision identifiers, used by Alembic.
 revision: str = "c8d4a7f2b1e6"
-down_revision: str | Sequence[str] | None = "834bd50b8734"
+down_revision: str | Sequence[str] | None = "66f36abbea34"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

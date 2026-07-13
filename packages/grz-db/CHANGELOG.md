@@ -1,5 +1,57 @@
 # Changelog
 
+## [2.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.1...grz-db-v2.1.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **grz-db:** correct tan_g population by raising sqlmodel floor ([#594](https://github.com/BfArM-MVH/grz-tools/issues/594)) ([abaa69f](https://github.com/BfArM-MVH/grz-tools/commit/abaa69f85ce84c0e3f69feaac0223b2622d16916))
+
+## [2.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.0...grz-db-v2.1.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** force timezone during consent_by_code ([98571dd](https://github.com/BfArM-MVH/grz-tools/commit/98571dd409e98dedb29d74360d21ee726f3f5617))
+* **grzctl:** fix backfill datetime vs date issues ([98571dd](https://github.com/BfArM-MVH/grz-tools/commit/98571dd409e98dedb29d74360d21ee726f3f5617))
+* **grzctl:** fix backfill datetime vs date issues ([#583](https://github.com/BfArM-MVH/grz-tools/issues/583)) ([98571dd](https://github.com/BfArM-MVH/grz-tools/commit/98571dd409e98dedb29d74360d21ee726f3f5617))
+
+## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.0.0...grz-db-v2.1.0) (2026-05-19)
+
+
+### Features
+
+* **grz-db,grz-common:** clean up SubmissionDb.populate API surface ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
+
+### Bug Fixes
+
+* **grz-common,grz-db,grzctl:** move populate logic into SubmissionDb ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grz-pydantic-models,grz-db:** align inconsistent version pins ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grzctl:** correct stale grz-cli hint in submission-not-found errors ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
+## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.2.0...grz-db-v2.0.0) (2026-05-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501))
+
+### Features
+
+* **grz-cli, grz-db:** require & record QC workflow version; log grzctl runtime version (closes [#532](https://github.com/BfArM-MVH/grz-tools/issues/532)) ([#561](https://github.com/BfArM-MVH/grz-tools/issues/561)) ([b0929cf](https://github.com/BfArM-MVH/grz-tools/commit/b0929cfd8b77fbc8d6f9e940ff8d2834b1c3271e))
+* **grz-db,grzctl:** add selected_for_qc submission column to submission database ([#531](https://github.com/BfArM-MVH/grz-tools/issues/531)) ([a753bd2](https://github.com/BfArM-MVH/grz-tools/commit/a753bd2f44a73fc113e10a736dd8c09f7c035b07))
+* **grz-tools:** add structured failure reason tracking for submissions ([#544](https://github.com/BfArM-MVH/grz-tools/issues/544)) ([65a2143](https://github.com/BfArM-MVH/grz-tools/commit/65a214389e91be00e99fb812293bfe40cca45cf0))
+* **grzctl, grz-db, grz-pydantic-models:** Improved populate ([#547](https://github.com/BfArM-MVH/grz-tools/issues/547)) ([8cbf232](https://github.com/BfArM-MVH/grz-tools/commit/8cbf2323747a3a2c35623b80f7ad1ef420217f07))
+* **grzctl:** add state-based filtering to grzctl db list (latest by default) ([#523](https://github.com/BfArM-MVH/grz-tools/issues/523)) ([9a715f4](https://github.com/BfArM-MVH/grz-tools/commit/9a715f40ec80d149fe5ab2fbda383da9671ff332)), closes [#504](https://github.com/BfArM-MVH/grz-tools/issues/504)
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501)) ([8953102](https://github.com/BfArM-MVH/grz-tools/commit/895310211d36796d995c37f1929a12458195d4c7))
+* **grzctl:** Introduce "backfill" command to re-read metadata from the archive ([#559](https://github.com/BfArM-MVH/grz-tools/issues/559)) ([9e83ad3](https://github.com/BfArM-MVH/grz-tools/commit/9e83ad31dbb9dd44f18d1f0ed1dbef82f4f1f63e))
+
+
+### Bug Fixes
+
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v1.1.0...grz-db-v1.2.0) (2025-12-04)
 
 

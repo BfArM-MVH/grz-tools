@@ -1,16 +1,18 @@
 """Command for managing a submission database"""
 
 import csv
+import itertools
 import json
 import logging
 import sys
 import traceback
-from collections import namedtuple
+from collections import Counter, namedtuple
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+import botocore.exceptions
 import click
 import grz_common.cli as grzcli
 import rich.console
@@ -23,6 +25,7 @@ import yaml
 from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
+from grz_common.transfer import init_s3_client
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     DatabaseConfigurationError,
@@ -35,9 +38,11 @@ from grz_db.models.submission import (
     ChangeRequestLog,
     ChangeRequestLogBase,
     DetailedQCResult,
+    FailureReasonEnum,
     FieldDiff,
     RequestRawContentType,
     Submission,
+    SubmissionBase,
     SubmissionDb,
     SubmissionDiffCollection,
     SubmissionStateEnum,
@@ -46,8 +51,6 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.submission.metadata import (
-    REDACTED_LOCAL_CASE_ID,
-    REDACTED_TAN,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
     LibraryType,
@@ -55,7 +58,9 @@ from grz_pydantic_models.submission.metadata import (
     SequenceType,
 )
 from pydantic import Field, ValidationError
+from tqdm.auto import tqdm
 
+from ... import get_versions
 from ...models.config import DbConfig, ListConfig
 from .. import limit
 from ..change_request_template import render_yaml_template
@@ -264,6 +269,7 @@ def list_submissions(
 
     if output_json:
         json.dump(submission_dicts, sys.stdout)
+        sys.stdout.write("\n")
     else:
         console.print(table)
 
@@ -324,6 +330,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
 
     if output_json:
         json.dump(submission_dicts, sys.stdout)
+        sys.stdout.write("\n")
     else:
         console.print(table)
 
@@ -462,9 +469,21 @@ def add(ctx: click.Context, submission_id: str):
 @click.argument("submission_id", type=str)
 @click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.option(
+    "--failure-reason",
+    type=click.Choice(FailureReasonEnum.list(), case_sensitive=False),
+    help="Failure reason when state is ERROR.",
+)
 @click.option("--ignore-error-state/--confirm-error-state")
 @click.pass_context
-def update(ctx: click.Context, submission_id: str, state_str: str, data_json: str | None, ignore_error_state: bool):  # noqa: C901
+def update(  # noqa: C901, PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    state_str: str,
+    data_json: str | None,
+    ignore_error_state: bool,
+    failure_reason: str | None,
+):
     """Update a submission to the given state. Optionally accepts additional JSON data to associate with the log entry."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -473,7 +492,6 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid state value '{state_str}'.[/red]")
         raise click.Abort() from e
-
     parsed_data = None
     if data_json:
         try:
@@ -499,16 +517,26 @@ def update(ctx: click.Context, submission_id: str, state_str: str, data_json: st
             console_err.print(f"[yellow]Not modifying state of errored submission '{submission_id}'.[/yellow]")
             ctx.exit()
 
-        new_state_log = db_service.update_submission_state(submission_id, state_enum, parsed_data)
+        failure_reason_enum = None
+        if failure_reason:
+            failure_reason_enum = FailureReasonEnum(failure_reason)
+
+        new_state_log = db_service.update_submission_state(
+            submission_id,
+            state_enum,
+            data=parsed_data,
+            failure_reason=failure_reason_enum,
+            grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
+        )
+
         console_err.print(
             f"[green]Submission '{submission_id}' updated to state '{new_state_log.state.value}'. Log ID: {new_state_log.id}[/green]"
         )
         if new_state_log.data:
             console_err.print(f"  Data: {new_state_log.data}")
-
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except click.exceptions.Exit as e:
         if e.exit_code != 0:
@@ -542,12 +570,21 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         console_err.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
+_ignore_field_option = click.option(
+    "--ignore-field",
+    "ignore_field",
+    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
+    help="Do not populate the given field from the metadata to the database. Can be specified multiple times.",
+    multiple=True,
+)
 
 
 def _prepare_submission_console_table(submission_diff: "SubmissionDiffCollection") -> rich.console.RenderableType:
@@ -613,11 +650,7 @@ def _prepare_donor_console_table(
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
-@click.option(
-    "--ignore-field",
-    help="Do not populate the given key from the metadata to the database. Can be specified multiple times to ignore multiple keys.",
-    multiple=True,
-)
+@_ignore_field_option
 @click.pass_context
 def populate(  # noqa: C901, PLR0913
     ctx: click.Context,
@@ -648,7 +681,7 @@ def populate(  # noqa: C901, PLR0913
             raise SubmissionNotFoundError(submission_id)
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
@@ -658,24 +691,30 @@ def populate(  # noqa: C901, PLR0913
     with open(metadata_path) as fd:
         metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
 
-    if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_field:
+    try:
+        SubmissionDb.assert_metadata_not_redacted(metadata, submission_id, set(ignore_field))
+    except ValueError as e:
         raise ValueError(
-            f"Submission {submission_id} has redacted tan_g in metadata.json: {metadata_path}. "
-            "Refusing to populate a seemingly-redacted TAN. "
-            "Add 'tan_g' to ignore fields and/or use 'grzctl db submission modify' directly."
+            f"Refusing to populate a seemingly-redacted submission: {e} "
+            f"(from {metadata_path}). "
+            "Add 'tan_g'/'pseudonym' to --ignore-field to bypass, "
+            "or use 'grzctl db submission modify' directly."
+        ) from e
+
+    submission_uploaded_date = (
+        submission_date.date() if submission_date is not None else submission.submission_uploaded_date
+    )
+    if submission_date is None:
+        log.warning(
+            "No submission date provided and submission date is missing in the database. "
+            "Will use submission date from metadata.json..."
         )
-    if (
-        not metadata.submission.local_case_id or metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
-    ) and "pseudonym" not in ignore_field:
-        raise ValueError(
-            f"Submission {submission_id} has missing or redacted local_case_id in metadata.json: {metadata_path}. "
-            "Add 'pseudonym' to ignore fields and/or use 'grzctl db submission modify' directly."
-        )
+        submission_uploaded_date = metadata.submission.submission_date
 
     submission_diff, donors_diff = db_service.diff(
         submission_id,
         metadata,
-        submission_date,
+        submission_uploaded_date=submission_uploaded_date,
         ignore_fields=set(ignore_field),
     )
 
@@ -690,8 +729,7 @@ def populate(  # noqa: C901, PLR0913
 
     if not submission_diff.has_pending and not donors_diff.has_pending:
         console_err.print("[green]Database is already up to date with the provided metadata![/green]")
-        ctx.exit()
-        return  # ctx.exit() raises SystemExit; this line satisfies static analysers
+        return
 
     console.print(
         rich.panel.Panel.fit(
@@ -743,18 +781,33 @@ class QCReportRow(StrictBaseModel):
     targeted_regions_above_min_coverage_required: float
     targeted_regions_above_min_coverage_deviation: float
     targeted_regions_above_min_coverage_qc_status: QCStatus = Field(alias="targetedRegionsAboveMinCoverageQCStatus")
+    # Written by GRZ_QC_Workflow >= v2.1.0. Optional so reports from older workflow
+    # versions (without the column) still parse. Auto-aliased to "grzQcWorkflowVersion"
+    # via StrictBaseModel's to_camel alias generator.
+    grz_qc_workflow_version: str | None = None
 
 
 @submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("report_csv_path", metavar="path/to/report.csv", type=grzcli.FILE_R_E)
 @click.option(
+    "--qc-workflow-version",
+    type=str,
+    required=False,
+    default=None,
+    envvar="GRZCTL_QC_WORKFLOW_VERSION",
+    help="QC workflow version to record when the report has no 'grzQcWorkflowVersion' column. "
+    "If the report carries one, it takes precedence. Env: GRZCTL_QC_WORKFLOW_VERSION.",
+)
+@click.option(
     "--confirm/--no-confirm",
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
 @click.pass_context
-def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, confirm: bool):
+def populate_qc(
+    ctx: click.Context, submission_id: str, report_csv_path: str, qc_workflow_version: str | None, confirm: bool
+):
     """Populate the submission database from a detailed QC pipeline report."""
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -765,6 +818,28 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, co
         reports = []
         for row in reader:
             reports.append(QCReportRow(**dict(zip(header, row, strict=True))))
+
+    # The report (GRZ_QC_Workflow >= v2.1.0) carries its own version in the
+    # 'grzQcWorkflowVersion' column; treat that as the source of truth and only fall back to
+    # --qc-workflow-version for older reports that lack the column.
+    report_versions = {report.grz_qc_workflow_version for report in reports if report.grz_qc_workflow_version}
+    if len(report_versions) > 1:
+        raise click.ClickException(f"Inconsistent grzQcWorkflowVersion values in report: {sorted(report_versions)}")
+    report_version = report_versions.pop() if report_versions else None
+
+    if report_version and qc_workflow_version and report_version != qc_workflow_version:
+        raise click.ClickException(
+            f"--qc-workflow-version ({qc_workflow_version}) disagrees with the report's "
+            f"grzQcWorkflowVersion ({report_version}). Omit --qc-workflow-version to use the report "
+            "value, which is authoritative."
+        )
+
+    effective_qc_workflow_version = report_version or qc_workflow_version
+    if not effective_qc_workflow_version:
+        raise click.ClickException(
+            "No QC workflow version found: the report has no 'grzQcWorkflowVersion' column and "
+            "--qc-workflow-version was not provided."
+        )
 
     report_mtime = datetime.fromtimestamp(Path(report_csv_path).stat().st_mtime, tz=UTC)
     results = []
@@ -791,6 +866,7 @@ def populate_qc(ctx: click.Context, submission_id: str, report_csv_path: str, co
                 targeted_regions_above_min_coverage_passed_qc=report.targeted_regions_above_min_coverage_qc_status
                 == QCStatus.PASS,
                 targeted_regions_above_min_coverage_percent_deviation=report.targeted_regions_above_min_coverage_deviation,
+                qc_workflow_version=effective_qc_workflow_version,
             )
         )
     table = rich.table.Table(
@@ -1031,12 +1107,73 @@ def change_request(  # noqa: PLR0913
 
     except SubmissionNotFoundError as e:
         console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grz-cli db submission add {submission_id}")
+        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
         raise click.Abort() from e
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
+def _research_consented_now(submission: Submission) -> bool | None:
+    """Research consent for the submission re-evaluated as of now.
+
+    Unlike the persisted ``consented`` field (evaluated at the submission date),
+    this recomputes consent from the stored redacted metadata using the current date.
+
+    :param submission: Submission whose stored metadata to evaluate.
+    :returns: ``True``/``False`` for the consent decision now, or ``None`` when
+        no metadata is stored (e.g. rows migrated without backpopulated metadata)
+        or when the stored metadata cannot be parsed.
+    """
+    if not submission.submission_metadata:
+        return None
+    try:
+        metadata = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
+    except ValidationError:
+        log.debug("Could not parse stored metadata for submission %s to evaluate consent now.", submission.id)
+        return None
+    return metadata.consents_to_research(date=date.today())
+
+
+def _build_attribute_table(submission: Submission, research_consented_now: bool | None) -> rich.table.Table:
+    """Build the attribute table shown by ``submission show``.
+
+    :param submission: Submission to render.
+    :param research_consented_now: Research consent re-evaluated as of now
+        (see :func:`_research_consented_now`), or ``None`` when unavailable.
+    :returns: A populated rich table of submission attributes.
+    """
+    attribute_table = rich.table.Table(box=None)
+    attribute_table.add_column("Attribute", justify="right")
+    attribute_table.add_column("Value")
+    for label, attr_name in (
+        ("tanG", "tan_g"),
+        ("Pseudonym", "pseudonym"),
+        ("Submission Uploaded Date", "submission_uploaded_date"),
+        ("Submission Size", "submission_size"),
+        ("Submission Type", "submission_type"),
+        ("Submitter ID", "submitter_id"),
+        ("Data Node ID", "data_node_id"),
+        ("Disease Type", "disease_type"),
+        ("Genomic Study Type", "genomic_study_type"),
+        ("Genomic Study Subtype", "genomic_study_subtype"),
+        ("Basic QC Passed", "basic_qc_passed"),
+        ("Research consent (at submission)", "consented"),
+        ("Selected For QC", "selected_for_qc"),
+        ("Detailed QC Passed", "detailed_qc_passed"),
+    ):
+        attr = getattr(submission, attr_name)
+        attribute_table.add_row(
+            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
+        )
+        if attr_name == "consented":
+            # Adjacent row: research consent re-evaluated as of now (recomputed from stored metadata).
+            attribute_table.add_row(
+                rich.text.Text("Research consent (now)", style="cyan"),
+                rich.text.Text(str(research_consented_now)) if research_consented_now is not None else _TEXT_MISSING,
+            )
+    return attribute_table
 
 
 @submission.command("show")
@@ -1054,15 +1191,21 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
 
+    research_consented_now = _research_consented_now(submission)
+
     if output_json:
         submission_dict = submission.model_dump(mode="json")
+        submission_dict["research_consented_now"] = research_consented_now
         submission_dict["states"] = []
 
         for state_log in sorted(submission.states, key=lambda s: s.timestamp):
             signature_status, verifying_key_comment = _verify_signature(
                 ctx.obj["public_keys"], state_log.author_name, state_log
             )
-            state_dict = state_log.model_dump(mode="json", include={"id", "timestamp", "state", "data"})
+            state_dict = state_log.model_dump(
+                mode="json", include={"id", "timestamp", "state", "data", "failure_reason", "grzctl_versions"}
+            )
+
             state_dict["data_steward"] = state_log.author_name
             state_dict["data_steward_signature"] = signature_status
             state_dict["signature_key_comment"] = verifying_key_comment
@@ -1072,37 +1215,17 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         sys.stdout.write("\n")
         return
 
-    attribute_table = rich.table.Table(box=None)
-    attribute_table.add_column("Attribute", justify="right")
-    attribute_table.add_column("Value")
-    for label, attr_name in (
-        ("tanG", "tan_g"),
-        ("Pseudonym", "pseudonym"),
-        ("Submission Date", "submission_date"),
-        ("Submission Size", "submission_size"),
-        ("Submission Type", "submission_type"),
-        ("Submitter ID", "submitter_id"),
-        ("Data Node ID", "data_node_id"),
-        ("Disease Type", "disease_type"),
-        ("Genomic Study Type", "genomic_study_type"),
-        ("Genomic Study Subtype", "genomic_study_subtype"),
-        ("Basic QC Passed", "basic_qc_passed"),
-        ("Consented", "consented"),
-        ("Selected For QC", "selected_for_qc"),
-        ("Detailed QC Passed", "detailed_qc_passed"),
-    ):
-        attr = getattr(submission, attr_name)
-        attribute_table.add_row(
-            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
-        )
+    attribute_table = _build_attribute_table(submission, research_consented_now)
 
     renderables: list[rich.console.RenderableType] = [rich.padding.Padding(attribute_table, (1, 0))]
     if submission.states:
-        state_table = rich.table.Table(title="State History")
+        state_table = rich.table.Table(title="State History", show_header=True)
         state_table.add_column("Log ID", style="dim", width=12)
         state_table.add_column("Timestamp (UTC)", style="yellow")
         state_table.add_column("State", style="green")
+        state_table.add_column("Failure Reason", style="red", min_width=15)
         state_table.add_column("Data", style="cyan", overflow="ellipsis")
+        state_table.add_column("Dependency Versions", style="blue")
         state_table.add_column("Data Steward", style="magenta")
         state_table.add_column("Signature Status")
 
@@ -1121,7 +1244,9 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
                 str(state_log.id),
                 state_log.timestamp.isoformat(),
                 state_str,
+                state_log.failure_reason.value if state_log.failure_reason else "",
                 data_str,
+                json.dumps(state_log.grzctl_versions) if state_log.grzctl_versions else _TEXT_MISSING,
                 data_steward_str,
                 signature_status_str,
             )
@@ -1134,6 +1259,247 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         title=f"Submission {submission.id}",
     )
     console.print(panel)
+
+
+def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str | None:
+    """Return the raw metadata.json content for *submission_id*, or None when not found.
+
+    Raises for any S3 error that is not a simple 404/NoSuchKey.
+    """
+    key = f"{submission_id}/metadata/metadata.json"
+    try:
+        response = s3_client.get_object(Bucket=bucket, Key=key)
+        return response["Body"].read().decode("utf-8")
+    except botocore.exceptions.ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in {"404", "NoSuchKey"}:
+            return None
+        raise
+
+
+class _BackfillResult(StrEnum):
+    UPDATED = "updated"
+    UP_TO_DATE = "up_to_date"
+    NOT_FOUND = "not_found"
+    WOULD_OVERWRITE = "would_overwrite"
+    ERROR = "error"
+
+
+def _backfill_submission(  # noqa: PLR0911, PLR0913
+    current_submission: Submission,
+    s3_client: Any,
+    bucket: str,
+    db_service: SubmissionDb,
+    dry_run: bool,
+    force: bool,
+    ignore_fields: set[str],
+) -> _BackfillResult:
+    """Fetch metadata.json from S3 for one submission and commit a diff to the database.
+
+    Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
+    as ``grzctl db submission populate`` so that every derived field (not only
+    *submission_size* and *submission_metadata*) is kept consistent, donor records are
+    synchronised, and already-up-to-date submissions are detected without a write.
+
+    When *force* is False, a destructive diff (existing non-NULL field would change)
+    is skipped instead of committed, preserving manually-corrected values. The caller
+    is expected to pre-filter already-populated rows so re-runs do not re-pay the S3
+    network cost for them.
+    """
+    submission_id = current_submission.id
+
+    try:
+        raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: S3 error – {exc}[/red]")
+        return _BackfillResult.ERROR
+
+    if raw_json is None:
+        # this is expected for submissions residing in the other consent bucket, so we do not explicitly log that here
+        # but still report them in the final stats
+        return _BackfillResult.NOT_FOUND
+
+    try:
+        metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: failed to parse metadata.json – {exc}[/red]")
+        return _BackfillResult.ERROR
+
+    try:
+        # If submission_uploaded_date is not set in the DB, replace it with the one from metadata.json.
+        # This case is expected for submissions that were created before the submission_date field was added.
+        submission_uploaded_date = (
+            current_submission.submission_uploaded_date
+            if current_submission.submission_uploaded_date
+            else metadata.submission.submission_date
+        )
+
+        submission_diff, donors_diff = db_service.diff(
+            submission_id,
+            metadata,
+            submission_uploaded_date=submission_uploaded_date,
+            ignore_fields=ignore_fields or None,
+        )
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: diff failed – {exc}[/red]")
+        return _BackfillResult.ERROR
+
+    if not submission_diff.has_pending and not donors_diff.has_pending:
+        console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
+        return _BackfillResult.UP_TO_DATE
+
+    if dry_run:
+        console_err.print(
+            f"[yellow]  [dry-run] {submission_id}: would update fields: {[d.key for d in submission_diff.pending]}[/yellow]"
+        )
+        return _BackfillResult.UPDATED
+
+    if not force and submission_diff.has_pending_destructive:
+        console_err.print(
+            f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}, skipping (use --force to overwrite).[/dim]"
+        )
+        return _BackfillResult.WOULD_OVERWRITE
+
+    try:
+        db_service.commit_changes(submission_id, submission_diff, donors_diff)
+        console_err.print(
+            f"[green]  {submission_id}: updated ({', '.join(d.key for d in submission_diff.pending) or 'no scalar changes'}).[/green]"
+        )
+        return _BackfillResult.UPDATED
+    except Exception as exc:
+        console_err.print(f"[red]  {submission_id}: failed to commit – {exc}[/red]")
+        return _BackfillResult.ERROR
+
+
+@db.command("backfill")
+@grzcli.configuration
+@click.option(
+    "--dry-run/--no-dry-run",
+    default=False,
+    help="Preview which submissions would be updated without writing to the database.",
+)
+@click.option(
+    "--force/--no-force",
+    default=False,
+    help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
+    "Without this flag, such submissions are reported and skipped.",
+)
+@click.option(
+    "--submission-id",
+    "submission_ids",
+    multiple=True,
+    metavar="SUBMISSION_ID",
+    help="Restrict backfill to these submission IDs (may be repeated). Mutually exclusive with --start-date/--end-date.",
+)
+@click.option(
+    "--start-date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=datetime.min,
+    help="Process only submissions processed on or after this date (inclusive). Defaults to the beginning of time.",
+)
+@click.option(
+    "--end-date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=datetime.max,
+    help="Process only submissions processed on or before this date (inclusive). Defaults to the end of time.",
+)
+@_ignore_field_option
+@click.pass_context
+def backfill(  # noqa: PLR0913
+    ctx: click.Context,
+    configuration: dict[str, Any],
+    dry_run: bool,
+    force: bool,
+    submission_ids: tuple[str, ...],
+    start_date: datetime,
+    end_date: datetime,
+    ignore_field: tuple[str, ...],
+    **kwargs,
+):
+    r"""Backfill submission fields for existing submissions by re-reading metadata.json from S3.
+
+    Uses the same diff/commit path as ``grzctl db submission populate``: only fields
+    that are actually missing or changed are written, donor records are synchronised,
+    and already-up-to-date submissions are silently skipped.
+
+    Existing non-NULL fields whose values differ from metadata.json are not overwritten
+    unless --force is given.
+
+    Candidate selection (mutually exclusive):
+
+    \b
+      (default)                all submissions within the date window (defaults to the full historical range)
+      --submission-id ...      explicit list of submission IDs
+      --start-date/--end-date  narrow the default date window
+
+    This command is idempotent: re-running it is always safe.
+    """
+    # ── Validate option combinations ────────────────────────────────────────
+    if submission_ids and (start_date != datetime.min or end_date != datetime.max):
+        raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
+
+    ignore_fields = set(ignore_field) | {
+        "submission_uploaded_date",
+        "tan_g",
+        "local_case_id",
+    }
+    try:
+        list_config = ListConfig.model_validate(configuration)
+    except Exception:
+        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
+        sys.exit(1)
+
+    db_service = get_submission_db_instance(ctx.obj["db_url"], author=ctx.obj["author"])
+
+    # ── Determine which submissions to process ──────────────────────────────
+    if submission_ids:
+        candidates: list[Submission] = []
+        for sid, sub in zip(submission_ids, db_service.get_submissions(list(submission_ids)), strict=True):
+            if sub is None:
+                console_err.print(f"[yellow]Warning: submission '{sid}' not found in database, skipping.[/yellow]")
+            else:
+                candidates.append(sub)
+    else:
+        candidates = list(db_service.list_processed_between(start_date.date(), end_date.date()))
+        console_err.print(
+            f"[cyan]Date window: {start_date.date()} – {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
+        )
+
+    counts: Counter[_BackfillResult] = Counter()
+
+    console_err.print(
+        f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
+        f"from bucket '{list_config.s3.bucket}'…[/cyan]"
+    )
+
+    # ── Fetch metadata from S3 and update DB ────────────────────────────────
+    s3_client = init_s3_client(list_config.s3)
+
+    for submission in tqdm(candidates):
+        counts[
+            _backfill_submission(
+                submission,
+                s3_client,
+                list_config.s3.bucket,
+                db_service,
+                dry_run,
+                force,
+                ignore_fields,
+            )
+        ] += 1
+
+    # ── Summary ─────────────────────────────────────────────────────────────
+    prefix = "[dry-run] " if dry_run else ""
+    verb = "Would update" if dry_run else "Updated"
+    console_err.print(
+        f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}\n"
+        f"  Up to date: {counts[_BackfillResult.UP_TO_DATE]}\n"
+        f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
+        f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
+        f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
+    )
+    if counts[_BackfillResult.ERROR]:
+        sys.exit(1)
 
 
 @db.command("sync-from-inbox")

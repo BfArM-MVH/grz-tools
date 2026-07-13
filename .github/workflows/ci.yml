@@ -5,12 +5,12 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
+  # Merge queue: required checks must report on the queue's speculative merge
+  # commit, which arrives via the merge_group event (not pull_request).
+  merge_group:
   workflow_dispatch:
 
 env:
-  UV_VERSION: '0.8.5'
   GRZ_CHECK_WORKSPACE: "packages/grz-check"
   RUST_TOOLCHAIN_VERSION: "1.89.0"
 
@@ -91,7 +91,7 @@ jobs:
           rust_json_objects=""
 
           for pkg_path in "${unique_test_dirs_array[@]}"; do
-            if [[ -f "$pkg_path/pyproject.toml" ]]; then
+            if [[ -f "$pkg_path/pyproject.toml" && -d "$pkg_path/tests" ]]; then
               # Note: We only need the path in the matrix object now
               python_json_objects+=$(jq -n --arg path "$pkg_path" '{"path": $path}')
             fi
@@ -128,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     # Run always on PRs to main, or if determine-changes says something relevant changed on push to main.
     # This ensures quality checks run even if no "package" code changed but e.g. a workflow file did.
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -138,7 +138,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: "pyproject.toml"
           enable-cache: true
 
       - name: Set up Python
@@ -162,7 +162,7 @@ jobs:
   quality-checks-rust:
     name: Global Quality Checks (Rust)
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -187,7 +187,7 @@ jobs:
     name: Build grz-check Binary
     needs: [ quality-checks-rust ]
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -245,7 +245,7 @@ jobs:
         python-version:
           - "3.12"
           - "3.13"
-    if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.build-grz-check-binary.result == 'success' && (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped') }}
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.build-grz-check-binary.result == 'success' && (needs.test-changed-packages-rust.result == 'success' || needs.test-changed-packages-rust.result == 'skipped') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -270,7 +270,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: "pyproject.toml"
           enable-cache: true
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -283,7 +283,7 @@ jobs:
         run: which grz-check && grz-check --version
 
       - name: Test ${{ matrix.python-version }}
-        run: uv run tox -e ${{ matrix.python-version }}
+        run: uv run tox -e ${{ matrix.python-version }} -- tests/
 
   test-changed-packages-python:
     name: Test Changed Python Packages
@@ -318,7 +318,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: "pyproject.toml"
           enable-cache: true
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -335,4 +335,50 @@ jobs:
         run: cd ${{ matrix.package.path }} && uv lock --check
 
       - name: Run tests for ${{ steps.pkg_info.outputs.name }}
-        run: cd ${{ matrix.package.path }} && uv run tox -e py${{ matrix.python-version }}
+        env:
+          GRZ_TOX_PACKAGE: ${{ steps.pkg_info.outputs.name }}
+        run: uv run tox -e py${{ matrix.python-version }} -- ${{ matrix.package.path }}
+
+  # Aggregator job: a single, stable check-run name to use as the required
+  # status check in branch protection. Stays valid even when matrix jobs are
+  # skipped (nothing changed) or individual job names change. Lists every leaf
+  # job below - keep this in sync when adding or removing jobs.
+  ci:
+    name: CI
+    needs:
+      - determine-changes
+      - quality-checks-python
+      - quality-checks-rust
+      - build-grz-check-binary
+      - test-changed-packages-rust
+      - run-workspace-tests-python
+      - test-changed-packages-python
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify no upstream job failed
+        shell: bash
+        run: |
+          # Fail only on failure/cancelled. A skipped job is allowed.
+          declare -A results=(
+            [determine-changes]="${{ needs.determine-changes.result }}"
+            [quality-checks-python]="${{ needs.quality-checks-python.result }}"
+            [quality-checks-rust]="${{ needs.quality-checks-rust.result }}"
+            [build-grz-check-binary]="${{ needs.build-grz-check-binary.result }}"
+            [test-changed-packages-rust]="${{ needs.test-changed-packages-rust.result }}"
+            [run-workspace-tests-python]="${{ needs.run-workspace-tests-python.result }}"
+            [test-changed-packages-python]="${{ needs.test-changed-packages-python.result }}"
+          )
+          failed=0
+          for job in "${!results[@]}"; do
+            result="${results[$job]}"
+            echo "$job=$result"
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "::error::Upstream job did not pass: $job=$result"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All upstream jobs passed or were skipped."

@@ -33,7 +33,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: wheels-linux-${{ matrix.target }}
-          path: dist
+          path: packages/grz-check/dist
 
   sdist:
     runs-on: ubuntu-latest
@@ -52,7 +52,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: wheels-sdist
-          path: dist
+          path: packages/grz-check/dist
 
   release:
     name: Release to PyPI

@@ -1,4 +1,5 @@
 import contextlib
+import datetime
 import shutil
 from unittest.mock import MagicMock, patch
 
@@ -269,7 +270,19 @@ def test_db_wrappers(
     )
 
     with mock_command(command_spec, submission_id) as (mock_worker, mock_extra):
-        result = runner.invoke(cli, args)
+        # download.py's --populate path calls `worker.parse_submission().metadata.content`
+        # plus `get_metadata_upload_timestamp(...)`. Configure the mocked Worker and patch
+        # the S3 helpers so the populate runs end-to-end against the real db. Harmless for
+        # commands that never call these.
+        if mock_worker is not None:
+            mock_worker.parse_submission.return_value.metadata.content = parsed_metadata
+        with (
+            patch("grzctl.commands.download.init_s3_client") as mock_init_s3,
+            patch("grzctl.commands.download.get_metadata_upload_timestamp") as mock_get_ts,
+        ):
+            mock_init_s3.return_value = MagicMock()
+            mock_get_ts.return_value.date.return_value = datetime.date.today()
+            result = runner.invoke(cli, args)
 
         assert result.exit_code == 0, f"Command failed: {result.output}"
 
@@ -532,3 +545,57 @@ def test_dbcontext_error_handling(db_engine, full_config_path, test_metadata, tm
         assert history[-1] == SubmissionStateEnum.ERROR
         assert history[-2] == SubmissionStateEnum.CLEANING
         assert history[-3] == SubmissionStateEnum.QCED
+
+
+@pytest.mark.parametrize(
+    ("valid_metadata", "expected_basic_qc_passed"),
+    [(True, True), (False, None)],
+)
+def test_validation_basic_qc_passed_update(
+    valid_metadata, expected_basic_qc_passed, db_engine, full_config_path, test_metadata, tmp_path
+):
+    runner = click.testing.CliRunner()
+    cli = build_cli()
+
+    parsed_metadata, metadata_path_fixture = test_metadata
+    submission_id = parsed_metadata.submission_id
+
+    submission_dir = tmp_path / "submission"
+    submission_dir.mkdir()
+    for d in ["metadata", "files", "logs", "encrypted_files"]:
+        (submission_dir / d).mkdir()
+    shutil.copy(metadata_path_fixture, submission_dir / "metadata" / "metadata.json")
+
+    setup_db_state(
+        runner,
+        cli,
+        full_config_path,
+        submission_id,
+        metadata_path_fixture,
+        initial_state=SubmissionStateEnum.DECRYPTED,
+    )
+
+    # Mock the validate.callback
+    with (
+        patch("grzctl.commands.validate.validate_module.validate.callback") as mock_validate_callback,
+    ):
+        # Fail validation on purpose for negative case
+        if not valid_metadata:
+            mock_validate_callback.side_effect = Exception("validation failed")
+
+        validate_args = [
+            "validate",
+            "--submission-dir",
+            str(submission_dir),
+            "--config-file",
+            str(full_config_path),
+            "--update-db",
+        ]
+
+        # Test to see if basic_qc_passed is updated to true on successful validation
+        runner.invoke(cli, validate_args)
+
+    # Create Submission from Db and check
+    with Session(db_engine) as db_session:
+        submission_from_db = db_session.exec(select(Submission).where(Submission.id == submission_id)).first()
+    assert submission_from_db.basic_qc_passed is expected_basic_qc_passed

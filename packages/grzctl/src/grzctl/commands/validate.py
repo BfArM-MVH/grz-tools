@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 @click.option(
     "--mmap/--no-mmap",
     "mmap",
-    default=True,
+    default=False,
     hidden=True,
     help="Whether to use mmap.",
 )
@@ -60,12 +60,16 @@ def validate(  # noqa: PLR0913
         start_state=SubmissionStateEnum.VALIDATING,
         end_state=SubmissionStateEnum.VALIDATED,
         enabled=update_db,
-    ):
+    ) as dbcontext_inst:
         validate_module.validate.callback(  # type: ignore[misc]
             configuration=configuration,
             submission_dir=submission_dir,
             force=force,
             threads=threads,
-            no_mmap=not mmap,
+            mmap=mmap,
             **kwargs,
         )
+
+        # If validation successful, update basic_qc_passed to True in db
+        if update_db:
+            _ = dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", "true")

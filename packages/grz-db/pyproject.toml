@@ -16,9 +16,9 @@ classifiers = [
 ]
 dependencies = [
     "alembic[tz] >=1.16.1",
-    "cryptography >=45.0.3",
-    "sqlmodel >=0.0.27",
-    "grz-pydantic-models >=2.5,<3",
+    "cryptography >=45.0.3,<49",
+    "sqlmodel >=0.0.38",
+    "grz-pydantic-models >=2.7,<3",
     "psycopg[binary] ~=3.2"
 ]
 
@@ -26,6 +26,15 @@ dependencies = [
 
 [dependency-groups]
 dev = ["tox", "tox-uv"]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-sugar",
+    "pytest-postgresql",
+    "psycopg",
+    "grz-pydantic-models-testing",
+]
 
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"

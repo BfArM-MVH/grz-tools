@@ -8,7 +8,17 @@ from datetime import date
 
 import pytest
 from grz_pydantic_models.mii.consent import Consent
-from grz_pydantic_models.submission.metadata.v1 import File, FileType, GrzSubmissionMetadata, ResearchConsent
+from grz_pydantic_models.submission.metadata import (
+    DiseaseType,
+    ResearchConsentNoScopeJustification,
+)
+from grz_pydantic_models.submission.metadata.v1 import (
+    File,
+    FileType,
+    GrzSubmissionMetadata,
+    LibraryType,
+    ResearchConsent,
+)
 from grz_pydantic_models_testing import example_metadata, example_research_consent
 from packaging.version import Version
 from pydantic import ValidationError
@@ -306,6 +316,7 @@ def test_file_extensions():
     (
         ("minimal_consented", True),
         ("minimal_consented_with_datetime", True),
+        ("minimal_consented_with_nonzero_datetime", True),
         ("extra_consented", True),
         ("minimal_nonconsented", True),
         ("minimal_consented_expired", True),
@@ -320,6 +331,57 @@ def test_research_consent_parse(case: str, valid: bool):
         Consent.model_validate_json(
             importlib.resources.files(example_research_consent).joinpath(f"{case}.json").read_text()
         )
+
+
+def test_research_consent_tolerates_fhir_extensions():
+    """FHIR allows id/extension on every element, so they must not be rejected on codings, concepts, or periods."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+
+    consent_raw["scope"]["coding"][0]["extension"] = [{"url": "http://example.org/ext", "valueString": "x"}]
+    consent_raw["scope"]["coding"][0]["id"] = "coding-1"
+    consent_raw["category"][0]["extension"] = [{"url": "http://example.org/ext"}]
+    consent_raw["provision"]["provision"][0]["period"]["extension"] = [{"url": "http://example.org/ext"}]
+    consent_raw["provision"]["provision"][0]["period"]["id"] = "period-1"
+
+    Consent.model_validate(consent_raw)
+
+
+def test_research_consent_parses_verification_date():
+    """A well-formed FHIR verification block (verified + verificationDate) must be parsed, not ignored."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+    consent_raw["verification"] = [{"verified": True, "verificationDate": "2026-03-27T11:27:01+01:00"}]
+
+    consent = Consent.model_validate(consent_raw)
+
+    assert consent.verification is not None
+    assert consent.verification[0].verified is True
+    assert consent.verification[0].verification_date is not None
+
+
+def test_research_consent_rejects_verification_without_verified():
+    """`verified` is required (FHIR 1..1), so a verification entry missing it must be rejected."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+    consent_raw["verification"] = [{"verificationDate": "2026-03-27T11:27:01+01:00"}]
+
+    with pytest.raises(ValidationError):
+        Consent.model_validate(consent_raw)
+
+
+def test_research_consent_still_rejects_unknown_fields():
+    """Allowing id/extension must not turn into accepting arbitrary unknown fields."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
+    )
+    consent_raw["scope"]["coding"][0]["pandorras-box"] = "I am in"
+
+    with pytest.raises(ValidationError):
+        Consent.model_validate(consent_raw)
 
 
 @pytest.mark.parametrize(
@@ -387,3 +449,215 @@ def test_research_consent_no_subprovisions():
     )
     del consent_json_raw["provision"]["provision"]
     Consent.model_validate_json(json.dumps(consent_json_raw))
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(
+        [
+            "oncomine_panel_tumor_only",
+            "panel_tumor_only",
+            "wes_tumor_germline",
+        ],
+        TESTED_VERSIONS,
+    ),
+)
+def test_disease_type_rare_missing_wgs_raises(dataset: str, version: str):
+    """
+    These datasets natively use panel or wes. For rare diseases, they fail the wgs check.
+    """
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    with pytest.raises(
+        ValidationError, match=r"the index donor must have at least one lab datum with libraryType 'wgs' or 'wgs_lr'"
+    ):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(["wes_tumor_germline"], TESTED_VERSIONS),
+)
+def test_disease_type_rare_missing_wgs_warns_before_cutoff(dataset: str, version: str, caplog):
+    """Before the cutoff, missing wgs for a rare disease should only log a warning."""
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-05-31"
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "starting 01.06.2026" not in str(e)
+
+    assert "starting 01.06.2026" in caplog.text
+
+
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_disease_type_rare_index_has_wgs_and_panel_passes(version: str):
+    """
+    If the index donor has at least WGS but additionally some panel data, it should still pass.
+    """
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    # duplicate the WGS lab datum but change its type to panel
+    panel_datum = copy.deepcopy(metadata["donors"][0]["labData"][0])
+    panel_datum["libraryType"] = LibraryType.panel.value
+    panel_datum["labDataName"] += "_panel"
+
+    # panels require a BED file
+    panel_datum["sequenceData"]["files"].append(
+        {"filePath": "dummy_panel_target.bed", "fileType": "bed", "fileChecksum": "c" * 64, "fileSizeInBytes": 1000}
+    )
+
+    # change file paths/checksums so it doesn't fail unique run/checksum validators
+    for i, file in enumerate(panel_datum["sequenceData"]["files"]):
+        file["fileChecksum"] = f"c{i:063d}"
+        if file["fileType"] == "fastq":
+            file["filePath"] = f"panel_{i}.fastq.gz"
+
+    metadata["donors"][0]["labData"].append(panel_datum)
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "starting 01.06.2026" not in str(e)
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(
+        [
+            "wgs_tumor_germline",
+            "wgs_lr_tumor_only",
+            "wgs_trio",
+        ],
+        TESTED_VERSIONS,
+    ),
+)
+def test_disease_type_rare_valid_library_passes(dataset: str, version: str):
+    """These datasets natively use wgs or wgs_lr. For rare diseases, they must pass."""
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "starting 01.06.2026" not in str(e)
+
+
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_disease_type_rare_non_index_unrestricted(version: str):
+    """Non-index donors (e.g., parents in a trio) are exempt from the WGS rule."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["diseaseType"] = DiseaseType.rare.value
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    # modify a non-index donor (donor[1]) to use a panel
+    for idx, datum in enumerate(metadata["donors"][1]["labData"]):
+        datum["libraryType"] = LibraryType.panel.value
+
+        # panels require a BED file
+        datum["sequenceData"]["files"].append(
+            {
+                "filePath": f"dummy_target_{idx}.bed",
+                "fileType": "bed",
+                "fileChecksum": f"c{idx:063d}",
+                "fileSizeInBytes": 1000,
+            }
+        )
+
+    try:
+        # should pass because the index donor still has WGS
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "starting 01.06.2026" not in str(e)
+
+
+@pytest.mark.parametrize(
+    "version,justification",
+    itertools.product(
+        TESTED_VERSIONS,
+        [ResearchConsentNoScopeJustification.LE_TECH.value, ResearchConsentNoScopeJustification.LE_ORG.value],
+    ),
+)
+def test_no_scope_justification_tech_org_raises(version: str, justification: str):
+    """LE_TECH and LE_ORG justifications should raise an error starting exactly 01.06.2026."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    # Apply to all consents to be thorough
+    for donor in metadata["donors"]:
+        for consent in donor.get("researchConsents", []):
+            consent["noScopeJustification"] = justification
+            consent.pop("scope", None)
+
+    with pytest.raises(ValidationError, match=r"is no longer allowed starting 01\.06\.2026"):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize(
+    "version,justification",
+    itertools.product(
+        TESTED_VERSIONS,
+        [ResearchConsentNoScopeJustification.LE_TECH.value, ResearchConsentNoScopeJustification.LE_ORG.value],
+    ),
+)
+def test_no_scope_justification_tech_org_warns(version: str, justification: str, caplog):
+    """LE_TECH and LE_ORG justifications should only warn strictly before 01.06.2026."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2026-05-31"
+
+    for donor in metadata["donors"]:
+        for consent in donor.get("researchConsents", []):
+            consent["noScopeJustification"] = justification
+            consent.pop("scope", None)
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "is no longer allowed starting 01.06.2026" not in str(e)
+
+    assert "is no longer allowed starting 01.06.2026" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "version,justification",
+    itertools.product(
+        TESTED_VERSIONS,
+        [
+            ResearchConsentNoScopeJustification.UNABLE.value,
+            ResearchConsentNoScopeJustification.REFUSED.value,
+            ResearchConsentNoScopeJustification.NO_RETURN.value,
+            ResearchConsentNoScopeJustification.OTHER.value,
+        ],
+    ),
+)
+def test_no_scope_justification_standard_passes_after_cutoff(version: str, justification: str):
+    """Standard valid justifications should continue to pass seamlessly after 01.06.2026."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2026-06-01"
+
+    for donor in metadata["donors"]:
+        for consent in donor.get("researchConsents", []):
+            consent["noScopeJustification"] = justification
+            consent.pop("scope", None)
+
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "is no longer allowed starting 01.06.2026" not in str(e)

@@ -3,11 +3,19 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-from grz_db.errors import SubmissionNotFoundError
+from grz_common.exceptions import (
+    DecryptionError,
+    EncryptionError,
+    IncompleteSubmissionError,
+    NetworkError,
+    UploadError,
+)
+from grz_db.errors import DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
-from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
 
+from . import get_versions
 from .commands.db.cli import get_submission_db_instance
 from .models.config import DbConfig
 
@@ -80,6 +88,12 @@ class DbContext:
         self.db: SubmissionDb | None = None
 
     @cached_property
+    def grzctl_versions(self) -> dict[str, str]:
+        """Get version information."""
+        versions = get_versions()
+        return {k: v or "unknown" for k, v in versions.items()}
+
+    @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
         # determine expected prior state based on order of enums
         members = list(SubmissionStateEnum)
@@ -106,7 +120,7 @@ class DbContext:
             self._check_prerequisites()
 
             log.debug(f"Updating submission {self.submission_id} state to {self.start_state.name}")
-            self.db.update_submission_state(self.submission_id, self.start_state)
+            self.db.update_submission_state(self.submission_id, self.start_state, grzctl_versions=self.grzctl_versions)
 
         except SubmissionNotFoundError:
             raise
@@ -117,26 +131,45 @@ class DbContext:
 
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> bool:
-        """Handles success or failure state updates."""
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> bool:
+        """Exit the database context.
+
+        Commits the transaction if no exception occurred, otherwise rolls back.
+
+        Returns:
+            False so any exception is propagated.
+        """
         if not self.db:
             return False
 
         if exc_type:
             error_message = str(exc_val)
             error_state = SubmissionStateEnum.ERROR
+            failure_reason = self._map_exception_to_failure_reason(exc_type, exc_val)  # new
             log.error(f"Operation failed for {self.submission_id}. Updating DB to {error_state.name}.")
             try:
-                self.db.update_submission_state(self.submission_id, error_state, data={"error": error_message})
+                self.db.update_submission_state(
+                    self.submission_id,
+                    error_state,
+                    failure_reason=failure_reason,
+                    data={"error": error_message},
+                    grzctl_versions=self.grzctl_versions,
+                )
             except Exception as db_exc:
                 log.error(f"Failed to write error state to DB: {db_exc}")
-
             return False
 
         else:
             log.info(f"Operation successful. Updating DB to {self.end_state.name}.")
             try:
-                self.db.update_submission_state(self.submission_id, self.end_state)
+                self.db.update_submission_state(
+                    self.submission_id, self.end_state, grzctl_versions=self.grzctl_versions
+                )
             except Exception as db_exc:
                 log.error(f"Failed to write success state to DB: {db_exc}")
 
@@ -161,6 +194,25 @@ class DbContext:
             private_key_bytes=key_path.read_bytes(),
             private_key_passphrase=db_config.author.private_key_passphrase,
         )
+
+    def _map_exception_to_failure_reason(
+        self, exc_type: type[BaseException], exc_val: BaseException | None
+    ) -> FailureReasonEnum:
+        """Maps an exception to the closest FailureReasonEnum value."""
+        exception_map: dict[type[BaseException], FailureReasonEnum] = {
+            FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
+            ValidationError: FailureReasonEnum.VALIDATION_ERROR,
+            DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
+            EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
+            NetworkError: FailureReasonEnum.NETWORK_ERROR,
+            UploadError: FailureReasonEnum.UPLOAD_ERROR,
+            DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
+            IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
+        }
+        for exc_class, failure_reason in exception_map.items():
+            if isinstance(exc_val, exc_class):
+                return failure_reason
+        return FailureReasonEnum.UNKNOWN
 
     def _check_prerequisites(self):
         """

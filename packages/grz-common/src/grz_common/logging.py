@@ -7,13 +7,50 @@ This module provides functions for setting up logging configuration.
 from __future__ import annotations
 
 import logging
+import socket
 from os import PathLike
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-LOGGING_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+def get_hostname() -> str | None:
+    """
+    Return the current host name, or ``None`` if it cannot be determined.
+
+    :return: The host name, or ``None`` if :func:`socket.gethostname` fails.
+    """
+    try:
+        return socket.gethostname()
+    except OSError:
+        return None
+
+
+def build_logging_format(hostname: str | None) -> str:
+    """
+    Build the logging format string, including the host name when available.
+
+    :param hostname: The host name to embed, or ``None`` to omit it.
+    :return: A :mod:`logging` format string.
+    """
+    hostname_part = f"{hostname} " if hostname is not None else ""
+    return f"%(asctime)s [%(levelname)s] {hostname_part}%(name)s: %(message)s"
+
+
+HOSTNAME: str | None = get_hostname()
+LOGGING_FORMAT = build_logging_format(HOSTNAME)
 LOGGING_DATEFMT = "%Y-%m-%d %I:%M %p"
+
+
+class AlembicInfoNoiseFilter(logging.Filter):
+    """Filter out repetitive initialization messages from Alembic."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == "alembic.runtime.migration":
+            msg = record.getMessage()
+            if "Context impl" in msg or "Will assume transactional DDL" in msg:
+                return False
+        return True
 
 
 def add_filelogger(file_path: str | PathLike, level: str = "INFO", logger_name: str | None = None) -> None:
@@ -61,5 +98,6 @@ def setup_cli_logging(log_file: str | None, log_level: str):
             log_file,
             log_level.upper(),
         )
+    logging.getLogger("alembic.runtime.migration").addFilter(AlembicInfoNoiseFilter())
 
     log.debug("Logging setup complete.")

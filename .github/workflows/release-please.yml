@@ -6,6 +6,10 @@ on:
       - main # Or your default branch
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
@@ -14,6 +18,8 @@ jobs:
       paths_released: ${{ steps.release.outputs.paths_released }}
       # releases_created is true if any release PR was created/updated
       releases_created: ${{ steps.release.outputs.releases_created }}
+      # JSON array of the open release PR objects (consumed by refresh-lock)
+      prs: ${{ steps.release.outputs.prs }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,13 +32,51 @@ jobs:
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.RELEASE_PLEASE_PAT }}
 
-  release-pr-check:
+  # release-please bumps package versions in the release PR but does not touch
+  # the workspace uv.lock, so `uv lock --check` in CI fails on that PR. This job
+  # refreshes uv.lock on the release PR branch and pushes it back. It checks out
+  # with the PAT (not GITHUB_TOKEN) so the pushed commit re-triggers CI.
+  refresh-lock:
+    name: Refresh uv.lock on release PR
     needs: release-please
-    if: needs.release-please.outputs.releases_created == 'true'
+    if: ${{ needs.release-please.outputs.prs != '' && needs.release-please.outputs.prs != '[]' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Confirm Release PR
+      - name: Determine release PR branch
+        id: branch
         run: |
-          echo "A Release PR has been created or updated by release-please."
-          echo "Affected paths in this release cycle (before PR merge): ${{ needs.release-please.outputs.paths_released }}"
-          echo "Merge the 'chore: release ...' PR to trigger tagging and publishing."
+          BRANCH=$(echo '${{ needs.release-please.outputs.prs }}' | jq -r '.[0].headBranchName')
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.branch.outputs.name }}
+          token: ${{ secrets.RELEASE_PLEASE_PAT }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version-file: "pyproject.toml"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Refresh uv.lock
+        run: |
+          uv lock
+          if git diff --quiet uv.lock; then
+            echo "uv.lock already in sync - nothing to commit."
+            exit 0
+          fi
+          # Attribute the lock refresh to the github-actions bot (41898282 is that
+          # account's stable user id). The push uses RELEASE_PLEASE_PAT so CI re-runs
+          # on the PR - the commit author is independent of the pushing token.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: refresh uv.lock for release"
+          git push
