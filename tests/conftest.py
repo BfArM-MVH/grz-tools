@@ -161,7 +161,7 @@ def remote_bucket_with_version(remote_bucket):
     """Mock S3 bucket with version.json file at root."""
     # Create additional buckets needed by archive/list/clean tests
     s3_client = boto3.client("s3")
-    for bucket_name in ["consented", "non-consented", "interrogation"]:
+    for bucket_name in ["consented", "non-consented"]:
         try:
             s3_client.create_bucket(Bucket=bucket_name)
         except Exception:
