@@ -95,7 +95,7 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False, no_mmap=False):
+    def validate(self, identifiers: IdentifiersModel, force: bool = False, no_mmap: bool = False):
         """
         Validate this submission
 

@@ -1135,6 +1135,7 @@ dev = [
     { name = "tox-uv" },
 ]
 lint = [
+    { name = "boto3-stubs" },
     { name = "mypy" },
     { name = "packaging" },
     { name = "pydantic" },
@@ -1195,6 +1196,7 @@ dev = [
     { name = "tox-uv" },
 ]
 lint = [
+    { name = "boto3-stubs", specifier = ">=1.36,<2" },
     { name = "mypy" },
     { name = "packaging" },
     { name = "pydantic" },
