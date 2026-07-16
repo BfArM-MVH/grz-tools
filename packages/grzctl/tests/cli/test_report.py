@@ -13,7 +13,7 @@ from grz_db.models.submission import Submission
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.report import date_to_quarter_year
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 TEST_METADATA_PATH = importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 
@@ -399,7 +399,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
 def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on databases migrated from prior schema without backpopulating metadata."""
     # add some minimal test data
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_date = date(year=2025, month=9, day=14)

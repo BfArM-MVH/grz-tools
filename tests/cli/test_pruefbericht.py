@@ -341,7 +341,40 @@ def pruefbericht_db_config(tmp_path):
     db_path = tmp_path / "test.db"
     db_url = f"sqlite:///{db_path}"
 
-    config = {"db": {"database_url": db_url, "author": {"name": "test_author"}}}
+    config = {
+        "s3": {
+            "inboxes": {
+                "000000000": {
+                    "inbox": {
+                        "endpoint_url": "http://localhost:9000",
+                        "private_key_path": "/dev/null",
+                    }
+                }
+            }
+        },
+        "archives": {
+            "consented": {
+                "s3": {"endpoint_url": "http://localhost:9000", "bucket": "consented", "public_key_path": "/dev/null"},
+                "public_key_path": "/dev/null",
+            },
+            "non_consented": {
+                "s3": {
+                    "endpoint_url": "http://localhost:9000",
+                    "bucket": "non-consented",
+                    "public_key_path": "/dev/null",
+                },
+                "public_key_path": "/dev/null",
+            },
+            "interrogation": {
+                "s3": {
+                    "endpoint_url": "http://localhost:9000",
+                    "bucket": "interrogation",
+                    "public_key_path": "/dev/null",
+                },
+            },
+        },
+        "db": {"database_url": db_url, "author": {"name": "test_author"}},
+    }
 
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config))

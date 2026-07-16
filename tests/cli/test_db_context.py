@@ -10,7 +10,7 @@ import yaml
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import Submission, SubmissionStateEnum
 from grzctl.cli import build_cli
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
@@ -23,11 +23,49 @@ def full_config_path(
     keys_config_content,
     pruefbericht_config_content,
 ):
-    config_data = {}
+    # Build a valid GrzctlConfig structure
+    config_data = {
+        "s3": {
+            "inboxes": {
+                "260914050": {
+                    "inbox": {
+                        "endpoint_url": "http://localhost:9000",
+                        "private_key_path": "/dev/null",
+                    }
+                }
+            }
+        },
+        "archives": {
+            "consented": {
+                "s3": {"endpoint_url": "http://localhost:9000", "bucket": "consented", "public_key_path": "/dev/null"},
+                "public_key_path": "/dev/null",
+            },
+            "non_consented": {
+                "s3": {
+                    "endpoint_url": "http://localhost:9000",
+                    "bucket": "non-consented",
+                    "public_key_path": "/dev/null",
+                },
+                "public_key_path": "/dev/null",
+            },
+            "interrogation": {
+                "s3": {
+                    "endpoint_url": "http://localhost:9000",
+                    "bucket": "interrogation",
+                    "public_key_path": "/dev/null",
+                },
+            },
+        },
+        "pruefbericht": {
+            "authorization_url": "https://bfarm.localhost/token",
+            "api_base_url": "https://bfarm.localhost/api/",
+            "client_id": "pytest",
+            "client_secret": "pysecret",
+        },
+        "detailed_qc": {"local_storage": str(tmp_path / "qc"), "salt": "test"},
+    }
     config_data.update(db_config_content)
-    config_data.update(s3_config_content)
     config_data.update(keys_config_content)
-    config_data.update(pruefbericht_config_content)
 
     if "author" in config_data.get("db", {}):
         config_data["db"]["author"]["private_key_passphrase"] = "test"
@@ -46,7 +84,7 @@ def full_config_path(
 
 @pytest.fixture
 def db_engine(full_config_path):
-    config = DbConfig.from_path(full_config_path)
+    config = GrzctlConfig.from_path(full_config_path)
     return sqlalchemy.create_engine(config.db.database_url)
 
 
@@ -194,8 +232,8 @@ def build_args(
         },
         {
             "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.validate.Worker",
-            "extra_patch": "grzctl.commands.validate.validate_module.validate.callback",
+            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
+            "extra_patch": "grzctl.commands.cli_wrappers.validate_module.validate.callback",
             "id_source": "submission",
             "initial_state": SubmissionStateEnum.DECRYPTED,
             "intermediate_state": SubmissionStateEnum.VALIDATING,
@@ -203,8 +241,8 @@ def build_args(
         },
         {
             "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.encrypt.Worker",
-            "extra_patch": "grzctl.commands.encrypt.encrypt_module.encrypt.callback",
+            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
+            "extra_patch": "grzctl.commands.cli_wrappers.encrypt_module.encrypt.callback",
             "id_source": "submission",
             "initial_state": SubmissionStateEnum.VALIDATED,
             "intermediate_state": SubmissionStateEnum.ENCRYPTING,
@@ -310,14 +348,14 @@ def test_db_wrappers(
         },
         {
             "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.validate.Worker",
-            "extra_patch": "grzctl.commands.validate.validate_module.validate.callback",
+            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
+            "extra_patch": "grzctl.commands.cli_wrappers.validate_module.validate.callback",
             "id_source": "submission",
         },
         {
             "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.encrypt.Worker",
-            "extra_patch": "grzctl.commands.encrypt.encrypt_module.encrypt.callback",
+            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
+            "extra_patch": "grzctl.commands.cli_wrappers.encrypt_module.encrypt.callback",
             "id_source": "submission",
         },
         {
@@ -388,8 +426,8 @@ def test_db_wrappers_submission_not_in_db(
         },
         {
             "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.validate.Worker",
-            "extra_patch": "grzctl.commands.validate.validate_module.validate.callback",
+            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
+            "extra_patch": "grzctl.commands.cli_wrappers.validate_module.validate.callback",
             "id_source": "submission",
             "wrong_state": SubmissionStateEnum.ENCRYPTED,  # expected: DECRYPTED
             "intermediate_state": SubmissionStateEnum.VALIDATING,
@@ -397,8 +435,8 @@ def test_db_wrappers_submission_not_in_db(
         },
         {
             "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.encrypt.Worker",
-            "extra_patch": "grzctl.commands.encrypt.encrypt_module.encrypt.callback",
+            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
+            "extra_patch": "grzctl.commands.cli_wrappers.encrypt_module.encrypt.callback",
             "id_source": "submission",
             "wrong_state": SubmissionStateEnum.DOWNLOADED,  # expected: VALIDATED
             "intermediate_state": SubmissionStateEnum.ENCRYPTING,
@@ -577,7 +615,7 @@ def test_validation_basic_qc_passed_update(
 
     # Mock the validate.callback
     with (
-        patch("grzctl.commands.validate.validate_module.validate.callback") as mock_validate_callback,
+        patch("grzctl.commands.cli_wrappers.validate_module.validate.callback") as mock_validate_callback,
     ):
         # Fail validation on purpose for negative case
         if not valid_metadata:

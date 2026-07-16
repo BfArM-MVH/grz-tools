@@ -160,6 +160,14 @@ def create_large_file(content: str | bytes, output_file: str | PathLike, target_
 @pytest.fixture
 def remote_bucket_with_version(remote_bucket):
     """Mock S3 bucket with version.json file at root."""
+    # Create additional buckets needed by archive/list/clean tests
+    s3_client = boto3.client("s3")
+    for bucket_name in ["consented", "non-consented", "interrogation"]:
+        try:
+            s3_client.create_bucket(Bucket=bucket_name)
+        except Exception:
+            pass  # already exists
+
     current_version = version("grz-cli")
 
     version_content = {
@@ -360,7 +368,13 @@ def encrypt_config_model(keys_config_content):
 
 @pytest.fixture
 def db_config_model(db_config_content):
-    return grzctl.models.config.DbConfig(**db_config_content)
+    return grzctl.models.config.GrzctlConfig(
+        **db_config_content,
+        s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
+        archives=_GRZCTL_ARCHIVES,
+        pruefbericht={},
+        detailed_qc=_GRZCTL_DETAILED_QC,
+    )
 
 
 @pytest.fixture
@@ -374,12 +388,12 @@ def pruefbericht_config_model(pruefbericht_config_content):
 
 
 @pytest.fixture
-def temp_s3_db_config_file_path(temp_data_dir_path, s3_config_model, db_config_model) -> Path:
+def temp_s3_db_config_file_path(temp_data_dir_path, s3_config_model, db_config_content) -> Path:
     config_file = temp_data_dir_path / "config.db_s3.yaml"
 
     combined = {
         **s3_config_model.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True),
-        **db_config_model.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True),
+        **db_config_content,
     }
 
     with open(config_file, "w") as fd:
@@ -421,10 +435,79 @@ def temp_identifiers_config_file_path(temp_data_dir_path, identifiers_config_mod
 
 
 @pytest.fixture
-def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_model) -> Path:
+def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_content) -> Path:
     config_file = temp_data_dir_path / "config.pruefbericht.yaml"
+    config = _grzctl_config_dict(
+        s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
+        db=_GRZCTL_DB_DUMMY,
+        pruefbericht=pruefbericht_config_content,
+    )
     with open(config_file, "w") as fd:
-        pruefbericht_config_model.to_yaml(fd)
+        yaml.safe_dump(config, fd, sort_keys=False)
+    return config_file
+
+
+# -- GrzctlConfig-format fixtures for tests that use grzctl.cli.build_cli() --
+
+# Shared building blocks for GrzctlConfig test fixtures
+_GRZCTL_ARCHIVE_S3 = {"public_key_path": "/dev/null"}
+_GRZCTL_ARCHIVES = {
+    "consented": {"s3": {"bucket": "consented", **_GRZCTL_ARCHIVE_S3}, "public_key_path": "/dev/null"},
+    "non_consented": {"s3": {"bucket": "non-consented", **_GRZCTL_ARCHIVE_S3}, "public_key_path": "/dev/null"},
+    "interrogation": {"s3": {"bucket": "interrogation"}},
+}
+_GRZCTL_DETAILED_QC = {"local_storage": "/tmp/qc", "salt": "test"}
+_GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
+
+
+def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None) -> dict:
+    """Build a GrzctlConfig dict from the given sections, filling in shared defaults."""
+    config = {
+        "s3": s3,
+        "archives": _GRZCTL_ARCHIVES,
+    }
+    if db is not None:
+        config["db"] = db
+    if keys is not None:
+        config.update(keys)
+    if pruefbericht is not None:
+        config.update(pruefbericht)
+    config["detailed_qc"] = _GRZCTL_DETAILED_QC
+    return config
+
+
+@pytest.fixture
+def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
+    """GrzctlConfig-format S3-only config for grzctl CLI tests."""
+    config_file = temp_data_dir_path / "config.grzctl_s3.yaml"
+    config = _grzctl_config_dict(
+        s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
+    )
+    with open(config_file, "w") as fd:
+        yaml.safe_dump(config, fd, sort_keys=False)
+    return config_file
+
+
+@pytest.fixture
+def temp_grzctl_keys_config_file_path(temp_data_dir_path, keys_config_content) -> Path:
+    """GrzctlConfig-format keys config for grzctl CLI tests."""
+    config_file = temp_data_dir_path / "config.grzctl_keys.yaml"
+    config = _grzctl_config_dict(
+        s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
+        db=_GRZCTL_DB_DUMMY,
+        keys=keys_config_content,
+    )
+    with open(config_file, "w") as fd:
+        yaml.safe_dump(config, fd, sort_keys=False)
+    return config_file
+
+
+@pytest.fixture
+def temp_grzctl_s3_db_config_file_path(temp_data_dir_path, db_config_model) -> Path:
+    """GrzctlConfig-format S3+DB config for grzctl CLI tests."""
+    config_file = temp_data_dir_path / "config.grzctl_db_s3.yaml"
+    with open(config_file, "w") as fd:
+        db_config_model.to_yaml(fd)
     return config_file
 
 

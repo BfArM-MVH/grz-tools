@@ -19,13 +19,13 @@ import sqlalchemy
 import yaml
 from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 
 def test_all_migrations(blank_initial_database_config_path):
     """Database migrations should work all the way from the oldest supported to the latest version."""
     # add some test data
-    config = DbConfig.from_path(blank_initial_database_config_path)
+    config = GrzctlConfig.from_path(blank_initial_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_id = "123456789_2024-11-08_d0f805c5"
@@ -115,7 +115,7 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
@@ -165,7 +165,7 @@ def test_populate_date(blank_database_config_path: Path, test_metadata_path: Pat
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
@@ -936,7 +936,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         assert "data_steward_signature" in state
 
     # Test 2: Verify database records have the version
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submission = db.get_submission(metadata.submission_id)
 
@@ -1046,7 +1046,7 @@ def test_submission_grzctl_version_different_versions(
 def test_failure_reason_migration(blank_initial_database_config_path):
     """Test the failure_reason migration works correctly."""
     # Set up test data before migration
-    config = DbConfig.from_path(blank_initial_database_config_path)
+    config = GrzctlConfig.from_path(blank_initial_database_config_path)
 
     if not config.db.database_url.startswith("sqlite:///"):
         pytest.skip("Test uses sqlite3 directly and only works with SQLite")

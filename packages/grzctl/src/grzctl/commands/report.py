@@ -29,7 +29,7 @@ from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, 
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
 
-from ..models.config import ReportConfig
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
@@ -46,13 +46,12 @@ def report(ctx: click.Context, configuration: dict[str, Any], config_file: tuple
     """
     Generate various reports related to GRZ activities.
     """
-    config = ReportConfig.model_validate(configuration)
-    if not config:
-        raise ValueError("DB config not found")
+    config = GrzctlConfig.model_validate(configuration)
+    db = config.require_db()
 
     ctx.obj = {
-        "db_url": config.db.database_url,
-        "grz_id": config.identifiers.grz,
+        "db_url": db.database_url,
+        "grz_id": config.identifiers.grz if config.identifiers else None,
     }
 
 

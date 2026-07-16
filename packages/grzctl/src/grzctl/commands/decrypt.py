@@ -11,7 +11,7 @@ from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..dbcontext import DbContext
-from ..models.config import DecryptConfig
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +34,10 @@ def decrypt(
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
-    config = DecryptConfig.model_validate(configuration)
+    config = GrzctlConfig.model_validate(configuration)
+    keys = config.require_keys()
 
-    grz_privkey_path = config.keys.grz_private_key_path
+    grz_privkey_path = keys.grz_private_key_path
     if not grz_privkey_path:
         log.error("GRZ private key path is required for decryption.")
         sys.exit(1)
