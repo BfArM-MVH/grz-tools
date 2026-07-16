@@ -1234,7 +1234,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(  # noqa: PLR0913
+def backfill(  # noqa: PLR0913, C901
     ctx: click.Context,
     configuration: dict[str, Any],
     dry_run: bool,
@@ -1274,7 +1274,9 @@ def backfill(  # noqa: PLR0913
         "local_case_id",
     }
     try:
-        list_config = ListConfig.model_validate(configuration)
+        config = GrzctlConfig.model_validate(configuration)
+        if not submission_ids:
+            s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
         console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
         sys.exit(1)
@@ -1297,20 +1299,36 @@ def backfill(  # noqa: PLR0913
 
     counts: Counter[_BackfillResult] = Counter()
 
-    console_err.print(
-        f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
-        f"from bucket '{s3_options.bucket}'…[/cyan]"
-    )
-
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
-    s3_client = init_s3_client(s3_options)
+    _s3_clients: dict[str | None, Any] = {}
+
+    def _resolve_s3(submission: Submission) -> tuple[Any, str]:
+        """Return (s3_client, bucket) for *submission*."""
+        if not submission_ids:
+            endpoint = str(s3_options.endpoint_url) if s3_options.endpoint_url else None
+            if endpoint not in _s3_clients:
+                _s3_clients[endpoint] = init_s3_client(s3_options)
+            return _s3_clients[endpoint], s3_options.bucket
+
+        target = config.resolve_inbox_by_submission_id(submission.id, inbox_bucket)
+        endpoint = str(target.s3.endpoint_url) if target.s3.endpoint_url else None
+        if endpoint not in _s3_clients:
+            _s3_clients[endpoint] = init_s3_client(target.s3)
+        return _s3_clients[endpoint], target.s3.bucket
+
+    console_err.print(f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s)…[/cyan]")
 
     for submission in tqdm(candidates):
+        try:
+            s3_client, bucket = _resolve_s3(submission)
+        except Exception:
+            console_err.print(f"[yellow]Warning: could not resolve inbox for '{submission.id}', skipping.[/yellow]")
+            continue
         counts[
             _backfill_submission(
                 submission,
                 s3_client,
-                s3_options.bucket,
+                bucket,
                 db_service,
                 dry_run,
                 force,

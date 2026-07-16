@@ -15,7 +15,6 @@ import grzctl.models.config
 import numpy as np
 import psycopg
 import pytest
-import yaml
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from grz_db.models.submission import SubmissionDb
@@ -371,7 +370,7 @@ def db_config_model(db_config_content):
     return grzctl.models.config.GrzctlConfig(
         **db_config_content,
         s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
-        archives=_GRZCTL_ARCHIVES,
+        archives=_grzctl_archives(),
         pruefbericht={},
         detailed_qc=_GRZCTL_DETAILED_QC,
     )
@@ -385,21 +384,6 @@ def identifiers_config_model(identifiers_config_content):
 @pytest.fixture
 def pruefbericht_config_model(pruefbericht_config_content):
     return grzctl.models.config.PruefberichtConfig(**pruefbericht_config_content)
-
-
-@pytest.fixture
-def temp_s3_db_config_file_path(temp_data_dir_path, s3_config_model, db_config_content) -> Path:
-    config_file = temp_data_dir_path / "config.db_s3.yaml"
-
-    combined = {
-        **s3_config_model.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True),
-        **db_config_content,
-    }
-
-    with open(config_file, "w") as fd:
-        yaml.safe_dump(combined, fd, sort_keys=False)
-
-    return config_file
 
 
 @pytest.fixture
@@ -419,10 +403,11 @@ def temp_db_config_file_path(temp_data_dir_path, db_config_model) -> Path:
 
 
 @pytest.fixture
-def temp_keys_config_file_path(temp_data_dir_path, encrypt_config_model) -> Path:
+def temp_keys_config_file_path(temp_data_dir_path, keys_config_content) -> Path:
     config_file = temp_data_dir_path / "config.keys.yaml"
+    config = grz_cli.models.config.EncryptConfig(**keys_config_content)
     with open(config_file, "w") as fd:
-        encrypt_config_model.to_yaml(fd)
+        config.to_yaml(fd)
     return config_file
 
 
@@ -437,34 +422,44 @@ def temp_identifiers_config_file_path(temp_data_dir_path, identifiers_config_mod
 @pytest.fixture
 def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_content) -> Path:
     config_file = temp_data_dir_path / "config.pruefbericht.yaml"
-    config = _grzctl_config_dict(
+    config = _grzctl_model(
         s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
         db=_GRZCTL_DB_DUMMY,
         pruefbericht=pruefbericht_config_content,
     )
     with open(config_file, "w") as fd:
-        yaml.safe_dump(config, fd, sort_keys=False)
+        config.to_yaml(fd)
     return config_file
 
 
 # -- GrzctlConfig-format fixtures for tests that use grzctl.cli.build_cli() --
 
 # Shared building blocks for GrzctlConfig test fixtures
-_GRZCTL_ARCHIVE_S3 = {"public_key_path": "/dev/null"}
-_GRZCTL_ARCHIVES = {
-    "consented": {"s3": {"bucket": "consented", **_GRZCTL_ARCHIVE_S3}, "public_key_path": "/dev/null"},
-    "non_consented": {"s3": {"bucket": "non-consented", **_GRZCTL_ARCHIVE_S3}, "public_key_path": "/dev/null"},
-    "interrogation": {"s3": {"bucket": "interrogation"}},
-}
 _GRZCTL_DETAILED_QC = {"local_storage": "/tmp/qc", "salt": "test"}
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
 
 
-def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None) -> dict:
+def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
+    """Build archives config dict. Pass *endpoint_url* for moto-backed tests."""
+
+    def _s3(bucket):
+        d = {"bucket": bucket, "public_key_path": public_key_path}
+        if endpoint_url:
+            d["endpoint_url"] = endpoint_url
+        return d
+
+    return {
+        "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
+        "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+        "interrogation": {"s3": _s3("interrogation")},
+    }
+
+
+def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, endpoint_url=None) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults."""
     config = {
         "s3": s3,
-        "archives": _GRZCTL_ARCHIVES,
+        "archives": _grzctl_archives(endpoint_url=endpoint_url),
     }
     if db is not None:
         config["db"] = db
@@ -476,15 +471,35 @@ def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None) -> dict:
     return config
 
 
+def _grzctl_model(
+    *,
+    s3,
+    db=None,
+    keys=None,
+    pruefbericht=None,
+    endpoint_url=None,
+) -> grzctl.models.config.GrzctlConfig:
+    """Build a GrzctlConfig model from the given sections."""
+    return grzctl.models.config.GrzctlConfig(
+        **_grzctl_config_dict(
+            s3=s3,
+            db=db,
+            keys=keys,
+            pruefbericht=pruefbericht,
+            endpoint_url=endpoint_url,
+        )
+    )
+
+
 @pytest.fixture
 def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
     """GrzctlConfig-format S3-only config for grzctl CLI tests."""
     config_file = temp_data_dir_path / "config.grzctl_s3.yaml"
-    config = _grzctl_config_dict(
+    config = _grzctl_model(
         s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
     )
     with open(config_file, "w") as fd:
-        yaml.safe_dump(config, fd, sort_keys=False)
+        config.to_yaml(fd)
     return config_file
 
 
@@ -492,13 +507,13 @@ def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
 def temp_grzctl_keys_config_file_path(temp_data_dir_path, keys_config_content) -> Path:
     """GrzctlConfig-format keys config for grzctl CLI tests."""
     config_file = temp_data_dir_path / "config.grzctl_keys.yaml"
-    config = _grzctl_config_dict(
+    config = _grzctl_model(
         s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
         db=_GRZCTL_DB_DUMMY,
         keys=keys_config_content,
     )
     with open(config_file, "w") as fd:
-        yaml.safe_dump(config, fd, sort_keys=False)
+        config.to_yaml(fd)
     return config_file
 
 

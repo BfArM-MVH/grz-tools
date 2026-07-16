@@ -1099,6 +1099,7 @@ name = "grz-tools"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "boto3-stubs" },
     { name = "grz-check" },
     { name = "grz-cli" },
     { name = "grz-common" },
@@ -1162,6 +1163,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3-stubs", specifier = "~=1.43.34" },
     { name = "grz-check", editable = "packages/grz-check" },
     { name = "grz-check", marker = "extra == 'test'", editable = "packages/grz-check" },
     { name = "grz-cli", editable = "packages/grz-cli" },
