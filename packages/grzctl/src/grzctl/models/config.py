@@ -3,7 +3,7 @@ from typing import Annotated
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.keys import KeyConfigModel
 from grz_common.models.s3 import S3ConfigModel
-from grz_pydantic_models.submission.metadata import GenomicDataCenterId
+from grz_pydantic_models.submission.metadata import GenomicDataCenterId, SubmitterId
 from pydantic import Field
 
 from .db import DbModel
@@ -37,6 +37,9 @@ class DbConfig(IgnoringBaseSettings):
 class ReportIdentifiersConfigModel(IgnoringBaseModel):
     grz: GenomicDataCenterId
     """Id of the GRZ."""
+
+    le: SubmitterId | None = None
+    """Optional ID of the LE for LE-scoped reports."""
 
 
 class ReportConfig(DbConfig):

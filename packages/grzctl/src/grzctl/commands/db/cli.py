@@ -36,7 +36,6 @@ from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
-    FailureReasonEnum,
     FieldDiff,
     Submission,
     SubmissionBase,
@@ -47,6 +46,7 @@ from grz_db.models.submission import (
     SubmissionStateLog,
 )
 from grz_pydantic_models.common import StrictBaseModel
+from grz_pydantic_models.status import FailureReasonEnum
 from grz_pydantic_models.submission.metadata import (
     GenomicStudySubtype,
     GrzSubmissionMetadata,

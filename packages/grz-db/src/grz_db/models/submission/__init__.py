@@ -15,7 +15,13 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
+from grz_common.utils.types import (
+    CaseInsensitiveStrEnum,
+    ListableEnum,
+    serialize_datetime_to_iso_z,
+)
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
+from grz_pydantic_models.status import FailureReasonEnum
 from grz_pydantic_models.submission.metadata import (
     REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
@@ -42,11 +48,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import DateTime, Field, Relationship, Session, SQLModel, create_engine, select
 
-from ...common import (
-    CaseInsensitiveStrEnum,
-    ListableEnum,
-    serialize_datetime_to_iso_z,
-)
 from ...errors import (
     DuplicateSubmissionError,
     DuplicateTanGError,
@@ -262,20 +263,6 @@ class Submission(SubmissionBase, table=True):
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
-
-
-class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
-    """Failure reason enum for submissions in ERROR state."""
-
-    DUPLICATE_TANG = "duplicate_tang"
-    INCOMPLETE_SUBMISSION = "incomplete_submission"
-    DECRYPTION_ERROR = "decryption_error"
-    NETWORK_ERROR = "network_error"
-    VALIDATION_ERROR = "validation_error"
-    FILE_NOT_FOUND = "file_not_found"
-    ENCRYPTION_ERROR = "encryption_error"
-    UPLOAD_ERROR = "upload_error"
-    UNKNOWN = "unknown"
 
 
 class SubmissionStateLogBase(SQLModel):
