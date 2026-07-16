@@ -24,6 +24,8 @@ def full_config_path(
     pruefbericht_config_content,
 ):
     # Build a valid GrzctlConfig structure
+    from tests.conftest import _grzctl_archives
+
     config_data = {
         "s3": {
             "inboxes": {
@@ -35,34 +37,13 @@ def full_config_path(
                 }
             }
         },
-        "archives": {
-            "consented": {
-                "s3": {"endpoint_url": "http://localhost:9000", "bucket": "consented", "public_key_path": "/dev/null"},
-                "public_key_path": "/dev/null",
-            },
-            "non_consented": {
-                "s3": {
-                    "endpoint_url": "http://localhost:9000",
-                    "bucket": "non-consented",
-                    "public_key_path": "/dev/null",
-                },
-                "public_key_path": "/dev/null",
-            },
-            "interrogation": {
-                "s3": {
-                    "endpoint_url": "http://localhost:9000",
-                    "bucket": "interrogation",
-                    "public_key_path": "/dev/null",
-                },
-            },
-        },
+        "archives": _grzctl_archives(endpoint_url="http://localhost:9000"),
         "pruefbericht": {
             "authorization_url": "https://bfarm.localhost/token",
             "api_base_url": "https://bfarm.localhost/api/",
             "client_id": "pytest",
             "client_secret": "pysecret",
         },
-        "detailed_qc": {"local_storage": str(tmp_path / "qc"), "salt": "test"},
     }
     config_data.update(db_config_content)
     config_data.update(keys_config_content)
