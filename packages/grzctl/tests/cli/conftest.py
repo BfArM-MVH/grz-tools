@@ -23,7 +23,6 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
-        "interrogation": {"s3": _s3("interrogation")},
     }
 
 
@@ -90,7 +89,6 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> Grz
             "known_public_keys": str(public_key_path.resolve()),
         },
         pruefbericht={},
-        detailed_qc={"local_storage": str(tmp_path / "qc"), "salt": "test"},
     )
 
 

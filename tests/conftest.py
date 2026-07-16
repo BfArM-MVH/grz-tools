@@ -372,7 +372,6 @@ def db_config_model(db_config_content):
         s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
-        detailed_qc=_GRZCTL_DETAILED_QC,
     )
 
 
@@ -435,7 +434,6 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
 # -- GrzctlConfig-format fixtures for tests that use grzctl.cli.build_cli() --
 
 # Shared building blocks for GrzctlConfig test fixtures
-_GRZCTL_DETAILED_QC = {"local_storage": "/tmp/qc", "salt": "test"}
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
 
 
@@ -451,7 +449,6 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
-        "interrogation": {"s3": _s3("interrogation")},
     }
 
 
@@ -467,7 +464,6 @@ def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, endpoint_u
         config.update(keys)
     if pruefbericht is not None:
         config.update(pruefbericht)
-    config["detailed_qc"] = _GRZCTL_DETAILED_QC
     return config
 
 

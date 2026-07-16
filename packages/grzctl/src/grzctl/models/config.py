@@ -72,17 +72,6 @@ class ProcessKeyConfigModel(IgnoringBaseSettings):
     """Path to the public key for re-encryption of non-consented submissions."""
 
 
-class DetailedQcModel(IgnoringBaseSettings):
-    local_storage: Annotated[str, Field(min_length=1)]
-    """Path to local storage for detailed QC staging."""
-
-    salt: str
-    """Salt to use for deterministic determination of submissions selected for detailed QC."""
-
-    target_percentage: Annotated[float, Field(ge=0.0, le=100.0)] = 2.0
-    """Target percentage of submissions selected for detailed QC per month."""
-
-
 class ArchiveTarget(IgnoringBaseModel):
     """Encapsulates everything needed to write to a specific archive."""
 
@@ -91,16 +80,6 @@ class ArchiveTarget(IgnoringBaseModel):
 
     public_key_path: Annotated[str, Field(min_length=1)]
     """Path to the public key for re-encryption of files destined for this archive."""
-
-
-class InterrogationConfig(IgnoringBaseModel):
-    """Configuration for the staging interrogation bucket."""
-
-    s3: S3Options
-    """S3 connection details and bucket for the staging interrogation bucket."""
-
-    keep_failed: bool = False
-    """If true, leaves the failed submission files in the interrogation bucket. Otherwise deletes them."""
 
 
 class ArchivesConfig(IgnoringBaseModel):
@@ -112,38 +91,10 @@ class ArchivesConfig(IgnoringBaseModel):
     non_consented: ArchiveTarget
     """Target definition for non-consented submissions."""
 
-    interrogation: InterrogationConfig
-    """Target definition for the intermediate interrogation bucket."""
-
-    @model_validator(mode="after")
-    def check_endpoints_match(self) -> "ArchivesConfig":
-        consented_endpoint = str(self.consented.s3.endpoint_url) if self.consented.s3.endpoint_url else None
-        non_consented_endpoint = str(self.non_consented.s3.endpoint_url) if self.non_consented.s3.endpoint_url else None
-        interrogation_endpoint = str(self.interrogation.s3.endpoint_url) if self.interrogation.s3.endpoint_url else None
-
-        if interrogation_endpoint != consented_endpoint:
-            log.warning(
-                "Interrogation bucket endpoint (%s) differs from consented archive endpoint (%s). "
-                "Server-side copying might be slow or fail.",
-                interrogation_endpoint,
-                consented_endpoint,
-            )
-
-        if interrogation_endpoint != non_consented_endpoint:
-            log.warning(
-                "Interrogation bucket endpoint (%s) differs from non-consented archive endpoint (%s). "
-                "Server-side copying might be slow or fail.",
-                interrogation_endpoint,
-                non_consented_endpoint,
-            )
-
-        return self
-
     @model_validator(mode="after")
     def check_buckets_are_unique(self) -> "ArchivesConfig":
-        buckets = {self.consented.s3.bucket, self.non_consented.s3.bucket, self.interrogation.s3.bucket}
-        if len(buckets) != 3:
-            raise ValueError("consented, non-consented and interrogation buckets must be distinct.")
+        if self.consented.s3.bucket == self.non_consented.s3.bucket:
+            raise ValueError("consented and non-consented buckets must be distinct.")
         return self
 
 
@@ -175,9 +126,6 @@ class GrzctlConfig(IgnoringBaseSettings):
     pruefbericht: PruefberichtModel | None = None
     """Configuration for Prüfbericht submission."""
 
-    detailed_qc: DetailedQcModel | None = None
-    """Configuration for detailed QC selection and staging."""
-
     keys: KeyModel | None = None
     """Key configuration for encryption/decryption commands."""
 
@@ -191,7 +139,6 @@ class GrzctlConfig(IgnoringBaseSettings):
         optional_sections = {
             "db": DbModel,
             "pruefbericht": PruefberichtModel,
-            "detailed_qc": DetailedQcModel,
         }
         for field_name, model_cls in optional_sections.items():
             if field_name in data and data[field_name] is not None:
@@ -208,10 +155,6 @@ class GrzctlConfig(IgnoringBaseSettings):
     def require_pruefbericht(self) -> PruefberichtModel:
         """Return the pruefbericht section, or exit if missing."""
         return _require_section(self, "pruefbericht", "pruefbericht")
-
-    def require_detailed_qc(self) -> DetailedQcModel:
-        """Return the detailed_qc section, or exit if missing."""
-        return _require_section(self, "detailed_qc", "detailed_qc")
 
     def require_keys(self) -> KeyModel:
         """Return the keys section, or exit if missing."""
