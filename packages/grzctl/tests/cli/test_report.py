@@ -413,7 +413,7 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
                 "tan_g": tan_g,
                 "pseudonym": pseudonym,
                 "id": submission_id,
-                "submission_date": submission_date,
+                "submission_uploaded_date": submission_date,
                 "submission_type": "initial",
                 "submitter_id": submitter_id,
                 "data_node_id": "GRZXYZ123",

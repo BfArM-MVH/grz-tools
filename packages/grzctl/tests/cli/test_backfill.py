@@ -29,7 +29,7 @@ BUCKET = "test-backfill-bucket"
 # We pick it specifically because it's S3's default region, so create_bucket() works without
 # an extra CreateBucketConfiguration/LocationConstraint argument.
 REGION = "us-east-1"
-IGNORE_FIELDS = {"submission_date", "tan_g", "pseudonym"}
+IGNORE_FIELDS = {"submission_uploaded_date", "tan_g", "pseudonym"}
 DIFFERENT_TAN_G = "b" * 64
 DIFFERENT_PSEUDONYM = "different-pseudonym"
 DIFFERENT_DATE = datetime.date(1999, 1, 1)
@@ -87,7 +87,7 @@ def _put_metadata(s3_client: Any, submission_id: str, metadata: GrzSubmissionMet
 def _populate_full_row(db: SubmissionDb, submission_id: str, metadata: GrzSubmissionMetadata) -> Submission:
     """Persist a fully-populated row by running the same diff/commit path the production code uses."""
     db.add_submission(submission_id)
-    submission_diff, donors_diff = db.diff(submission_id, metadata, submission_date=None)
+    submission_diff, donors_diff = db.diff(submission_id, metadata, submission_uploaded_date=None)
     db.commit_changes(submission_id, submission_diff, donors_diff)
     return db.get_submission(submission_id)
 
@@ -242,7 +242,7 @@ def test_backfill_submission_force_does_not_overwrite_ignore_fields(
 ) -> None:
     """Even with --force, the hard-coded ignore_fields are not overwritten by re-derived metadata."""
     current = db.add_submission(submission_id)
-    current.submission_date = DIFFERENT_DATE
+    current.submission_uploaded_date = DIFFERENT_DATE
     current.tan_g = DIFFERENT_TAN_G
     current.pseudonym = DIFFERENT_PSEUDONYM
     db.update_submission(current)
@@ -264,7 +264,7 @@ def test_backfill_submission_force_does_not_overwrite_ignore_fields(
 
     assert result == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
-    assert persisted.submission_date == DIFFERENT_DATE
+    assert persisted.submission_uploaded_date == DIFFERENT_DATE
     assert persisted.tan_g == DIFFERENT_TAN_G
     assert persisted.pseudonym == DIFFERENT_PSEUDONYM
     assert persisted.submission_size == metadata.get_submission_size()
