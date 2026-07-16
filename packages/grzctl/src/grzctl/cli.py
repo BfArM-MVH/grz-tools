@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
+import platformdirs
 from grz_cli.commands.submit import submit
 from grz_common.cli.dump_config import dump_config
 from grz_common.logging import setup_cli_logging
@@ -24,6 +25,13 @@ from .commands.pruefbericht import pruefbericht
 from .commands.report import report
 
 log = logging.getLogger(__name__)
+
+
+def _grzctl_default_config_path() -> Path:
+    return Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
+
+
+grzcli.get_default_config_path = _grzctl_default_config_path
 
 
 class OrderedGroup(click.Group):
