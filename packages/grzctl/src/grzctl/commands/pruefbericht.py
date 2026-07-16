@@ -15,7 +15,7 @@ from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissi
 from pydantic_core import to_jsonable_python
 
 from ..dbcontext import DbContext
-from ..models.config import DbConfig, PruefberichtConfig
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 fail_or_pass = click.option(
@@ -93,13 +93,11 @@ def _generate_pruefbericht_from_database(
     submission_id: str, configuration: dict[str, Any], failed: bool
 ) -> Pruefbericht:
     """Generate Prüfbericht by fetching submission data from the database."""
-    config = DbConfig.model_validate(configuration)
+    config = GrzctlConfig.model_validate(configuration)
+    db = config.require_db()
 
-    if not config.db.database_url:
-        raise ValueError("database_url must be provided in configuration to fetch from database")
-
-    db = SubmissionDb(db_url=str(config.db.database_url), author=None, debug=False)
-    submission = db.get_submission(submission_id)
+    db_service = SubmissionDb(db_url=str(db.database_url), author=None, debug=False)
+    submission = db_service.get_submission(submission_id)
 
     if submission is None:
         raise ValueError(f"Submission with ID '{submission_id}' not found in database")
@@ -120,7 +118,7 @@ def _generate_pruefbericht_from_database(
         raise ValueError(f"Submission {submission_id} is missing required fields: {', '.join(missing_fields)}")
 
     # Get donors to determine library types
-    donors = db.get_donors(submission_id)
+    donors = db_service.get_donors(submission_id)
     if not donors:
         raise ValueError(f"No donors found for submission {submission_id}")
 
@@ -229,18 +227,19 @@ def submit(  # noqa: PLR0913
     **kwargs,
 ):
     """Submit a Prüfbericht JSON to BfArM."""
-    config = PruefberichtConfig.model_validate(configuration)
+    config = GrzctlConfig.model_validate(configuration)
+    pb = config.require_pruefbericht()
 
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
 
-    if (auth_url := config.pruefbericht.authorization_url) is None:
+    if (auth_url := pb.authorization_url) is None:
         raise ValueError("pruefbericht.auth_url must be provided to submit Prüfberichte")
-    if (client_id := config.pruefbericht.client_id) is None:
+    if (client_id := pb.client_id) is None:
         raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
-    if (client_secret := config.pruefbericht.client_secret) is None:
+    if (client_secret := pb.client_secret) is None:
         raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
-    if (api_base_url := config.pruefbericht.api_base_url) is None:
+    if (api_base_url := pb.api_base_url) is None:
         raise ValueError("pruefbericht.api_base_url must be provided to submit Prüfberichte")
 
     if pruefbericht.submitted_case.tan == REDACTED_TAN and not allow_redacted_tan_g:

@@ -44,6 +44,7 @@ def test_upload_download_submission(
     tmpdir_factory,
     remote_bucket_with_version,
     temp_s3_db_config_file_path,
+    temp_grzctl_s3_db_config_file_path,
     initiated_db_test_connection,  # necessary to initiate DB
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -104,7 +105,7 @@ def test_upload_download_submission(
         add_args = [
             "db",
             "--config-file",
-            str(temp_s3_db_config_file_path),
+            str(temp_grzctl_s3_db_config_file_path),
             "submission",
             "add",
             submission_id,
@@ -123,7 +124,7 @@ def test_upload_download_submission(
             "--output-dir",
             str(download_dir_path),
             "--config-file",
-            str(temp_s3_db_config_file_path),
+            str(temp_grzctl_s3_db_config_file_path),
             "--no-update-db",
             "--populate",
         ]

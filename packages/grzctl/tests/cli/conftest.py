@@ -10,7 +10,7 @@ import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def test_metadata_path():
         ),
     ]
 )
-def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbConfig:
+def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> GrzctlConfig:
     private_key = Ed25519PrivateKey.generate()
     private_key_path = tmp_path / "alice.sec"
     with open(private_key_path, "wb") as private_key_file:
@@ -53,7 +53,42 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
         postgresql: psycopg.Connection = request.getfixturevalue("postgresql")
         database_url = f"postgresql+psycopg://{postgresql.info.user}:@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
 
-    return DbConfig(
+    return GrzctlConfig(
+        s3={
+            "inboxes": {
+                "000000000": {
+                    "inbox": {
+                        "endpoint_url": "http://localhost:9000",
+                        "private_key_path": str(private_key_path.resolve()),
+                    }
+                }
+            }
+        },
+        archives={
+            "consented": {
+                "s3": {
+                    "endpoint_url": "http://localhost:9000",
+                    "bucket": "consented",
+                    "public_key_path": str(public_key_path.resolve()),
+                },
+                "public_key_path": str(public_key_path.resolve()),
+            },
+            "non_consented": {
+                "s3": {
+                    "endpoint_url": "http://localhost:9000",
+                    "bucket": "non-consented",
+                    "public_key_path": str(public_key_path.resolve()),
+                },
+                "public_key_path": str(public_key_path.resolve()),
+            },
+            "interrogation": {
+                "s3": {
+                    "endpoint_url": "http://localhost:9000",
+                    "bucket": "interrogation",
+                    "public_key_path": str(public_key_path.resolve()),
+                },
+            },
+        },
         db={
             "database_url": database_url,
             "author": {
@@ -62,15 +97,17 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
                 "private_key_passphrase": "",
             },
             "known_public_keys": str(public_key_path.resolve()),
-        }
+        },
+        pruefbericht={},
+        detailed_qc={"local_storage": str(tmp_path / "qc"), "salt": "test"},
     )
 
 
 @pytest.fixture
-def blank_initial_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
+def blank_initial_database_config_path(tmp_path: Path, blank_database_config: GrzctlConfig) -> Path:
     config_path = tmp_path / "config.db.yaml"
     with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
+        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json", exclude_none=True)))
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -80,10 +117,10 @@ def blank_initial_database_config_path(tmp_path: Path, blank_database_config: Db
 
 
 @pytest.fixture
-def blank_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
+def blank_database_config_path(tmp_path: Path, blank_database_config: GrzctlConfig) -> Path:
     config_path = tmp_path / "config.db.yaml"
     with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
+        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json", exclude_none=True)))
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()

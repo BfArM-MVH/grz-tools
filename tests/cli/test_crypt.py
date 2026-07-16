@@ -73,7 +73,7 @@ def test_encrypt_submission_protect_overwrite(
         runner.invoke(cli, testargs, catch_exceptions=False)
 
 
-def test_decrypt_submission(working_dir_path, temp_keys_config_file_path):
+def test_decrypt_submission(working_dir_path, temp_grzctl_keys_config_file_path):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
 
     shutil.copytree(
@@ -88,7 +88,7 @@ def test_decrypt_submission(working_dir_path, temp_keys_config_file_path):
         "--submission-dir",
         str(working_dir_path),
         "--config-file",
-        temp_keys_config_file_path,
+        temp_grzctl_keys_config_file_path,
         "--no-update-db",
     ]
     runner = CliRunner()
@@ -119,6 +119,7 @@ def test_decrypt_submission(working_dir_path, temp_keys_config_file_path):
 def test_encrypt_decrypt_submission(
     working_dir_path,
     temp_keys_config_file_path,
+    temp_grzctl_keys_config_file_path,
     # crypt4gh_grz_private_key_file_path,
     tmpdir_factory: pytest.TempdirFactory,
 ):
@@ -149,7 +150,7 @@ def test_encrypt_decrypt_submission(
         "--submission-dir",
         str(working_dir_path),
         "--config-file",
-        temp_keys_config_file_path,
+        temp_grzctl_keys_config_file_path,
         "--no-update-db",
     ]
 

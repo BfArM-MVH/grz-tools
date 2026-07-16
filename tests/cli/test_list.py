@@ -8,14 +8,14 @@ import shutil
 from unittest import mock
 
 import click.testing
-import grzctl
+import grzctl.cli
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
 
 from .. import mock_files
 
 
-def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
+def test_list(temp_grzctl_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
@@ -47,7 +47,8 @@ def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_
             "--submission-dir",
             str(working_dir_path),
             "--config-file",
-            temp_s3_config_file_path,
+            temp_grzctl_s3_config_file_path,
+            "--no-update-db",
         ]
 
         runner = click.testing.CliRunner()
@@ -59,7 +60,7 @@ def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_
 
         submission_id = result_upload.stdout.strip()
 
-        list_args = ["list", "--config-file", temp_s3_config_file_path, "--json", "--show-cleaned"]
+        list_args = ["list", "--config-file", temp_grzctl_s3_config_file_path, "--json", "--show-cleaned"]
 
         result_list = runner.invoke(cli, list_args, catch_exceptions=False)
 
@@ -71,7 +72,7 @@ def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_
         assert listed_submissions[0]["state"] == "complete"
 
 
-def test_list_with_partial_env(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
+def test_list_with_partial_env(temp_grzctl_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     """If database configuration is partially-populated via environment variables, it should still be ignored."""
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
@@ -104,7 +105,8 @@ def test_list_with_partial_env(temp_s3_config_file_path, remote_bucket_with_vers
             "--submission-dir",
             str(working_dir_path),
             "--config-file",
-            temp_s3_config_file_path,
+            temp_grzctl_s3_config_file_path,
+            "--no-update-db",
         ]
 
         runner = click.testing.CliRunner()
@@ -116,7 +118,7 @@ def test_list_with_partial_env(temp_s3_config_file_path, remote_bucket_with_vers
 
         submission_id = result_upload.stdout.strip()
 
-        list_args = ["list", "--config-file", temp_s3_config_file_path, "--json", "--show-cleaned"]
+        list_args = ["list", "--config-file", temp_grzctl_s3_config_file_path, "--json", "--show-cleaned"]
 
         result_list = runner.invoke(
             cli, list_args, catch_exceptions=False, env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "secret"}

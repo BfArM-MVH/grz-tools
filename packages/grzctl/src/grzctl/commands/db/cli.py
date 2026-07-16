@@ -58,7 +58,7 @@ from pydantic import Field, ValidationError
 from tqdm.auto import tqdm
 
 from ... import get_versions
-from ...models.config import DbConfig, ListConfig
+from ...models.config import GrzctlConfig
 from .. import limit
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
@@ -87,10 +87,8 @@ def db(
     # set up context object
     ctx.ensure_object(dict)
 
-    config = DbConfig.model_validate(configuration)
-    db_config = config.db
-    if not db_config:
-        raise DatabaseConfigurationError("DB config not found")
+    config = GrzctlConfig.model_validate(configuration)
+    db_config = config.require_db()
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:
@@ -1229,6 +1227,11 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     default=datetime.max,
     help="Process only submissions processed on or before this date (inclusive). Defaults to the end of time.",
 )
+@click.option(
+    "--inbox-bucket",
+    default=None,
+    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
+)
 @_ignore_field_option
 @click.pass_context
 def backfill(  # noqa: PLR0913
@@ -1239,6 +1242,7 @@ def backfill(  # noqa: PLR0913
     submission_ids: tuple[str, ...],
     start_date: datetime,
     end_date: datetime,
+    inbox_bucket,
     ignore_field: tuple[str, ...],
     **kwargs,
 ):
@@ -1295,18 +1299,18 @@ def backfill(  # noqa: PLR0913
 
     console_err.print(
         f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
-        f"from bucket '{list_config.s3.bucket}'…[/cyan]"
+        f"from bucket '{s3_options.bucket}'…[/cyan]"
     )
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
-    s3_client = init_s3_client(list_config.s3)
+    s3_client = init_s3_client(s3_options)
 
     for submission in tqdm(candidates):
         counts[
             _backfill_submission(
                 submission,
                 s3_client,
-                list_config.s3.bucket,
+                s3_options.bucket,
                 db_service,
                 dry_run,
                 force,
@@ -1330,17 +1334,24 @@ def backfill(  # noqa: PLR0913
 
 @db.command("sync-from-inbox")
 @grzcli.configuration
+@click.option(
+    "--inbox-bucket",
+    default=None,
+    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
+)
 @click.pass_context
 def sync_from_inbox(
     ctx: click.Context,
     configuration: dict[str, Any],
+    inbox_bucket,
     **kwargs,
 ):
     """
     Synchronize the database with submissions found in the inbox.
     """
     try:
-        list_config = ListConfig.model_validate(configuration)
+        config = GrzctlConfig.model_validate(configuration)
+        s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
         console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
         sys.exit(1)
@@ -1350,8 +1361,8 @@ def sync_from_inbox(
     db_service = get_submission_db_instance(db_url, author=author)
 
     try:
-        console_err.print(f"[cyan]Scanning inbox '{list_config.s3.bucket}'...[/cyan]")
-        s3_submissions = query_submissions(list_config.s3, show_cleaned=False)
+        console_err.print(f"[cyan]Scanning inbox '{s3_options.bucket}'...[/cyan]")
+        s3_submissions = query_submissions(s3_options, show_cleaned=False)
 
         console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
         sync_submissions(db_service, s3_submissions, author)

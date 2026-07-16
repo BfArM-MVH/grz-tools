@@ -16,7 +16,7 @@ import pytest
 from grz_db.models.submission import SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, DonorsDiffCollection, SubmissionDiffCollection
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 SUBMISSION_DATE = date(2025, 9, 15)
 
@@ -35,7 +35,7 @@ def db_ctx(blank_database_config_path: Path, test_metadata_path: Path) -> Simple
     metadata_raw = json.loads(test_metadata_path.read_text())
     metadata = _parse(metadata_raw)
     submission_id = metadata.submission_id
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     db.add_submission(submission_id)
     return SimpleNamespace(db=db, metadata=metadata, metadata_raw=metadata_raw, submission_id=submission_id)
