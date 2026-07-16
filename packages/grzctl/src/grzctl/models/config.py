@@ -7,6 +7,7 @@ from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.keys import KeyModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from pydantic import Field, model_validator
+from pydantic import ValidationError as PydanticValidationError
 
 log = logging.getLogger(__name__)
 
@@ -187,8 +188,6 @@ class GrzctlConfig(IgnoringBaseSettings):
     @classmethod
     def _drop_incomplete_optional_sections(cls, data: dict) -> dict:
         """Drop optional sections that are present but incomplete (e.g. from partial env vars)."""
-        from pydantic import ValidationError as PydanticValidationError
-
         optional_sections = {
             "db": DbModel,
             "pruefbericht": PruefberichtModel,
@@ -201,8 +200,6 @@ class GrzctlConfig(IgnoringBaseSettings):
                 except PydanticValidationError:
                     data[field_name] = None
         return data
-
-    # -- Typed accessors --------------------------------------------------
 
     def require_db(self) -> DbModel:
         """Return the db section, or exit if missing."""
@@ -223,8 +220,6 @@ class GrzctlConfig(IgnoringBaseSettings):
     def require_identifiers(self) -> IdentifiersModel:
         """Return the identifiers section, or exit if missing."""
         return _require_section(self, "identifiers", "identifiers")
-
-    # -- S3 inbox resolution ----------------------------------------------
 
     def resolve_inbox_by_submission_id(self, submission_id: str, bucket: str | None = None) -> InboxTarget:
         """Resolve an inbox by extracting the LE ID from the submission ID.
