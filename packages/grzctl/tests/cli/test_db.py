@@ -883,7 +883,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
-    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
     # add submission
@@ -967,7 +967,7 @@ def test_submission_grzctl_version_different_versions(
     args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
-    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
     # Setup only (does not create state logs)
