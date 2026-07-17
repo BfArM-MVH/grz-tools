@@ -47,11 +47,11 @@ def report(ctx: click.Context, configuration: dict[str, Any], config_file: tuple
     Generate various reports related to GRZ activities.
     """
     config = GrzctlConfig.model_validate(configuration)
-    db = config.require_db()
+    db = config.db
 
     ctx.obj = {
         "db_url": db.database_url,
-        "grz_id": config.identifiers.grz if config.identifiers else None,
+        "grz_id": config.identifiers.grz,
     }
 
 

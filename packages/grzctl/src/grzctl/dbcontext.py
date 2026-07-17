@@ -117,7 +117,7 @@ class DbContext:
             return self
 
         try:
-            db_config = self.config.require_db()
+            db_config = self.config.db
 
             self.db = get_submission_db_instance(db_config.database_url, author=self.author)
 
@@ -180,7 +180,7 @@ class DbContext:
 
     @cached_property
     def author(self) -> Author:
-        db_config = self.config.require_db()
+        db_config = self.config.db
 
         if not db_config.author:
             raise ValueError("Author configuration is missing")

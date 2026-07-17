@@ -88,7 +88,7 @@ def db(
     ctx.ensure_object(dict)
 
     config = GrzctlConfig.model_validate(configuration)
-    db_config = config.require_db()
+    db_config = config.db
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:

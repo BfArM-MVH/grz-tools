@@ -7,7 +7,6 @@ from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.keys import KeyModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from pydantic import Field, model_validator
-from pydantic import ValidationError as PydanticValidationError
 
 log = logging.getLogger(__name__)
 
@@ -98,19 +97,6 @@ class ArchivesConfig(IgnoringBaseModel):
         return self
 
 
-def _require_section(config, field_name: str, section_name: str):
-    """Resolve an optional config section, exiting with a clear message if missing."""
-    value = getattr(config, field_name)
-    if value is None:
-        log.error(
-            "Configuration section '%s' is required for this command. Add a '%s' section to your config.",
-            section_name,
-            section_name,
-        )
-        sys.exit(1)
-    return value
-
-
 class GrzctlConfig(IgnoringBaseSettings):
     """Unified configuration for all grzctl commands."""
 
@@ -120,49 +106,17 @@ class GrzctlConfig(IgnoringBaseSettings):
     archives: ArchivesConfig
     """Configuration for consented and non-consented archives."""
 
-    db: DbModel | None = None
+    db: DbModel
     """Database configuration for submission tracking."""
 
-    pruefbericht: PruefberichtModel | None = None
+    pruefbericht: PruefberichtModel
     """Configuration for Prüfbericht submission."""
 
-    keys: KeyModel | None = None
+    keys: KeyModel
     """Key configuration for encryption/decryption commands."""
 
-    identifiers: IdentifiersModel | None = None
+    identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_incomplete_optional_sections(cls, data: dict) -> dict:
-        """Drop optional sections that are present but incomplete (e.g. from partial env vars)."""
-        optional_sections = {
-            "db": DbModel,
-            "pruefbericht": PruefberichtModel,
-        }
-        for field_name, model_cls in optional_sections.items():
-            if field_name in data and data[field_name] is not None:
-                try:
-                    model_cls.model_validate(data[field_name])  # type: ignore[attr-defined]
-                except PydanticValidationError:
-                    data[field_name] = None
-        return data
-
-    def require_db(self) -> DbModel:
-        """Return the db section, or exit if missing."""
-        return _require_section(self, "db", "db")
-
-    def require_pruefbericht(self) -> PruefberichtModel:
-        """Return the pruefbericht section, or exit if missing."""
-        return _require_section(self, "pruefbericht", "pruefbericht")
-
-    def require_keys(self) -> KeyModel:
-        """Return the keys section, or exit if missing."""
-        return _require_section(self, "keys", "keys")
-
-    def require_identifiers(self) -> IdentifiersModel:
-        """Return the identifiers section, or exit if missing."""
-        return _require_section(self, "identifiers", "identifiers")
 
     def resolve_inbox_by_submission_id(self, submission_id: str, bucket: str | None = None) -> InboxTarget:
         """Resolve an inbox by extracting the LE ID from the submission ID.
