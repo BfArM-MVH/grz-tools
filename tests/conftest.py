@@ -469,9 +469,7 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     }
 
 
-def _grzctl_config_dict(
-    *, s3, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None
-) -> dict:
+def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
 
     *keys* and *identifiers* default to valid placeholders for tests that don't
@@ -482,7 +480,9 @@ def _grzctl_config_dict(
         "s3": s3,
         "archives": _grzctl_archives(endpoint_url=endpoint_url),
         "db": db if db is not None else _GRZCTL_DB_DUMMY,
-        "keys": keys if keys is not None else {
+        "keys": keys
+        if keys is not None
+        else {
             "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
             "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
         },
