@@ -44,6 +44,7 @@ def full_config_path(
             "client_id": "pytest",
             "client_secret": "pysecret",
         },
+        "identifiers": {"grz": "GRZK00007"},
     }
     config_data.update(db_config_content)
     config_data.update(keys_config_content)

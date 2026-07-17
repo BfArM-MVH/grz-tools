@@ -372,6 +372,8 @@ def db_config_model(db_config_content):
         s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
+        keys=_GRZCTL_KEYS_DUMMY,
+        identifiers=_GRZCTL_IDENTIFIERS_DUMMY,
     )
 
 
@@ -424,7 +426,7 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
     config = _grzctl_model(
         s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
         db=_GRZCTL_DB_DUMMY,
-        pruefbericht=pruefbericht_config_content,
+        pruefbericht=pruefbericht_config_content["pruefbericht"],
     )
     with open(config_file, "w") as fd:
         config.to_yaml(fd)
@@ -435,6 +437,8 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
 
 # Shared building blocks for GrzctlConfig test fixtures
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
+_GRZCTL_KEYS_DUMMY = {"grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve())}
+_GRZCTL_IDENTIFIERS_DUMMY = {"grz": "GRZK00007"}
 
 
 def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
@@ -452,19 +456,16 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     }
 
 
-def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, endpoint_url=None) -> dict:
+def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults."""
-    config = {
+    return {
         "s3": s3,
         "archives": _grzctl_archives(endpoint_url=endpoint_url),
+        "db": db if db is not None else _GRZCTL_DB_DUMMY,
+        "keys": keys if keys is not None else _GRZCTL_KEYS_DUMMY,
+        "pruefbericht": pruefbericht if pruefbericht is not None else {},
+        "identifiers": identifiers if identifiers is not None else _GRZCTL_IDENTIFIERS_DUMMY,
     }
-    if db is not None:
-        config["db"] = db
-    if keys is not None:
-        config.update(keys)
-    if pruefbericht is not None:
-        config.update(pruefbericht)
-    return config
 
 
 def _grzctl_model(
@@ -473,6 +474,7 @@ def _grzctl_model(
     db=None,
     keys=None,
     pruefbericht=None,
+    identifiers=None,
     endpoint_url=None,
 ) -> grzctl.models.config.GrzctlConfig:
     """Build a GrzctlConfig model from the given sections."""
@@ -482,6 +484,7 @@ def _grzctl_model(
             db=db,
             keys=keys,
             pruefbericht=pruefbericht,
+            identifiers=identifiers,
             endpoint_url=endpoint_url,
         )
     )
@@ -506,7 +509,7 @@ def temp_grzctl_keys_config_file_path(temp_data_dir_path, keys_config_content) -
     config = _grzctl_model(
         s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
         db=_GRZCTL_DB_DUMMY,
-        keys=keys_config_content,
+        keys=keys_config_content["keys"],
     )
     with open(config_file, "w") as fd:
         config.to_yaml(fd)

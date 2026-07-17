@@ -338,7 +338,7 @@ def pruefbericht_db_config(tmp_path):
     """Create a test database config for pruefbericht tests."""
     import json
 
-    from tests.conftest import _grzctl_archives
+    from tests.conftest import _grzctl_archives, crypt4gh_grz_public_key_file
 
     db_path = tmp_path / "test.db"
     db_url = f"sqlite:///{db_path}"
@@ -355,6 +355,9 @@ def pruefbericht_db_config(tmp_path):
         },
         "archives": _grzctl_archives(),
         "db": {"database_url": db_url, "author": {"name": "test_author"}},
+        "keys": {"grz_public_key_path": crypt4gh_grz_public_key_file},
+        "pruefbericht": {},
+        "identifiers": {"grz": "GRZK00007"},
     }
 
     config_path = tmp_path / "config.json"
