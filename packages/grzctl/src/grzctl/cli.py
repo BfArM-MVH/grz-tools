@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 import platformdirs
+import rich.pretty
 from grz_cli.commands.submit import submit
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
@@ -111,8 +112,6 @@ def build_cli():
 @click.pass_context
 def dump_config(ctx: click.Context):
     """Dump the loaded grzctl configuration."""
-    import rich.pretty
-
     config: GrzctlConfig = ctx.obj["configuration"]
     rich.pretty.pprint(config.model_dump(mode="json", exclude_none=True))
 

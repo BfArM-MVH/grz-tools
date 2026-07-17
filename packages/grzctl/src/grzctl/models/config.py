@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
 
+import yaml
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
@@ -170,8 +171,6 @@ class GrzctlConfig(IgnoringBaseSettings):
     @classmethod
     def from_path(cls, path: str | Path) -> "GrzctlConfig":  # type: ignore[override]
         """Load config from a single YAML file, letting env vars override file values."""
-        import yaml
-
         with open(path) as fd:
             config_dict = yaml.safe_load(fd)
         return cls.from_configuration(config_dict)
