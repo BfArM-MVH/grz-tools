@@ -34,9 +34,9 @@ def test_archive(temp_grzctl_s3_config_file_path, remote_bucket_with_version, wo
             metadata_file.truncate()
 
         args = [
-            "archive",
-            "--config-file",
+            "--config",
             temp_grzctl_s3_config_file_path,
+            "archive",
             "--submission-dir",
             str(working_dir_path),
             "--no-update-db",

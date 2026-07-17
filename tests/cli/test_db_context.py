@@ -58,7 +58,7 @@ def full_config_path(
 
     runner = click.testing.CliRunner()
     cli = build_cli()
-    result = runner.invoke(cli, ["db", "--config-file", str(config_path), "init"])
+    result = runner.invoke(cli, ["--config", str(config_path), "db", "init"])
     assert result.exit_code == 0, f"DB Init failed: {result.output}"
 
     return config_path
@@ -83,16 +83,16 @@ def test_metadata(tmp_path, submission_metadata):
 def setup_db_state(
     runner, cli, config_file, submission_id, metadata_path, initial_state: SubmissionStateEnum | None = None
 ):
-    result = runner.invoke(cli, ["db", "--config-file", str(config_file), "submission", "add", submission_id])
+    result = runner.invoke(cli, ["--config", str(config_file), "db", "submission", "add", submission_id])
     assert result.exit_code == 0, f"Setup add failed: {result.output}"
 
     if metadata_path and metadata_path.exists():
         result = runner.invoke(
             cli,
             [
-                "db",
-                "--config-file",
+                "--config",
                 str(config_file),
+                "db",
                 "submission",
                 "populate",
                 submission_id,
@@ -106,7 +106,7 @@ def setup_db_state(
     if initial_state:
         result = runner.invoke(
             cli,
-            ["db", "--config-file", str(config_file), "submission", "update", submission_id, initial_state.value],
+            ["--config", str(config_file), "db", "submission", "update", submission_id, initial_state.value],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, f"Setup update state failed: {result.output}"
@@ -178,7 +178,8 @@ def build_args(
         else:
             args.append(arg)
     if config_path:
-        args.extend(["--config-file", str(config_path)])
+        args.insert(0, str(config_path))
+        args.insert(0, "--config")
     args.extend(extra_flags)
     return args
 
@@ -513,14 +514,14 @@ def test_pruefbericht_wrapper(db_engine, full_config_path, test_metadata, tmp_pa
             mock_pb.submitted_case.tan = parsed_metadata.submission.tan_g
 
             args = [
+                "--config",
+                str(full_config_path),
                 "pruefbericht",
                 "submit",
                 "--submission-id",
                 submission_id,
                 "--pruefbericht-file",
                 str(pb_path),
-                "--config-file",
-                str(full_config_path),
                 "--update-db",
             ]
 
@@ -548,12 +549,12 @@ def test_dbcontext_error_handling(db_engine, full_config_path, test_metadata, tm
         mock_clean.side_effect = RuntimeError("S3 Failure")
 
         args = [
+            "--config",
+            str(full_config_path),
             "clean",
             "--submission-id",
             submission_id,
             "--yes-i-really-mean-it",
-            "--config-file",
-            str(full_config_path),
             "--update-db",
         ]
 
@@ -604,11 +605,11 @@ def test_validation_basic_qc_passed_update(
             mock_validate_callback.side_effect = Exception("validation failed")
 
         validate_args = [
+            "--config",
+            str(full_config_path),
             "validate",
             "--submission-dir",
             str(submission_dir),
-            "--config-file",
-            str(full_config_path),
             "--update-db",
         ]
 
