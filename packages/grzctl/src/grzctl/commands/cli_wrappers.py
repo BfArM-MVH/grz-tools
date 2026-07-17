@@ -18,9 +18,29 @@ from ..models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 
-def _grzctl_config_to_grzcli_dict(config: GrzctlConfig) -> dict:
-    """Convert a GrzctlConfig to the dict format expected by grz-cli commands."""
-    return config.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True)
+def derive_validate_config(config: GrzctlConfig) -> dict:
+    """Build the config dict expected by grz-cli's ``validate`` command.
+
+    ``ValidateConfig`` only needs ``identifiers`` (specifically ``identifiers.grz``).
+    """
+    return {"identifiers": config.identifiers.model_dump(mode="json", exclude_none=True)}
+
+
+def derive_encrypt_config(config: GrzctlConfig) -> dict:
+    """Build the config dict expected by grz-cli's ``encrypt`` command.
+
+    ``EncryptConfig`` needs ``keys`` with ``grz_public_key_path`` (required,
+    exactly one of ``grz_public_key`` or ``grz_public_key_path`` must be set)
+    and optionally ``submitter_private_key_path`` and ``grz_private_key_path``.
+    """
+    keys_dump: dict = {}
+    if config.keys.grz_public_key_path is not None:
+        keys_dump["grz_public_key_path"] = config.keys.grz_public_key_path
+    if config.keys.submitter_private_key_path is not None:
+        keys_dump["submitter_private_key_path"] = config.keys.submitter_private_key_path
+    if config.keys.grz_private_key_path is not None:
+        keys_dump["grz_private_key_path"] = config.keys.grz_private_key_path
+    return {"keys": keys_dump}
 
 
 @click.command()
@@ -68,7 +88,7 @@ def validate(  # noqa: PLR0913
         enabled=update_db,
     ) as dbcontext_inst:
         validate_module.validate.callback(  # type: ignore[misc]
-            configuration=_grzctl_config_to_grzcli_dict(configuration),
+            configuration=derive_validate_config(configuration),
             submission_dir=submission_dir,
             force=force,
             threads=threads,
@@ -121,7 +141,7 @@ def encrypt(
         enabled=update_db,
     ):
         encrypt_module.encrypt.callback(  # type: ignore[misc]
-            configuration=_grzctl_config_to_grzcli_dict(configuration),
+            configuration=derive_encrypt_config(configuration),
             submission_dir=submission_dir,
             force=force,
             check_validation_logs=check_validation_logs,
