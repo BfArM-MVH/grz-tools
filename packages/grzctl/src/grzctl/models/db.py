@@ -44,7 +44,7 @@ class DbModel(IgnoringBaseSettings):
     author: Author
     """Author information for submission database."""
 
-    known_public_keys: FilePath | str = "~/.config/grz-cli/known_public_keys"
+    known_public_keys: FilePath | str = "~/.config/grzctl/known_public_keys"
     """
     File listing public keys. Used for DB verification.
 
