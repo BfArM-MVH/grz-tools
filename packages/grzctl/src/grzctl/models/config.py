@@ -60,17 +60,17 @@ class ProcessS3Options(IgnoringBaseModel):
     """
 
 
-class ProcessKeyConfigModel(IgnoringBaseModel):
-    """Key configuration for the process command."""
+class GrzctlKeyModel(IgnoringBaseModel):
+    """Key configuration for grzctl commands."""
 
     grz_private_key_path: Annotated[str, Field(min_length=1)]
     """Path to the GRZ private key for decryption."""
 
-    consented_archive_public_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the public key for re-encryption of consented submissions."""
+    grz_public_key_path: Annotated[str | None, Field(default=None)] = None
+    """Path to the GRZ public key (used by encrypt wrapper, derived from archives if not set)."""
 
-    non_consented_archive_public_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the public key for re-encryption of non-consented submissions."""
+    submitter_private_key_path: Annotated[str | None, Field(default=None)] = None
+    """Path to the submitter's private key (used by encrypt wrapper)."""
 
 
 class ArchiveTarget(IgnoringBaseModel):
