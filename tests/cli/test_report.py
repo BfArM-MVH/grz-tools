@@ -17,7 +17,7 @@ def test_report_processed(temp_db_config_file_path):
     cli = grzctl.cli.build_cli()
     execute = lambda args: runner.invoke(cli, args, catch_exceptions=False)
 
-    args_prefix = ["db", "--config-file", temp_db_config_file_path]
+    args_prefix = ["--config", temp_db_config_file_path, "db"]
     result = execute([*args_prefix, "init"])
     assert result.exit_code == 0, result.output
 
@@ -50,9 +50,9 @@ def test_report_processed(temp_db_config_file_path):
 
     today = datetime.date.today()
     report_args = [
-        "report",
-        "--config-file",
+        "--config",
         temp_db_config_file_path,
+        "report",
         "processed",
         "--since",
         (today - datetime.timedelta(days=1)).isoformat(),

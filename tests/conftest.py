@@ -437,7 +437,10 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
 
 # Shared building blocks for GrzctlConfig test fixtures
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
-_GRZCTL_KEYS_DUMMY = {"grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve())}
+_GRZCTL_KEYS_DUMMY = {
+    "grz_private_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
+    "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
+}
 _GRZCTL_IDENTIFIERS_DUMMY = {"grz": "GRZK00007"}
 
 

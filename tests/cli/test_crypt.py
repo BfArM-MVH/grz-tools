@@ -84,11 +84,11 @@ def test_decrypt_submission(working_dir_path, temp_grzctl_keys_config_file_path)
     shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
 
     testargs = [
+        "--config",
+        temp_grzctl_keys_config_file_path,
         "decrypt",
         "--submission-dir",
         str(working_dir_path),
-        "--config-file",
-        temp_grzctl_keys_config_file_path,
         "--no-update-db",
     ]
     runner = CliRunner()
@@ -146,11 +146,11 @@ def test_encrypt_decrypt_submission(
 
     # then, decrypt the data again
     testargs = [
+        "--config",
+        temp_grzctl_keys_config_file_path,
         "decrypt",
         "--submission-dir",
         str(working_dir_path),
-        "--config-file",
-        temp_grzctl_keys_config_file_path,
         "--no-update-db",
     ]
 

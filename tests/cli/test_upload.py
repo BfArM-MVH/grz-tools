@@ -98,9 +98,9 @@ def test_upload_download_submission(
     cli = grzctl.cli.build_cli()
 
     add_args = [
-        "db",
-        "--config-file",
+        "--config",
         str(temp_grzctl_s3_db_config_file_path),
+        "db",
         "submission",
         "add",
         submission_id,
@@ -113,13 +113,13 @@ def test_upload_download_submission(
 
     # download encrypted submission
     download_args = [
+        "--config",
+        str(temp_grzctl_s3_db_config_file_path),
         "download",
         "--submission-id",
         submission_id,
         "--output-dir",
         str(download_dir_path),
-        "--config-file",
-        str(temp_grzctl_s3_db_config_file_path),
         "--no-update-db",
         "--populate",
     ]

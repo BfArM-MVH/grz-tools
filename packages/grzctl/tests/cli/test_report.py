@@ -52,7 +52,7 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            ["--config", blank_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
             catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
@@ -76,7 +76,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     s1_metadata = GrzSubmissionMetadata.model_validate(s1_metadata_raw)
     s1_metadata_raw["submission"]["submissionType"] = "initial"
     result_add1 = runner.invoke(
-        cli, ["db", "--config-file", blank_database_config_path, "submission", "add", s1_metadata.submission_id]
+        cli, ["--config", blank_database_config_path, "db", "submission", "add", s1_metadata.submission_id]
     )
     assert result_add1.exit_code == 0, result_add1.output
     s1_metadata_path = tmp_path / "submission1.metadata.json"
@@ -85,9 +85,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_populate1 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "populate",
             "--no-confirm",
@@ -99,9 +99,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_modify1 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "modify",
             s1_metadata.submission_id,
@@ -121,7 +121,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     s2_metadata_raw["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient refuses to sign consent"
     s2_metadata = GrzSubmissionMetadata.model_validate(s2_metadata_raw)
     result_add2 = runner.invoke(
-        cli, ["db", "--config-file", blank_database_config_path, "submission", "add", s2_metadata.submission_id]
+        cli, ["--config", blank_database_config_path, "db", "submission", "add", s2_metadata.submission_id]
     )
     assert result_add2.exit_code == 0, result_add2.output
     s2_metadata_path = tmp_path / "submission2.metadata.json"
@@ -130,9 +130,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_populate2 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "populate",
             "--no-confirm",
@@ -144,9 +144,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_modify2 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "modify",
             s2_metadata.submission_id,
@@ -158,9 +158,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_modify2_2 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "modify",
             s2_metadata.submission_id,
@@ -181,9 +181,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_qc_populate2 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "populate-qc",
             s2_metadata.submission_id,
@@ -202,7 +202,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     s3_metadata_raw["donors"][0]["researchConsents"][0]["scope"]["provision"]["provision"] = []
     s3_metadata = GrzSubmissionMetadata.model_validate(s3_metadata_raw)
     result_add3 = runner.invoke(
-        cli, ["db", "--config-file", blank_database_config_path, "submission", "add", s3_metadata.submission_id]
+        cli, ["--config", blank_database_config_path, "db", "submission", "add", s3_metadata.submission_id]
     )
     assert result_add3.exit_code == 0, result_add3.output
     s3_metadata_path = tmp_path / "submission3.metadata.json"
@@ -211,9 +211,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_populate3 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "populate",
             "--no-confirm",
@@ -225,9 +225,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_modify3 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "modify",
             s3_metadata.submission_id,
@@ -239,9 +239,9 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     result_change1 = runner.invoke(
         cli,
         [
-            "db",
-            "--config-file",
+            "--config",
             blank_database_config_path,
+            "db",
             "submission",
             "change-request",
             s1_metadata.submission_id,
@@ -254,7 +254,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            ["--config", blank_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
             catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
@@ -429,7 +429,7 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            ["--config", blank_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
         )
         assert result_report.exit_code == 0, result_report.output
 

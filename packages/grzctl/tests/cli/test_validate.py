@@ -6,6 +6,27 @@ import grzctl.cli
 import pytest
 
 
+@pytest.fixture
+def grzctl_config_path(tmp_path):
+    import yaml
+
+    config = {
+        "s3": {"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
+        "archives": {
+            "consented": {"s3": {"bucket": "consented"}, "public_key_path": "/dev/null"},
+            "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": "/dev/null"},
+        },
+        "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
+        "pruefbericht": {},
+        "keys": {"grz_private_key_path": "/dev/null"},
+        "identifiers": {"grz": "GRZT00000"},
+    }
+    config_path = tmp_path / "config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config, f)
+    return config_path
+
+
 @pytest.mark.parametrize(
     ("flag", "expected"),
     [
@@ -14,7 +35,7 @@ import pytest
         (None, False),  # default is no-mmap
     ],
 )
-def test_validate_forwards_mmap_to_inner_callback(tmp_path, monkeypatch, flag, expected):
+def test_validate_forwards_mmap_to_inner_callback(tmp_path, monkeypatch, flag, expected, grzctl_config_path):
     """The grzctl ``validate`` wrapper must forward the ``mmap`` flag to the inner
     grz-cli ``validate`` callback under the parameter name it actually expects
     (``mmap``), not ``no_mmap``.
@@ -33,7 +54,7 @@ def test_validate_forwards_mmap_to_inner_callback(tmp_path, monkeypatch, flag, e
 
     monkeypatch.setattr(grz_cli_validate.validate, "callback", fake_callback)
 
-    args = ["validate", "--submission-dir", str(tmp_path), "--no-update-db"]
+    args = ["--config", str(grzctl_config_path), "validate", "--submission-dir", str(tmp_path), "--no-update-db"]
     if flag is not None:
         args.append(flag)
 

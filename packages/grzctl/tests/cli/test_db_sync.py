@@ -105,7 +105,7 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
     cli = grzctl.cli.build_cli()
 
     with patch("grzctl.commands.db.cli.query_submissions", return_value=mock_s3_submissions) as mock_query:
-        result = runner.invoke(cli, ["db", "--config-file", str(blank_database_config_path), "sync-from-inbox"])
+        result = runner.invoke(cli, ["--config", str(blank_database_config_path), "db", "sync-from-inbox"])
 
         assert result.exit_code == 0, result.stderr
         mock_query.assert_called_once()
