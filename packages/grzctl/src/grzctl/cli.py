@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 import click
+import platformdirs
 from grz_cli.commands.submit import submit
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
@@ -24,6 +25,8 @@ from .commands.report import report
 from .models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
+
+DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
 
 
 class OrderedGroup(click.Group):
@@ -64,7 +67,7 @@ def build_cli():
         metavar="PATH",
         type=FILE_R_E,
         default=None,
-        help="Path to the grzctl configuration file (required for most commands)",
+        help="Path to the grzctl configuration file. Defaults to ~/.config/grzctl/config.yaml",
     )
     @click.pass_context
     def cli(ctx: click.Context, config_path: Path | None = None, log_file: str | None = None, log_level: str = "INFO"):
@@ -78,6 +81,8 @@ def build_cli():
         """
         setup_cli_logging(log_file, log_level)
         ctx.ensure_object(dict)
+        if config_path is None and DEFAULT_CONFIG_PATH.is_file():
+            config_path = DEFAULT_CONFIG_PATH
         if config_path is not None:
             config = GrzctlConfig.from_path(config_path)
             ctx.obj["configuration"] = config
