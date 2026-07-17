@@ -87,7 +87,7 @@ def db(
     # set up context object
     ctx.ensure_object(dict)
 
-    config = GrzctlConfig.model_validate(configuration)
+    config = GrzctlConfig.from_configuration(configuration)
     db_config = config.db
     author_name = db_config.author.name
 
@@ -1274,7 +1274,7 @@ def backfill(  # noqa: PLR0913, C901
         "local_case_id",
     }
     try:
-        config = GrzctlConfig.model_validate(configuration)
+        config = GrzctlConfig.from_configuration(configuration)
         if not submission_ids:
             s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
@@ -1368,7 +1368,7 @@ def sync_from_inbox(
     Synchronize the database with submissions found in the inbox.
     """
     try:
-        config = GrzctlConfig.model_validate(configuration)
+        config = GrzctlConfig.from_configuration(configuration)
         s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
         console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
