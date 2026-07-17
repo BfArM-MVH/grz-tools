@@ -35,7 +35,7 @@ def decrypt(
     Decrypting a submission requires the _private_ key of the original recipient.
     """
     config = GrzctlConfig.model_validate(configuration)
-    keys = config.require_keys()
+    keys = config.keys
 
     grz_privkey_path = keys.grz_private_key_path
     if not grz_privkey_path:

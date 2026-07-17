@@ -94,7 +94,7 @@ def _generate_pruefbericht_from_database(
 ) -> Pruefbericht:
     """Generate Prüfbericht by fetching submission data from the database."""
     config = GrzctlConfig.model_validate(configuration)
-    db = config.require_db()
+    db = config.db
 
     db_service = SubmissionDb(db_url=str(db.database_url), author=None, debug=False)
     submission = db_service.get_submission(submission_id)
@@ -228,7 +228,7 @@ def submit(  # noqa: PLR0913
 ):
     """Submit a Prüfbericht JSON to BfArM."""
     config = GrzctlConfig.model_validate(configuration)
-    pb = config.require_pruefbericht()
+    pb = config.pruefbericht
 
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
