@@ -136,17 +136,20 @@ def list_submissions(
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.
     """
-    config = GrzctlConfig.model_validate(configuration)
+    config = GrzctlConfig.from_configuration(configuration)
     s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
 
     submissions = query_submissions(s3_options, show_cleaned)
 
     database_states: dict[str, str | None] | None = None
-    if config.db is not None:
-        database_states = {}
+    try:
         submission_db = get_submission_db_instance(db_url=config.db.database_url)
+        database_states = {}
         for submission in submissions:
             database_states[submission.submission_id] = _get_latest_state_str(submission_db, submission.submission_id)
+    except Exception:
+        database_states = None
+        log.warning("Could not query database for submission states. Run 'grzctl db upgrade' to initialize.")
 
     if output_json:
         submissions_jsonable = to_jsonable_python(submissions[:limit])
