@@ -43,7 +43,6 @@ def test_quarter_determination():
 def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on an empty database."""
     env = {
-        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
     }
 
@@ -66,7 +65,6 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
 def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     """Small test case with a few submissions for quarterly reports."""
     env = {
-        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
     }
 
@@ -422,7 +420,6 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
         connection.commit()
 
     env = {
-        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
     }
 

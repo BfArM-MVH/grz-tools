@@ -15,7 +15,7 @@ from grz_common.workers.submission import Submission
 from .. import mock_files
 
 
-def test_clean_and_list(temp_grzctl_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
+def test_clean_and_list(temp_grzctl_s3_config_file_path, temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
@@ -83,7 +83,7 @@ def test_clean_and_list(temp_grzctl_s3_config_file_path, remote_bucket_with_vers
         # ensure metadata is empty
         assert remote_bucket_with_version.Object(f"{submission_id}/metadata/metadata.json").content_length == 0
 
-        list_args = ["list", "--config-file", temp_grzctl_s3_config_file_path, "--json", "--show-cleaned"]
+        list_args = ["list", "--config-file", temp_grzctl_s3_db_config_file_path, "--json", "--show-cleaned"]
 
         result_list = runner.invoke(cli, list_args, catch_exceptions=False)
 
