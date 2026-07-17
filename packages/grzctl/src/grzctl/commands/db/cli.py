@@ -1228,11 +1228,6 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     default=datetime.max,
     help="Process only submissions processed on or before this date (inclusive). Defaults to the end of time.",
 )
-@click.option(
-    "--inbox-bucket",
-    default=None,
-    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
-)
 @_ignore_field_option
 @click.pass_context
 def backfill(  # noqa: PLR0913, C901
@@ -1243,7 +1238,6 @@ def backfill(  # noqa: PLR0913, C901
     submission_ids: tuple[str, ...],
     start_date: datetime,
     end_date: datetime,
-    inbox_bucket,
     ignore_field: tuple[str, ...],
     **kwargs,
 ):
@@ -1255,6 +1249,9 @@ def backfill(  # noqa: PLR0913, C901
 
     Existing non-NULL fields whose values differ from metadata.json are not overwritten
     unless --force is given.
+
+    Both the consented and non-consented archive buckets are always scanned.
+    If a submission's metadata.json is found in both, an error is raised.
 
     Candidate selection (mutually exclusive):
 
@@ -1274,13 +1271,21 @@ def backfill(  # noqa: PLR0913, C901
         "tan_g",
         "local_case_id",
     }
-    try:
-        config = configuration
-        if not submission_ids:
-            s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
-    except Exception:
-        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
-        sys.exit(1)
+    config = configuration
+
+    # ── Build S3 clients for both archive targets ────────────────────────────
+    archive_targets = [
+        ("consented", config.archives.consented.s3),
+        ("non_consented", config.archives.non_consented.s3),
+    ]
+
+    _s3_clients: dict[str | None, Any] = {}
+
+    def _get_s3_client(s3_options: Any) -> Any:
+        endpoint = str(s3_options.endpoint_url) if s3_options.endpoint_url else None
+        if endpoint not in _s3_clients:
+            _s3_clients[endpoint] = init_s3_client(s3_options)
+        return _s3_clients[endpoint]
 
     db_service = get_submission_db_instance(ctx.obj["db_url"], author=ctx.obj["author"])
 
@@ -1300,42 +1305,38 @@ def backfill(  # noqa: PLR0913, C901
 
     counts: Counter[_BackfillResult] = Counter()
 
+    console_err.print(
+        f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
+        f"across consented and non-consented archives…[/cyan]"
+    )
+
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
-    _s3_clients: dict[str | None, Any] = {}
-
-    def _resolve_s3(submission: Submission) -> tuple[Any, str]:
-        """Return (s3_client, bucket) for *submission*."""
-        if not submission_ids:
-            endpoint = str(s3_options.endpoint_url) if s3_options.endpoint_url else None
-            if endpoint not in _s3_clients:
-                _s3_clients[endpoint] = init_s3_client(s3_options)
-            return _s3_clients[endpoint], s3_options.bucket
-
-        target = config.resolve_inbox_by_submission_id(submission.id, inbox_bucket)
-        endpoint = str(target.s3.endpoint_url) if target.s3.endpoint_url else None
-        if endpoint not in _s3_clients:
-            _s3_clients[endpoint] = init_s3_client(target.s3)
-        return _s3_clients[endpoint], target.s3.bucket
-
-    console_err.print(f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s)…[/cyan]")
-
     for submission in tqdm(candidates):
-        try:
-            s3_client, bucket = _resolve_s3(submission)
-        except Exception:
-            console_err.print(f"[yellow]Warning: could not resolve inbox for '{submission.id}', skipping.[/yellow]")
-            continue
-        counts[
-            _backfill_submission(
+        # Try both archives for each submission
+        results: dict[str, _BackfillResult] = {}
+        for label, s3_options in archive_targets:
+            client = _get_s3_client(s3_options)
+            results[label] = _backfill_submission(
                 submission,
-                s3_client,
-                bucket,
+                client,
+                s3_options.bucket,
                 db_service,
                 dry_run,
                 force,
                 ignore_fields,
             )
-        ] += 1
+
+        found_in = [label for label, result in results.items() if result != _BackfillResult.NOT_FOUND]
+
+        if len(found_in) > 1:
+            console_err.print(
+                f"[red]  {submission.id}: ERROR — metadata.json found in both consented and non_consented archives[/red]"
+            )
+            counts[_BackfillResult.ERROR] += 1
+        elif len(found_in) == 1:
+            counts[results[found_in[0]]] += 1
+        else:
+            counts[_BackfillResult.NOT_FOUND] += 1
 
     # ── Summary ─────────────────────────────────────────────────────────────
     prefix = "[dry-run] " if dry_run else ""
