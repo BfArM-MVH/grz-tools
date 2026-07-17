@@ -1,6 +1,5 @@
 """Tests for config derivation in grzctl CLI wrappers."""
 
-import pytest
 from grzctl.commands.cli_wrappers import derive_encrypt_config, derive_validate_config
 from grzctl.models.config import GrzctlConfig
 
@@ -66,9 +65,7 @@ class TestDeriveEncryptConfig:
         }
 
     def test_no_private_key_path(self):
-        config = _make_grzctl_config(
-            keys={"grz_private_key_path": "/dev/null", "grz_public_key_path": "/dev/null"}
-        )
+        config = _make_grzctl_config(keys={"grz_private_key_path": "/dev/null", "grz_public_key_path": "/dev/null"})
         result = derive_encrypt_config(config)
         # grz_private_key_path should be included since it's set
         assert "grz_private_key_path" in result["keys"]
