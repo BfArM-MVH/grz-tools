@@ -2,13 +2,13 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_dir
 @grzcli.threads
 @grzcli.update_db
@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
     help="Whether to archive as consented (default) or non-consented.",
 )
 def archive(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_dir,
     threads,
     update_db,
@@ -37,7 +37,7 @@ def archive(
     """
     Archive a submission within a GRZ/GDC.
     """
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
 
     archive_s3 = config.archives.consented.s3 if consented else config.archives.non_consented.s3
 

@@ -1,11 +1,10 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, ClassVar
 
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
-from grz_common.models.keys import KeyModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from pydantic import Field, model_validator
 from pydantic.fields import FieldInfo
@@ -127,6 +126,8 @@ class DictConfigSettingsSource(PydanticBaseSettingsSource):
 class GrzctlConfig(IgnoringBaseSettings):
     """Unified configuration for all grzctl commands."""
 
+    _config_dict: ClassVar[dict[str, Any] | None] = None
+
     s3: ProcessS3Options
     """Configuration for S3 inbox connections."""
 
@@ -139,7 +140,7 @@ class GrzctlConfig(IgnoringBaseSettings):
     pruefbericht: PruefberichtModel
     """Configuration for Prüfbericht submission."""
 
-    keys: KeyModel
+    keys: GrzctlKeyModel
     """Key configuration for encryption/decryption commands."""
 
     identifiers: IdentifiersModel
@@ -167,16 +168,12 @@ class GrzctlConfig(IgnoringBaseSettings):
         return (init_settings, env_settings, dotenv_settings, file_secret_settings)
 
     @classmethod
-    def from_path(cls, path: str | Path) -> "GrzctlConfig":
-        """Load config from a YAML file, letting env vars override file values."""
-        from grz_common.utils.config import read_and_merge_config_files
+    def from_path(cls, path: str | Path) -> "GrzctlConfig":  # type: ignore[override]
+        """Load config from a single YAML file, letting env vars override file values."""
+        import yaml
 
-        if isinstance(path, tuple):
-            path = list(path)
-        if not isinstance(path, list):
-            path = [path]
-        paths = [Path(p) for p in path]
-        config_dict = read_and_merge_config_files(paths)
+        with open(path) as fd:
+            config_dict = yaml.safe_load(fd)
         return cls.from_configuration(config_dict)
 
     @classmethod

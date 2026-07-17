@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
@@ -10,6 +9,7 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_id
 @grzcli.output_dir
 @grzcli.threads
@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
     help="Update the submission metadata with information from metadata.json and S3. If combined with --force, will overwrite information in db without asking.",
 )
 def download(  # noqa: PLR0913
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_id,
     output_dir,
     threads,
@@ -50,7 +50,7 @@ def download(  # noqa: PLR0913
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
     s3_options = config.resolve_inbox_by_submission_id(submission_id, inbox_bucket).s3
 
     log.info("Starting download...")

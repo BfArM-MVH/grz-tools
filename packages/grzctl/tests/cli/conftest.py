@@ -89,7 +89,10 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> Grz
             "known_public_keys": str(public_key_path.resolve()),
         },
         pruefbericht={},
-        keys={"grz_public_key_path": str(public_key_path.resolve())},
+        keys={
+            "grz_private_key_path": str(private_key_path.resolve()),
+            "grz_public_key_path": str(public_key_path.resolve()),
+        },
         identifiers={"grz": "GRZK00007"},
     )
 

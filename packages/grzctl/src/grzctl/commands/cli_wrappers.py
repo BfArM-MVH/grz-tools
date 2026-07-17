@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import click
 import grz_cli.commands.encrypt as encrypt_module
@@ -12,14 +11,20 @@ from grz_common.models.s3 import S3Options
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
 
+def _grzctl_config_to_grzcli_dict(config: GrzctlConfig) -> dict:
+    """Convert a GrzctlConfig to the dict format expected by grz-cli commands."""
+    return config.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True)
+
+
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_dir
 @grzcli.force
 @grzcli.threads
@@ -32,7 +37,7 @@ log = logging.getLogger(__name__)
 )
 @grzcli.update_db
 def validate(  # noqa: PLR0913
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_dir,
     force,
     threads,
@@ -63,7 +68,7 @@ def validate(  # noqa: PLR0913
         enabled=update_db,
     ) as dbcontext_inst:
         validate_module.validate.callback(  # type: ignore[misc]
-            configuration=configuration,
+            configuration=_grzctl_config_to_grzcli_dict(configuration),
             submission_dir=submission_dir,
             force=force,
             threads=threads,
@@ -76,7 +81,7 @@ def validate(  # noqa: PLR0913
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_dir
 @grzcli.force
 @click.option(
@@ -87,7 +92,7 @@ def validate(  # noqa: PLR0913
 )
 @grzcli.update_db
 def encrypt(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_dir,
     force,
     check_validation_logs,
@@ -116,7 +121,7 @@ def encrypt(
         enabled=update_db,
     ):
         encrypt_module.encrypt.callback(  # type: ignore[misc]
-            configuration=configuration,
+            configuration=_grzctl_config_to_grzcli_dict(configuration),
             submission_dir=submission_dir,
             force=force,
             check_validation_logs=check_validation_logs,
@@ -127,7 +132,7 @@ def encrypt(
 @click.command()
 @grzcli.submission_dir
 @grzcli.threads
-@grzcli.configuration
+@grzctl_configuration
 @click.option(
     "--inbox-bucket",
     default=None,
@@ -135,7 +140,7 @@ def encrypt(
 )
 @grzcli.update_db
 def upload(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_dir,
     threads,
     inbox_bucket,
@@ -143,7 +148,7 @@ def upload(
     **kwargs,
 ):
     """Upload a submission to a GRZ/GDC (wrapper with DB updates)."""
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
     inbox_s3 = config.resolve_inbox_by_bucket(inbox_bucket)
 
     submission_dir = Path(submission_dir)

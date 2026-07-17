@@ -2,13 +2,13 @@
 
 import logging
 import sys
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
 from grz_common.transfer import init_s3_resource
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_id
 @click.option("--yes-i-really-mean-it", is_flag=True)
 @grzcli.update_db
@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
     help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
 )
 def clean(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_id,
     yes_i_really_mean_it: bool,
     update_db: bool,
@@ -36,7 +36,7 @@ def clean(
     """
     Remove all files of a submission from the S3 inbox.
     """
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
     s3_options = config.resolve_inbox_by_submission_id(submission_id, inbox_bucket).s3
     bucket_name = s3_options.bucket
 

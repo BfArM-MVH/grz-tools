@@ -14,6 +14,7 @@ from grz_pydantic_models.pruefbericht.v0 import Pruefbericht, SubmittedCase
 from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissionMetadata, Relation
 from pydantic_core import to_jsonable_python
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -89,11 +90,9 @@ def _generate_pruefbericht_from_metadata(metadata: GrzSubmissionMetadata, failed
     )
 
 
-def _generate_pruefbericht_from_database(
-    submission_id: str, configuration: dict[str, Any], failed: bool
-) -> Pruefbericht:
+def _generate_pruefbericht_from_database(submission_id: str, configuration: GrzctlConfig, failed: bool) -> Pruefbericht:
     """Generate Prüfbericht by fetching submission data from the database."""
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
     db = config.db
 
     db_service = SubmissionDb(db_url=str(db.database_url), author=None, debug=False)
@@ -191,9 +190,9 @@ def from_metadata(metadata_file, failed):
 
 @generate.command("from-database")
 @grzcli.submission_id
-@grzcli.configuration
+@grzctl_configuration
 @fail_or_pass
-def from_database(submission_id, configuration, failed, config_file=None):
+def from_database(submission_id, configuration: GrzctlConfig, failed):
     """Generate Prüfbericht from database using submission ID."""
     try:
         pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed)
@@ -205,7 +204,7 @@ def from_database(submission_id, configuration, failed, config_file=None):
 @pruefbericht.command()
 @click.option("--pruefbericht-file", type=click.Path(exists=True), required=True, help="Path to pruefbericht file")
 @grzcli.submission_id
-@grzcli.configuration
+@grzctl_configuration
 @click.option(
     "--token", help="Access token to try instead of requesting a new one.", envvar="GRZ_PRUEFBERICHT_ACCESS_TOKEN"
 )
@@ -217,7 +216,7 @@ def from_database(submission_id, configuration, failed, config_file=None):
 )
 @grzcli.update_db
 def submit(  # noqa: PLR0913
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     pruefbericht_file,
     submission_id,
     token,
@@ -227,7 +226,7 @@ def submit(  # noqa: PLR0913
     **kwargs,
 ):
     """Submit a Prüfbericht JSON to BfArM."""
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
     pb = config.pruefbericht
 
     with open(pruefbericht_file) as f:

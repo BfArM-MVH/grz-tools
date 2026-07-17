@@ -74,7 +74,7 @@ class DbContext:
 
     def __init__(
         self,
-        configuration: dict[str, Any],
+        configuration: dict[str, Any] | GrzctlConfig,
         submission_id: str,
         start_state: SubmissionStateEnum,
         end_state: SubmissionStateEnum,
@@ -89,7 +89,9 @@ class DbContext:
 
     @cached_property
     def config(self) -> GrzctlConfig:
-        """Parse and cache the GrzctlConfig from the raw configuration dict."""
+        """Parse and cache the GrzctlConfig from the raw configuration dict or object."""
+        if isinstance(self.configuration, GrzctlConfig):
+            return self.configuration
         return GrzctlConfig.from_configuration(self.configuration)
 
     @cached_property
