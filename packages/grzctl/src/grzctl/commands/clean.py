@@ -36,7 +36,7 @@ def clean(
     """
     Remove all files of a submission from the S3 inbox.
     """
-    config = GrzctlConfig.model_validate(configuration)
+    config = GrzctlConfig.from_configuration(configuration)
     s3_options = config.resolve_inbox_by_submission_id(submission_id, inbox_bucket).s3
     bucket_name = s3_options.bucket
 

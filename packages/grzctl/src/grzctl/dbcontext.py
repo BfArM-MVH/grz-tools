@@ -90,7 +90,7 @@ class DbContext:
     @cached_property
     def config(self) -> GrzctlConfig:
         """Parse and cache the GrzctlConfig from the raw configuration dict."""
-        return GrzctlConfig.model_validate(self.configuration)
+        return GrzctlConfig.from_configuration(self.configuration)
 
     @cached_property
     def grzctl_versions(self) -> dict[str, str]:

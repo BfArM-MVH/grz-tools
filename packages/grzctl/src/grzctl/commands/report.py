@@ -46,7 +46,7 @@ def report(ctx: click.Context, configuration: dict[str, Any], config_file: tuple
     """
     Generate various reports related to GRZ activities.
     """
-    config = GrzctlConfig.model_validate(configuration)
+    config = GrzctlConfig.from_configuration(configuration)
     db = config.db
 
     ctx.obj = {

@@ -1,12 +1,15 @@
 import logging
 import sys
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Any
 
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.keys import KeyModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from pydantic import Field, model_validator
+from pydantic.fields import FieldInfo
+from pydantic_settings import PydanticBaseSettingsSource
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ class ProcessS3Options(IgnoringBaseModel):
     """
 
 
-class ProcessKeyConfigModel(IgnoringBaseSettings):
+class ProcessKeyConfigModel(IgnoringBaseModel):
     """Key configuration for the process command."""
 
     grz_private_key_path: Annotated[str, Field(min_length=1)]
@@ -97,6 +100,30 @@ class ArchivesConfig(IgnoringBaseModel):
         return self
 
 
+class DictConfigSettingsSource(PydanticBaseSettingsSource):
+    """A settings source that loads values from a dict (e.g. merged YAML config).
+
+    This source has lower priority than env vars, so environment variables
+    can override config file values.
+    """
+
+    def __init__(self, settings_cls: type, config_dict: dict[str, Any]):
+        super().__init__(settings_cls)
+        self.config_dict = config_dict
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        field_value = self.config_dict.get(field_name)
+        return field_value, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        for field_name, field in self.settings_cls.model_fields.items():
+            field_value, field_key, value_is_complex = self.get_field_value(field, field_name)
+            if field_value is not None:
+                d[field_key] = field_value
+        return d
+
+
 class GrzctlConfig(IgnoringBaseSettings):
     """Unified configuration for all grzctl commands."""
 
@@ -117,6 +144,46 @@ class GrzctlConfig(IgnoringBaseSettings):
 
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type,
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        config_dict = getattr(cls, "_config_dict", None)
+        if config_dict is not None:
+            cls._config_dict = None
+            return (
+                init_settings,
+                env_settings,
+                DictConfigSettingsSource(settings_cls, config_dict),
+                dotenv_settings,
+                file_secret_settings,
+            )
+        return (init_settings, env_settings, dotenv_settings, file_secret_settings)
+
+    @classmethod
+    def from_path(cls, path: str | Path) -> "GrzctlConfig":
+        """Load config from a YAML file, letting env vars override file values."""
+        from grz_common.utils.config import read_and_merge_config_files
+
+        if isinstance(path, tuple):
+            path = list(path)
+        if not isinstance(path, list):
+            path = [path]
+        paths = [Path(p) for p in path]
+        config_dict = read_and_merge_config_files(paths)
+        return cls.from_configuration(config_dict)
+
+    @classmethod
+    def from_configuration(cls, configuration: dict[str, Any]) -> "GrzctlConfig":
+        """Load config from a dict, letting env vars override dict values."""
+        cls._config_dict = configuration
+        return cls()
 
     def resolve_inbox_by_submission_id(self, submission_id: str, bucket: str | None = None) -> InboxTarget:
         """Resolve an inbox by extracting the LE ID from the submission ID.
