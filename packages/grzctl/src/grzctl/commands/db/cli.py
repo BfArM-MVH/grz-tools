@@ -58,6 +58,7 @@ from pydantic import Field, ValidationError
 from tqdm.auto import tqdm
 
 from ... import get_versions
+from ...commands import grzctl_configuration
 from ...models.config import GrzctlConfig
 from .. import limit
 from . import SignatureStatus, _verify_signature
@@ -76,18 +77,18 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group(help="Database operations")
-@grzcli.configuration
+@grzctl_configuration
 @click.pass_context
 def db(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     **kwargs,
 ):
     """Database operations"""
     # set up context object
     ctx.ensure_object(dict)
 
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
     db_config = config.db
     author_name = db_config.author.name
 
@@ -1196,7 +1197,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 
 
 @db.command("backfill")
-@grzcli.configuration
+@grzctl_configuration
 @click.option(
     "--dry-run/--no-dry-run",
     default=False,
@@ -1236,7 +1237,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 @click.pass_context
 def backfill(  # noqa: PLR0913, C901
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     dry_run: bool,
     force: bool,
     submission_ids: tuple[str, ...],
@@ -1274,7 +1275,7 @@ def backfill(  # noqa: PLR0913, C901
         "local_case_id",
     }
     try:
-        config = GrzctlConfig.from_configuration(configuration)
+        config = configuration
         if not submission_ids:
             s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
@@ -1351,7 +1352,7 @@ def backfill(  # noqa: PLR0913, C901
 
 
 @db.command("sync-from-inbox")
-@grzcli.configuration
+@grzctl_configuration
 @click.option(
     "--inbox-bucket",
     default=None,
@@ -1360,7 +1361,7 @@ def backfill(  # noqa: PLR0913, C901
 @click.pass_context
 def sync_from_inbox(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     inbox_bucket,
     **kwargs,
 ):
@@ -1368,7 +1369,7 @@ def sync_from_inbox(
     Synchronize the database with submissions found in the inbox.
     """
     try:
-        config = GrzctlConfig.from_configuration(configuration)
+        config = configuration
         s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
         console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")

@@ -4,7 +4,6 @@ import datetime
 import json
 import logging
 import sys
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
@@ -15,6 +14,7 @@ from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSum
 from grz_db.models.submission import SubmissionDb
 from pydantic_core import to_jsonable_python
 
+from ..commands import grzctl_configuration
 from ..models.config import GrzctlConfig
 from . import limit
 from .db.cli import get_submission_db_instance
@@ -116,7 +116,7 @@ def _prepare_table(
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.output_json
 @click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
 @click.option(
@@ -126,7 +126,7 @@ def _prepare_table(
 )
 @limit
 def list_submissions(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     output_json: bool,
     show_cleaned: bool,
     inbox_bucket,
@@ -136,7 +136,7 @@ def list_submissions(
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.
     """
-    config = GrzctlConfig.from_configuration(configuration)
+    config = configuration
     s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
 
     submissions = query_submissions(s3_options, show_cleaned)
