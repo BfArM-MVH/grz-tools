@@ -39,7 +39,7 @@ grz-check = { workspace = true }
 # enforces it on every local invocation. (The constraint-dependencies 
 # below as well as conda `environment-dev.yml`pin must be kept in sync 
 # by hand.)
-required-version = "==0.11.22"
+required-version = "~=0.11.22"
 
 # Centralize test/dev tool version ranges here so each package's
 # `[dependency-groups]` only lists bare package names. uv applies these
@@ -54,7 +54,7 @@ constraint-dependencies = [
     "responses ==0.25.*",
     "numpy >=2.1.2,<3",
     "ruff >=0.11.12,<1",
-    "uv ==0.11.22"
+    "uv ~=0.11.22"
 ]
 
 [project.optional-dependencies]
