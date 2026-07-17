@@ -109,9 +109,14 @@ def blank_initial_database_config_path(tmp_path: Path, blank_database_config: Gr
 
 @pytest.fixture
 def blank_database_config_path(tmp_path: Path, blank_database_config: GrzctlConfig) -> Path:
+    import yaml
+
     config_path = tmp_path / "config.db.yaml"
+
+    config_dict = blank_database_config.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True)
+
     with open(config_path, "w") as config_file:
-        blank_database_config.to_yaml(config_file)
+        yaml.dump(config_dict, config_file)
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
