@@ -9,10 +9,8 @@ from collections import defaultdict
 from enum import StrEnum
 from operator import attrgetter
 from pathlib import Path
-from typing import Any
 
 import click
-import grz_common.cli as grzctl
 import sqlalchemy as sa
 from grz_db.models.author import Author
 from grz_db.models.submission import (
@@ -29,7 +27,8 @@ from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, 
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
 
-from ..models.config import ReportConfig
+from ..commands import grzctl_configuration
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
@@ -40,18 +39,17 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group()
-@grzctl.configuration
+@grzctl_configuration
 @click.pass_context
-def report(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
+def report(ctx: click.Context, configuration: GrzctlConfig):
     """
     Generate various reports related to GRZ activities.
     """
-    config = ReportConfig.model_validate(configuration)
-    if not config:
-        raise ValueError("DB config not found")
+    config = configuration
+    db = config.db
 
     ctx.obj = {
-        "db_url": config.db.database_url,
+        "db_url": db.database_url,
         "grz_id": config.identifiers.grz,
     }
 

@@ -2,37 +2,43 @@
 
 import logging
 import sys
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
 from grz_common.transfer import init_s3_resource
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
-from ..models.config import CleanConfig
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_id
 @click.option("--yes-i-really-mean-it", is_flag=True)
 @grzcli.update_db
+@click.option(
+    "--inbox-bucket",
+    default=None,
+    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
+)
 def clean(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_id,
     yes_i_really_mean_it: bool,
     update_db: bool,
+    inbox_bucket,
     **kwargs,
 ):
     """
     Remove all files of a submission from the S3 inbox.
     """
-    config = CleanConfig.model_validate(configuration)
-
-    bucket_name = config.s3.bucket
+    config = configuration
+    s3_options = config.resolve_inbox_by_submission_id(submission_id, inbox_bucket).s3
+    bucket_name = s3_options.bucket
 
     if not submission_id:
         sys.exit("No submission ID provided. Please specify a submission ID to clean.")
@@ -49,14 +55,14 @@ def clean(
             end_state=SubmissionStateEnum.CLEANED,
             enabled=update_db,
         ):
-            _clean_submission_from_bucket(bucket_name, config, submission_id)
+            _clean_submission_from_bucket(bucket_name, s3_options, submission_id)
 
 
-def _clean_submission_from_bucket(bucket_name: str, config: CleanConfig, submission_id):
+def _clean_submission_from_bucket(bucket_name: str, s3_options, submission_id):
     prefix = submission_id
     prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
-    resource = init_s3_resource(config.s3)
+    resource = init_s3_resource(s3_options)
     bucket = resource.Bucket(bucket_name)
     log.info(f"Cleaning '{prefix}' from '{bucket_name}' …")
     # add a marker at start of cleaning to

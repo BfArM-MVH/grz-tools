@@ -58,7 +58,8 @@ from pydantic import Field, ValidationError
 from tqdm.auto import tqdm
 
 from ... import get_versions
-from ...models.config import DbConfig, ListConfig
+from ...commands import grzctl_configuration
+from ...models.config import GrzctlConfig
 from .. import limit
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
@@ -76,21 +77,19 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group(help="Database operations")
-@grzcli.configuration
+@grzctl_configuration
 @click.pass_context
 def db(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     **kwargs,
 ):
     """Database operations"""
     # set up context object
     ctx.ensure_object(dict)
 
-    config = DbConfig.model_validate(configuration)
+    config = configuration
     db_config = config.db
-    if not db_config:
-        raise DatabaseConfigurationError("DB config not found")
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:
@@ -1198,7 +1197,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 
 
 @db.command("backfill")
-@grzcli.configuration
+@grzctl_configuration
 @click.option(
     "--dry-run/--no-dry-run",
     default=False,
@@ -1231,9 +1230,9 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(  # noqa: PLR0913
+def backfill(  # noqa: PLR0913, C901
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     dry_run: bool,
     force: bool,
     submission_ids: tuple[str, ...],
@@ -1250,6 +1249,9 @@ def backfill(  # noqa: PLR0913
 
     Existing non-NULL fields whose values differ from metadata.json are not overwritten
     unless --force is given.
+
+    Both the consented and non-consented archive buckets are always scanned.
+    If a submission's metadata.json is found in both, an error is raised.
 
     Candidate selection (mutually exclusive):
 
@@ -1269,11 +1271,21 @@ def backfill(  # noqa: PLR0913
         "tan_g",
         "local_case_id",
     }
-    try:
-        list_config = ListConfig.model_validate(configuration)
-    except Exception:
-        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
-        sys.exit(1)
+    config = configuration
+
+    # ── Build S3 clients for both archive targets ────────────────────────────
+    archive_targets = [
+        ("consented", config.archives.consented.s3),
+        ("non_consented", config.archives.non_consented.s3),
+    ]
+
+    _s3_clients: dict[str | None, Any] = {}
+
+    def _get_s3_client(s3_options: Any) -> Any:
+        endpoint = str(s3_options.endpoint_url) if s3_options.endpoint_url else None
+        if endpoint not in _s3_clients:
+            _s3_clients[endpoint] = init_s3_client(s3_options)
+        return _s3_clients[endpoint]
 
     db_service = get_submission_db_instance(ctx.obj["db_url"], author=ctx.obj["author"])
 
@@ -1295,24 +1307,36 @@ def backfill(  # noqa: PLR0913
 
     console_err.print(
         f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
-        f"from bucket '{list_config.s3.bucket}'…[/cyan]"
+        f"across consented and non-consented archives…[/cyan]"
     )
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
-    s3_client = init_s3_client(list_config.s3)
-
     for submission in tqdm(candidates):
-        counts[
-            _backfill_submission(
+        # Try both archives for each submission
+        results: dict[str, _BackfillResult] = {}
+        for label, s3_options in archive_targets:
+            client = _get_s3_client(s3_options)
+            results[label] = _backfill_submission(
                 submission,
-                s3_client,
-                list_config.s3.bucket,
+                client,
+                s3_options.bucket,
                 db_service,
                 dry_run,
                 force,
                 ignore_fields,
             )
-        ] += 1
+
+        found_in = [label for label, result in results.items() if result != _BackfillResult.NOT_FOUND]
+
+        if len(found_in) > 1:
+            console_err.print(
+                f"[red]  {submission.id}: ERROR — metadata.json found in both consented and non_consented archives[/red]"
+            )
+            counts[_BackfillResult.ERROR] += 1
+        elif len(found_in) == 1:
+            counts[results[found_in[0]]] += 1
+        else:
+            counts[_BackfillResult.NOT_FOUND] += 1
 
     # ── Summary ─────────────────────────────────────────────────────────────
     prefix = "[dry-run] " if dry_run else ""
@@ -1329,18 +1353,25 @@ def backfill(  # noqa: PLR0913
 
 
 @db.command("sync-from-inbox")
-@grzcli.configuration
+@grzctl_configuration
+@click.option(
+    "--inbox-bucket",
+    default=None,
+    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
+)
 @click.pass_context
 def sync_from_inbox(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
+    inbox_bucket,
     **kwargs,
 ):
     """
     Synchronize the database with submissions found in the inbox.
     """
     try:
-        list_config = ListConfig.model_validate(configuration)
+        config = configuration
+        s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
         console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
         sys.exit(1)
@@ -1350,8 +1381,8 @@ def sync_from_inbox(
     db_service = get_submission_db_instance(db_url, author=author)
 
     try:
-        console_err.print(f"[cyan]Scanning inbox '{list_config.s3.bucket}'...[/cyan]")
-        s3_submissions = query_submissions(list_config.s3, show_cleaned=False)
+        console_err.print(f"[cyan]Scanning inbox '{s3_options.bucket}'...[/cyan]")
+        s3_submissions = query_submissions(s3_options, show_cleaned=False)
 
         console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
         sync_submissions(db_service, s3_submissions, author)

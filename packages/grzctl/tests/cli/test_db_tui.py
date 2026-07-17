@@ -34,9 +34,9 @@ def test_db_tui_passes_quarter_year(captured_browser_args, blank_database_config
         result = runner.invoke(
             cli,
             [
-                "db",
-                "--config-file",
+                "--config",
                 str(blank_database_config_path),
+                "db",
                 "tui",
                 "--quarter",
                 "2",
@@ -61,9 +61,9 @@ def test_db_tui_passes_none_when_quarter_year_omitted(captured_browser_args, bla
         result = runner.invoke(
             cli,
             [
-                "db",
-                "--config-file",
+                "--config",
                 str(blank_database_config_path),
+                "db",
                 "tui",
             ],
         )

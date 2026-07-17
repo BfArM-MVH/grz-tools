@@ -2,30 +2,32 @@
 CLI module for handling command-line interface operations for GRZ administrators.
 """
 
-import logging.config
+import logging
 from pathlib import Path
 
 import click
-import grz_common.cli as grzcli
+import platformdirs
+import rich.pretty
 from grz_cli.commands.submit import submit
-from grz_cli.commands.upload import upload
-from grz_common.cli.dump_config import dump_config
+from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
 
 from . import get_versions
 from .commands.archive import archive
 from .commands.clean import clean
+from .commands.cli_wrappers import encrypt, upload, validate
 from .commands.consent import consent
 from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
-from .commands.encrypt import encrypt
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
-from .commands.validate import validate
+from .models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
+
+DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
 
 
 class OrderedGroup(click.Group):
@@ -60,16 +62,31 @@ def build_cli():
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
         help="Set the log level (default: INFO)",
     )
-    @grzcli.config_file
-    def cli(config_file: tuple[Path], log_file: str | None = None, log_level: str = "INFO"):
+    @click.option(
+        "--config",
+        "config_path",
+        metavar="PATH",
+        type=FILE_R_E,
+        default=None,
+        help="Path to the grzctl configuration file. Defaults to ~/.config/grzctl/config.yaml",
+    )
+    @click.pass_context
+    def cli(ctx: click.Context, config_path: Path | None = None, log_file: str | None = None, log_level: str = "INFO"):
         """
         Command-line interface function for setting up logging.
 
+        :param config_path: Path to the unified grzctl configuration file.
         :param log_file: Path to the log file. If provided, a file logger will be added.
         :param log_level: Log level for the logger. It should be one of the following:
                            DEBUG, INFO, WARNING, ERROR, CRITICAL.
         """
         setup_cli_logging(log_file, log_level)
+        ctx.ensure_object(dict)
+        if config_path is None and DEFAULT_CONFIG_PATH.is_file():
+            config_path = DEFAULT_CONFIG_PATH
+        if config_path is not None:
+            config = GrzctlConfig.from_path(config_path)
+            ctx.obj["configuration"] = config
 
     # For convenience, include grz-cli commands as well.
     cli.add_command(validate)
@@ -89,6 +106,14 @@ def build_cli():
     cli.add_command(dump_config)
 
     return cli
+
+
+@click.command()
+@click.pass_context
+def dump_config(ctx: click.Context):
+    """Dump the loaded grzctl configuration."""
+    config: GrzctlConfig = ctx.obj["configuration"]
+    rich.pretty.pprint(config.model_dump(mode="json", exclude_none=True))
 
 
 def main():

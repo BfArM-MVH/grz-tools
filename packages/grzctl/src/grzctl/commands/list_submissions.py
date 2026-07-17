@@ -4,7 +4,6 @@ import datetime
 import json
 import logging
 import sys
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
@@ -15,8 +14,8 @@ from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSum
 from grz_db.models.submission import SubmissionDb
 from pydantic_core import to_jsonable_python
 
-from ..models.config import ListConfig
-from ..models.db import DbModel
+from ..commands import grzctl_configuration
+from ..models.config import GrzctlConfig
 from . import limit
 from .db.cli import get_submission_db_instance
 
@@ -117,34 +116,40 @@ def _prepare_table(
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.output_json
 @click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
+@click.option(
+    "--inbox-bucket",
+    default=None,
+    help="Inbox bucket name to list. Required when multiple inboxes are configured.",
+)
 @limit
 def list_submissions(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     output_json: bool,
     show_cleaned: bool,
+    inbox_bucket,
     limit: int,
     **kwargs,
 ):
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.
     """
-    config = ListConfig.model_validate(configuration)
+    config = configuration
+    s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
 
-    submissions = query_submissions(config.s3, show_cleaned)
+    submissions = query_submissions(s3_options, show_cleaned)
 
     database_states: dict[str, str | None] | None = None
-    if isinstance(config.db, DbModel):
-        database_states = {}
+    try:
         submission_db = get_submission_db_instance(db_url=config.db.database_url)
-        # query latest database state for submissions
+        database_states = {}
         for submission in submissions:
             database_states[submission.submission_id] = _get_latest_state_str(submission_db, submission.submission_id)
-    elif isinstance(config.db, dict):
-        # this can happen if environment variables partially populate DbModel but it's missing from the passed config file
-        log.debug("Ignoring partial/invalid database configuration.")
+    except Exception:
+        database_states = None
+        log.warning("Could not query database for submission states. Run 'grzctl db upgrade' to initialize.")
 
     if output_json:
         submissions_jsonable = to_jsonable_python(submissions[:limit])

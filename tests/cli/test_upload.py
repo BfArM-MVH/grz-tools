@@ -3,7 +3,6 @@ import os
 import shutil
 from importlib.metadata import version
 from pathlib import Path
-from unittest import mock
 
 import grz_cli.cli
 import grzctl.cli
@@ -43,7 +42,8 @@ def test_upload_download_submission(
     working_dir_path,
     tmpdir_factory,
     remote_bucket_with_version,
-    temp_s3_db_config_file_path,
+    temp_s3_config_file_path,
+    temp_grzctl_s3_db_config_file_path,
     initiated_db_test_connection,  # necessary to initiate DB
 ):
     submission_dir = Path("tests/mock_files/submissions/valid_submission")
@@ -72,64 +72,60 @@ def test_upload_download_submission(
             state=EncryptionState(encryption_successful=True),
         )
 
-    with mock.patch(
-        "grz_common.models.s3.S3Options.__getattr__",
-        lambda self, name: None if name == "endpoint_url" else AttributeError,
-    ):
-        # upload encrypted submission
-        upload_args = [
-            "upload",
-            "--submission-dir",
-            str(working_dir_path),
-            "--config-file",
-            temp_s3_db_config_file_path,
-        ]
+    # upload encrypted submission
+    upload_args = [
+        "upload",
+        "--submission-dir",
+        str(working_dir_path),
+        "--config-file",
+        temp_s3_config_file_path,
+    ]
 
-        runner = CliRunner(env=env)
-        cli = grz_cli.cli.build_cli()
-        result = runner.invoke(cli, upload_args, catch_exceptions=False)
+    runner = CliRunner(env=env)
+    cli = grz_cli.cli.build_cli()
+    result = runner.invoke(cli, upload_args, catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
-        assert len(result.output) != 0, result.stderr
+    assert result.exit_code == 0, result.output
+    assert len(result.output) != 0, result.stderr
 
-        submission_id = result.stdout.strip()
+    submission_id = result.stdout.strip()
 
-        objects_in_bucket = {obj.key: obj for obj in remote_bucket_with_version.objects.all()}
-        assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
+    objects_in_bucket = {obj.key: obj for obj in remote_bucket_with_version.objects.all()}
+    assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
 
-        assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
+    assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
 
-        cli = grzctl.cli.build_cli()
+    cli = grzctl.cli.build_cli()
 
-        add_args = [
-            "db",
-            "--config-file",
-            str(temp_s3_db_config_file_path),
-            "submission",
-            "add",
-            submission_id,
-        ]
-        runner.invoke(cli, add_args, catch_exceptions=False)
+    add_args = [
+        "--config",
+        str(temp_grzctl_s3_db_config_file_path),
+        "db",
+        "submission",
+        "add",
+        submission_id,
+    ]
+    runner.invoke(cli, add_args, catch_exceptions=False)
 
-        # download
-        download_dir = tmpdir_factory.mktemp("submission_download")
-        download_dir_path = Path(download_dir.strpath)
+    # download
+    download_dir = tmpdir_factory.mktemp("submission_download")
+    download_dir_path = Path(download_dir.strpath)
 
-        # download encrypted submission
-        download_args = [
-            "download",
-            "--submission-id",
-            submission_id,
-            "--output-dir",
-            str(download_dir_path),
-            "--config-file",
-            str(temp_s3_db_config_file_path),
-            "--no-update-db",
-            "--populate",
-        ]
-        result = runner.invoke(cli, download_args, catch_exceptions=False)
+    # download encrypted submission
+    download_args = [
+        "--config",
+        str(temp_grzctl_s3_db_config_file_path),
+        "download",
+        "--submission-id",
+        submission_id,
+        "--output-dir",
+        str(download_dir_path),
+        "--no-update-db",
+        "--populate",
+    ]
+    result = runner.invoke(cli, download_args, catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.output
 
     assert are_dir_trees_equal(
         working_dir_path / "encrypted_files",
@@ -304,20 +300,16 @@ def test_upload_workflow_succeeds_with_symlinks_to_real_test_files(
     assert result.exit_code == 0, result.output
 
     # upload (must not fail due to symlink usage earlier)
-    with mock.patch(
-        "grz_common.models.s3.S3Options.__getattr__",
-        lambda self, name: None if name == "endpoint_url" else AttributeError,
-    ):
-        result = runner.invoke(
-            cli,
-            [
-                "upload",
-                "--submission-dir",
-                str(working_dir_path),
-                *config_args,
-            ],
-            catch_exceptions=False,
-        )
+    result = runner.invoke(
+        cli,
+        [
+            "upload",
+            "--submission-dir",
+            str(working_dir_path),
+            *config_args,
+        ],
+        catch_exceptions=False,
+    )
     assert result.exit_code == 0, result.output
 
     submission_id = result.stdout.strip()

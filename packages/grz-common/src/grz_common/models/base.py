@@ -19,7 +19,7 @@ class IgnoringBaseModel(BaseModel):
 
     def to_yaml(self, fd):
         """Reads the configuration file and validates it against the schema."""
-        yaml.dump(self.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True))
+        yaml.dump(self.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True), fd)
 
     @classmethod
     def from_path(cls, path: str | PathLike) -> Self:

@@ -7,10 +7,23 @@ import cryptography.hazmat.primitives.serialization as cryptser
 import grzctl.cli
 import psycopg
 import pytest
-import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
+
+
+def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
+
+    def _s3(bucket):
+        d = {"bucket": bucket, "public_key_path": public_key_path}
+        if endpoint_url:
+            d["endpoint_url"] = endpoint_url
+        return d
+
+    return {
+        "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
+        "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+    }
 
 
 @pytest.fixture
@@ -27,7 +40,7 @@ def test_metadata_path():
         ),
     ]
 )
-def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbConfig:
+def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> GrzctlConfig:
     private_key = Ed25519PrivateKey.generate()
     private_key_path = tmp_path / "alice.sec"
     with open(private_key_path, "wb") as private_key_file:
@@ -53,7 +66,19 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
         postgresql: psycopg.Connection = request.getfixturevalue("postgresql")
         database_url = f"postgresql+psycopg://{postgresql.info.user}:@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
 
-    return DbConfig(
+    return GrzctlConfig(
+        s3={
+            "inboxes": {
+                "000000000": {
+                    "inbox": {
+                        "private_key_path": str(private_key_path.resolve()),
+                    }
+                }
+            }
+        },
+        archives=_grzctl_archives(
+            public_key_path=str(public_key_path.resolve()),
+        ),
         db={
             "database_url": database_url,
             "author": {
@@ -62,31 +87,37 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
                 "private_key_passphrase": "",
             },
             "known_public_keys": str(public_key_path.resolve()),
-        }
+        },
+        pruefbericht={},
+        keys={
+            "grz_private_key_path": str(private_key_path.resolve()),
+            "grz_public_key_path": str(public_key_path.resolve()),
+        },
+        identifiers={"grz": "GRZK00007"},
     )
 
 
 @pytest.fixture
-def blank_initial_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
+def blank_initial_database_config_path(tmp_path: Path, blank_database_config: GrzctlConfig) -> Path:
     config_path = tmp_path / "config.db.yaml"
     with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
+        blank_database_config.to_yaml(config_file)
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    _ = runner.invoke(cli, ["db", "--config-file", str(config_path), "upgrade", "--revision", "1a9bd994df1b"])
+    _ = runner.invoke(cli, ["--config", str(config_path), "db", "upgrade", "--revision", "1a9bd994df1b"])
 
     return config_path
 
 
 @pytest.fixture
-def blank_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
+def blank_database_config_path(tmp_path: Path, blank_database_config: GrzctlConfig) -> Path:
     config_path = tmp_path / "config.db.yaml"
     with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
+        blank_database_config.to_yaml(config_file)
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    _ = runner.invoke(cli, ["db", "--config-file", str(config_path), "init"])
+    _ = runner.invoke(cli, ["--config", str(config_path), "db", "init"])
 
     return config_path

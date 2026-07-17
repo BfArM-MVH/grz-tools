@@ -11,7 +11,7 @@ import yaml
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary
 from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 
 def test_sync_from_inbox(blank_database_config_path, tmp_path):
@@ -22,10 +22,16 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
         config_data = yaml.safe_load(f)
 
     config_data["s3"] = {
-        "bucket": "test-bucket",
-        "endpoint_url": "http://localhost:9000",
-        "access_key_id": "minioadmin",
-        "secret_access_key": "minioadmin",
+        "inboxes": {
+            "123456789": {
+                "test-bucket": {
+                    "endpoint_url": "http://localhost:9000",
+                    "access_key": "minioadmin",
+                    "secret": "minioadmin",
+                    "private_key_path": config_data["db"]["author"]["private_key_path"],
+                }
+            }
+        }
     }
 
     with open(blank_database_config_path, "w", encoding="utf-8") as f:
@@ -81,7 +87,7 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
         submission_no_change,
     ]
 
-    db_config = DbConfig.from_path(blank_database_config_path)
+    db_config = GrzctlConfig.from_path(blank_database_config_path)
 
     with open(config_data["db"]["author"]["private_key_path"], "rb") as f:
         pk_bytes = f.read()
@@ -99,7 +105,7 @@ def test_sync_from_inbox(blank_database_config_path, tmp_path):
     cli = grzctl.cli.build_cli()
 
     with patch("grzctl.commands.db.cli.query_submissions", return_value=mock_s3_submissions) as mock_query:
-        result = runner.invoke(cli, ["db", "--config-file", str(blank_database_config_path), "sync-from-inbox"])
+        result = runner.invoke(cli, ["--config", str(blank_database_config_path), "db", "sync-from-inbox"])
 
         assert result.exit_code == 0, result.stderr
         mock_query.assert_called_once()

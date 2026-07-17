@@ -123,12 +123,12 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
 
         # submit generated Prüfbericht
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
             "--no-update-db",
@@ -160,12 +160,12 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_
 
         # submit generated Prüfbericht with a pre-provided token
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
             "--token",
@@ -201,12 +201,12 @@ def test_valid_submission_with_expired_token(
 
         # (try to) submit generated Prüfbericht with an expired token
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
             "--token",
@@ -320,12 +320,12 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
 
         # attempt to submit
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
         ]
@@ -338,10 +338,30 @@ def pruefbericht_db_config(tmp_path):
     """Create a test database config for pruefbericht tests."""
     import json
 
+    from tests.conftest import _grzctl_archives, crypt4gh_grz_private_key_file, crypt4gh_grz_public_key_file
+
     db_path = tmp_path / "test.db"
     db_url = f"sqlite:///{db_path}"
 
-    config = {"db": {"database_url": db_url, "author": {"name": "test_author"}}}
+    config = {
+        "s3": {
+            "inboxes": {
+                "000000000": {
+                    "inbox": {
+                        "private_key_path": "/dev/null",
+                    }
+                }
+            }
+        },
+        "archives": _grzctl_archives(),
+        "db": {"database_url": db_url, "author": {"name": "test_author"}},
+        "keys": {
+            "grz_private_key_path": crypt4gh_grz_private_key_file,
+            "grz_public_key_path": crypt4gh_grz_public_key_file,
+        },
+        "pruefbericht": {},
+        "identifiers": {"grz": "GRZK00007"},
+    }
 
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config))
@@ -404,13 +424,13 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         TEST_SUBMISSION_ID,
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)
@@ -448,13 +468,13 @@ def test_generate_from_database_missing_submission(pruefbericht_db_config):
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         "nonexistent_id",
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)
@@ -481,13 +501,13 @@ def test_generate_from_database_missing_fields(pruefbericht_db_config):
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         TEST_SUBMISSION_ID,
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)
@@ -549,13 +569,13 @@ def test_generate_from_database_no_index_donor(pruefbericht_db_config):
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         TEST_SUBMISSION_ID,
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)

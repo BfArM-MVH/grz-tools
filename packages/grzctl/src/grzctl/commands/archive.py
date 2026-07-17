@@ -2,36 +2,44 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import click
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
-from ..models.config import ArchiveConfig
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
-import grz_common.cli as grzcli
-
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_dir
 @grzcli.threads
 @grzcli.update_db
+@click.option(
+    "--consented/--non-consented",
+    "consented",
+    default=True,
+    help="Whether to archive as consented (default) or non-consented.",
+)
 def archive(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_dir,
     threads,
     update_db,
+    consented,
     **kwargs,
 ):
     """
     Archive a submission within a GRZ/GDC.
     """
-    config = ArchiveConfig.model_validate(configuration)
+    config = configuration
+
+    archive_s3 = config.archives.consented.s3 if consented else config.archives.non_consented.s3
 
     log.info("Starting archival...")
 
@@ -52,6 +60,6 @@ def archive(
         end_state=SubmissionStateEnum.ARCHIVED,
         enabled=update_db,
     ):
-        worker_inst.archive(config.s3)
+        worker_inst.archive(archive_s3)
 
     log.info("Archival finished!")

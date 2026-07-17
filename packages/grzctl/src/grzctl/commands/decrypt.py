@@ -3,27 +3,26 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
-from ..models.config import DecryptConfig
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_dir
 @grzcli.force
 @grzcli.update_db
 def decrypt(
-    configuration: dict[str, Any],
-    config_file: tuple[Path],
+    configuration: GrzctlConfig,
     submission_dir,
     force,
     update_db,
@@ -34,9 +33,10 @@ def decrypt(
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
-    config = DecryptConfig.model_validate(configuration)
+    config = configuration
+    keys = config.keys
 
-    grz_privkey_path = config.keys.grz_private_key_path
+    grz_privkey_path = keys.grz_private_key_path
     if not grz_privkey_path:
         log.error("GRZ private key path is required for decryption.")
         sys.exit(1)

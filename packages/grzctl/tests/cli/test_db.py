@@ -19,13 +19,13 @@ import sqlalchemy
 import yaml
 from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 
 def test_all_migrations(blank_initial_database_config_path):
     """Database migrations should work all the way from the oldest supported to the latest version."""
     # add some test data
-    config = DbConfig.from_path(blank_initial_database_config_path)
+    config = GrzctlConfig.from_path(blank_initial_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_id = "123456789_2024-11-08_d0f805c5"
@@ -55,7 +55,7 @@ def test_all_migrations(blank_initial_database_config_path):
     # ensure db command raises appropriate error before migration
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    args_common = ["db", "--config-file", blank_initial_database_config_path]
+    args_common = ["--config", blank_initial_database_config_path, "db"]
     result_premature_list = runner.invoke(cli, [*args_common, "list"])
     assert result_premature_list.exit_code != 0
     assert "Database not at latest schema" in result_premature_list.stderr
@@ -97,7 +97,7 @@ def test_all_migrations(blank_initial_database_config_path):
 
 
 def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -115,7 +115,7 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
@@ -136,7 +136,7 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
 
 
 def test_populate_date(blank_database_config_path: Path, test_metadata_path: Path):
-    db_args = ["db", "--config-file", blank_database_config_path]
+    db_args = ["--config", blank_database_config_path, "db"]
     changed_date = date(2026, 1, 1)
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -165,7 +165,7 @@ def test_populate_date(blank_database_config_path: Path, test_metadata_path: Pat
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
@@ -173,7 +173,7 @@ def test_populate_date(blank_database_config_path: Path, test_metadata_path: Pat
 
 
 def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path, test_metadata_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     # compute submission ID _before_ tanG is redacted (changing the property return value)
@@ -208,7 +208,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metad
     rng.seed(42)
     changed_date = date(2026, 1, 1)
 
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
@@ -304,7 +304,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metad
 
 
 def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -366,7 +366,7 @@ def test_populate_qc_with_qc_workflow_version_flag(
     blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
 ):
     """Test populate-qc with --qc-workflow-version flag."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -424,7 +424,7 @@ def test_populate_qc_with_qc_workflow_version_env_var(
     blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path, monkeypatch
 ):
     """Test populate-qc with GRZCTL_QC_WORKFLOW_VERSION environment variable."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     # Set the environment variable
@@ -483,7 +483,7 @@ def test_populate_qc_missing_qc_workflow_version(
     blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
 ):
     """Test populate-qc fails when qc_workflow_version is not provided."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -530,7 +530,7 @@ def test_populate_qc_missing_qc_workflow_version(
 
 def test_populate_qc_version_from_report(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
     """populate-qc takes the version from the report's grzQcWorkflowVersion column when no flag is given."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -575,7 +575,7 @@ def test_populate_qc_version_from_report(blank_database_config_path: Path, tmp_p
 
 def test_populate_qc_flag_report_mismatch(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
     """populate-qc errors when --qc-workflow-version disagrees with the report's grzQcWorkflowVersion."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -622,7 +622,7 @@ def test_populate_qc_flag_report_mismatch(blank_database_config_path: Path, tmp_
 
 def test_update_error_confirm(blank_database_config_path: Path, test_metadata_path: Path):
     """Database should confirm before updating a submission from an Error state."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner()
@@ -652,7 +652,7 @@ def test_list_sort(blank_database_config_path: Path):
     0. null latest state timestamp and null submission date
     1. latest state timestamp if not null, otherwise submission date
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
 
     expected_ordering = [
         {"id": "123456789_2025-07-01_a1b2c3d4"},
@@ -690,7 +690,7 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
     `grzctl db submission show --json` should return machine-readable JSON
     with submission metadata and state history.
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -741,7 +741,7 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
 
 
 def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
 
     sub_latest_error = "123456789_2025-07-01_b1b2c3d1"
     sub_latest_qced = "123456789_2025-07-01_b1b2c3d2"
@@ -867,7 +867,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
     - grzctl_versions appears in human-readable table output
     - Versions are preserved across multiple state transitions
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
 
     # Mock the version to a known test value for reproducibility
     test_version = "0.1.2-test"
@@ -883,7 +883,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
-    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
     # add submission
@@ -936,7 +936,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         assert "data_steward_signature" in state
 
     # Test 2: Verify database records have the version
-    config = DbConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submission = db.get_submission(metadata.submission_id)
 
@@ -964,10 +964,10 @@ def test_submission_grzctl_version_different_versions(
     """
     Verify that state logs show their logged version, not the current runtime version.
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
-    runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
+    runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
     # Setup only (does not create state logs)
@@ -1046,7 +1046,7 @@ def test_submission_grzctl_version_different_versions(
 def test_failure_reason_migration(blank_initial_database_config_path):
     """Test the failure_reason migration works correctly."""
     # Set up test data before migration
-    config = DbConfig.from_path(blank_initial_database_config_path)
+    config = GrzctlConfig.from_path(blank_initial_database_config_path)
 
     if not config.db.database_url.startswith("sqlite:///"):
         pytest.skip("Test uses sqlite3 directly and only works with SQLite")
@@ -1062,7 +1062,7 @@ def test_failure_reason_migration(blank_initial_database_config_path):
     # Test CLI commands fail before migration
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    args_common = ["db", "--config-file", blank_initial_database_config_path]
+    args_common = ["--config", blank_initial_database_config_path, "db"]
 
     result_premature = runner.invoke(cli, [*args_common, "list"])
     assert result_premature.exit_code != 0
@@ -1086,7 +1086,7 @@ def test_failure_reason_migration(blank_initial_database_config_path):
 
 def test_submission_show_json_includes_failure_reason(blank_database_config_path: Path):
     """Submission show --json should include failure_reason in state history."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", blank_database_config_path, "db"]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
