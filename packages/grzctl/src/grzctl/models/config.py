@@ -1,7 +1,8 @@
 import logging
 import sys
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, Any
 
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
@@ -14,6 +15,8 @@ log = logging.getLogger(__name__)
 
 from .db import DbModel
 from .pruefbericht import PruefberichtModel
+
+_config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", default=None)
 
 
 class InboxConfig(S3ConnectionBase):
@@ -126,8 +129,6 @@ class DictConfigSettingsSource(PydanticBaseSettingsSource):
 class GrzctlConfig(IgnoringBaseSettings):
     """Unified configuration for all grzctl commands."""
 
-    _config_dict: ClassVar[dict[str, Any] | None] = None
-
     s3: ProcessS3Options
     """Configuration for S3 inbox connections."""
 
@@ -155,9 +156,8 @@ class GrzctlConfig(IgnoringBaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        config_dict = getattr(cls, "_config_dict", None)
+        config_dict = _config_ctx.get()
         if config_dict is not None:
-            cls._config_dict = None
             return (
                 init_settings,
                 env_settings,
@@ -179,8 +179,11 @@ class GrzctlConfig(IgnoringBaseSettings):
     @classmethod
     def from_configuration(cls, configuration: dict[str, Any]) -> "GrzctlConfig":
         """Load config from a dict, letting env vars override dict values."""
-        cls._config_dict = configuration
-        return cls()
+        token = _config_ctx.set(configuration)
+        try:
+            return cls()
+        finally:
+            _config_ctx.reset(token)
 
     def resolve_inbox_by_submission_id(self, submission_id: str, bucket: str | None = None) -> InboxTarget:
         """Resolve an inbox by extracting the LE ID from the submission ID.
