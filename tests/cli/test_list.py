@@ -76,12 +76,20 @@ def test_list(temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, wo
 
 def test_list_with_partial_env(remote_bucket_with_version, working_dir_path, tmp_path):
     """If database configuration is partially-populated via environment variables, config validation must fail."""
-    from tests.conftest import _GRZCTL_KEYS_DUMMY, _grzctl_archives
+    from tests.conftest import (
+        _grzctl_archives,
+        crypt4gh_grz_private_key_file,
+        crypt4gh_grz_public_key_file,
+    )
 
+    keys = {
+        "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
+        "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
+    }
     no_db_config = {
         "s3": {"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
         "archives": _grzctl_archives(),
-        "keys": _GRZCTL_KEYS_DUMMY,
+        "keys": keys,
         "pruefbericht": {},
         "identifiers": {"grz": "GRZK00007"},
     }

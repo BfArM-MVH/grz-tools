@@ -366,14 +366,14 @@ def encrypt_config_model(keys_config_content):
 
 
 @pytest.fixture
-def db_config_model(db_config_content):
+def db_config_model(db_config_content, grzctl_keys_config, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **db_config_content,
         s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
-        keys=_GRZCTL_KEYS_DUMMY,
-        identifiers=_GRZCTL_IDENTIFIERS_DUMMY,
+        keys=grzctl_keys_config,
+        identifiers=grzctl_identifiers_config,
     )
 
 
@@ -469,15 +469,25 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     }
 
 
-def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
-    """Build a GrzctlConfig dict from the given sections, filling in shared defaults."""
+def _grzctl_config_dict(
+    *, s3, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None
+) -> dict:
+    """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
+
+    *keys* and *identifiers* default to valid placeholders for tests that don't
+    exercise those sections.  In tests that need real key material, pass values
+    from the ``grzctl_keys_config`` / ``grzctl_identifiers_config`` fixtures.
+    """
     return {
         "s3": s3,
         "archives": _grzctl_archives(endpoint_url=endpoint_url),
         "db": db if db is not None else _GRZCTL_DB_DUMMY,
-        "keys": keys if keys is not None else _GRZCTL_KEYS_DUMMY,
+        "keys": keys if keys is not None else {
+            "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
+            "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
+        },
         "pruefbericht": pruefbericht if pruefbericht is not None else {},
-        "identifiers": identifiers if identifiers is not None else _GRZCTL_IDENTIFIERS_DUMMY,
+        "identifiers": identifiers if identifiers is not None else {"grz": "GRZK00007"},
     }
 
 
