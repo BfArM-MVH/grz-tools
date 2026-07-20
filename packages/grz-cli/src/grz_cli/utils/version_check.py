@@ -43,50 +43,7 @@ def check_version_and_exit_if_needed(
     version_file = VersionFile.from_s3(s3_options, version_file_key)
 
     current_version = pkg_version.Version(version("grz-cli"))
-    now = datetime.now(UTC)
-
-    policy = _select_active_policy(version_file.grzcli_version, now)
-
-    if policy is None:
-        logger.debug("No active version policy found — skipping version check.")
-        return
-
-    minimal_version = policy.minimal_version
-    recommended_version = policy.recommended_version
-    max_version = policy.max_version
-    enforced_from = policy.enforced_from
-
-    logger.debug(f"Current grz-cli version: {current_version}")
-    logger.debug(
-        f"Active policy: "
-        f"minimal={minimal_version}, "
-        f"recommended={recommended_version}, "
-        f"max_version={max_version}, "
-        f"enforced_from={enforced_from}"
-    )
-
-    # old version
-    if current_version < minimal_version:
-        logger.error(
-            f"Your grz-cli version ({current_version}) is not supported. Minimum required version is {minimal_version}."
-        )
-        sys.exit(1)
-
-    # supported but behind recommended — skip if recommended_version not set
-    if recommended_version is not None and minimal_version <= current_version < recommended_version:
-        logger.warning(
-            f"You are using grz-cli {current_version}, but the recommended version is "
-            f"{recommended_version}. Upgrading is strongly recommended."
-        )
-        return
-
-    # too new — skip if max_version not set
-    if max_version is not None and current_version > max_version:
-        logger.error(f"grz-cli version {current_version} is newer than the maximum supported version ({max_version}).")
-        sys.exit(1)
-
-    # best case
-    logger.info(f"grz-cli {current_version} is within the supported and tested range.")
+    _check_policy_and_exit_if_needed("grz-cli", current_version, version_file.grzcli_version)
 
 
 def check_metadata_version_and_exit_if_needed(
@@ -98,9 +55,18 @@ def check_metadata_version_and_exit_if_needed(
     version_file = VersionFile.from_s3(s3_options, version_file_key)
 
     current_version = pkg_version.Version(metadata_schema_version)
+    _check_policy_and_exit_if_needed("metadata", current_version, version_file.metadata_version)
+
+
+def _check_policy_and_exit_if_needed(
+    subject: str,
+    current_version: pkg_version.Version,
+    policies: list[VersionInfo],
+) -> None:
+    """Validate a version against the active policy for a subject."""
     now = datetime.now(UTC)
 
-    policy = _select_active_policy(version_file.metadata_version, now)
+    policy = _select_active_policy(policies, now)
     if policy is None:
         logger.debug("No active version policy found — skipping version check.")
         return
@@ -110,7 +76,7 @@ def check_metadata_version_and_exit_if_needed(
     max_version = policy.max_version
     enforced_from = policy.enforced_from
 
-    logger.debug(f"Current metadata version: {current_version}")
+    logger.debug(f"Current {subject} version: {current_version}")
     logger.debug(
         f"Active policy: "
         f"minimal={minimal_version}, "
@@ -122,22 +88,24 @@ def check_metadata_version_and_exit_if_needed(
     # old version
     if current_version < minimal_version:
         logger.error(
-            f"Your metadata version ({current_version}) is not supported. Minimum required version is {minimal_version}."
+            f"Your {subject} version ({current_version}) is not supported. Minimum required version is {minimal_version}."
         )
         sys.exit(1)
 
     # supported but behind recommended — skip if recommended_version not set
     if recommended_version is not None and minimal_version <= current_version < recommended_version:
         logger.warning(
-            f"You are using metadata {current_version}, but the recommended version is "
+            f"You are using {subject} {current_version}, but the recommended version is "
             f"{recommended_version}. Upgrading is strongly recommended."
         )
         return
 
     # too new — skip if max_version not set
     if max_version is not None and current_version > max_version:
-        logger.error(f"metadata version {current_version} is newer than the maximum supported version ({max_version}).")
+        logger.error(
+            f"{subject} version {current_version} is newer than the maximum supported version ({max_version})."
+        )
         sys.exit(1)
 
     # best case
-    logger.info(f"metadata {current_version} is within the supported and tested range.")
+    logger.info(f"{subject} {current_version} is within the supported and tested range.")

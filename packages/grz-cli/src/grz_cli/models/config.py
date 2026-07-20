@@ -1,10 +1,8 @@
 import logging
-from typing import Annotated
 
 from grz_common.models.identifiers import IdentifiersConfigModel
 from grz_common.models.keys import KeyConfigModel
-from grz_common.models.s3 import S3ConfigModel, S3Options
-from pydantic import Field
+from grz_common.models.s3 import S3ConfigModel
 
 log = logging.getLogger(__name__)
 
@@ -18,4 +16,4 @@ class EncryptConfig(KeyConfigModel):
 
 
 class ValidateConfig(IdentifiersConfigModel):
-    s3: Annotated[S3Options | None, Field(default=None)] = None
+    pass

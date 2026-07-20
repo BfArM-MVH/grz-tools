@@ -11,8 +11,6 @@ from grz_common.workers.worker import Worker
 
 log = logging.getLogger(__name__)
 
-from grz_cli.utils.version_check import check_metadata_version_and_exit_if_needed
-
 
 @click.command()
 @grzcli.configuration
@@ -53,12 +51,6 @@ def validate(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-
-    config = ValidateConfig.model_validate(configuration)
-    if config.s3 is not None:
-        submission = worker_inst.parse_submission()
-        metadata_schema_version = submission.metadata.content.get_schema_version()
-        check_metadata_version_and_exit_if_needed(config.s3, metadata_schema_version)
 
     worker_inst.validate(identifiers=config.identifiers, force=force, no_mmap=not mmap)
 
