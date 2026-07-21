@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.2...grz-db-v2.1.3) (2026-07-21)
+
+
+### Bug Fixes
+
+* **grz-common,grz-db:** map duplicate tanG and upload errors correctly   ([#617](https://github.com/BfArM-MVH/grz-tools/issues/617)) ([7c6fe27](https://github.com/BfArM-MVH/grz-tools/commit/7c6fe271a15011a6925a2f2a8a1167f832d78f9c))
+* **grz-db:** datetime handling in signature evaluation ([#626](https://github.com/BfArM-MVH/grz-tools/issues/626)) ([b7894c9](https://github.com/BfArM-MVH/grz-tools/commit/b7894c9bee81acff0389bdef9e7414bb1ba795b9))
+
 ## [2.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.1...grz-db-v2.1.2) (2026-06-08)
 
 

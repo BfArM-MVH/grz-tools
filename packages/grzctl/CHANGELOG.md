@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.4...grzctl-v2.2.0) (2026-07-21)
+
+
+### Features
+
+* **grzctl, grz-db, grz-common:** Metadata schema version check via version.json ([#624](https://github.com/BfArM-MVH/grz-tools/issues/624)) ([c6f1e7c](https://github.com/BfArM-MVH/grz-tools/commit/c6f1e7ce07cd5772beee5551e0b95b02a9f83914))
+
 ## [2.1.4](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.3...grzctl-v2.1.4) (2026-06-16)
 
 
