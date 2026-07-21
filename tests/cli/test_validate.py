@@ -43,10 +43,6 @@ def test_validate_submission(
         result = runner.invoke(cli, testargs, catch_exceptions=False)
         assert "Starting file validation with `grz-check`..." in caplog.text
 
-    # test if command has correctly checked for:
-    # - mismatched md5sums
-    # - all files existing
-
     assert result.exit_code == 0, result.output
 
 
