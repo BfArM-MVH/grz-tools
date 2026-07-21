@@ -7,7 +7,7 @@ import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from operator import attrgetter
-from typing import Any, ClassVar, Literal, Optional, Self
+from typing import Any, ClassVar, Literal, Optional, Protocol, Self
 
 import sqlalchemy as sa
 import sqlalchemy.dialects.postgresql as sa_psql
@@ -48,11 +48,15 @@ from ...common import (
     serialize_datetime_to_iso_z,
 )
 from ...errors import (
+    CaseHasLinkedSubmissionsError,
+    CaseNotFoundError,
+    DuplicatePsnError,
     DuplicateSubmissionError,
     DuplicateTanGError,
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
     SubmissionNotFoundError,
+    SubmissionTypeInvalidForCaseError,
     SubmissionTypeIsNoneError,
 )
 from ..author import Author
@@ -184,9 +188,13 @@ class Submission(SubmissionBase, table=True):
             raise ValueError(f"Submission ID '{v}' does not match the required pattern.")
         return v
 
+    case_id: int | None = Field(default=None, foreign_key="cases.id", index=True)
+
     states: list["SubmissionStateLog"] = Relationship(back_populates="submission")
 
     changes: list["ChangeRequestLog"] = Relationship(back_populates="submission")
+
+    case: Optional["Case"] = Relationship(back_populates="submissions")
 
     def diff(
         self,
@@ -262,6 +270,85 @@ class Submission(SubmissionBase, table=True):
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
+
+
+class Case(SQLModel, table=True):
+    """Case table model.
+
+    Groups multiple submissions belonging to the same patient/case. The authoritative identity is
+    ``psn`` (the RKI pseudonym), unique once assigned. ``submitter_id`` and ``local_case_id`` are
+    lookup keys used to resolve the case before a ``psn`` exists; they are deliberately *not* a
+    uniqueness constraint, since a future flow may resolve a case by ``psn`` alone (with
+    ``local_case_id`` absent).
+    """
+
+    __tablename__ = "cases"
+    __table_args__ = {"extend_existing": True}
+
+    immutable_fields: ClassVar[set[str]] = {"id"}
+
+    id: int | None = Field(default=None, primary_key=True)
+    psn: str | None = Field(default=None, index=True)
+    submitter_id: SubmitterId | None = Field(default=None)
+    local_case_id: str | None = Field(default=None)
+
+    submissions: list["Submission"] = Relationship(back_populates="case")
+
+    @classmethod
+    def mutable_fields(cls) -> set[str]:
+        """Field names that :meth:`SubmissionDb.modify_case` may change.
+
+        All model fields except those in :attr:`immutable_fields`. Relationship
+        attributes (e.g. ``submissions``) are not model fields, so they are
+        naturally excluded.
+
+        :returns: The set of modifiable field names.
+        """
+        return set(cls.model_fields.keys()) - cls.immutable_fields
+
+
+class CaseResolver(Protocol):
+    """Strategy for locating the case a submission belongs to.
+
+    Different resolvers key on different identifiers, so the resolution rule can evolve (currently
+    ``(submitter_id, local_case_id)``; later the RKI ``psn``) without a schema change.
+    """
+
+    def find_case(
+        self,
+        session: Session,
+        *,
+        submitter_id: str | None,
+        local_case_id: str | None,
+        psn: str | None,
+    ) -> "Case | None": ...
+
+
+class SubmitterLocalCaseResolver:
+    """Resolve a case by ``(submitter_id, local_case_id)``. The current default."""
+
+    def find_case(
+        self, session: Session, *, submitter_id: str | None, local_case_id: str | None, psn: str | None
+    ) -> "Case | None":
+        if submitter_id is None or local_case_id is None:
+            return None
+        return session.exec(
+            select(Case).where(Case.submitter_id == submitter_id, Case.local_case_id == local_case_id)
+        ).first()
+
+
+class PsnResolver:
+    """Resolve a case by RKI pseudonym. For future PSN-based linking."""
+
+    def find_case(
+        self, session: Session, *, submitter_id: str | None, local_case_id: str | None, psn: str | None
+    ) -> "Case | None":
+        if psn is None:
+            return None
+        return session.exec(select(Case).where(Case.psn == psn)).first()
+
+
+DEFAULT_CASE_RESOLVER: CaseResolver = SubmitterLocalCaseResolver()
 
 
 class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
@@ -1014,6 +1101,288 @@ class SubmissionDb:
             found = {s.id: s for s in session.exec(statement).all()}
         return [found.get(sid) for sid in submission_ids]
 
+    def get_case(self, case_id: int) -> Case | None:
+        """Retrieve a case by its primary key.
+
+        :param case_id: Primary key of the case.
+        :returns: The :class:`Case`, or ``None`` if no case has that ID.
+        """
+        with self._get_session() as session:
+            return session.get(Case, case_id)
+
+    def list_cases(self) -> list[tuple[Case, int]]:
+        """List all cases together with their linked-submission count.
+
+        Cases with no linked submissions are included with a count of ``0``
+        (via an outer join).
+
+        :returns: A list of ``(case, linked_submission_count)`` tuples, ordered
+            by ascending case ID.
+        """
+        with self._get_session() as session:
+            rows = session.exec(
+                select(Case, sqlfn.count(Submission.id))  # type: ignore[arg-type]
+                .outerjoin(Submission, Submission.case_id == Case.id)  # type: ignore[arg-type]
+                .group_by(Case.id)  # type: ignore[arg-type]
+                .order_by(Case.id)  # type: ignore[arg-type]
+            ).all()
+            return [(case, count) for case, count in rows]
+
+    def list_submissions_for_case(self, case_id: int) -> Sequence[Submission]:
+        """List all submissions linked to a case.
+
+        Each submission is returned with its ``states`` relationship eagerly
+        loaded. An unknown ``case_id`` yields an empty result rather than an error.
+
+        :param case_id: Primary key of the case whose submissions to list.
+        :returns: Submissions linked to the case, ordered by ascending
+            submission ID.
+        """
+        with self._get_session() as session:
+            return session.exec(
+                select(Submission)
+                .where(Submission.case_id == case_id)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .order_by(Submission.id)
+            ).all()
+
+    def get_initial_submission(self, case_id: int) -> Submission | None:
+        """Return the ``initial`` submission of a case.
+
+        At most one ``initial`` submission can be linked to a case (enforced by
+        a partial unique index), so the result is unambiguous.
+
+        :param case_id: Primary key of the case.
+        :returns: The case's ``initial`` submission, or ``None`` if none is
+            linked yet.
+        """
+        with self._get_session() as session:
+            return session.exec(
+                select(Submission).where(
+                    Submission.case_id == case_id,
+                    Submission.submission_type == SubmissionType.initial,
+                )
+            ).first()
+
+    def create_case(
+        self, submitter_id: str | None = None, local_case_id: str | None = None, psn: str | None = None
+    ) -> Case:
+        """Create a case from the given identifiers.
+
+        The identifiers are the case's resolution keys: ``(submitter_id,
+        local_case_id)`` locate a case before a ``psn`` is assigned, while
+        ``psn`` (the RKI pseudonym) is the authoritative identity and must be
+        unique when present. All three are optional.
+
+        :param submitter_id: Submitter identifier resolution key.
+        :param local_case_id: Submitter-local case identifier resolution key.
+        :param psn: RKI pseudonym; must be unique across cases when set.
+        :returns: The newly created :class:`Case`, with its database-assigned ``id`` populated.
+        :raises DuplicatePsnError: if ``psn`` is already assigned to another case.
+        """
+        with self._get_session() as session:
+            if psn is not None and session.exec(select(Case).where(Case.psn == psn)).first() is not None:
+                raise DuplicatePsnError(psn)
+            case = Case(submitter_id=submitter_id, local_case_id=local_case_id, psn=psn)
+            session.add(case)
+            try:
+                session.commit()
+                session.refresh(case)
+                return case
+            except IntegrityError as e:
+                session.rollback()
+                if psn is not None:
+                    raise DuplicatePsnError(psn) from e
+                raise
+
+    def modify_case(self, case_id: int, key: str, value: Any) -> Case:
+        """Modify a single mutable field of a case.
+
+        Only mutable columns may be changed; ``id`` (and any other field listed
+        in :attr:`Case.immutable_fields`) is read-only.
+
+        :param case_id: Primary key of the case to modify.
+        :param key: Name of the column to set (e.g. ``"psn"``, ``"submitter_id"``,
+            ``"local_case_id"``).
+        :param value: New value for the column.
+        :returns: The updated :class:`Case`, reloaded from the database.
+        :raises ValueError: if ``key`` is not a column of ``cases`` or is read-only.
+        :raises CaseNotFoundError: if no case has the given ``case_id``.
+        :raises DuplicatePsnError: if ``key`` is ``"psn"`` and ``value`` is
+            already assigned to another case.
+        """
+        if key in Case.immutable_fields:
+            raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
+        if key not in Case.mutable_fields():
+            raise ValueError(f"Unknown column key '{key}'")
+        with self._get_session() as session:
+            case = session.get(Case, case_id)
+            if case is None:
+                raise CaseNotFoundError(case_id)
+            setattr(case, key, value)
+            session.add(case)
+            try:
+                session.commit()
+                session.refresh(case)
+                return case
+            except IntegrityError as e:
+                session.rollback()
+                if key == "psn":
+                    raise DuplicatePsnError(str(value)) from e
+                raise
+
+    def delete_case(self, case_id: int) -> None:
+        """Delete a case, refusing when submissions are still linked to it.
+
+        :param case_id: Primary key of the case to delete.
+        :raises CaseNotFoundError: if no case has the given ``case_id``.
+        :raises CaseHasLinkedSubmissionsError: if one or more submissions are
+            still linked to the case.
+        """
+        with self._get_session() as session:
+            case = session.get(Case, case_id)
+            if case is None:
+                raise CaseNotFoundError(case_id)
+            count = session.exec(
+                select(sqlfn.count()).select_from(Submission).where(Submission.case_id == case_id)  # type: ignore[arg-type]
+            ).one()
+            if count:
+                raise CaseHasLinkedSubmissionsError(case_id, count)
+            session.delete(case)
+            session.commit()
+
+    def set_submission_case(self, submission_id: str, case_id: int) -> Submission:
+        """Link (or relink) a submission to an existing case.
+
+        The one-initial-per-case rule is enforced at commit time by a partial
+        unique index (a unique index limited to ``initial`` submissions); a
+        violation raises rather than silently overwriting the existing link.
+
+        :param submission_id: ID of the submission to link.
+        :param case_id: Primary key of the target case.
+        :returns: The updated :class:`Submission`, reloaded from the database.
+        :raises SubmissionNotFoundError: if no submission has the given
+            ``submission_id``.
+        :raises CaseNotFoundError: if no case has the given ``case_id``.
+        :raises SubmissionTypeInvalidForCaseError: if linking would give the
+            case a second ``initial`` submission.
+        """
+        with self._get_session() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            case = session.get(Case, case_id)
+            if case is None:
+                raise CaseNotFoundError(case_id)
+            submission.case_id = case_id
+            session.add(submission)
+            try:
+                session.commit()
+                session.refresh(submission)
+                return submission
+            except IntegrityError as e:
+                session.rollback()
+                raise SubmissionTypeInvalidForCaseError(
+                    f"Cannot link submission '{submission_id}' to case {case_id}: "
+                    "the case already has an initial submission."
+                ) from e
+
+    def assign_case(  # noqa: PLR0913
+        self,
+        submission_id: str,
+        *,
+        submitter_id: str | None = None,
+        local_case_id: str | None = None,
+        psn: str | None = None,
+        submission_type: SubmissionType,
+        resolver: CaseResolver | None = None,
+    ) -> Case:
+        """Resolve or create the case for a submission and link it, keeping exactly one initial per case.
+
+        The *resolver* strategy decides how an existing case is located (default:
+        ``(submitter_id, local_case_id)``). A brand-new case requires an ``initial`` submission; a
+        non-initial submission requires the case to already have a (different) initial submission.
+        ``test`` submissions are exempt. Re-running for an already-linked submission makes no further
+        change (safe to repeat).
+
+        :param submission_id: ID of the submission to assign.
+        :param submitter_id: Submitter identifier passed to the resolver and
+            stored on a newly created case.
+        :param local_case_id: Submitter-local case identifier passed to the
+            resolver and stored on a newly created case.
+        :param psn: RKI pseudonym passed to the resolver and stored on a newly
+            created case.
+        :param submission_type: Type of the submission. Decides which links are
+            allowed: ``initial`` and ``test`` may open a new case, while other
+            types require the case to already have an initial submission.
+        :param resolver: Strategy used to locate an existing case; defaults to
+            :data:`DEFAULT_CASE_RESOLVER` (:class:`SubmitterLocalCaseResolver`).
+        :returns: The resolved or newly created :class:`Case` the submission is
+            now linked to.
+        :raises SubmissionNotFoundError: if no submission has the given
+            ``submission_id``.
+        :raises SubmissionTypeInvalidForCaseError: if a non-initial, non-test
+            submission targets a case with no initial submission, or the
+            assignment would create a duplicate initial submission.
+        """
+        resolver = resolver or DEFAULT_CASE_RESOLVER
+        with self._get_session() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+
+            case = resolver.find_case(session, submitter_id=submitter_id, local_case_id=local_case_id, psn=psn)
+            is_initial = submission_type == SubmissionType.initial
+            is_test = submission_type == SubmissionType.test
+
+            if case is None:
+                if not is_initial and not is_test:
+                    raise SubmissionTypeInvalidForCaseError(
+                        f"'{submission_type}' submission for a case with no initial submission "
+                        f"(submitter '{submitter_id}', local case '{local_case_id}')."
+                    )
+                case = Case(submitter_id=submitter_id, local_case_id=local_case_id, psn=psn)
+                session.add(case)
+                session.flush()
+            elif is_initial:
+                existing_initial = session.exec(
+                    select(Submission).where(
+                        Submission.case_id == case.id,
+                        Submission.submission_type == SubmissionType.initial,
+                    )
+                ).first()
+                if existing_initial is not None and existing_initial.id != submission_id:
+                    raise SubmissionTypeInvalidForCaseError(
+                        f"Duplicate initial submission for case {case.id} "
+                        f"(submitter '{submitter_id}', local case '{local_case_id}'); "
+                        f"initial is already '{existing_initial.id}'."
+                    )
+            elif not is_test:
+                existing_initial = session.exec(
+                    select(Submission).where(
+                        Submission.case_id == case.id,
+                        Submission.submission_type == SubmissionType.initial,
+                    )
+                ).first()
+                if existing_initial is None:
+                    raise SubmissionTypeInvalidForCaseError(
+                        f"'{submission_type}' submission for a case with no initial submission "
+                        f"(submitter '{submitter_id}', local case '{local_case_id}')."
+                    )
+
+            submission.case_id = case.id
+            session.add(submission)
+            try:
+                session.commit()
+            except IntegrityError as e:
+                session.rollback()
+                raise SubmissionTypeInvalidForCaseError(
+                    f"Duplicate initial submission for case {case.id} "
+                    f"(submitter '{submitter_id}', local case '{local_case_id}')."
+                ) from e
+            session.refresh(case)
+            return case
+
     def list_submissions(
         self,
         limit: int | None,
@@ -1423,6 +1792,15 @@ class SubmissionDb:
             logger.debug("Submission %s added to database.", submission_id)
 
         self.assert_metadata_not_redacted(metadata, submission_id, ignore_fields)
+
+        # Link the submission to its case unless the case key is unavailable (redacted/ignored).
+        if "pseudonym" not in ignore_fields and metadata.submission.local_case_id != REDACTED_LOCAL_CASE_ID:
+            self.assign_case(
+                submission_id,
+                submitter_id=metadata.submission.submitter_id,
+                local_case_id=metadata.submission.local_case_id,
+                submission_type=metadata.submission.submission_type,
+            )
 
         submission_diff, donors_diff = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields)
 
