@@ -1,8 +1,10 @@
 import datetime
+from collections.abc import Callable
 
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from grz_db.errors import DuplicateTanGError
 from grz_db.models.author import Author
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
@@ -11,6 +13,8 @@ TWO_TB = 2 * 1024**4  # 2,199,023,255,552 bytes
 SUBMISSION_ID = "123456789_2024-01-01_abcdef01"
 SUBMISSION_ID_2 = "123456789_2024-01-02_abcdef02"
 SUBMISSION_ID_3 = "123456789_2024-01-03_abcdef03"
+TAN_G_1 = "a" * 64
+TAN_G_2 = "b" * 64
 
 
 @pytest.fixture(scope="function")
@@ -143,3 +147,30 @@ def test_get_submissions_includes_states(db: SubmissionDb) -> None:
 
     assert result[0] is not None
     assert len(result[0].states) >= 1
+
+
+def _set_tan_g_via_modify(db: SubmissionDb, sub: Submission, tan_g: str) -> None:
+    db.modify_submission(sub.id, "tan_g", tan_g)
+
+
+def _set_tan_g_via_update(db: SubmissionDb, sub: Submission, tan_g: str) -> None:
+    sub.tan_g = tan_g
+    db.update_submission(sub)
+
+
+@pytest.mark.parametrize(
+    "set_tan_g",
+    [_set_tan_g_via_modify, _set_tan_g_via_update],
+    ids=["modify_submission", "update_submission"],
+)
+def test_raises_on_duplicate_tan_g(
+    db: SubmissionDb,
+    set_tan_g: Callable[[SubmissionDb, Submission, str], None],
+) -> None:
+    """Raise DuplicateTanGError when tan_g collides with an existing row."""
+    sub1 = db.add_submission(SUBMISSION_ID)
+    set_tan_g(db, sub1, TAN_G_1)
+
+    sub2 = db.add_submission(SUBMISSION_ID_2)
+    with pytest.raises(DuplicateTanGError):
+        set_tan_g(db, sub2, TAN_G_1)
