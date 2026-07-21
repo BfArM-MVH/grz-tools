@@ -1,8 +1,9 @@
+import logging
 from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
-from grz_cli.utils.version_check import check_version_and_exit_if_needed
+from grz_cli.utils.version_check import check_metadata_version_and_exit_if_needed, check_version_and_exit_if_needed
 from packaging.version import Version
 
 
@@ -10,14 +11,15 @@ class DummyVersionInfo:
     def __init__(self, minimal_version, recommended_version, max_version, enforced_from):
         self.minimal_version = Version(minimal_version)
         self.recommended_version = Version(recommended_version)
-        self.max_version = Version(max_version)
+        self.max_version = Version(max_version) if max_version is not None else None
         self.enforced_from = enforced_from
 
 
 class DummyVersionFile:
-    def __init__(self, policies):
+    def __init__(self, policies, metadata_policies=None):
         self.schema_version = 1
         self.grzcli_version = policies
+        self.metadata_version = metadata_policies or []
 
 
 def test_too_old_after_enforcement():
@@ -55,11 +57,12 @@ def test_version_ok(caplog):
     policy = DummyVersionInfo("1.4.0", "1.5.0", "1.5.1", datetime(2020, 1, 1, tzinfo=UTC))
     vf = DummyVersionFile([policy])
 
-    with (
-        patch("grz_cli.utils.version_check.VersionFile.from_s3", return_value=vf),
-        patch("grz_cli.utils.version_check.version", return_value="1.5.0"),
-    ):
-        check_version_and_exit_if_needed(None)
+    with caplog.at_level(logging.INFO):
+        with (
+            patch("grz_cli.utils.version_check.VersionFile.from_s3", return_value=vf),
+            patch("grz_cli.utils.version_check.version", return_value="1.5.0"),
+        ):
+            check_version_and_exit_if_needed(None)
 
     assert "supported and tested range" in caplog.text
 
@@ -92,3 +95,18 @@ def test_selects_latest_active_policy():
         patch("grz_cli.utils.version_check.version", return_value="1.5.0"),
     ):
         check_version_and_exit_if_needed(None)
+
+
+def test_metadata_version_too_old_after_enforcement():
+    """The metadata schema version is old --> sys.exit."""
+    policy = DummyVersionInfo("1.3.0", "1.3.0", None, datetime(2020, 1, 1, tzinfo=UTC))
+    vf = DummyVersionFile([], metadata_policies=[policy])
+
+    with (
+        patch("grz_cli.utils.version_check.VersionFile.from_s3", return_value=vf),
+        patch("sys.exit", side_effect=SystemExit) as mock_exit,
+    ):
+        with pytest.raises(SystemExit):
+            check_metadata_version_and_exit_if_needed(None, "1.2.0")
+
+        mock_exit.assert_called_once_with(1)

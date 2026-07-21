@@ -143,7 +143,7 @@ class SubmissionBase(SQLModel):
     pseudonym: str | None = Field(default=None, index=True)
 
     # fields from Prüfbericht
-    submission_date: datetime.date | None = None
+    submission_uploaded_date: datetime.date | None = None
     submission_type: SubmissionType | None = None
     submitter_id: SubmitterId | None = None
     data_node_id: GenomicDataCenterId | None = None
@@ -206,7 +206,7 @@ class Submission(SubmissionBase, table=True):
             new_value = getattr(other, key)
 
             # Ensure fields are cast to date
-            if key == "submission_date":
+            if key == "submission_uploaded_date":
                 if isinstance(old_value, datetime.datetime):
                     old_value = old_value.date()
                 if isinstance(new_value, datetime.datetime):
@@ -228,7 +228,7 @@ class Submission(SubmissionBase, table=True):
         cls,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_uploaded_date: datetime.date,
     ) -> Self:
         """Construct a Submission populated with values derived from parsed metadata.
 
@@ -241,8 +241,8 @@ class Submission(SubmissionBase, table=True):
         if isinstance(metadata_submission_date, datetime.datetime):
             metadata_submission_date = metadata_submission_date.date()
 
-        if isinstance(submission_date, datetime.datetime):
-            submission_date = submission_date.date()
+        if isinstance(submission_uploaded_date, datetime.datetime):
+            submission_uploaded_date = submission_uploaded_date.date()
 
         return cls.model_validate(
             {
@@ -256,9 +256,9 @@ class Submission(SubmissionBase, table=True):
                 "genomic_study_subtype": metadata.submission.genomic_study_subtype,
                 "pseudonym": metadata.submission.local_case_id,
                 "data_node_id": metadata.submission.genomic_data_center_id,
-                "consented": metadata.consents_to_research(date=datetime.date.today()),
+                "consented": metadata.consents_to_research(date=metadata_submission_date),
                 "submission_size": metadata.get_submission_size(),
-                "submission_date": submission_date if submission_date is not None else metadata_submission_date,
+                "submission_uploaded_date": submission_uploaded_date,
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
@@ -456,7 +456,15 @@ class Donor(SQLModel, table=True):
         cls,
         submission_id: str,
         donor: MetadataDonor,
+        metadata_submission_date: datetime.date,
     ) -> Self:
+        """Construct a Donor populated from parsed metadata.
+
+        :param submission_id: Submission ID.
+        :param donor: Donor metadata.
+        :param metadata_submission_date: Submission date from metadata.
+            Used to evaluate research consent at the time the submission was created.
+        """
         return cls.model_validate(
             dict(
                 submission_id=submission_id,
@@ -466,7 +474,7 @@ class Donor(SQLModel, table=True):
                 sequence_types={datum.sequence_type for datum in donor.lab_data},
                 sequence_subtypes={datum.sequence_subtype for datum in donor.lab_data},
                 mv_consented=donor.consents_to_mv(),
-                research_consented=donor.consents_to_research(date=datetime.date.today()),
+                research_consented=donor.consents_to_research(date=metadata_submission_date),
                 research_consent_missing_justifications={
                     consent.no_scope_justification
                     for consent in donor.research_consents
@@ -740,7 +748,7 @@ class SubmissionDb:
                 .join(QCQueueEntry, QCQueueEntry.submission_id == Submission.id)  # type: ignore[arg-type]
                 .where(Submission.submission_type == SubmissionType.initial)
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
-                .where(Submission.submission_date.between(start_date, end_date))  # type: ignore[union-attr]
+                .where(Submission.submission_uploaded_date.between(start_date, end_date))  # type: ignore[union-attr]
                 .where(Submission.submitter_id == submitter_id)
                 .order_by(QCQueueEntry.basic_qc_passed_at, Submission.id)  # type: ignore[arg-type]
             ).all()
@@ -785,7 +793,7 @@ class SubmissionDb:
 
         block_size = math.floor(1 / target_proportion)
         block_index = absolute_index // block_size
-        submission_quarter, submission_year = date_to_quarter_year(submission.submission_date)  # type: ignore[arg-type]
+        submission_quarter, submission_year = date_to_quarter_year(submission.submission_uploaded_date)  # type: ignore[arg-type]
         seed = f"{submission.submitter_id}-{submission_year}-{submission_quarter}-{block_index}-{salt}"
         rng = random.Random(seed)  # noqa: S311
 
@@ -1038,7 +1046,7 @@ class SubmissionDb:
                     isouter=True,
                 )
                 .order_by(
-                    sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_date)
+                    sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_uploaded_date)
                     .desc()
                     .nulls_first()
                 )
@@ -1122,7 +1130,7 @@ class SubmissionDb:
 
         if submission is None:
             raise SubmissionNotFoundError(submission_id)
-        submission_date = submission.submission_date
+        submission_date = submission.submission_uploaded_date
         if submission_date is None:
             raise SubmissionDateIsNoneError()
         submission_type = submission.submission_type
@@ -1186,14 +1194,14 @@ class SubmissionDb:
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_uploaded_date: datetime.date,
         ignore_fields: set[str] | None = None,
     ) -> SubmissionDiffCollection:
         """Compare a submission's current database state against fresh metadata.
 
         :param submission_id: Submission ID to look up.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
-        :param submission_date: Explicit submission date; falls back to the value in *metadata* when ``None``.
+        :param submission_uploaded_date: Date of submission upload finish
         :param ignore_fields: Field names to skip entirely during the comparison.
         :returns: A :class:`SubmissionDiffCollection` instance summarising all detected differences.
         """
@@ -1204,7 +1212,10 @@ class SubmissionDb:
         if ignore_fields is None:
             ignore_fields = set()
 
-        new_submission = Submission.from_metadata(submission_id, metadata, submission_date)
+        if isinstance(submission_uploaded_date, datetime.datetime):
+            submission_uploaded_date = submission_uploaded_date.date()
+
+        new_submission = Submission.from_metadata(submission_id, metadata, submission_uploaded_date)
 
         return current_submission.diff(new_submission, ignore_fields)
 
@@ -1219,9 +1230,14 @@ class SubmissionDb:
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
         :returns: A fully populated :class:`DonorDiff`.
         """
+        metadata_submission_date = metadata.submission.submission_date
+        if isinstance(metadata_submission_date, datetime.datetime):
+            metadata_submission_date = metadata_submission_date.date()
+
         donors_in_db_submission = {donor.pseudonym: donor for donor in self.get_donors(submission_id=submission_id)}
         donors_in_metadata = {
-            (d := Donor.from_donor_metadata(submission_id, donor)).pseudonym: d for donor in metadata.donors
+            (d := Donor.from_donor_metadata(submission_id, donor, metadata_submission_date)).pseudonym: d
+            for donor in metadata.donors
         }
 
         result = DonorsDiffCollection()
@@ -1239,10 +1255,33 @@ class SubmissionDb:
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_uploaded_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
     ) -> tuple[SubmissionDiffCollection, DonorsDiffCollection]:
-        submission_diff = self._diff_metadata(submission_id, metadata, submission_date, ignore_fields)
+        """
+        Generates differences between the current and previous states of submission metadata
+        and donors data.
+
+        This function compares the provided metadata and donors data with the existing
+        state in the system for a specific submission ID and returns the differences in two
+        separate collections.
+
+        :param submission_id: The unique identifier of the submission to be compared.
+        :param metadata: The metadata of the submission to compare against.
+        :param submission_uploaded_date: The date when the submission process was finished.
+            If None, the field will not be included in the comparison.
+        :param ignore_fields: Optional set of field names to be ignored during the metadata comparison.
+        :returns: A tuple containing the differences in the submission metadata and the corresponding donor entries.
+        """
+        if submission_uploaded_date is None:
+            # set arbitrary date if not provided
+            submission_uploaded_date = metadata.submission.submission_date
+
+            # Add submission date to ignore fields
+            ignore_fields = ignore_fields or set()
+            ignore_fields.add("submission_uploaded_date")
+
+        submission_diff = self._diff_metadata(submission_id, metadata, submission_uploaded_date, ignore_fields)
         donor_diff = self._diff_donors(submission_id, metadata)
         return submission_diff, donor_diff
 

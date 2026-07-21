@@ -87,13 +87,9 @@ def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata
     assert submission.genomic_study_subtype == metadata.submission.genomic_study_subtype
     assert submission.pseudonym == metadata.submission.local_case_id
     assert submission.data_node_id == metadata.submission.genomic_data_center_id
-    assert submission.submission_date == explicit_date  # explicit date takes precedence
+    assert submission.submission_uploaded_date == explicit_date  # explicit date takes precedence
     assert submission.submission_size == metadata.get_submission_size()
     assert submission.submission_metadata == metadata.to_redacted_dict()
-
-    # --- explicit date is preferred over the metadata date ---
-    submission_fallback = Submission.from_metadata(SUBMISSION_ID, metadata, None)
-    assert submission_fallback.submission_date == metadata.submission.submission_date
 
     # --- system-managed fields must not be in model_fields_set ---
     system_fields = {"basic_qc_passed", "detailed_qc_passed", "selected_for_qc"}

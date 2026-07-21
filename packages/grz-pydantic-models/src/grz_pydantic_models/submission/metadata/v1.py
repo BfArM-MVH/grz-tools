@@ -182,6 +182,13 @@ class Submission(StrictBaseModel):
     Name of the sequencing lab.
     """
 
+    @field_validator("submission_date", mode="before")
+    @classmethod
+    def _coerce_datetime_to_date(cls, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.date()
+        return value
+
 
 class Gender(StrEnum):
     """

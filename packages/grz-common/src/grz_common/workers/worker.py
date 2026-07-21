@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 
@@ -290,7 +291,13 @@ class Worker:
 
         upload_worker.archive(encrypted_submission)
 
-    def download(self, s3_options: S3Options, submission_id: str, force: bool = False):
+    def download(
+        self,
+        s3_options: S3Options,
+        submission_id: str,
+        force: bool = False,
+        metadata_version_check: Callable[[str], None] | None = None,
+    ):
         """
         Download an encrypted submission
         """
@@ -308,5 +315,10 @@ class Worker:
         self.__log.info("Downloading metadata...")
         download_worker.download_metadata(submission_id, self.metadata_dir, metadata_file_name="metadata.json")
 
+        encrypted_submission = EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir)
+        if metadata_version_check is not None:
+            metadata_schema_version = encrypted_submission.metadata.content.get_schema_version()
+            metadata_version_check(metadata_schema_version)
+
         self.__log.info("Downloading encrypted files...")
-        download_worker.download(submission_id, EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir))
+        download_worker.download(submission_id, encrypted_submission)
