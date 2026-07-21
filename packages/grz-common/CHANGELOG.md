@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.1.0...grz-common-v2.2.0) (2026-07-21)
+
+
+### Features
+
+* **grz-common:** Log hostname ([#599](https://github.com/BfArM-MVH/grz-tools/issues/599)) ([9e5b74e](https://github.com/BfArM-MVH/grz-tools/commit/9e5b74e9643f9f8f426bdcd2af2aee7fd81c4acc))
+* **grzctl, grz-db, grz-common:** Metadata schema version check via version.json ([#624](https://github.com/BfArM-MVH/grz-tools/issues/624)) ([c6f1e7c](https://github.com/BfArM-MVH/grz-tools/commit/c6f1e7ce07cd5772beee5551e0b95b02a9f83914))
+
+
+### Bug Fixes
+
+* **grz-common,grz-db:** map duplicate tanG and upload errors correctly   ([#617](https://github.com/BfArM-MVH/grz-tools/issues/617)) ([7c6fe27](https://github.com/BfArM-MVH/grz-tools/commit/7c6fe271a15011a6925a2f2a8a1167f832d78f9c))
+
 ## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.0.1...grz-common-v2.1.0) (2026-05-19)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.7.2...grz-cli-v1.8.0) (2026-07-21)
+
+
+### Features
+
+* **grzctl, grz-db, grz-common:** Metadata schema version check via version.json ([#624](https://github.com/BfArM-MVH/grz-tools/issues/624)) ([c6f1e7c](https://github.com/BfArM-MVH/grz-tools/commit/c6f1e7ce07cd5772beee5551e0b95b02a9f83914))
+
 ## [1.7.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.7.1...grz-cli-v1.7.2) (2026-06-02)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.7.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.7.1...grz-pydantic-models-v2.7.2) (2026-07-21)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** Change dateTime field type from date to datetime in Consent model ([#611](https://github.com/BfArM-MVH/grz-tools/issues/611)) ([2c69f9e](https://github.com/BfArM-MVH/grz-tools/commit/2c69f9e0d29e7633100b40a60d762859c9bab0a7))
+* **grz-pydantic-models:** handle datetime, FHIR extensions and verification in consent model ([#610](https://github.com/BfArM-MVH/grz-tools/issues/610))Fix/consent field dtypes ([#627](https://github.com/BfArM-MVH/grz-tools/issues/627)) ([11bddd9](https://github.com/BfArM-MVH/grz-tools/commit/11bddd9f1c8d0b579d40297830fda581b2d03d3b))
+
 ## [2.7.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.7.0...grz-pydantic-models-v2.7.1) (2026-05-26)
 
 
