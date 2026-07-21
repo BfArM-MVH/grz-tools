@@ -1,6 +1,7 @@
 """Tests for submission_id-aware validation skip logic"""
 
 from pathlib import Path
+from unittest.mock import PropertyMock
 
 import pytest
 from grz_common.progress.progress_logging import FileProgressLogger
@@ -153,3 +154,21 @@ def test_validation_reruns_after_failed_validation(
         or mock_validate.validate_bam.called
         or mock_validate.validate_raw.called
     ), "Expected grz-check to re-run for previously failed files"
+
+
+@pytest.mark.parametrize(
+    ("expected_to_pass", "gz_file_location"),
+    [
+        (True, Path("tests/mock_files/fastq_files_1000/paired_end_passing_read1.fastq.gz")),
+        (False, Path("tests/mock_files/fastq_files_1000/invalid_gz_read1.fastq.gz")),
+    ],
+)
+def test_gz_magic_byte_check(submission, mocker, expected_to_pass, gz_file_location):
+    mocker.patch.object(Submission, "files", new_callable=PropertyMock, return_value={gz_file_location: None})
+
+    errors = list(submission.validate_gz_extension())
+
+    if expected_to_pass:
+        assert errors == []
+    else:
+        assert any("not actually a valid gzip file" in e for e in errors)

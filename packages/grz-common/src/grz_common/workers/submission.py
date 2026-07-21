@@ -266,7 +266,7 @@ class Submission:
     @property
     def files(self) -> dict[Path, SubmissionFileMetadata]:
         """
-        The files liked in the metadata.
+        The files linked in the metadata.
 
         :return: Dictionary of `local_file_path` -> `SubmissionFileMetadata` pairs.
         """
@@ -296,6 +296,15 @@ class Submission:
                         all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
         yield from all_errors
 
+    def validate_gz_extension(self) -> Generator[str, None, None]:
+        """Sanity-checks that every file with a .gz extension has gzip magic bytes."""
+        for file_path in self.files:
+            if file_path.suffix == ".gz":
+                with open(file_path, "rb") as f:
+                    first_bytes = f.read(2)
+                if first_bytes != b"\x1f\x8b":
+                    yield f"{file_path}: File labeled .gz not actually a valid gzip file!"
+
     def validate_files(  # noqa: C901, PLR0912, PLR0915
         self,
         checksum_progress_file: str | PathLike,
@@ -306,6 +315,8 @@ class Submission:
         """
         Validates submission files using native `grz-check` PyO3 bindings and populates progress logs.
         """
+        yield from self.validate_gz_extension()
+
         checksum_progress_logger = FileProgressLogger[ValidationState](log_file_path=checksum_progress_file)
         checksum_progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
 
