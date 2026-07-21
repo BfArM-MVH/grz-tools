@@ -545,3 +545,57 @@ def test_dbcontext_error_handling(db_engine, full_config_path, test_metadata, tm
         assert history[-1] == SubmissionStateEnum.ERROR
         assert history[-2] == SubmissionStateEnum.CLEANING
         assert history[-3] == SubmissionStateEnum.QCED
+
+
+@pytest.mark.parametrize(
+    ("valid_metadata", "expected_basic_qc_passed"),
+    [(True, True), (False, None)],
+)
+def test_validation_basic_qc_passed_update(
+    valid_metadata, expected_basic_qc_passed, db_engine, full_config_path, test_metadata, tmp_path
+):
+    runner = click.testing.CliRunner()
+    cli = build_cli()
+
+    parsed_metadata, metadata_path_fixture = test_metadata
+    submission_id = parsed_metadata.submission_id
+
+    submission_dir = tmp_path / "submission"
+    submission_dir.mkdir()
+    for d in ["metadata", "files", "logs", "encrypted_files"]:
+        (submission_dir / d).mkdir()
+    shutil.copy(metadata_path_fixture, submission_dir / "metadata" / "metadata.json")
+
+    setup_db_state(
+        runner,
+        cli,
+        full_config_path,
+        submission_id,
+        metadata_path_fixture,
+        initial_state=SubmissionStateEnum.DECRYPTED,
+    )
+
+    # Mock the validate.callback
+    with (
+        patch("grzctl.commands.validate.validate_module.validate.callback") as mock_validate_callback,
+    ):
+        # Fail validation on purpose for negative case
+        if not valid_metadata:
+            mock_validate_callback.side_effect = Exception("validation failed")
+
+        validate_args = [
+            "validate",
+            "--submission-dir",
+            str(submission_dir),
+            "--config-file",
+            str(full_config_path),
+            "--update-db",
+        ]
+
+        # Test to see if basic_qc_passed is updated to true on successful validation
+        runner.invoke(cli, validate_args)
+
+    # Create Submission from Db and check
+    with Session(db_engine) as db_session:
+        submission_from_db = db_session.exec(select(Submission).where(Submission.id == submission_id)).first()
+    assert submission_from_db.basic_qc_passed is expected_basic_qc_passed
