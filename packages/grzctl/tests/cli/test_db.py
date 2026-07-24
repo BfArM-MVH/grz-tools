@@ -1186,6 +1186,66 @@ def test_change_request_template_for_other_change_types_includes_audit_fields():
     assert "describe the field/value to modify" in result.stdout
 
 
+def test_change_request_validate_accepts_valid_input_without_config(tmp_path: Path):
+    """The offline validator accepts a well-formed data file with no DB config at all."""
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    # Note: no `db --config-file ...` — the command must work standalone.
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code == 0, result.stderr
+    assert "valid" in result.stderr.lower()
+
+
+def test_change_request_validate_rejects_unedited_template(tmp_path: Path):
+    """Saving the template and validating it unchanged must fail — the safety net still applies offline."""
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    template = runner.invoke(cli, ["change-request-template", "Delete"]).stdout
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(template)
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code != 0
+    assert "requested_at" in result.stderr
+
+
+def test_change_request_validate_reports_missing_field(tmp_path: Path):
+    """A data file missing a required audit field is rejected with that field named."""
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(incomplete, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_validate_gives_friendly_date_error(tmp_path: Path):
+    """A malformed `requested_at` yields a clear message, not pydantic's raw coercion error."""
+    bad = {**_DELETE_CHANGE_REQUEST_DATA, "requested_at": "27-03-2026"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(bad, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code != 0
+    assert "invalid date format" in result.stderr.lower()
+    assert "requested_at" in result.stderr
+
+
+def test_change_request_validate_accepts_mislabeled_extension(tmp_path: Path):
+    """YAML content saved with a .json extension still loads (YAML is a superset of JSON)."""
+    data_file = tmp_path / "delete.json"  # deliberately wrong extension for YAML content
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code == 0, result.stderr
+    assert "valid" in result.stderr.lower()
+
+
 def test_change_request_dry_run_does_not_write(blank_database_config_path: Path, tmp_path: Path):
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
