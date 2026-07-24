@@ -376,6 +376,16 @@ _RAW_CONTENT_MAGIC: dict[RequestRawContentType, bytes] = {
 }
 
 
+def detect_raw_content_type(content: bytes) -> RequestRawContentType | None:
+    """Identify a raw attachment's type from its magic bytes.
+
+    Content is authoritative — the file extension is intentionally ignored. Returns
+    ``None`` if the bytes match no supported type. This is the same magic-byte table
+    the model uses to verify ``request_raw_content`` against its declared type.
+    """
+    return next((content_type for content_type, magic in _RAW_CONTENT_MAGIC.items() if content.startswith(magic)), None)
+
+
 _TEMPLATE_PLACEHOLDER_MARKER = "<FILL IN"
 
 
