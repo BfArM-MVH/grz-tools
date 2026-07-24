@@ -408,6 +408,8 @@ def _build_submission_dict_from(
     :param log_obj: The most recent :class:`~grz_db.models.submission.SubmissionStateLog` or
         :class:`~grz_db.models.submission.ChangeRequestLog`, or ``None`` if no log exists yet.
     :param submission: The submission ORM/Pydantic model instance.
+    :param signature_status: Verification result for the log entry's author signature.
+        Defaults to :attr:`~SignatureStatus.UNKNOWN` when no verification was performed.
     :returns: A dictionary suitable for JSON serialisation that contains the submission identifiers
         and either a ``latest_state`` or ``latest_change_request`` key depending on *log_obj*.
     :raises TypeError: If *log_obj* is neither ``None`` nor one of the two expected log types.
