@@ -171,9 +171,10 @@ $ grzctl db --config-file $CONFIG_PATH submission change-request \
 ```
 
 - Supported types: **PDF** and **PNG**.
-- The type is inferred from the file extension (`.pdf`, `.png`) and then
-  **verified against the file's magic bytes** (`%PDF-` for PDF, the PNG
-  signature for PNG). A mismatch or unsupported extension is rejected.
+- The type is identified from the file's **magic bytes** (`%PDF-` for PDF, the
+  PNG signature for PNG), not its extension — the content decides. A valid PDF or
+  PNG is accepted whatever it is named, and a file whose bytes match no supported
+  type is rejected.
 - If you supply `--raw-content`, `request_email_content` becomes optional — the
   attachment can stand in for the transcribed email.
 
@@ -300,7 +301,7 @@ Options for `submission change-request`:
 | --- | --- |
 | `--data-file PATH` | JSON/YAML file with the change-request fields. Mutually exclusive with `--data`. |
 | `--data JSON` | Inline JSON with the change-request fields. Mutually exclusive with `--data-file`. |
-| `--raw-content PATH` | Optional PDF/PNG attachment; type verified by magic bytes. |
+| `--raw-content PATH` | Optional PDF/PNG attachment; type detected from magic bytes, not the extension. |
 | `--dry-run` | Validate and check the submission exists, but write nothing. |
 
 `CHANGE` is one of `Modify`, `Delete`, `Transfer` (case-insensitive).

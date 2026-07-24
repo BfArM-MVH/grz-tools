@@ -22,7 +22,12 @@ from pathlib import Path
 import click
 import rich.console
 import yaml
-from grz_db.models.submission import ChangeRequestEnum, ChangeRequestLogBase, RequestRawContentType
+from grz_db.models.submission import (
+    ChangeRequestEnum,
+    ChangeRequestLogBase,
+    RequestRawContentType,
+    detect_raw_content_type,
+)
 from pydantic import ValidationError
 
 from .change_request_template import render_yaml_template
@@ -37,11 +42,6 @@ _COLUMNAR_KEYS = {"requester_name", "requester_email", "requested_at", "request_
 # is reported clearly rather than via pydantic's field-by-field coercion errors.
 _PLACEHOLDER_MARKER = "<FILL IN"
 _DATE_PLACEHOLDER = "YYYY-MM-DD"
-
-_RAW_CONTENT_TYPE_BY_SUFFIX: dict[str, RequestRawContentType] = {
-    ".pdf": RequestRawContentType.PDF,
-    ".png": RequestRawContentType.PNG,
-}
 
 
 def _load_change_request_input(data_json: str | None, data_file: Path | None) -> dict | None:
@@ -86,17 +86,23 @@ def _load_change_request_input(data_json: str | None, data_file: Path | None) ->
 
 
 def _read_raw_content(path: Path | None) -> tuple[bytes | None, RequestRawContentType | None]:
-    """Read the optional binary attachment and infer its type from the file extension."""
+    """Read the optional binary attachment and identify its type from its magic bytes.
+
+    The file extension is only a hint — the content decides. A valid PDF/PNG is accepted
+    regardless of what it is named, and a file whose bytes match no supported type is rejected.
+    """
     if path is None:
         return None, None
-    content_type = _RAW_CONTENT_TYPE_BY_SUFFIX.get(path.suffix.lower())
+    content = path.read_bytes()
+    content_type = detect_raw_content_type(content)
     if content_type is None:
+        supported = ", ".join(t.value for t in RequestRawContentType)
         console_err.print(
-            f"[red]Error: cannot infer raw-content type from extension '{path.suffix}'. "
-            f"Supported extensions: {', '.join(sorted(_RAW_CONTENT_TYPE_BY_SUFFIX))}.[/red]"
+            f"[red]Error: '{path}' is not a recognized attachment — its content matches no "
+            f"supported type. Supported types: {supported}.[/red]"
         )
         raise click.Abort()
-    return path.read_bytes(), content_type
+    return content, content_type
 
 
 def _build_change_request_kwargs(

@@ -1358,7 +1358,7 @@ def test_change_request_modify_requires_audit_fields_too(blank_database_config_p
 
 
 def test_change_request_with_raw_content_pdf(blank_database_config_path: Path, tmp_path: Path):
-    """--raw-content provides the binary blob; type is inferred from .pdf extension."""
+    """--raw-content provides the binary blob; type is identified from the content's magic bytes."""
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
@@ -1397,45 +1397,15 @@ def test_change_request_with_raw_content_pdf(blank_database_config_path: Path, t
     assert persisted.request_raw_content_type.value == "PDF"
 
 
-def test_change_request_raw_content_unknown_extension_fails(blank_database_config_path: Path, tmp_path: Path):
-    """An unknown extension must fail with a clear error since type is only inferred."""
+def test_change_request_raw_content_unrecognized_bytes_fail(blank_database_config_path: Path, tmp_path: Path):
+    """Content matching no supported type is rejected, regardless of the file's name."""
     args_common = ["db", "--config-file", blank_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     _add_submission(runner, cli, args_common, submission_id)
 
-    blob_path = tmp_path / "request.bin"
-    blob_path.write_bytes(b"\x00\x01\x02")
-    data_file = tmp_path / "delete.yaml"
-    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
-
-    result = runner.invoke(
-        cli,
-        [
-            *args_common,
-            "submission",
-            "change-request",
-            submission_id,
-            "Delete",
-            "--data-file",
-            str(data_file),
-            "--raw-content",
-            str(blob_path),
-        ],
-    )
-    assert result.exit_code != 0
-    assert "infer raw-content type" in result.stderr
-
-
-def test_change_request_raw_content_magic_byte_mismatch_fails(blank_database_config_path: Path, tmp_path: Path):
-    """A file with a .pdf extension but non-PDF bytes must fail the magic-byte validator."""
-    args_common = ["db", "--config-file", blank_database_config_path]
-    submission_id = "260840108_2025-12-16_cc9973f0"
-    runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
-    _add_submission(runner, cli, args_common, submission_id)
-
+    # Bytes match neither PDF nor PNG magic; even a .pdf name must not save it.
     fake_pdf = tmp_path / "request.pdf"
     fake_pdf.write_bytes(b"not a pdf at all")
     data_file = tmp_path / "delete.yaml"
@@ -1456,7 +1426,45 @@ def test_change_request_raw_content_magic_byte_mismatch_fails(blank_database_con
         ],
     )
     assert result.exit_code != 0
-    assert "magic bytes" in result.stderr
+    assert "not a recognized attachment" in result.stderr
+
+
+def test_change_request_raw_content_type_from_content_not_extension(blank_database_config_path: Path, tmp_path: Path):
+    """The attachment type follows the magic bytes, not the extension: PNG bytes in a .pdf file store as PNG."""
+    args_common = ["db", "--config-file", blank_database_config_path]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    png_bytes = b"\x89PNG\r\n\x1a\n fake png body"
+    misnamed = tmp_path / "request.pdf"  # deliberately the wrong extension for PNG content
+    misnamed.write_bytes(png_bytes)
+    audit_only = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "request_email_content"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(audit_only, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--raw-content",
+            str(misnamed),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    config = DbConfig.from_path(blank_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    persisted = next(s for s in db.list_change_requests() if s.id == submission_id).changes[0]
+    assert persisted.request_raw_content == png_bytes
+    assert persisted.request_raw_content_type.value == "PNG"
 
 
 def test_submission_grzctl_versions_logging(blank_database_config_path: Path, test_metadata_path: Path, monkeypatch):
