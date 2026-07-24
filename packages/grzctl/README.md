@@ -11,3 +11,7 @@ Command-line tool for internal GRZ operations.
   - Alternatively, you can use `uv run --project path/to/repo grzctl <grzctl options here>` to run it from any directory.
     This is useful if your config uses relative paths and `grzctl` must therefore be run from a specific directory.
 
+## Documentation
+
+- [Registering change requests](docs/change-requests.md) — recording that a submission must be modified, deleted, or transferred, with the who/when/what audit trail.
+
