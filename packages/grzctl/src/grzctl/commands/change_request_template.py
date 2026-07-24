@@ -35,6 +35,9 @@ def render_yaml_template(change: ChangeRequestEnum) -> str:
     """
     guidance = _TYPE_GUIDANCE.get(change, "describe the requested change")
     return (
+        "# Replace each <FILL IN ...> placeholder — including the angle brackets — with a plain value.\n"
+        "# e.g.  requester_email: erika.mustermann@example.org   (not <erika.mustermann@example.org>)\n"
+        "\n"
         "# Full name of the person requesting the change\n"
         "requester_name: <FILL IN requester name>\n"
         "\n"
