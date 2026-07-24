@@ -183,12 +183,27 @@ The same input checks apply everywhere a change request is validated:
 
 1. `requester_name`, `requester_email`, and `requested_at` are all present.
 2. At least one of `request_email_content` or `--raw-content` is provided.
-3. No field still contains the `<FILL IN` placeholder marker.
-4. The whole record validates against the change-request model.
+3. No field still holds a template placeholder — neither the `<FILL IN …>`
+   markers nor the `YYYY-MM-DD` date placeholder.
+4. `requested_at` is a valid `YYYY-MM-DD` date.
+5. The whole record validates against the change-request model (a final backstop
+   for anything the checks above don't cover).
 
-If any check fails, the command prints the problem **and** re-prints the
-expected YAML template, then aborts. For example, submitting an unedited
-template fails on the `requested_at: YYYY-MM-DD` placeholder.
+If anything is wrong, **all** problems are reported together as a single list —
+so you can fix them in one pass rather than one error per run — followed by a
+pointer to `grzctl change-request-template <CHANGE>` for a filled-in example. For
+example, an unedited template reports each `<FILL IN>` field plus the
+`YYYY-MM-DD` date placeholder at once:
+
+```console
+$ grzctl change-request-validate Delete --data-file unedited-template.yaml
+Error: the change-request input needs attention:
+  • requester_name: still has the '<FILL IN ...>' placeholder — replace it
+  • requester_email: still has the '<FILL IN ...>' placeholder — replace it
+  • request_email_content: still has the '<FILL IN ...>' placeholder — replace it
+  • requested_at: still the 'YYYY-MM-DD' placeholder — use a real date, e.g. 2026-03-27
+See `grzctl change-request-template Delete` for a filled-in example.
+```
 
 There are two ways to run these checks, differing only in whether they touch the
 database:
