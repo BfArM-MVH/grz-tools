@@ -1373,7 +1373,9 @@ def sync_from_inbox(
         config = configuration
         s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
-        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
+        console_err.print(
+            f"[red]Error resolving S3 configuration from supplied inbox-bucket {inbox_bucket}: {traceback.format_exc()}[/red]"
+        )
         sys.exit(1)
 
     db_url = ctx.obj["db_url"]
