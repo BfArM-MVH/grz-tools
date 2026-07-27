@@ -81,7 +81,7 @@ def download(  # noqa: PLR0913
             submission_id,
             force=force,
             metadata_version_check=lambda metadata_schema_version: check_metadata_version_and_exit_if_needed(
-                config.s3,
+                s3_options,
                 metadata_schema_version,
             ),
         )
