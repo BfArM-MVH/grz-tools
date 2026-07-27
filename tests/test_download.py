@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.download import S3BotoDownloadWorker
+from grz_common.workers.worker import Worker
 
 
 @pytest.fixture(scope="module")
@@ -166,3 +167,40 @@ def test_download_redownloads_file_after_failed_download(
     assert mock_download.call_count == expected, (
         f"Expected {expected} failed files to be retried, but only {mock_download.call_count} were downloaded"
     )
+
+
+def test_worker_download_checks_metadata_version_before_files(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    tmp_path,
+):
+    """A failing metadata version check aborts before encrypted files are downloaded."""
+    metadata_path, metadata_key = encrypted_submission.get_metadata_file_path_and_object_id()
+    upload_file(remote_bucket, metadata_path, metadata_key)
+    for local_file_path, s3_key in encrypted_submission.get_encrypted_files_and_object_id().items():
+        upload_file(remote_bucket, local_file_path, s3_key)
+
+    worker = Worker(
+        metadata_dir=tmp_path / "metadata",
+        files_dir=tmp_path / "files",
+        log_dir=tmp_path / "logs",
+        encrypted_files_dir=tmp_path / "encrypted_files",
+    )
+
+    checked_versions = []
+
+    def fail_metadata_version_check(metadata_schema_version: str) -> None:
+        checked_versions.append(metadata_schema_version)
+        raise SystemExit(1)
+
+    with pytest.raises(SystemExit):
+        worker.download(
+            s3_config_model.s3,
+            encrypted_submission.submission_id,
+            metadata_version_check=fail_metadata_version_check,
+        )
+
+    assert checked_versions == [encrypted_submission.metadata.content.get_schema_version()]
+    assert (tmp_path / "metadata" / "metadata.json").exists()
+    assert not list((tmp_path / "encrypted_files").rglob("*.c4gh"))

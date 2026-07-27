@@ -93,6 +93,9 @@ class VersionFile(BaseModel):
 
     # List allows staged future policies (empty list disables version checking)
     grzcli_version: list[VersionInfo] = Field(default_factory=list, description="List of version policies for grz-cli")
+    metadata_version: list[VersionInfo] = Field(
+        default_factory=list, description="List of version policies for metadata schema"
+    )
 
     @classmethod
     def from_s3(cls, s3_options: S3Options, version_file_key: str) -> Self:

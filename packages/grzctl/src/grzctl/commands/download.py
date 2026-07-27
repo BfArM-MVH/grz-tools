@@ -6,6 +6,7 @@ from typing import Any
 
 import click
 import grz_common.cli as grzcli
+from grz_cli.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
@@ -68,7 +69,15 @@ def download(  # noqa: PLR0913
         end_state=SubmissionStateEnum.DOWNLOADED,
         enabled=update_db,
     ) as db_context:
-        worker_inst.download(config.s3, submission_id, force=force)
+        worker_inst.download(
+            config.s3,
+            submission_id,
+            force=force,
+            metadata_version_check=lambda metadata_schema_version: check_metadata_version_and_exit_if_needed(
+                config.s3,
+                metadata_schema_version,
+            ),
+        )
         if populate:
             if not db_context.db:
                 log.warning("Database context is not available, skipping population of submission metadata in DB.")
