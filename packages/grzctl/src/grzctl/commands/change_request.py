@@ -57,7 +57,7 @@ def _load_change_request_input(data_json: str | None, data_file: Path | None) ->
             raise click.Abort() from e
     if data_file is None:
         return None
-    text = data_file.read_text()
+    text = data_file.read_text(encoding="utf-8")
     # YAML is a superset of JSON, so a single YAML parse accepts .json, .yaml and
     # .yml alike — the extension is only a hint, not a hard requirement. This also
     # means a correctly-formed file loads even if it carries the "wrong" extension.
