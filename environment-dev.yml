@@ -6,7 +6,7 @@ channels:
 dependencies:
   # common
   - python >=3.12
-  - uv =0.11.22
+  - uv ~=0.11.22
   # for grz-check
   - rust =1.89.0
   # for grz-db
