@@ -454,6 +454,29 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
 
 
+@pytest.mark.parametrize(
+    "version,valid",
+    (
+        ("2025.0.1", True),  # minimum supported version
+        ("2025.0.4", True),
+        ("2026.0.0", True),  # the version that was previously rejected
+        ("2026.0.0-rc1", True),  # pre-releases of a supported version are accepted
+        ("2030.1.2", True),  # any newer version is accepted
+        ("2024.0.0", False),  # older than the minimum supported version
+        ("1.0.7", False),  # older than the minimum supported version
+        ("not-a-version", False),  # unparseable
+    ),
+)
+def test_research_consent_schema_version(version: str, valid: bool):
+    """Consent schemaVersion accepts the minimum supported version and anything newer."""
+    consent = Consent.model_validate_json(
+        importlib.resources.files(example_research_consent).joinpath("minimal_consented.json").read_text()
+    )
+    expectation = nullcontext() if valid else pytest.raises(ValidationError)
+    with expectation:
+        ResearchConsent(schemaVersion=version, scope=consent)
+
+
 def test_research_consent_subprovisions_deny_permit():
     """Within one research consent's subprovisions, deny before permit should return a non-consented state."""
     consent_raw = json.loads(

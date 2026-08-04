@@ -13,6 +13,8 @@ from operator import attrgetter
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Self
 
+from packaging.version import InvalidVersion
+from packaging.version import Version as PackagingVersion
 from pydantic import (
     AfterValidator,
     ConfigDict,
@@ -275,8 +277,25 @@ class MvConsent(StrictBaseModel):
     """
 
 
-class ResearchConsentSchemaVersion(StrEnum):
-    v_2025_0_1 = "2025.0.1"
+#: Oldest MII "Modul Consent" package version we accept for researchConsents[].schemaVersion.
+#: Any equal or newer version is accepted; the consent contents are still validated separately.
+MIN_RESEARCH_CONSENT_SCHEMA_VERSION = PackagingVersion("2025.0.1")
+
+
+def _validate_research_consent_schema_version(value: str) -> str:
+    try:
+        parsed = PackagingVersion(value)
+    except InvalidVersion as err:
+        raise ValueError(f"researchConsent schemaVersion must be a valid version, got {value!r}") from err
+    if parsed < MIN_RESEARCH_CONSENT_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported researchConsent schemaVersion {value}; "
+            f"minimum supported version is {MIN_RESEARCH_CONSENT_SCHEMA_VERSION}"
+        )
+    return value
+
+
+ResearchConsentSchemaVersion = Annotated[str, AfterValidator(_validate_research_consent_schema_version)]
 
 
 class ResearchConsentNoScopeJustification(StrEnum):
@@ -306,8 +325,9 @@ class ResearchConsent(StrictBaseModel):
     # try Consent model first, falling back to dict
     scope: Annotated[Consent | dict | None, Field(union_mode="left_to_right")] = None
     """
-    Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
-    See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
+    Scope of the research consent in JSON format following the MII IG Consent FHIR schema
+    (schemaVersion 2025.0.1 or newer).
+    See 'https://www.medizininformatik-initiative.de/Kerndatensatz/Modul_Consent/MII-IG-Modul-Consent.html' and
     'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
     """
 
