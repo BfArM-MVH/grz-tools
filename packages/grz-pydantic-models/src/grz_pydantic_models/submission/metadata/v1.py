@@ -21,13 +21,14 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
 
-from ...common import StrictBaseModel
-from ...mii.consent import Consent, ProvisionType
+from ...common import StrictBaseModel, as_aware_datetime
+from ...mii.consent import BroadConsentVersion, Consent, ProvisionType
 from .. import thresholds as thresholds_model
 from .versioning import Version
 
@@ -49,6 +50,16 @@ def is_supported_version(version: str) -> bool:
 
 
 class ResearchConsentCodes(StrEnum):
+    """
+    Permissions from the MII consent policy CodeSystem that a donor must grant to consent to research.
+
+    Both are still active: the six permissions the MII has retired so far (four of them announced in
+    the 2026.0.0 release notes, the two GECCO83 ones already deprecated in 2025.0.0) are not among
+    them, so a retired permission cannot affect this decision. Codes are matched on the OID alone;
+    OIDs are globally unique, and a submitter stating the policy system without its 'urn:oid:' prefix
+    is far likelier than a foreign CodeSystem reusing one of these strings.
+    """
+
     PATDAT_ERHEBEN_SPEICHERN_NUTZEN = "2.16.840.1.113883.3.1937.777.24.5.3.1"
     MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
 
@@ -279,6 +290,12 @@ class MvConsent(StrictBaseModel):
 
 #: Oldest MII "Modul Consent" package version we accept for researchConsents[].schemaVersion.
 #: Any equal or newer version is accepted; the consent contents are still validated separately.
+#:
+#: Every published package from here on is covered by the Consent model:
+#:   2025.0.1 - 2025.0.4 share profile MII_PR_Consent_Einwilligung 1.0.8; 2025.0.2 and 2025.0.3 only
+#:     grew the policy CodeSystem (101 -> 124 codes), which this model does not enumerate.
+#:   2026.0.0 ships profile 1.0.9: the category:mii slice moved to the mii-cs-consent-version-modules
+#:     CodeSystem and both provision period ends became optional. Both are handled.
 MIN_RESEARCH_CONSENT_SCHEMA_VERSION = PackagingVersion("2025.0.1")
 
 
@@ -295,7 +312,21 @@ def _validate_research_consent_schema_version(value: str) -> str:
     return value
 
 
-ResearchConsentSchemaVersion = Annotated[str, AfterValidator(_validate_research_consent_schema_version)]
+#: The version floor lives in a validator, which JSON Schema generation cannot express, so state it
+#: explicitly: consumers of the generated schema would otherwise see an unconstrained string.
+ResearchConsentSchemaVersion = Annotated[
+    str,
+    AfterValidator(_validate_research_consent_schema_version),
+    WithJsonSchema(
+        {
+            "type": "string",
+            "description": (
+                "Schema version of de.medizininformatikinitiative.kerndatensatz.consent, "
+                f"at least {MIN_RESEARCH_CONSENT_SCHEMA_VERSION}"
+            ),
+        }
+    ),
+]
 
 
 class ResearchConsentNoScopeJustification(StrEnum):
@@ -369,39 +400,52 @@ class ResearchConsent(StrictBaseModel):
         return self
 
     @staticmethod
-    def _as_utc_datetime(
-        value: date | datetime,
-        time_default: time = time.min,
-        zone_default: tzinfo = UTC,
-    ) -> datetime:
+    def _as_utc_datetime(value: date | datetime, zone_default: tzinfo = UTC) -> datetime:
         """Coerce a date or datetime to a timezone-aware datetime.
 
         :param value: date or datetime to coerce.
-        :param time_default: time to use when ``value`` is a plain date (no time component).
         :param zone_default: tzinfo to attach when ``value`` is naive (no tzinfo).
         :returns: timezone-aware datetime.
         """
         if isinstance(value, datetime):
-            return value.replace(tzinfo=zone_default) if value.tzinfo is None else value
-        return datetime.combine(value, time_default, tzinfo=zone_default)
+            return as_aware_datetime(value, zone_default)
+        return datetime.combine(value, time.min, tzinfo=zone_default)
+
+    @property
+    def broad_consent_versions(self) -> frozenset[BroadConsentVersion]:
+        """
+        Versions of the MII broad consent document this consent declares, derived from its policy OIDs.
+
+        Empty if the scope did not parse as a FHIR Consent or states no recognized OID. The declared
+        ``schemaVersion`` names the KDS package instead and says nothing about the document version.
+        """
+        return self.scope.broad_consent_versions if isinstance(self.scope, Consent) else frozenset()
 
     def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
         dt = self._as_utc_datetime(dt)
-
         code2consent: dict[str, bool] = {}
-        if isinstance(self.scope, Consent) and (self.scope.provision is not None):
-            for provision in self.scope.provision.provision:
-                start = self._as_utc_datetime(provision.period.start, time.min)
-                # a period without an end date stays in force indefinitely
-                end = self._as_utc_datetime(provision.period.end, time.max) if provision.period.end else None
 
-                if start <= dt and (end is None or dt <= end):
-                    for codeable_concept in provision.code:
-                        for coding in codeable_concept.coding:
-                            if provision.type == ProvisionType.PERMIT:
-                                code2consent[coding.code] = code2consent.get(coding.code, True)
-                            else:
-                                code2consent[coding.code] = False
+        if not isinstance(self.scope, Consent):
+            # the scope fell back to dict, so nothing can be read from it
+            return code2consent
+
+        if self.scope.provision is None:
+            return code2consent
+
+        # the root provision frames every nested rule: outside its period, none of them applies
+        if not self.scope.provision.period.contains(dt):
+            return code2consent
+
+        for provision in self.scope.provision.provision:
+            if not provision.period.contains(dt):
+                continue
+            for codeable_concept in provision.code:
+                for coding in codeable_concept.coding:
+                    if provision.type == ProvisionType.PERMIT:
+                        code2consent[coding.code] = code2consent.get(coding.code, True)
+                    else:
+                        code2consent[coding.code] = False
+
         return code2consent
 
     @staticmethod

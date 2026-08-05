@@ -1,10 +1,10 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from ..common import StrictBaseModel
+from ..common import StrictBaseModel, as_aware_datetime
 
 
 class StrictIgnoringBaseModel(StrictBaseModel):
@@ -37,24 +37,72 @@ class Status(StrEnum):
     ENTERED_IN_ERROR = "entered-in-error"
 
 
+def _date_to_datetime(value: Any, time_of_day: time) -> Any:
+    """
+    Widen a date-only period bound to a datetime at ``time_of_day``.
+
+    Values that already carry a time component are passed through untouched for pydantic to parse.
+
+    :param value: raw period bound as submitted.
+    :param time_of_day: time to combine a date-only bound with.
+    :returns: a datetime for date-only bounds, otherwise ``value`` unchanged.
+    """
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, date):
+        return datetime.combine(value, time_of_day)
+
+    if isinstance(value, str):
+        has_time_component = "T" in value or " " in value
+        if has_time_component:
+            return value
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError:
+            return value
+        return datetime.combine(parsed, time_of_day)
+
+    return value
+
+
 class Period(FhirElement):
     start: datetime
     #: Optional since MII consent package 2026.0.0: a period without an end never expires.
     end: datetime | None = None
 
-    @field_validator("start", "end", mode="before")
-    def date_to_datetime(cls, v):  # noqa: N805
-        if isinstance(v, datetime):
-            return v
-        if isinstance(v, date):
-            return datetime.combine(v, datetime.min.time())
-        if isinstance(v, str):
-            try:
-                d = date.fromisoformat(v)
-            except ValueError:
-                return v
-            return datetime.combine(d, datetime.min.time())
-        return v
+    # FHIR treats a date-only bound as covering the whole day, so a date-only start begins at
+    # midnight while a date-only end stays in force until the end of that day.
+
+    @field_validator("start", mode="before")
+    @classmethod
+    def start_of_day(cls, v):
+        return _date_to_datetime(v, time.min)
+
+    @field_validator("end", mode="before")
+    @classmethod
+    def end_of_day(cls, v):
+        return _date_to_datetime(v, time.max)
+
+    def contains(self, moment: datetime) -> bool:
+        """
+        Whether ``moment`` falls within this period, both bounds inclusive.
+
+        Naive datetimes on either side are read as UTC, matching the rest of the pipeline.
+
+        :param moment: point in time to test.
+        :returns: True if the period is in force at ``moment``.
+        """
+        moment = as_aware_datetime(moment)
+
+        if moment < as_aware_datetime(self.start):
+            return False
+
+        if self.end is None:
+            # a period without an end never expires
+            return True
+
+        return moment <= as_aware_datetime(self.end)
 
 
 class Policy(StrictIgnoringBaseModel):
@@ -73,20 +121,66 @@ class CodeableConcept(FhirElement):
     coding: Annotated[list[Coding], Field(min_length=1)]
     text: str | None = None
 
+    @property
+    def codings(self) -> frozenset[tuple[str, str]]:
+        """The (system, code) pairs carried by this concept."""
+        return frozenset((coding.system, coding.code) for coding in self.coding)
+
 
 class ConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
     period: Period
     code: Annotated[list[CodeableConcept], Field(min_length=1)]
+    #: The profile constrains Consent.provision.provision.provision to 0..0. A third level would
+    #: carry permissions that consent evaluation does not read, so reject it rather than drop it.
+    provision: list[Any] | None = None
+
+    @model_validator(mode="after")
+    def reject_nested_provision(self):
+        if self.provision:
+            raise ValueError(
+                "consent.provision.provision[].provision is not allowed by the MII consent profile "
+                "and its permissions would not be evaluated"
+            )
+        return self
 
 
 class RootConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
+    #: Required by every profile version; only its end became optional in profile 1.0.9.
+    period: Period
     provision: list[ConsentProvision] = Field(default_factory=list)
+    #: The profile constrains Consent.provision.code to 0..0; permissions belong on the sub-provisions.
+    code: list[Any] | None = None
+
+    @model_validator(mode="after")
+    def reject_root_code(self):
+        if self.code:
+            raise ValueError(
+                "consent.provision.code is not allowed by the MII consent profile; "
+                "permissions belong on consent.provision.provision[].code"
+            )
+        return self
+
+
+class Identifier(StrictIgnoringBaseModel):
+    # The profile requires both on Consent.patient.identifier (1..1 each).
+    system: str
+    value: str
 
 
 class Patient(StrictIgnoringBaseModel):
+    # The profile marks both as mustSupport yet requires neither, so the patient may be identified
+    # either way. A patient stating neither (e.g. display only) carries nothing this model keeps
+    # and is rejected rather than silently reduced to an empty object.
     reference: str | None = None
+    identifier: Identifier | None = None
+
+    @model_validator(mode="after")
+    def require_reference_or_identifier(self):
+        if self.reference is None and self.identifier is None:
+            raise ValueError("consent.patient must identify the patient by a reference or an identifier")
+        return self
 
 
 class Verification(StrictIgnoringBaseModel):
@@ -96,20 +190,94 @@ class Verification(StrictIgnoringBaseModel):
 
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
 EXPECTED_SCOPE_CODING_CODE = "research"
-MII_BROAD_CONSENT_CATEGORY_CODE = "2.16.840.1.113883.3.1937.777.24.2.184"
+MII_BROAD_CONSENT_OID = "2.16.840.1.113883.3.1937.777.24.2.184"
+#: CodeSystem holding the OIDs of the MII broad consent versions and additional modules, introduced
+#: in package 2026.0.0 (canonical OID urn:oid:2.16.840.1.113883.3.1937.777.24.5.27).
+MII_CONSENT_VERSION_MODULES_SYSTEM = (
+    "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-version-modules"
+)
 #: The category CodeSystem was renamed in package version 2026.0.0, but that package's own
 #: examples still use the old spelling, so both are in the wild.
 MII_CONSENT_CATEGORY_SYSTEMS = (
     "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
-    "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-version-modules",
+    MII_CONSENT_VERSION_MODULES_SYSTEM,
 )
 EXPECTED_CATEGORIES: dict[str, frozenset[tuple[str, str]]] = {
     "loinc": frozenset({("http://loinc.org", "57016-8")}),
-    "mii": frozenset({(s, MII_BROAD_CONSENT_CATEGORY_CODE) for s in MII_CONSENT_CATEGORY_SYSTEMS}),
+    "mii": frozenset({(s, MII_BROAD_CONSENT_OID) for s in MII_CONSENT_CATEGORY_SYSTEMS}),
 }
 
 
+class BroadConsentVersion(StrEnum):
+    """Version of the MII broad consent document a donor was presented with."""
+
+    V1_6D = "1.6d"
+    V1_6F = "1.6f"
+    V1_7_2 = "1.7.2"
+
+
+class ConsentDocumentKind(StrEnum):
+    """What a broad consent document declares."""
+
+    #: Consent to the broad consent itself.
+    CONSENT = "consent"
+    #: Refusal of the broad consent (Ablehnung).
+    REJECTION = "rejection"
+    #: Withdrawal of the entire broad consent (Komplettwiderruf).
+    COMPLETE_WITHDRAWAL = "complete withdrawal"
+    #: Withdrawal of parts of the broad consent (Teilwiderruf).
+    PARTIAL_WITHDRAWAL = "partial withdrawal"
+    #: An additional module on top of the broad consent (Zusatzmodul).
+    ADDITIONAL_MODULE = "additional module"
+
+
+#: Codes of the mii-cs-consent-version-modules CodeSystem, mapped to what they declare and to the
+#: broad consent version they belong to. These OIDs identify the signed document itself and appear
+#: as Consent.policy[].uri (usually prefixed with 'urn:oid:'), independent of the KDS package version
+#: declared in researchConsents[].schemaVersion. Unknown OIDs are deliberately not an error: a future
+#: broad consent version must not break submissions.
+BROAD_CONSENT_DOCUMENT_OIDS: dict[str, tuple[ConsentDocumentKind, BroadConsentVersion | None]] = {
+    MII_BROAD_CONSENT_OID: (ConsentDocumentKind.CONSENT, None),
+    "2.16.840.1.113883.3.1937.777.24.2.1790": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_6D),
+    "2.16.840.1.113883.3.1937.777.24.2.4053": (ConsentDocumentKind.REJECTION, BroadConsentVersion.V1_6D),
+    "2.16.840.1.113883.3.1937.777.24.2.2718": (ConsentDocumentKind.COMPLETE_WITHDRAWAL, BroadConsentVersion.V1_6D),
+    "2.16.840.1.113883.3.1937.777.24.2.2719": (ConsentDocumentKind.PARTIAL_WITHDRAWAL, BroadConsentVersion.V1_6D),
+    "2.16.840.1.113883.3.1937.777.24.2.1791": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_6F),
+    "2.16.840.1.113883.3.1937.777.24.2.2720": (ConsentDocumentKind.COMPLETE_WITHDRAWAL, BroadConsentVersion.V1_6F),
+    "2.16.840.1.113883.3.1937.777.24.2.2721": (ConsentDocumentKind.PARTIAL_WITHDRAWAL, BroadConsentVersion.V1_6F),
+    "2.16.840.1.113883.3.1937.777.24.2.2079": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_7_2),
+    "2.16.840.1.113883.3.1937.777.24.2.4054": (ConsentDocumentKind.REJECTION, BroadConsentVersion.V1_7_2),
+    "2.16.840.1.113883.3.1937.777.24.2.2722": (ConsentDocumentKind.COMPLETE_WITHDRAWAL, BroadConsentVersion.V1_7_2),
+    "2.16.840.1.113883.3.1937.777.24.2.2723": (ConsentDocumentKind.PARTIAL_WITHDRAWAL, BroadConsentVersion.V1_7_2),
+    # consent of legal guardians and of minors, all belonging to broad consent 1.7.2
+    "2.16.840.1.113883.3.1937.777.24.2.3542": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_7_2),
+    "2.16.840.1.113883.3.1937.777.24.2.3543": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_7_2),
+    "2.16.840.1.113883.3.1937.777.24.2.3544": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_7_2),
+    # additional modules, not tied to a single broad consent version
+    "2.16.840.1.113883.3.1937.777.24.2.4052": (ConsentDocumentKind.ADDITIONAL_MODULE, None),
+    "2.16.840.1.113883.3.1937.777.24.2.4031": (ConsentDocumentKind.ADDITIONAL_MODULE, None),
+    "2.16.840.1.113883.3.1937.777.24.2.4036": (ConsentDocumentKind.ADDITIONAL_MODULE, None),
+    "2.16.840.1.113883.3.1937.777.24.2.4037": (ConsentDocumentKind.ADDITIONAL_MODULE, None),
+    "2.16.840.1.113883.3.1937.777.24.2.4048": (ConsentDocumentKind.ADDITIONAL_MODULE, None),
+}
+
+_OID_URI_PREFIX = "urn:oid:"
+
+
+def _strip_oid_prefix(uri: str) -> str:
+    """Reduce a policy URI to a bare OID.
+
+    The MII examples are inconsistent: most policy URIs carry the 'urn:oid:' prefix, but at least one
+    shipped example states the bare OID.
+
+    :param uri: policy URI as submitted.
+    :returns: the URI without a leading 'urn:oid:'.
+    """
+    return uri.removeprefix(_OID_URI_PREFIX)
+
+
 class Consent(StrictIgnoringBaseModel):
+    resource_type: Literal["Consent"] | None = None
     status: Status
     scope: CodeableConcept
     category: Annotated[list[CodeableConcept], Field(min_length=2)]
@@ -140,16 +308,19 @@ class Consent(StrictIgnoringBaseModel):
     def ensure_valid_category(self):
         categories_to_find = set(EXPECTED_CATEGORIES.keys())
         for i, category in enumerate(self.category):
-            if len(category.coding) != 1:
-                raise ValueError(
-                    f"consent.category[{i}].coding must contain only a single element, not {len(category.coding)}"
-                )
-            coding = (category.coding[0].system, category.coding[0].code)
             for expected_category_name, accepted in EXPECTED_CATEGORIES.items():
-                if coding in accepted:
-                    if expected_category_name not in categories_to_find:
-                        raise ValueError(f"Duplicate required category in consent.category: {category}")
-                    categories_to_find.remove(expected_category_name)
+                if not (category.codings & accepted):
+                    continue
+                # Only the loinc and mii slices are pinned to a single coding; the category slicing
+                # is open, so any further category may carry as many codings as it likes.
+                if len(category.coding) != 1:
+                    raise ValueError(
+                        f"consent.category[{i}] carries the {expected_category_name} category and must "
+                        f"therefore contain only a single coding, not {len(category.coding)}"
+                    )
+                if expected_category_name not in categories_to_find:
+                    raise ValueError(f"Duplicate required category in consent.category: {category}")
+                categories_to_find.remove(expected_category_name)
 
         if categories_to_find:
             missing = ", ".join(
@@ -159,3 +330,37 @@ class Consent(StrictIgnoringBaseModel):
             raise ValueError(f"Missing expected categories: {missing}")
 
         return self
+
+    @property
+    def document_oids(self) -> frozenset[str]:
+        """Bare OIDs identifying the signed documents, from policy URIs and version/module categories."""
+        from_policies = {_strip_oid_prefix(policy.uri) for policy in self.policy}
+        from_categories = {
+            coding.code
+            for category in self.category
+            for coding in category.coding
+            if coding.system == MII_CONSENT_VERSION_MODULES_SYSTEM
+        }
+        return frozenset(from_policies | from_categories)
+
+    @property
+    def _known_documents(self) -> tuple[tuple[ConsentDocumentKind, BroadConsentVersion | None], ...]:
+        """The (kind, version) pairs of those document OIDs the version and module CodeSystem defines."""
+        return tuple(
+            BROAD_CONSENT_DOCUMENT_OIDS[oid] for oid in self.document_oids if oid in BROAD_CONSENT_DOCUMENT_OIDS
+        )
+
+    @property
+    def broad_consent_versions(self) -> frozenset[BroadConsentVersion]:
+        """Broad consent versions this consent declares. Empty if none of its OIDs is recognized."""
+        return frozenset(version for _, version in self._known_documents if version is not None)
+
+    @property
+    def document_kinds(self) -> frozenset[ConsentDocumentKind]:
+        """What the recognized OIDs of this consent declare."""
+        return frozenset(kind for kind, _ in self._known_documents)
+
+    @property
+    def unknown_document_oids(self) -> frozenset[str]:
+        """OIDs that are not part of the known version and module CodeSystem, e.g. a newer broad consent."""
+        return frozenset(oid for oid in self.document_oids if oid not in BROAD_CONSENT_DOCUMENT_OIDS)
