@@ -392,9 +392,10 @@ class ResearchConsent(StrictBaseModel):
         if isinstance(self.scope, Consent) and (self.scope.provision is not None):
             for provision in self.scope.provision.provision:
                 start = self._as_utc_datetime(provision.period.start, time.min)
-                end = self._as_utc_datetime(provision.period.end, time.max)
+                # a period without an end date stays in force indefinitely
+                end = self._as_utc_datetime(provision.period.end, time.max) if provision.period.end else None
 
-                if start <= dt <= end:
+                if start <= dt and (end is None or dt <= end):
                     for codeable_concept in provision.code:
                         for coding in codeable_concept.coding:
                             if provision.type == ProvisionType.PERMIT:

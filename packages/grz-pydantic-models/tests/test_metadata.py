@@ -4,7 +4,7 @@ import itertools
 import json
 import re
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from grz_pydantic_models.mii.consent import (
@@ -543,6 +543,30 @@ def test_example_research_consent_scopes_parse_as_consent(dataset: str, version:
     for donor in submission.donors:
         for research_consent in donor.research_consents:
             assert research_consent.scope is None or isinstance(research_consent.scope, Consent)
+
+
+def test_research_consent_open_ended_provision_period():
+    """
+    Package 2026.0.0 relaxed provision.period.end to optional. Such a consent must parse, and the
+    provision must stay in force indefinitely rather than being treated as expired.
+    """
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("minimal_consented.json").read_text()
+    )
+    for provision in consent_raw["provision"]["provision"]:
+        del provision["period"]["end"]
+
+    consent = Consent.model_validate(consent_raw)
+    assert consent.provision is not None
+    assert all(provision.period.end is None for provision in consent.provision.provision)
+
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=consent)
+    start = consent.provision.provision[0].period.start.date()
+    assert ResearchConsent.consents_to_research([research_consent], date=start)
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2999, month=12, day=31))
+    assert not ResearchConsent.consents_to_research([research_consent], date=start - timedelta(days=1)), (
+        "a provision must not apply before its start date"
+    )
 
 
 def test_research_consent_rejects_category_in_both_spellings():

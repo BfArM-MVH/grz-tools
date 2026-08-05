@@ -39,7 +39,8 @@ class Status(StrEnum):
 
 class Period(FhirElement):
     start: datetime
-    end: datetime
+    #: Optional since MII consent package 2026.0.0: a period without an end never expires.
+    end: datetime | None = None
 
     @field_validator("start", "end", mode="before")
     def date_to_datetime(cls, v):  # noqa: N805
