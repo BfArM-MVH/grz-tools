@@ -7,7 +7,11 @@ from contextlib import nullcontext
 from datetime import date
 
 import pytest
-from grz_pydantic_models.mii.consent import Consent
+from grz_pydantic_models.mii.consent import (
+    MII_BROAD_CONSENT_CATEGORY_CODE,
+    MII_CONSENT_CATEGORY_SYSTEMS,
+    Consent,
+)
 from grz_pydantic_models.submission.metadata import (
     DiseaseType,
     ResearchConsentNoScopeJustification,
@@ -367,6 +371,10 @@ def test_file_extensions():
         ("minimal_nonconsented", True),
         ("minimal_consented_expired", True),
         ("mii_ig_consent_v2025_example1", True),
+        # examples shipped inside the MII consent package 2026.0.0, vendored verbatim
+        ("mii_ig_consent_v2026_example1", True),
+        ("mii_ig_consent_v2026_example2", True),
+        ("mii_ig_consent_v2026_example3", True),
         ("invalid_missing_fields", False),
     ),
 )
@@ -475,6 +483,100 @@ def test_research_consent_schema_version(version: str, valid: bool):
     expectation = nullcontext() if valid else pytest.raises(ValidationError)
     with expectation:
         ResearchConsent(schemaVersion=version, scope=consent)
+
+
+@pytest.mark.parametrize(
+    "version,category_system,schema_version",
+    itertools.product(
+        [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
+        MII_CONSENT_CATEGORY_SYSTEMS,
+        ["2025.0.1", "2026.0.0"],
+    ),
+)
+def test_wgs_trio_accepts_renamed_consent_category_system(version: str, category_system: str, schema_version: str):
+    """
+    Package 2026.0.0 renamed the category CodeSystem from mii-cs-consent-consent_category to
+    mii-cs-consent-version-modules. Raw JSON with either spelling must parse as a Consent, not
+    fall through to dict. The spelling is deliberately not coupled to the declared schemaVersion:
+    the 2026.0.0 package's own examples still use the old spelling, so both are in the wild.
+    """
+    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    metadata = json.loads(metadata_str)
+    research_consent = metadata["donors"][0]["researchConsents"][0]
+    research_consent["schemaVersion"] = schema_version
+    mii_codings = [
+        coding
+        for category in research_consent["scope"]["category"]
+        for coding in category["coding"]
+        if coding["code"] == MII_BROAD_CONSENT_CATEGORY_CODE
+    ]
+    assert mii_codings, "example consent should contain the MII broad consent category"
+    for coding in mii_codings:
+        coding["system"] = category_system
+
+    submission = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    assert isinstance(submission.donors[0].research_consents[0].scope, Consent)
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(
+        [
+            "oncomine_panel_tumor_only",
+            "panel_tumor_only",
+            "wes_tumor_germline",
+            "wgs_tumor_germline",
+            "wgs_lr_tumor_only",
+            "wgs_trio",
+        ],
+        TESTED_VERSIONS,
+    ),
+)
+def test_example_research_consent_scopes_parse_as_consent(dataset: str, version: str):
+    """
+    The Consent | dict union falls back to dict on any parse failure without raising, so a
+    consent parsing regression stays invisible to plain validation tests. Every provided scope
+    in the example submissions must come out as a Consent, never a dict.
+    """
+    metadata_str = importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
+    submission = GrzSubmissionMetadata.model_validate_json(metadata_str)
+    for donor in submission.donors:
+        for research_consent in donor.research_consents:
+            assert research_consent.scope is None or isinstance(research_consent.scope, Consent)
+
+
+def test_research_consent_rejects_category_in_both_spellings():
+    """The MII broad consent category must appear exactly once, even across both CodeSystem spellings."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("minimal_consented.json").read_text()
+    )
+    new_style = MII_CONSENT_CATEGORY_SYSTEMS[1]
+    mii_category = copy.deepcopy(
+        next(c for c in consent_raw["category"] if c["coding"][0]["code"] == MII_BROAD_CONSENT_CATEGORY_CODE)
+    )
+    mii_category["coding"][0]["system"] = new_style
+    consent_raw["category"].append(mii_category)
+
+    with pytest.raises(ValidationError, match="Duplicate required category"):
+        Consent.model_validate(consent_raw)
+
+
+def test_research_consent_missing_category_message_is_readable():
+    """The missing-category error reaches submitters, so it must spell out the accepted system|code pairs."""
+    consent_raw = json.loads(
+        importlib.resources.files(example_research_consent).joinpath("minimal_consented.json").read_text()
+    )
+    mii_category = next(c for c in consent_raw["category"] if c["coding"][0]["code"] == MII_BROAD_CONSENT_CATEGORY_CODE)
+    mii_category["coding"][0]["system"] = "https://example.org/not-the-consent-category-system"
+
+    with pytest.raises(ValidationError) as excinfo:
+        Consent.model_validate(consent_raw)
+
+    message = str(excinfo.value)
+    assert "Missing expected categories" in message
+    for system in MII_CONSENT_CATEGORY_SYSTEMS:
+        assert f"{system}|{MII_BROAD_CONSENT_CATEGORY_CODE}" in message
+    assert "frozenset" not in message
 
 
 def test_research_consent_subprovisions_deny_permit():
