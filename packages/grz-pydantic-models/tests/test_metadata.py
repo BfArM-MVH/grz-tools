@@ -765,6 +765,28 @@ def test_research_consent_without_parsed_scope_has_no_broad_consent_version():
     assert research_consent.broad_consent_versions == frozenset()
 
 
+@pytest.mark.parametrize("status", ("draft", "proposed", "rejected", "inactive", "entered-in-error"))
+def test_consent_not_in_force_grants_nothing(status: str):
+    """
+    Consent.status is a FHIR modifier element: anything but 'active' marks the consent as not
+    currently valid, so its permit provisions must not be read as research consent.
+    """
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["status"] = status
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=Consent.model_validate(consent_raw))
+
+    assert not research_consent.scope.is_in_force
+    assert research_consent.consent_by_code(date(year=2024, month=1, day=1)) == {}
+    assert not ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+
+
+def test_consent_in_force_still_grants():
+    """The status gate must not change the outcome for the active consents it guards."""
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent("minimal_consented"))
+    assert research_consent.scope.is_in_force
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+
+
 @pytest.mark.parametrize("case", ("withdrawal_complete", "rejection_bc_v1_7_2"))
 def test_withdrawal_and_rejection_do_not_consent_to_research(case: str):
     research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent(case))

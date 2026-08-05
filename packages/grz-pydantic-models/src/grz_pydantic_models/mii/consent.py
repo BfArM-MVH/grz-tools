@@ -325,6 +325,16 @@ class Consent(StrictIgnoringBaseModel):
         return self
 
     @property
+    def is_in_force(self) -> bool:
+        """
+        Whether the consent's status marks it as currently valid.
+
+        Consent.status is a FHIR modifier element: every status other than 'active' marks the consent
+        as not in force, so its provisions must not be read as permissions.
+        """
+        return self.status == Status.ACTIVE
+
+    @property
     def document_oids(self) -> frozenset[str]:
         """Bare OIDs identifying the signed documents, from policy URIs and version/module categories."""
         from_policies = {_strip_oid_prefix(policy.uri) for policy in self.policy}

@@ -415,7 +415,9 @@ class ResearchConsent(StrictBaseModel):
             # the scope fell back to dict, so nothing can be read from it
             return code2consent
 
-        if self.scope.provision is None:
+        # Consent.status is a modifier element: a consent that is not in force grants nothing,
+        # no matter what its provisions say.
+        if not self.scope.is_in_force or self.scope.provision is None:
             return code2consent
 
         # the root provision frames every nested rule: outside its period, none of them applies
