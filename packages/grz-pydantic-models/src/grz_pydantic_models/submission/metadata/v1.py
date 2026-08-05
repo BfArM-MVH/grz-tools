@@ -327,7 +327,7 @@ class ResearchConsent(StrictBaseModel):
     """
     Scope of the research consent in JSON format following the MII IG Consent FHIR schema
     (schemaVersion 2025.0.1 or newer).
-    See 'https://www.medizininformatik-initiative.de/Kerndatensatz/Modul_Consent/MII-IG-Modul-Consent.html' and
+    See 'https://simplifier.net/guide/mii-ig-modul-consent-2026' and
     'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
     """
 

@@ -95,17 +95,21 @@ class Verification(StrictIgnoringBaseModel):
 
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
 EXPECTED_SCOPE_CODING_CODE = "research"
-EXPECTED_CATEGORIES = {
-    "loinc": CodeableConcept(coding=[Coding(system="http://loinc.org", code="57016-8")]),
-    "mii": CodeableConcept(
-        coding=[
-            Coding(
-                system="https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
-                code="2.16.840.1.113883.3.1937.777.24.2.184",
-            )
-        ]
-    ),
+MII_BROAD_CONSENT_CATEGORY_CODE = "2.16.840.1.113883.3.1937.777.24.2.184"
+#: The category CodeSystem was renamed in package version 2026.0.0, but that package's own
+#: examples still use the old spelling, so both are in the wild.
+MII_CONSENT_CATEGORY_SYSTEMS = (
+    "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
+    "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-version-modules",
+)
+EXPECTED_CATEGORIES: dict[str, frozenset[tuple[str, str]]] = {
+    "loinc": frozenset({("http://loinc.org", "57016-8")}),
+    "mii": frozenset({(s, MII_BROAD_CONSENT_CATEGORY_CODE) for s in MII_CONSENT_CATEGORY_SYSTEMS}),
 }
+
+
+def _format_accepted_codings(name: str) -> str:
+    return " or ".join(f"{system}|{code}" for system, code in sorted(EXPECTED_CATEGORIES[name]))
 
 
 class Consent(StrictIgnoringBaseModel):
@@ -143,16 +147,15 @@ class Consent(StrictIgnoringBaseModel):
                 raise ValueError(
                     f"consent.category[{i}].coding must contain only a single element, not {len(category.coding)}"
                 )
-            category_minimal = CodeableConcept(
-                coding=[Coding(system=category.coding[0].system, code=category.coding[0].code)]
-            )
-            for expected_category_name, expected_category in EXPECTED_CATEGORIES.items():
-                if expected_category == category_minimal:
+            coding = (category.coding[0].system, category.coding[0].code)
+            for expected_category_name, accepted in EXPECTED_CATEGORIES.items():
+                if coding in accepted:
                     if expected_category_name not in categories_to_find:
                         raise ValueError(f"Duplicate required category in consent.category: {category}")
                     categories_to_find.remove(expected_category_name)
 
         if categories_to_find:
-            raise ValueError(f"Missing expected categories: {[EXPECTED_CATEGORIES[c] for c in categories_to_find]}")
+            missing = ", ".join(f"{name} ({_format_accepted_codings(name)})" for name in sorted(categories_to_find))
+            raise ValueError(f"Missing expected categories: {missing}")
 
         return self
