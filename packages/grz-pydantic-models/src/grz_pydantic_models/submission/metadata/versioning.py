@@ -19,7 +19,10 @@ class Version:
 
     def __init__(self, version: str):
         try:
-            self._components = map(int, version.split("."))
+            # a tuple, not the map object: comparing consumes an iterator, so a version compared
+            # twice would answer from an exhausted one, and '<=' would fall back to comparing two
+            # empty remainders and call them equal
+            self._components = tuple(map(int, version.split(".")))
         except Exception as err:
             raise ValueError(f"Failed to parse '{version}' as a version string") from err
 

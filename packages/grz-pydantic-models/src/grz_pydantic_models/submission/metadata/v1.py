@@ -46,7 +46,7 @@ ClinicalDataNodeId = Annotated[str, StringConstraints(pattern=r"^KDK[A-Z0-9]{3}[
 
 
 def is_supported_version(version: str) -> bool:
-    return Version("1.1.1") <= Version(version) <= Version("1.3")
+    return Version("1.1.1") <= Version(version) <= Version("1.3.1")
 
 
 class ResearchConsentCodes(StrEnum):

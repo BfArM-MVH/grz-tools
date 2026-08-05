@@ -26,6 +26,7 @@ from grz_pydantic_models.mii.consent import (
 from grz_pydantic_models.submission.metadata import (
     DiseaseType,
     ResearchConsentNoScopeJustification,
+    get_accepted_versions,
 )
 from grz_pydantic_models.submission.metadata.v1 import (
     MIN_RESEARCH_CONSENT_SCHEMA_VERSION,
@@ -501,6 +502,20 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
     consents = [ResearchConsent(schemaVersion="2025.0.1", scope=_consent(case)) for case in cases]
 
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
+
+
+def test_metadata_declaring_schema_1_3_1_validates():
+    """
+    Metadata schema 1.3.1 only widens the researchConsent schemaVersion enum, so a submission
+    declaring it must validate exactly like 1.3.0.
+    """
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.3.0.json").read_text())
+    metadata["$schema"] = metadata["$schema"].replace("/v1.3.0/", "/v1.3.1/")
+
+    submission = GrzSubmissionMetadata.model_validate(metadata)
+    assert submission.get_schema_version() == "1.3.1"
+    # grz-common's validate() gates on this set, so parsing alone does not make 1.3.1 accepted
+    assert submission.get_schema_version() in get_accepted_versions()
 
 
 @pytest.mark.parametrize(
