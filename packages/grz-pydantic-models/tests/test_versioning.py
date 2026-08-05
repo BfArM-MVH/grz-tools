@@ -18,11 +18,7 @@ def test_version_comparisons():
 
 
 def test_version_trailing_zeros_do_not_fake_equality():
-    """
-    A shorter version padded with zeros compares equal, so '<=' must not accept a longer, larger one.
-    Comparison used to consume the components, leaving '<=' to compare two empty remainders and call
-    them equal, which made every upper bound pass.
-    """
+    """A shorter version pads with zeros, so '<=' must still reject a longer, larger one."""
     assert Version("1.4.0") > Version("1.3")
     assert not Version("1.4.0") <= Version("1.3")
     assert not Version("1.3.1") <= Version("1.3")
@@ -30,6 +26,6 @@ def test_version_trailing_zeros_do_not_fake_equality():
 
 
 def test_version_rejects_a_non_numeric_version():
-    """Parsing was lazy, so a malformed version only failed later, during an unrelated comparison."""
+    """A malformed version must fail where it is constructed, not at some later comparison."""
     with pytest.raises(ValueError, match="Failed to parse"):
         Version("1.2.x")

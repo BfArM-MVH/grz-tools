@@ -71,8 +71,8 @@ class Period(FhirElement):
     #: Optional since MII consent package 2026.0.0: a period without an end never expires.
     end: datetime | None = None
 
-    # FHIR treats a date-only bound as covering the whole day, so a date-only start begins at
-    # midnight while a date-only end stays in force until the end of that day.
+    # FHIR reads a date-only bound as the whole day: a start begins at midnight, an end expires
+    # at the end of that day.
 
     @field_validator("start", mode="before")
     @classmethod
@@ -131,8 +131,7 @@ class ConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
     period: Period
     code: Annotated[list[CodeableConcept], Field(min_length=1)]
-    #: The profile constrains Consent.provision.provision.provision to 0..0. A third level would
-    #: carry permissions that consent evaluation does not read, so reject it rather than drop it.
+    #: Forbidden by the profile (0..0), and rejected rather than ignored: evaluation never reads it.
     provision: list[Any] | None = None
 
     @model_validator(mode="after")
@@ -191,8 +190,7 @@ class Verification(StrictIgnoringBaseModel):
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
 EXPECTED_SCOPE_CODING_CODE = "research"
 MII_BROAD_CONSENT_OID = "2.16.840.1.113883.3.1937.777.24.2.184"
-#: CodeSystem holding the OIDs of the MII broad consent versions and additional modules, introduced
-#: in package 2026.0.0 (canonical OID urn:oid:2.16.840.1.113883.3.1937.777.24.5.27).
+#: OIDs of the broad consent versions and additional modules, introduced in package 2026.0.0.
 MII_CONSENT_VERSION_MODULES_SYSTEM = (
     "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-version-modules"
 )
@@ -231,11 +229,10 @@ class ConsentDocumentKind(StrEnum):
     ADDITIONAL_MODULE = "additional module"
 
 
-#: Codes of the mii-cs-consent-version-modules CodeSystem, mapped to what they declare and to the
-#: broad consent version they belong to. These OIDs identify the signed document itself and appear
-#: as Consent.policy[].uri (usually prefixed with 'urn:oid:'), independent of the KDS package version
-#: declared in researchConsents[].schemaVersion. Unknown OIDs are deliberately not an error: a future
-#: broad consent version must not break submissions.
+#: What each code of the version and module CodeSystem declares. These OIDs identify the signed
+#: document and appear as Consent.policy[].uri, unlike schemaVersion, which names the KDS package.
+#: Unknown OIDs are reported, never rejected: a future broad consent version must not break
+#: submissions.
 BROAD_CONSENT_DOCUMENT_OIDS: dict[str, tuple[ConsentDocumentKind, BroadConsentVersion | None]] = {
     MII_BROAD_CONSENT_OID: (ConsentDocumentKind.CONSENT, None),
     "2.16.840.1.113883.3.1937.777.24.2.1790": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_6D),
@@ -265,10 +262,7 @@ _OID_URI_PREFIX = "urn:oid:"
 
 
 def _strip_oid_prefix(uri: str) -> str:
-    """Reduce a policy URI to a bare OID.
-
-    The MII examples are inconsistent: most policy URIs carry the 'urn:oid:' prefix, but at least one
-    shipped example states the bare OID.
+    """Reduce a policy URI to a bare OID; the MII ships examples both with and without the prefix.
 
     :param uri: policy URI as submitted.
     :returns: the URI without a leading 'urn:oid:'.
@@ -311,8 +305,7 @@ class Consent(StrictIgnoringBaseModel):
             for expected_category_name, accepted in EXPECTED_CATEGORIES.items():
                 if not (category.codings & accepted):
                     continue
-                # Only the loinc and mii slices are pinned to a single coding; the category slicing
-                # is open, so any further category may carry as many codings as it likes.
+                # only the loinc and mii slices are pinned to one coding; the slicing is open
                 if len(category.coding) != 1:
                     raise ValueError(
                         f"consent.category[{i}] carries the {expected_category_name} category and must "
@@ -362,5 +355,9 @@ class Consent(StrictIgnoringBaseModel):
 
     @property
     def unknown_document_oids(self) -> frozenset[str]:
-        """OIDs that are not part of the known version and module CodeSystem, e.g. a newer broad consent."""
+        """
+        OIDs that are not part of the known version and module CodeSystem, e.g. a newer broad consent.
+
+        Policy URIs that are no OIDs at all are reported here unchanged.
+        """
         return frozenset(oid for oid in self.document_oids if oid not in BROAD_CONSENT_DOCUMENT_OIDS)

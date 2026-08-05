@@ -526,10 +526,7 @@ def test_research_consent_schema_version_rejected(version: str):
 
 
 def test_metadata_declaring_schema_1_3_1_validates():
-    """
-    Metadata schema 1.3.1 only widens the researchConsent schemaVersion enum, so a submission
-    declaring it must validate exactly like 1.3.0.
-    """
+    """Schema 1.3.1 only widens the consent version enum, so it must validate like 1.3.0."""
     metadata = json.loads(importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.3.0.json").read_text())
     metadata["$schema"] = metadata["$schema"].replace("/v1.3.0/", "/v1.3.1/")
 
@@ -558,10 +555,8 @@ def test_research_consent_schema_version_error_names_the_accepted_versions():
 )
 def test_wgs_trio_accepts_renamed_consent_category_system(version: str, category_system: str):
     """
-    Package 2026.0.0 renamed the category CodeSystem from mii-cs-consent-consent_category to
-    mii-cs-consent-version-modules. Raw JSON with either spelling must parse as a Consent, not
-    fall through to dict. The 2026.0.0 package's own examples still use the old spelling, so both
-    are in the wild.
+    Either category CodeSystem spelling must parse: the 2026.0.0 package renamed it but still
+    ships examples using the old name.
     """
     metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
     metadata = json.loads(metadata_str)
@@ -595,11 +590,7 @@ def test_wgs_trio_accepts_renamed_consent_category_system(version: str, category
     ),
 )
 def test_example_research_consent_scopes_parse_as_consent(dataset: str, version: str):
-    """
-    The Consent | dict union falls back to dict on any parse failure without raising, so a
-    consent parsing regression stays invisible to plain validation tests. Every provided scope
-    in the example submissions must come out as a Consent, never a dict.
-    """
+    """The scope union falls back to dict silently, so every example scope must parse as a Consent."""
     metadata_str = importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
     submission = GrzSubmissionMetadata.model_validate_json(metadata_str)
     for donor in submission.donors:
@@ -608,10 +599,7 @@ def test_example_research_consent_scopes_parse_as_consent(dataset: str, version:
 
 
 def test_research_consent_open_ended_provision_period():
-    """
-    Package 2026.0.0 relaxed provision.period.end to optional. Such a consent must parse, and the
-    provision must stay in force indefinitely rather than being treated as expired.
-    """
+    """A provision without an end must parse and stay in force, not count as expired."""
     consent_raw = _consent_raw("minimal_consented")
     del consent_raw["provision"]["period"]["end"]
     for provision in consent_raw["provision"]["provision"]:
@@ -737,10 +725,7 @@ def test_research_consent_no_subprovisions():
 def test_consent_derives_broad_consent_version_from_policy_oid(
     case: str, versions: set[BroadConsentVersion], kinds: set[ConsentDocumentKind]
 ):
-    """
-    The signed document version lives in Consent.policy[].uri, not in the declared schemaVersion,
-    which names the KDS package instead.
-    """
+    """The signed document version lives in policy[].uri, not in the declared schemaVersion."""
     consent = _consent(case)
     assert consent.broad_consent_versions == versions
     assert consent.document_kinds == kinds
@@ -787,10 +772,7 @@ def test_withdrawal_and_rejection_do_not_consent_to_research(case: str):
 
 
 def test_consent_accepts_extra_category_with_several_codings():
-    """
-    Only the loinc and mii category slices are pinned to a single coding. The slicing is open, so a
-    further category carrying several codings is conformant and must not be rejected.
-    """
+    """The category slicing is open, so a category outside the pinned slices may carry several codings."""
     consent = _consent("minimal_consented_extra_multi_coding_category")
     assert len(consent.category) == 3
     assert len(consent.category[2].coding) == 2
@@ -803,10 +785,7 @@ def test_consent_rejects_several_codings_on_the_mii_category():
 
 
 def test_consent_rejects_provisions_it_would_not_evaluate():
-    """
-    The profile forbids a third provision level and a code on the root provision. Both carry
-    permissions that consent evaluation never reads, so accepting them would silently lose them.
-    """
+    """Both carry permissions consent evaluation never reads, so accepting them would lose them."""
     with pytest.raises(ValidationError, match=re.escape("provision.provision[].provision is not allowed")):
         _consent("invalid_third_level_provision")
     with pytest.raises(ValidationError, match=re.escape("consent.provision.code is not allowed")):
@@ -840,10 +819,7 @@ def test_consent_rejects_unidentified_patient():
 
 
 def test_date_only_provision_end_covers_the_whole_day():
-    """
-    FHIR treats a date-only period end as inclusive of that day. Coercing it to midnight would drop
-    consent for every query carrying a time of day on the last valid day.
-    """
+    """FHIR treats a date-only end as inclusive of that day, not as midnight."""
     consent = _consent("minimal_consented")
     provision = consent.provision.provision[0]
     end_day = provision.period.end.date()
@@ -868,11 +844,8 @@ def test_datetime_provision_end_is_not_extended_to_the_whole_day():
     assert not period.contains(datetime(2025, 8, 31, 12, 0, tzinfo=UTC))
 
 
-### Conformance against the MII artefacts vendored in example_terminology.
-###
-### These tests discover their inputs: dropping another version of a CodeSystem or of the profile
-### into that directory adds test cases automatically, and anything the model does not yet cover
-### fails there rather than in production. See example_terminology/README.md for the workflow.
+### Conformance against the MII artefacts vendored in example_terminology. These tests discover
+### their inputs, so dropping a newly released version in adds cases. See that directory's README.
 
 
 def _vendored(prefix: str) -> list[str]:
@@ -925,11 +898,7 @@ def test_vendored_artefact_holds_the_version_its_name_claims(name: str):
 
 @pytest.mark.parametrize("name", _vendored("mii-cs-consent-version-modules."))
 def test_document_oid_table_covers_every_shipped_oid(name: str):
-    """
-    The OID table is hand-curated because the mapping from OID to broad consent version lives only in
-    a German display string. Its membership is not: every OID the MII ships must be in the table, so
-    a new broad consent version fails here instead of silently reporting no version at all.
-    """
+    """Every OID the MII ships must be classified, so a new broad consent version fails here."""
     shipped = {concept["code"] for concept in _load_vendored(name)["concept"]}
     missing = shipped - set(BROAD_CONSENT_DOCUMENT_OIDS)
     assert not missing, f"{name} defines OIDs the model does not classify: {sorted(missing)}"
@@ -948,10 +917,8 @@ def test_document_oid_table_invents_no_oids():
 @pytest.mark.parametrize("name", _vendored("mii-cs-consent-policy."))
 def test_evaluated_policy_codes_are_active(name: str):
     """
-    The policy CodeSystem does change between packages (66 codes in 1.0.5, 124 in 1.1.0, six of them
-    since retired). Research consent is derived from exactly two of its codes, so both must exist and
-    stay active in every vendored version, otherwise consent would be granted on a withdrawn
-    permission.
+    The two codes research consent is derived from must exist and stay active in every vendored
+    policy CodeSystem, otherwise consent would be granted on a permission the MII has withdrawn.
     """
     concepts = _codesystem_concepts(_load_vendored(name))
     for code in ResearchConsentCodes:
@@ -981,10 +948,7 @@ def _category_slice_coding(elements: dict[str, dict], slice_name: str) -> tuple[
 
 @pytest.mark.parametrize("name", _vendored("mii-pr-consent-einwilligung."))
 def test_model_matches_the_profile(name: str):
-    """
-    Everything the Consent model hard-codes about the profile, checked against the profile itself, so
-    that a new profile version reports what changed instead of rejecting conformant submissions.
-    """
+    """What the model hard-codes about the profile, checked against the profile itself."""
     elements = _differential(_load_vendored(name))
 
     assert elements["Consent.scope.coding.system"]["fixedUri"] == EXPECTED_SCOPE_CODING_SYSTEM
@@ -1020,11 +984,7 @@ def test_model_matches_the_profile(name: str):
 
 
 def test_research_consent_schema_version_json_schema_states_the_accepted_versions():
-    """
-    The accepted versions live in a validator, which JSON Schema cannot express. Without an explicit
-    schema the exported contract silently degrades to an unconstrained string, and it has to match
-    the enum of the GRZ metadata schema so both agree on what a submission may declare.
-    """
+    """The exported schema must state the accepted versions, to agree with the GRZ metadata schema."""
     schema = GrzSubmissionMetadata.model_json_schema()
     # the field is optional, so pydantic wraps the declared schema in an anyOf with null
     schema_version = schema["$defs"]["ResearchConsent"]["properties"]["schemaVersion"]

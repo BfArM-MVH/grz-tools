@@ -49,13 +49,13 @@ def is_supported_version(version: str) -> bool:
 
 class ResearchConsentCodes(StrEnum):
     """
-    Permissions from the MII consent policy CodeSystem that a donor must grant to consent to research.
+    Permissions consent to research is derived from. Neither has been retired by the MII.
 
-    Both are still active: the six permissions the MII has retired so far (four of them announced in
-    the 2026.0.0 release notes, the two GECCO83 ones already deprecated in 2025.0.0) are not among
-    them, so a retired permission cannot affect this decision. Codes are matched on the OID alone;
-    OIDs are globally unique, and a submitter stating the policy system without its 'urn:oid:' prefix
-    is far likelier than a foreign CodeSystem reusing one of these strings.
+    A consent must state at least one of them and permit every one it states; see
+    ``ResearchConsent.consents_to_research``.
+
+    Matched on the OID alone: OIDs are globally unique, while the policy system is stated
+    inconsistently, with and without its 'urn:oid:' prefix.
     """
 
     PATDAT_ERHEBEN_SPEICHERN_NUTZEN = "2.16.840.1.113883.3.1937.777.24.5.3.1"
@@ -301,8 +301,7 @@ def _validate_research_consent_schema_version(value: str) -> str:
     return value
 
 
-#: The accepted versions live in a validator, which JSON Schema generation cannot express, so state
-#: them explicitly: consumers of the generated schema would otherwise see an unconstrained string.
+#: Restated for JSON Schema, which cannot express a validator and would export a bare string.
 ResearchConsentSchemaVersion = Annotated[
     str,
     AfterValidator(_validate_research_consent_schema_version),
@@ -449,6 +448,16 @@ class ResearchConsent(StrictBaseModel):
 
     @staticmethod
     def consents_to_research(consents: list[ResearchConsent], date: date) -> bool:
+        """
+        Whether ``consents`` grant consent to research at ``date``.
+
+        True if at least one of the ``ResearchConsentCodes`` is stated across ``consents`` and every
+        stated one is permitted; a single deny, or no stated research permission at all, refuses.
+
+        :param consents: research consents to evaluate together.
+        :param date: date the consent state is evaluated at.
+        :returns: True if research consent is granted at ``date``.
+        """
         all_consented = None
         code2consent = ResearchConsent.merged_consent_by_code(consents, date)
 
