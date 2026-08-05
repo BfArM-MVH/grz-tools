@@ -1051,7 +1051,6 @@ test = [
 name = "grz-pydantic-models"
 source = { editable = "packages/grz-pydantic-models" }
 dependencies = [
-    { name = "packaging" },
     { name = "pydantic" },
 ]
 
@@ -1069,10 +1068,7 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "packaging", specifier = ">=23,<27" },
-    { name = "pydantic", specifier = ">=2.12,<3" },
-]
+requires-dist = [{ name = "pydantic", specifier = ">=2.12,<3" }]
 
 [package.metadata.requires-dev]
 dev = [
