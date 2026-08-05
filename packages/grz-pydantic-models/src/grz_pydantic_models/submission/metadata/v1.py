@@ -13,8 +13,6 @@ from operator import attrgetter
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Self
 
-from packaging.version import InvalidVersion
-from packaging.version import Version as PackagingVersion
 from pydantic import (
     AfterValidator,
     ConfigDict,
@@ -288,42 +286,31 @@ class MvConsent(StrictBaseModel):
     """
 
 
-#: Oldest MII "Modul Consent" package version we accept for researchConsents[].schemaVersion.
-#: Any equal or newer version is accepted; the consent contents are still validated separately.
-#:
-#: Every published package from here on is covered by the Consent model:
-#:   2025.0.1 - 2025.0.4 share profile MII_PR_Consent_Einwilligung 1.0.8; 2025.0.2 and 2025.0.3 only
-#:     grew the policy CodeSystem (101 -> 124 codes), which this model does not enumerate.
-#:   2026.0.0 ships profile 1.0.9: the category:mii slice moved to the mii-cs-consent-version-modules
-#:     CodeSystem and both provision period ends became optional. Both are handled.
-MIN_RESEARCH_CONSENT_SCHEMA_VERSION = PackagingVersion("2025.0.1")
+#: MII "Modul Consent" package versions the Consent model is checked against, in publication order.
+#: GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has not released; add it here once it
+#: is, together with its artefacts in example_terminology.
+RESEARCH_CONSENT_SCHEMA_VERSIONS = ("2025.0.1", "2025.0.2", "2025.0.3", "2025.0.4", "2026.0.0")
 
 
 def _validate_research_consent_schema_version(value: str) -> str:
-    try:
-        parsed = PackagingVersion(value)
-    except InvalidVersion as err:
-        raise ValueError(f"researchConsent schemaVersion must be a valid version, got {value!r}") from err
-    if parsed < MIN_RESEARCH_CONSENT_SCHEMA_VERSION:
+    if value not in RESEARCH_CONSENT_SCHEMA_VERSIONS:
         raise ValueError(
-            f"Unsupported researchConsent schemaVersion {value}; "
-            f"minimum supported version is {MIN_RESEARCH_CONSENT_SCHEMA_VERSION}"
+            f"Unsupported researchConsent schemaVersion {value!r}; "
+            f"accepted versions are {', '.join(RESEARCH_CONSENT_SCHEMA_VERSIONS)}"
         )
     return value
 
 
-#: The version floor lives in a validator, which JSON Schema generation cannot express, so state it
-#: explicitly: consumers of the generated schema would otherwise see an unconstrained string.
+#: The accepted versions live in a validator, which JSON Schema generation cannot express, so state
+#: them explicitly: consumers of the generated schema would otherwise see an unconstrained string.
 ResearchConsentSchemaVersion = Annotated[
     str,
     AfterValidator(_validate_research_consent_schema_version),
     WithJsonSchema(
         {
             "type": "string",
-            "description": (
-                "Schema version of de.medizininformatikinitiative.kerndatensatz.consent, "
-                f"at least {MIN_RESEARCH_CONSENT_SCHEMA_VERSION}"
-            ),
+            "description": "Schema version of de.medizininformatikinitiative.kerndatensatz.consent",
+            "enum": list(RESEARCH_CONSENT_SCHEMA_VERSIONS),
         }
     ),
 ]

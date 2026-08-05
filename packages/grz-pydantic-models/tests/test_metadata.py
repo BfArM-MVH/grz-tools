@@ -3,7 +3,6 @@ import importlib.resources
 import itertools
 import json
 import re
-from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -29,7 +28,7 @@ from grz_pydantic_models.submission.metadata import (
     get_accepted_versions,
 )
 from grz_pydantic_models.submission.metadata.v1 import (
-    MIN_RESEARCH_CONSENT_SCHEMA_VERSION,
+    RESEARCH_CONSENT_SCHEMA_VERSIONS,
     File,
     FileType,
     GrzSubmissionMetadata,
@@ -504,6 +503,28 @@ def test_multi_research_consent(cases: list[str], consenting: bool):
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
 
 
+@pytest.mark.parametrize("version", RESEARCH_CONSENT_SCHEMA_VERSIONS)
+def test_every_published_package_version_parses_the_same_consent(version: str):
+    """Every version the model claims to support must accept one and the same consent."""
+    research_consent = ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented"))
+    assert isinstance(research_consent.scope, Consent)
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+
+
+@pytest.mark.parametrize(
+    "version",
+    (
+        "1.0.7",  # a consent package predating the ones this model covers
+        "9999.0.0",  # the accepted versions are an allow list, not a floor
+        "not-a-version",
+    ),
+)
+def test_research_consent_schema_version_rejected(version: str):
+    """Anything outside the allow list is refused, including versions newer than any known one."""
+    with pytest.raises(ValidationError):
+        ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented"))
+
+
 def test_metadata_declaring_schema_1_3_1_validates():
     """
     Metadata schema 1.3.1 only widens the researchConsent schemaVersion enum, so a submission
@@ -518,28 +539,14 @@ def test_metadata_declaring_schema_1_3_1_validates():
     assert submission.get_schema_version() in get_accepted_versions()
 
 
-@pytest.mark.parametrize(
-    "version,valid",
-    (
-        ("2025.0.1", True),  # minimum supported version
-        # every package the MII published between the minimum and 2026.0.0; none changed the profile
-        ("2025.0.2", True),
-        ("2025.0.3", True),
-        ("2025.0.4", True),
-        ("2026.0.0", True),  # the version that was previously rejected
-        ("2026.0.0-rc1", True),  # pre-releases of a supported version are accepted
-        ("2026.0.1-rc-3", True),  # the release candidates the MII publishes are accepted too
-        ("2030.1.2", True),  # any newer version is accepted
-        ("2024.0.0", False),  # older than the minimum supported version
-        ("1.0.7", False),  # older than the minimum supported version
-        ("not-a-version", False),  # unparseable
-    ),
-)
-def test_research_consent_schema_version(version: str, valid: bool):
-    """Consent schemaVersion accepts the minimum supported version and anything newer."""
-    expectation = nullcontext() if valid else pytest.raises(ValidationError)
-    with expectation:
-        ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented"))
+def test_research_consent_schema_version_error_names_the_accepted_versions():
+    """The message reaches submitters, so it must say what is accepted rather than only what is not."""
+    with pytest.raises(ValidationError) as excinfo:
+        ResearchConsent(schemaVersion="9999.0.0", scope=_consent("minimal_consented"))
+
+    message = str(excinfo.value)
+    for version in RESEARCH_CONSENT_SCHEMA_VERSIONS:
+        assert version in message
 
 
 @pytest.mark.parametrize(
@@ -861,17 +868,6 @@ def test_datetime_provision_end_is_not_extended_to_the_whole_day():
     assert not period.contains(datetime(2025, 8, 31, 12, 0, tzinfo=UTC))
 
 
-@pytest.mark.parametrize("schema_version", ("2025.0.1", "2025.0.2", "2025.0.3", "2025.0.4", "2026.0.0"))
-def test_every_published_package_version_parses_the_same_consent(schema_version: str):
-    """
-    Packages 2025.0.2 to 2025.0.4 left profile MII_PR_Consent_Einwilligung 1.0.8 untouched and only
-    grew the policy CodeSystem, so a consent valid under 2025.0.1 stays valid under all of them.
-    """
-    research_consent = ResearchConsent(schemaVersion=schema_version, scope=_consent("minimal_consented"))
-    assert isinstance(research_consent.scope, Consent)
-    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
-
-
 ### Conformance against the MII artefacts vendored in example_terminology.
 ###
 ### These tests discover their inputs: dropping another version of a CodeSystem or of the profile
@@ -1023,14 +1019,17 @@ def test_model_matches_the_profile(name: str):
     assert Identifier.model_fields["value"].is_required()
 
 
-def test_research_consent_schema_version_json_schema_states_the_floor():
+def test_research_consent_schema_version_json_schema_states_the_accepted_versions():
     """
-    The floor lives in a validator, which JSON Schema cannot express. Without an explicit schema the
-    exported contract silently degrades to an unconstrained string.
+    The accepted versions live in a validator, which JSON Schema cannot express. Without an explicit
+    schema the exported contract silently degrades to an unconstrained string, and it has to match
+    the enum of the GRZ metadata schema so both agree on what a submission may declare.
     """
     schema = GrzSubmissionMetadata.model_json_schema()
+    # the field is optional, so pydantic wraps the declared schema in an anyOf with null
     schema_version = schema["$defs"]["ResearchConsent"]["properties"]["schemaVersion"]
-    assert str(MIN_RESEARCH_CONSENT_SCHEMA_VERSION) in json.dumps(schema_version)
+    enums = [branch["enum"] for branch in schema_version["anyOf"] if "enum" in branch]
+    assert enums == [list(RESEARCH_CONSENT_SCHEMA_VERSIONS)]
 
 
 @pytest.mark.parametrize(
