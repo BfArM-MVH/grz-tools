@@ -108,10 +108,6 @@ EXPECTED_CATEGORIES: dict[str, frozenset[tuple[str, str]]] = {
 }
 
 
-def _format_accepted_codings(name: str) -> str:
-    return " or ".join(f"{system}|{code}" for system, code in sorted(EXPECTED_CATEGORIES[name]))
-
-
 class Consent(StrictIgnoringBaseModel):
     status: Status
     scope: CodeableConcept
@@ -155,7 +151,10 @@ class Consent(StrictIgnoringBaseModel):
                     categories_to_find.remove(expected_category_name)
 
         if categories_to_find:
-            missing = ", ".join(f"{name} ({_format_accepted_codings(name)})" for name in sorted(categories_to_find))
+            missing = ", ".join(
+                f"{name} ({' or '.join(f'{system}|{code}' for system, code in sorted(EXPECTED_CATEGORIES[name]))})"
+                for name in sorted(categories_to_find)
+            )
             raise ValueError(f"Missing expected categories: {missing}")
 
         return self
