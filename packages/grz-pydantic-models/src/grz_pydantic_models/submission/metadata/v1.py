@@ -51,7 +51,9 @@ class ResearchConsentCodes(StrEnum):
     """
     Permissions consent to research is derived from. Neither has been retired by the MII.
 
-    A consent must state at least one of them and permit every one it states; see
+    Research use needs MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU, which the MII policy
+    CodeSystem places inside the PATDAT_ERHEBEN_SPEICHERN_NUTZEN module, so permitting the module
+    grants it as well. Either permit therefore suffices, while a deny on either revokes; see
     ``ResearchConsent.consents_to_research``.
 
     Matched on the OID alone: OIDs are globally unique, while the policy system is stated

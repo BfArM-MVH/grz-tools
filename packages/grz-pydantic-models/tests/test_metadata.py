@@ -950,6 +950,33 @@ def test_evaluated_policy_codes_are_active(name: str):
         assert not properties.get("inactive"), f"{code.value} is inactive in {name}"
 
 
+def _concept_subtree(nodes: list[dict], code: str) -> dict | None:
+    """The concept carrying ``code``, searched at any depth."""
+    for node in nodes:
+        if node["code"] == code:
+            return node
+        if (found := _concept_subtree(node.get("concept", []), code)) is not None:
+            return found
+    return None
+
+
+def _descendant_codes(node: dict) -> set[str]:
+    children = node.get("concept", [])
+    return {child["code"] for child in children} | {c for child in children for c in _descendant_codes(child)}
+
+
+@pytest.mark.parametrize("name", _vendored("mii-cs-consent-policy."))
+def test_scientific_use_stays_within_the_patdat_module(name: str):
+    """
+    consents_to_research accepts a permit of either research code alone. That is sound only while
+    the MII keeps the scientific-use permission a descendant of the PATDAT module, so that a permit
+    of the module subsumes it.
+    """
+    module = _concept_subtree(_load_vendored(name)["concept"], ResearchConsentCodes.PATDAT_ERHEBEN_SPEICHERN_NUTZEN)
+    assert module is not None, f"{name} does not define the PATDAT module"
+    assert ResearchConsentCodes.MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU in _descendant_codes(module)
+
+
 def _differential(profile: dict) -> dict[str, dict]:
     return {element["id"]: element for element in profile["differential"]["element"]}
 
