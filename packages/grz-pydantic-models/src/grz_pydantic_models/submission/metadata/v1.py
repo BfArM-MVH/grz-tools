@@ -1282,10 +1282,16 @@ class GrzSubmissionMetadata(StrictBaseModel):
             missing_subtypes = required_sequencing_subtypes - donor_sequence_subtypes
 
             if missing_subtypes:
-                raise ValueError(
+                message = (
                     f"Index donor is missing sequence subtypes for submission type '{self.submission.genomic_study_subtype}': "
-                    f"{', '.join(missing_subtypes)}."
+                    f"{', '.join(missing_subtypes)}, starting 04.12.2025."
                 )
+                # This check was published in grz-pydantic-models v2.5.0 (2025-12-04); submissions
+                # predating that release were not subject to it, so only warn for them.
+                if self.submission.submission_date >= date(2025, 12, 4):
+                    raise ValueError(message)
+                else:
+                    log.warning(message)
 
             return self
 

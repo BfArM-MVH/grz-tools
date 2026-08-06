@@ -95,6 +95,11 @@ def test_wgs_tumor_germline_missing_dna(version):
         importlib.resources.files(example_metadata).joinpath("wgs_tumor_germline", f"v{version}.json").read_text()
     )
 
+    # The example predates the 04.12.2025 cutoff, before which a missing subtype only warns.
+    metadata = json.loads(metadata_str)
+    metadata["submission"]["submissionDate"] = "2025-12-04"
+    metadata_str = json.dumps(metadata)
+
     ### tumor+germline
 
     # delete germline DNA
@@ -168,6 +173,47 @@ def test_wgs_tumor_germline_missing_dna(version):
 
     # missing tumor DNA should pass
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_missing_sequence_subtype_warns_before_cutoff(version: str, caplog):
+    """
+    The labData/genomicStudySubtype check was published in grz-pydantic-models v2.5.0 (04.12.2025).
+    Submissions predating that release must only warn, so that backfills and other operations
+    replaying historical data do not fail retroactively.
+    """
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_tumor_germline", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2025-12-03"
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
+    del metadata["donors"][0]["labData"][0]
+
+    # must not raise for this rule
+    try:
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    except ValidationError as e:
+        assert "Index donor is missing sequence subtypes" not in str(e)
+
+    assert "Index donor is missing sequence subtypes" in caplog.text
+    assert "starting 04.12.2025" in caplog.text
+
+
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_missing_sequence_subtype_raises_on_cutoff(version: str):
+    """On the cutoff date itself the check is enforced."""
+    metadata = json.loads(
+        importlib.resources.files(example_metadata).joinpath("wgs_tumor_germline", f"v{version}.json").read_text()
+    )
+    metadata["submission"]["submissionDate"] = "2025-12-04"
+    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
+    del metadata["donors"][0]["labData"][0]
+
+    with pytest.raises(
+        ValidationError,
+        match=r"""Index donor is missing sequence subtypes for submission type 'tumor\+germline': germline""",
+    ):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
 @pytest.mark.parametrize(
