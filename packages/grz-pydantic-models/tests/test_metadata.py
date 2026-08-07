@@ -3,23 +3,40 @@ import importlib.resources
 import itertools
 import json
 import re
-from contextlib import nullcontext
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from grz_pydantic_models.mii.consent import Consent
+from grz_pydantic_models.mii.consent import (
+    BROAD_CONSENT_DOCUMENT_OIDS,
+    EXPECTED_CATEGORIES,
+    EXPECTED_SCOPE_CODING_CODE,
+    EXPECTED_SCOPE_CODING_SYSTEM,
+    MII_BROAD_CONSENT_OID,
+    MII_CONSENT_CATEGORY_SYSTEMS,
+    MII_CONSENT_VERSION_MODULES_SYSTEM,
+    BroadConsentVersion,
+    Consent,
+    ConsentDocumentKind,
+    ConsentProvision,
+    Identifier,
+    Period,
+    RootConsentProvision,
+)
 from grz_pydantic_models.submission.metadata import (
     DiseaseType,
     ResearchConsentNoScopeJustification,
+    get_accepted_versions,
 )
 from grz_pydantic_models.submission.metadata.v1 import (
+    RESEARCH_CONSENT_SCHEMA_VERSIONS,
     File,
     FileType,
     GrzSubmissionMetadata,
     LibraryType,
     ResearchConsent,
+    ResearchConsentCodes,
 )
-from grz_pydantic_models_testing import example_metadata, example_research_consent
+from grz_pydantic_models_testing import example_metadata, example_research_consent, example_terminology
 from packaging.version import Version
 from pydantic import ValidationError
 
@@ -357,33 +374,76 @@ def test_file_extensions():
         )
 
 
-@pytest.mark.parametrize(
-    "case,valid",
-    (
-        ("minimal_consented", True),
-        ("minimal_consented_with_datetime", True),
-        ("minimal_consented_with_nonzero_datetime", True),
-        ("extra_consented", True),
-        ("minimal_nonconsented", True),
-        ("minimal_consented_expired", True),
-        ("mii_ig_consent_v2025_example1", True),
-        ("invalid_missing_fields", False),
-    ),
-)
-def test_research_consent_parse(case: str, valid: bool):
-    expectation = nullcontext() if valid else pytest.raises(ValidationError)
+def _consent_raw(case: str) -> dict:
+    """The raw JSON of an example consent, for tests that mutate it before validation."""
+    return json.loads(importlib.resources.files(example_research_consent).joinpath(f"{case}.json").read_text())
 
-    with expectation:
-        Consent.model_validate_json(
-            importlib.resources.files(example_research_consent).joinpath(f"{case}.json").read_text()
-        )
+
+def _consent(case: str) -> Consent:
+    """An example consent parsed as the model under test."""
+    return Consent.model_validate(_consent_raw(case))
+
+
+#: Example consents the MII consent profile permits; each must parse.
+VALID_CONSENT_CASES = (
+    "minimal_consented",
+    "minimal_consented_with_datetime",
+    "minimal_consented_with_nonzero_datetime",
+    "extra_consented",
+    "minimal_nonconsented",
+    "minimal_consented_expired",
+    "mii_ig_consent_v2025_example1",
+    # examples shipped inside the MII consent package 2026.0.0, vendored verbatim
+    "mii_ig_consent_v2026_example1",
+    "mii_ig_consent_v2026_example2",
+    "mii_ig_consent_v2026_example3",
+    "mii_ig_consent_v2026_example4",
+    # instances the MII consent profile permits and that must therefore not be rejected
+    "minimal_consented_open_ended",
+    "minimal_consented_version_modules_category",
+    "minimal_consented_extra_multi_coding_category",
+    "minimal_consented_patient_by_identifier",
+    "minimal_consented_bc_v1_7_2",
+    "minimal_consented_bc_v1_6d_bare_oid",
+    "minimal_consented_unknown_policy_oid",
+    "withdrawal_complete",
+    "rejection_bc_v1_7_2",
+    "status_rejected",
+)
+#: Instances the MII consent profile forbids and whose contents would otherwise be dropped silently.
+INVALID_CONSENT_CASES = (
+    "invalid_missing_fields",
+    "invalid_wrong_resource_type",
+    "invalid_third_level_provision",
+    "invalid_root_provision_code",
+    "invalid_mii_category_multi_coding",
+)
+
+
+def test_consent_case_lists_match_the_fixture_package():
+    """Every fixture must be listed and every listed fixture must ship, so drift fails loudly."""
+    shipped = {
+        entry.name.removesuffix(".json")
+        for entry in importlib.resources.files(example_research_consent).iterdir()
+        if entry.name.endswith(".json")
+    }
+    assert shipped == set(VALID_CONSENT_CASES) | set(INVALID_CONSENT_CASES)
+
+
+@pytest.mark.parametrize("case", VALID_CONSENT_CASES)
+def test_research_consent_parses(case: str):
+    _consent(case)
+
+
+@pytest.mark.parametrize("case", INVALID_CONSENT_CASES)
+def test_research_consent_rejected(case: str):
+    with pytest.raises(ValidationError):
+        _consent(case)
 
 
 def test_research_consent_tolerates_fhir_extensions():
     """FHIR allows id/extension on every element, so they must not be rejected on codings, concepts, or periods."""
-    consent_raw = json.loads(
-        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
-    )
+    consent_raw = _consent_raw("mii_ig_consent_v2025_example1")
 
     consent_raw["scope"]["coding"][0]["extension"] = [{"url": "http://example.org/ext", "valueString": "x"}]
     consent_raw["scope"]["coding"][0]["id"] = "coding-1"
@@ -396,9 +456,7 @@ def test_research_consent_tolerates_fhir_extensions():
 
 def test_research_consent_parses_verification_date():
     """A well-formed FHIR verification block (verified + verificationDate) must be parsed, not ignored."""
-    consent_raw = json.loads(
-        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
-    )
+    consent_raw = _consent_raw("mii_ig_consent_v2025_example1")
     consent_raw["verification"] = [{"verified": True, "verificationDate": "2026-03-27T11:27:01+01:00"}]
 
     consent = Consent.model_validate(consent_raw)
@@ -410,9 +468,7 @@ def test_research_consent_parses_verification_date():
 
 def test_research_consent_rejects_verification_without_verified():
     """`verified` is required (FHIR 1..1), so a verification entry missing it must be rejected."""
-    consent_raw = json.loads(
-        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
-    )
+    consent_raw = _consent_raw("mii_ig_consent_v2025_example1")
     consent_raw["verification"] = [{"verificationDate": "2026-03-27T11:27:01+01:00"}]
 
     with pytest.raises(ValidationError):
@@ -421,9 +477,7 @@ def test_research_consent_rejects_verification_without_verified():
 
 def test_research_consent_still_rejects_unknown_fields():
     """Allowing id/extension must not turn into accepting arbitrary unknown fields."""
-    consent_raw = json.loads(
-        importlib.resources.files(example_research_consent).joinpath("mii_ig_consent_v2025_example1.json").read_text()
-    )
+    consent_raw = _consent_raw("mii_ig_consent_v2025_example1")
     consent_raw["scope"]["coding"][0]["pandorras-box"] = "I am in"
 
     with pytest.raises(ValidationError):
@@ -444,28 +498,192 @@ def test_research_consent_still_rejects_unknown_fields():
     ),
 )
 def test_multi_research_consent(cases: list[str], consenting: bool):
-    consents = []
-    for case in cases:
-        consent = Consent.model_validate_json(
-            importlib.resources.files(example_research_consent).joinpath(f"{case}.json").read_text()
-        )
-        consents.append(ResearchConsent(schemaVersion="2025.0.1", scope=consent))
+    consents = [ResearchConsent(schemaVersion="2025.0.1", scope=_consent(case)) for case in cases]
 
     assert ResearchConsent.consents_to_research(consents, date=date(year=2025, month=6, day=25)) == consenting
 
 
+@pytest.mark.parametrize("version", RESEARCH_CONSENT_SCHEMA_VERSIONS)
+def test_every_published_package_version_parses_the_same_consent(version: str):
+    """Every version the model claims to support must accept one and the same consent."""
+    research_consent = ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented"))
+    assert isinstance(research_consent.scope, Consent)
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+
+
+@pytest.mark.parametrize(
+    "version",
+    (
+        "1.0.7",  # a consent package predating the ones this model covers
+        "9999.0.0",  # the accepted versions are an allow list, not a floor
+        "not-a-version",
+    ),
+)
+def test_research_consent_schema_version_rejected(version: str):
+    """Anything outside the allow list is refused, including versions newer than any known one."""
+    with pytest.raises(ValidationError):
+        ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented"))
+
+
+def test_metadata_declaring_schema_1_3_1_validates():
+    """Schema 1.3.1 only widens the consent version enum, so it must validate like 1.3.0."""
+    metadata = json.loads(importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.3.0.json").read_text())
+    metadata["$schema"] = metadata["$schema"].replace("/v1.3.0/", "/v1.3.1/")
+
+    submission = GrzSubmissionMetadata.model_validate(metadata)
+    assert submission.get_schema_version() == "1.3.1"
+    # grz-common's validate() gates on this set, so parsing alone does not make 1.3.1 accepted
+    assert submission.get_schema_version() in get_accepted_versions()
+
+
+def test_research_consent_schema_version_error_names_the_accepted_versions():
+    """The message reaches submitters, so it must say what is accepted rather than only what is not."""
+    with pytest.raises(ValidationError) as excinfo:
+        ResearchConsent(schemaVersion="9999.0.0", scope=_consent("minimal_consented"))
+
+    message = str(excinfo.value)
+    for version in RESEARCH_CONSENT_SCHEMA_VERSIONS:
+        assert version in message
+
+
+@pytest.mark.parametrize(
+    "version,category_system",
+    itertools.product(
+        [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
+        MII_CONSENT_CATEGORY_SYSTEMS,
+    ),
+)
+def test_wgs_trio_accepts_renamed_consent_category_system(version: str, category_system: str):
+    """
+    Either category CodeSystem spelling must parse: the 2026.0.0 package renamed it but still
+    ships examples using the old name.
+    """
+    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    metadata = json.loads(metadata_str)
+    research_consent = metadata["donors"][0]["researchConsents"][0]
+    mii_codings = [
+        coding
+        for category in research_consent["scope"]["category"]
+        for coding in category["coding"]
+        if coding["code"] == MII_BROAD_CONSENT_OID
+    ]
+    assert mii_codings, "example consent should contain the MII broad consent category"
+    for coding in mii_codings:
+        coding["system"] = category_system
+
+    submission = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    assert isinstance(submission.donors[0].research_consents[0].scope, Consent)
+
+
+@pytest.mark.parametrize(
+    "dataset,version",
+    itertools.product(
+        [
+            "oncomine_panel_tumor_only",
+            "panel_tumor_only",
+            "wes_tumor_germline",
+            "wgs_tumor_germline",
+            "wgs_lr_tumor_only",
+            "wgs_trio",
+        ],
+        TESTED_VERSIONS,
+    ),
+)
+def test_example_research_consent_scopes_parse_as_consent(dataset: str, version: str):
+    """The scope union falls back to dict silently, so every example scope must parse as a Consent."""
+    metadata_str = importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
+    submission = GrzSubmissionMetadata.model_validate_json(metadata_str)
+    for donor in submission.donors:
+        for research_consent in donor.research_consents:
+            assert research_consent.scope is None or isinstance(research_consent.scope, Consent)
+
+
+def test_research_consent_open_ended_provision_period():
+    """A provision without an end must parse and stay in force, not count as expired."""
+    consent_raw = _consent_raw("minimal_consented")
+    del consent_raw["provision"]["period"]["end"]
+    for provision in consent_raw["provision"]["provision"]:
+        del provision["period"]["end"]
+
+    consent = Consent.model_validate(consent_raw)
+    assert consent.provision is not None
+    assert all(provision.period.end is None for provision in consent.provision.provision)
+
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=consent)
+    start = consent.provision.provision[0].period.start.date()
+    assert ResearchConsent.consents_to_research([research_consent], date=start)
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2999, month=12, day=31))
+    assert not ResearchConsent.consents_to_research([research_consent], date=start - timedelta(days=1)), (
+        "a provision must not apply before its start date"
+    )
+
+
+def test_consent_requires_root_provision_period():
+    """Every profile version pins the root provision period to 1..1; only its end became optional."""
+    consent_raw = _consent_raw("minimal_consented")
+    del consent_raw["provision"]["period"]
+
+    with pytest.raises(ValidationError, match="period"):
+        Consent.model_validate(consent_raw)
+
+
+def test_root_provision_period_caps_open_ended_sub_provisions():
+    """The root provision frames every nested rule, so a permit must not outlive its period."""
+    consent_raw = _consent_raw("minimal_consented")
+    for provision in consent_raw["provision"]["provision"]:
+        del provision["period"]["end"]
+
+    consent = Consent.model_validate(consent_raw)
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=consent)
+    root_end_day = consent.provision.period.end.date()
+    assert ResearchConsent.consents_to_research([research_consent], date=root_end_day), (
+        "consent must still apply on the last day of the root provision period"
+    )
+    assert not ResearchConsent.consents_to_research([research_consent], date=root_end_day + timedelta(days=1)), (
+        "an open-ended permit must not outlive the root provision period"
+    )
+
+
+def test_research_consent_rejects_category_in_both_spellings():
+    """The MII broad consent category must appear exactly once, even across both CodeSystem spellings."""
+    consent_raw = _consent_raw("minimal_consented")
+    new_style = MII_CONSENT_CATEGORY_SYSTEMS[1]
+    mii_category = copy.deepcopy(
+        next(c for c in consent_raw["category"] if c["coding"][0]["code"] == MII_BROAD_CONSENT_OID)
+    )
+    mii_category["coding"][0]["system"] = new_style
+    consent_raw["category"].append(mii_category)
+
+    with pytest.raises(ValidationError, match="Duplicate required category"):
+        Consent.model_validate(consent_raw)
+
+
+def test_research_consent_missing_category_message_is_readable():
+    """The missing-category error reaches submitters, so it must spell out the accepted system|code pairs."""
+    consent_raw = _consent_raw("minimal_consented")
+    mii_category = next(c for c in consent_raw["category"] if c["coding"][0]["code"] == MII_BROAD_CONSENT_OID)
+    mii_category["coding"][0]["system"] = "https://example.org/not-the-consent-category-system"
+
+    with pytest.raises(ValidationError) as excinfo:
+        Consent.model_validate(consent_raw)
+
+    message = str(excinfo.value)
+    assert "Missing expected categories" in message
+    for system in MII_CONSENT_CATEGORY_SYSTEMS:
+        assert f"{system}|{MII_BROAD_CONSENT_OID}" in message
+    assert "frozenset" not in message
+
+
 def test_research_consent_subprovisions_deny_permit():
     """Within one research consent's subprovisions, deny before permit should return a non-consented state."""
-    consent_raw = json.loads(
-        importlib.resources.files(example_research_consent).joinpath("minimal_nonconsented.json").read_text()
-    )
+    consent_raw = _consent_raw("minimal_nonconsented")
 
     # add a permit subprovision object for same consent object, after the deny subprovision
     new_permit_subprovision = copy.deepcopy(consent_raw["provision"]["provision"][0])
     new_permit_subprovision["type"] = "permit"
     consent_raw["provision"]["provision"].append(new_permit_subprovision)
 
-    consent = Consent.model_validate_json(json.dumps(consent_raw))
+    consent = Consent.model_validate(consent_raw)
 
     assert not ResearchConsent.consents_to_research(
         [ResearchConsent(scope=consent)], date=date(year=2025, month=10, day=13)
@@ -474,14 +692,12 @@ def test_research_consent_subprovisions_deny_permit():
 
 def test_research_consents_deny_permit():
     """Having two research consents, where deny comes before permit, should return a non-consented state."""
-    consent_raw = json.loads(
-        importlib.resources.files(example_research_consent).joinpath("minimal_nonconsented.json").read_text()
-    )
-    consent1 = Consent.model_validate_json(json.dumps(consent_raw))
+    consent_raw = _consent_raw("minimal_nonconsented")
+    consent1 = Consent.model_validate(consent_raw)
 
     # add a permit consent object for same donor
     consent_raw["provision"]["provision"][0]["type"] = "permit"
-    consent2 = Consent.model_validate_json(json.dumps(consent_raw))
+    consent2 = Consent.model_validate(consent_raw)
 
     assert not ResearchConsent.consents_to_research(
         (ResearchConsent(scope=consent1), ResearchConsent(scope=consent2)), date=date(year=2025, month=10, day=13)
@@ -490,11 +706,290 @@ def test_research_consents_deny_permit():
 
 def test_research_consent_no_subprovisions():
     """Consent objects are allowed to have no provisions under the root."""
-    consent_json_raw = json.loads(
-        importlib.resources.files(example_research_consent).joinpath("minimal_consented.json").read_text()
-    )
+    consent_json_raw = _consent_raw("minimal_consented")
     del consent_json_raw["provision"]["provision"]
-    Consent.model_validate_json(json.dumps(consent_json_raw))
+    Consent.model_validate(consent_json_raw)
+
+
+@pytest.mark.parametrize(
+    "case,versions,kinds",
+    (
+        ("minimal_consented", {BroadConsentVersion.V1_6F}, {ConsentDocumentKind.CONSENT}),
+        ("minimal_consented_bc_v1_7_2", {BroadConsentVersion.V1_7_2}, {ConsentDocumentKind.CONSENT}),
+        # the MII package itself ships a policy URI without the urn:oid: prefix
+        ("minimal_consented_bc_v1_6d_bare_oid", {BroadConsentVersion.V1_6D}, {ConsentDocumentKind.CONSENT}),
+        ("withdrawal_complete", {BroadConsentVersion.V1_6F}, {ConsentDocumentKind.COMPLETE_WITHDRAWAL}),
+        ("rejection_bc_v1_7_2", {BroadConsentVersion.V1_7_2}, {ConsentDocumentKind.REJECTION}),
+    ),
+)
+def test_consent_derives_broad_consent_version_from_policy_oid(
+    case: str, versions: set[BroadConsentVersion], kinds: set[ConsentDocumentKind]
+):
+    """The signed document version lives in policy[].uri, not in the declared schemaVersion."""
+    consent = _consent(case)
+    assert consent.broad_consent_versions == versions
+    assert consent.document_kinds == kinds
+    assert not consent.unknown_document_oids
+
+
+def test_consent_reports_unknown_policy_oid_without_rejecting_it():
+    """A future broad consent version must not break submissions, but must not be silently claimed either."""
+    consent = _consent("minimal_consented_unknown_policy_oid")
+    assert consent.unknown_document_oids == {"2.16.840.1.113883.3.1937.777.24.2.9999"}
+    assert not consent.broad_consent_versions
+    assert not consent.document_kinds
+
+
+def test_consent_derives_version_from_category_coding():
+    """
+    The version and module OIDs are also valid Consent.category codings, so a consent stating its
+    version there rather than only in policy must be recognized too.
+    """
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["category"].append(
+        {"coding": [{"system": MII_CONSENT_VERSION_MODULES_SYSTEM, "code": "2.16.840.1.113883.3.1937.777.24.2.2079"}]}
+    )
+    consent = Consent.model_validate(consent_raw)
+    assert consent.broad_consent_versions == {BroadConsentVersion.V1_6F, BroadConsentVersion.V1_7_2}
+
+
+def test_research_consent_exposes_broad_consent_versions():
+    """The version is reachable from the submission model without reaching into the FHIR resource."""
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent("minimal_consented_bc_v1_7_2"))
+    assert research_consent.broad_consent_versions == {BroadConsentVersion.V1_7_2}
+
+
+def test_research_consent_without_parsed_scope_has_no_broad_consent_version():
+    """A scope that fell back to dict must report no version rather than raising."""
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope={"not": "a consent"})
+    assert research_consent.broad_consent_versions == frozenset()
+
+
+@pytest.mark.parametrize("case", ("withdrawal_complete", "rejection_bc_v1_7_2"))
+def test_withdrawal_and_rejection_do_not_consent_to_research(case: str):
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent(case))
+    assert not ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+
+
+def test_consent_accepts_extra_category_with_several_codings():
+    """The category slicing is open, so a category outside the pinned slices may carry several codings."""
+    consent = _consent("minimal_consented_extra_multi_coding_category")
+    assert len(consent.category) == 3
+    assert len(consent.category[2].coding) == 2
+
+
+def test_consent_rejects_several_codings_on_the_mii_category():
+    """The mii slice itself is pinned to exactly one coding."""
+    with pytest.raises(ValidationError, match="carries the mii category"):
+        _consent("invalid_mii_category_multi_coding")
+
+
+def test_consent_rejects_provisions_it_would_not_evaluate():
+    """Both carry permissions consent evaluation never reads, so accepting them would lose them."""
+    with pytest.raises(ValidationError, match=re.escape("provision.provision[].provision is not allowed")):
+        _consent("invalid_third_level_provision")
+    with pytest.raises(ValidationError, match=re.escape("consent.provision.code is not allowed")):
+        _consent("invalid_root_provision_code")
+
+
+def test_consent_rejects_other_resource_types():
+    """Unknown fields are ignored, so without this guard any object with consent-shaped keys parses."""
+    with pytest.raises(ValidationError, match="Input should be 'Consent'"):
+        _consent("invalid_wrong_resource_type")
+
+
+def test_consent_keeps_patient_identifier():
+    """The profile allows identifying the patient by identifier; dropping it would lose the pseudonym."""
+    consent = _consent("minimal_consented_patient_by_identifier")
+    assert consent.patient.reference is None
+    assert consent.patient.identifier is not None
+    assert consent.patient.identifier.value == "42"
+
+
+def test_consent_rejects_unidentified_patient():
+    """
+    The profile requires neither reference nor identifier (both are mustSupport, 0..1), but a
+    patient stating neither, e.g. by display name only, carries nothing this model keeps.
+    """
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["patient"] = {}
+
+    with pytest.raises(ValidationError, match="reference or an identifier"):
+        Consent.model_validate(consent_raw)
+
+
+def test_date_only_provision_end_covers_the_whole_day():
+    """FHIR treats a date-only end as inclusive of that day, not as midnight."""
+    consent = _consent("minimal_consented")
+    provision = consent.provision.provision[0]
+    end_day = provision.period.end.date()
+
+    assert provision.period.contains(datetime(end_day.year, end_day.month, end_day.day, 12, 0, tzinfo=UTC))
+    assert provision.period.contains(datetime(end_day.year, end_day.month, end_day.day, 23, 59, tzinfo=UTC))
+    assert not provision.period.contains(
+        datetime(end_day.year, end_day.month, end_day.day, 0, 0, tzinfo=UTC) + timedelta(days=1)
+    )
+
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=consent)
+    noon = datetime(end_day.year, end_day.month, end_day.day, 12, 0, tzinfo=UTC)
+    assert research_consent.consent_by_code(noon), "consent must still apply at noon on its last valid day"
+
+
+def test_datetime_provision_end_is_not_extended_to_the_whole_day():
+    """A period end that states a time must keep it, otherwise it silently gains up to a day."""
+    consent = _consent("minimal_consented_with_datetime")
+    assert consent.provision.period.end == datetime(2050, 8, 31, 18, 7)
+    period = consent.provision.provision[0].period
+    assert period.end == datetime(2025, 8, 31, 9, 4, 51)
+    assert not period.contains(datetime(2025, 8, 31, 12, 0, tzinfo=UTC))
+
+
+### Conformance against the MII artefacts vendored in example_terminology. These tests discover
+### their inputs, so dropping a newly released version in adds cases. See that directory's README.
+
+
+def _vendored(prefix: str) -> list[str]:
+    """File names of every vendored MII artefact whose name starts with ``prefix``."""
+    names = sorted(
+        entry.name
+        for entry in importlib.resources.files(example_terminology).iterdir()
+        if entry.name.startswith(prefix) and entry.name.endswith(".json")
+    )
+    assert names, f"no vendored MII artefact matches {prefix!r}"
+    return names
+
+
+def _load_vendored(name: str) -> dict:
+    return json.loads(importlib.resources.files(example_terminology).joinpath(name).read_text())
+
+
+def _declared_version(name: str) -> str:
+    """
+    The version a vendored file name claims, e.g. 'mii-cs-consent-policy.1.1.0.json' -> '1.1.0'.
+
+    Artefacts are named after their own resource version rather than the package that ships them:
+    several packages ship the same CodeSystem or profile version, and the mapping between the two
+    is recorded in the directory README.
+    """
+    return name.removesuffix(".json").split(".", 1)[1]
+
+
+def _codesystem_concepts(codesystem: dict) -> dict[str, dict[str, object]]:
+    """Every concept of a CodeSystem, including nested ones, mapped to its properties."""
+    concepts: dict[str, dict[str, object]] = {}
+
+    def collect(nodes):
+        for node in nodes:
+            concepts[node["code"]] = {
+                prop["code"]: prop.get("valueString", prop.get("valueBoolean", prop.get("valueCode")))
+                for prop in node.get("property", [])
+            }
+            collect(node.get("concept", []))
+
+    collect(codesystem.get("concept", []))
+    return concepts
+
+
+@pytest.mark.parametrize("name", _vendored("mii-"))
+def test_vendored_artefact_holds_the_version_its_name_claims(name: str):
+    """The file name is what the other tests report, so it must not drift from the contents."""
+    assert _load_vendored(name)["version"] == _declared_version(name)
+
+
+@pytest.mark.parametrize("name", _vendored("mii-cs-consent-version-modules."))
+def test_document_oid_table_covers_every_shipped_oid(name: str):
+    """Every OID the MII ships must be classified, so a new broad consent version fails here."""
+    shipped = {concept["code"] for concept in _load_vendored(name)["concept"]}
+    missing = shipped - set(BROAD_CONSENT_DOCUMENT_OIDS)
+    assert not missing, f"{name} defines OIDs the model does not classify: {sorted(missing)}"
+
+
+def test_document_oid_table_invents_no_oids():
+    """Every OID claimed by the table must come from some vendored CodeSystem, not from guesswork."""
+    shipped = {
+        concept["code"]
+        for name in _vendored("mii-cs-consent-version-modules.")
+        for concept in _load_vendored(name)["concept"]
+    }
+    assert set(BROAD_CONSENT_DOCUMENT_OIDS) <= shipped
+
+
+@pytest.mark.parametrize("name", _vendored("mii-cs-consent-policy."))
+def test_evaluated_policy_codes_are_active(name: str):
+    """
+    The two codes research consent is derived from must exist and stay active in every vendored
+    policy CodeSystem, otherwise consent would be granted on a permission the MII has withdrawn.
+    """
+    concepts = _codesystem_concepts(_load_vendored(name))
+    for code in ResearchConsentCodes:
+        properties = concepts.get(code.value)
+        assert properties is not None, f"{code.value} is missing from {name}"
+        assert properties.get("status") != "deprecated", f"{code.value} is deprecated in {name}"
+        assert not properties.get("inactive"), f"{code.value} is inactive in {name}"
+
+
+def _differential(profile: dict) -> dict[str, dict]:
+    return {element["id"]: element for element in profile["differential"]["element"]}
+
+
+def _category_slice_coding(elements: dict[str, dict], slice_name: str) -> tuple[str, str]:
+    """
+    The (system, code) a category slice is pinned to.
+
+    Profile 1.0.8 splits the pattern across the slice and its coding; 1.0.9 states both on the slice.
+    """
+    coding: dict[str, str] = {}
+    for element_id in (f"Consent.category:{slice_name}", f"Consent.category:{slice_name}.coding"):
+        element = elements.get(element_id, {})
+        pattern = element.get("patternCodeableConcept", {}).get("coding", [{}])[0] | element.get("patternCoding", {})
+        coding |= {key: value for key, value in pattern.items() if key in ("system", "code")}
+    return coding["system"], coding["code"]
+
+
+@pytest.mark.parametrize("name", _vendored("mii-pr-consent-einwilligung."))
+def test_model_matches_the_profile(name: str):
+    """What the model hard-codes about the profile, checked against the profile itself."""
+    elements = _differential(_load_vendored(name))
+
+    assert elements["Consent.scope.coding.system"]["fixedUri"] == EXPECTED_SCOPE_CODING_SYSTEM
+    assert elements["Consent.scope.coding.code"]["fixedCode"] == EXPECTED_SCOPE_CODING_CODE
+
+    assert _category_slice_coding(elements, "loinc") in EXPECTED_CATEGORIES["loinc"]
+    assert _category_slice_coding(elements, "mii") in EXPECTED_CATEGORIES["mii"]
+    assert elements["Consent.category"]["min"] == Consent.model_fields["category"].metadata[0].min_length
+
+    # the model rejects what the profile forbids, because evaluation would otherwise drop it silently
+    assert elements["Consent.provision.code"]["max"] == "0"
+    assert elements["Consent.provision.provision.provision"]["max"] == "0"
+
+    # a period bound the profile makes optional must not be required by the model, and vice versa
+    for element_id in ("Consent.provision.period.end", "Consent.provision.provision.period.end"):
+        if elements[element_id]["min"] == 0:
+            assert not Period.model_fields["end"].is_required(), f"{name} makes {element_id} optional"
+    for element_id in ("Consent.provision.period.start", "Consent.provision.provision.period.start"):
+        assert elements[element_id]["min"] == 1
+    assert Period.model_fields["start"].is_required()
+
+    # the period itself stays required at both provision levels, framing consent evaluation
+    for element_id in ("Consent.provision.period", "Consent.provision.provision.period"):
+        assert elements[element_id]["min"] == 1
+    assert RootConsentProvision.model_fields["period"].is_required()
+    assert ConsentProvision.model_fields["period"].is_required()
+
+    # a patient identifier, when given, must carry system and value
+    for element_id in ("Consent.patient.identifier.system", "Consent.patient.identifier.value"):
+        assert elements[element_id]["min"] == 1
+    assert Identifier.model_fields["system"].is_required()
+    assert Identifier.model_fields["value"].is_required()
+
+
+def test_research_consent_schema_version_json_schema_states_the_accepted_versions():
+    """The exported schema must state the accepted versions, to agree with the GRZ metadata schema."""
+    schema = GrzSubmissionMetadata.model_json_schema()
+    # the field is optional, so pydantic wraps the declared schema in an anyOf with null
+    schema_version = schema["$defs"]["ResearchConsent"]["properties"]["schemaVersion"]
+    enums = [branch["enum"] for branch in schema_version["anyOf"] if "enum" in branch]
+    assert enums == [list(RESEARCH_CONSENT_SCHEMA_VERSIONS)]
 
 
 @pytest.mark.parametrize(
