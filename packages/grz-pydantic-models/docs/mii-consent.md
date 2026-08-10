@@ -137,16 +137,19 @@ research consent. That is why `ResearchConsentCodes` contains both.
 
 `consents_to_research(consents, date)` then applies these rules:
 
-1. A consent whose root provision period does not contain `date` contributes nothing, since the root
+1. A consent whose `status` is not `active` contributes nothing. `status` is a FHIR modifier
+   element, so a rejected, withdrawn (`inactive`), draft, proposed or erroneous consent grants
+   nothing regardless of its provisions.
+2. A consent whose root provision period does not contain `date` contributes nothing, since the root
    deny frame bounds every nested rule. Same for each nested provision's own period.
-2. Codes are matched on the OID alone, because the surrounding `system` is written
+3. Codes are matched on the OID alone, because the surrounding `system` is written
    inconsistently in the wild (with and without `urn:oid:`).
-3. **Deny wins.** A permit of either research code grants, but a deny on either revokes, also
+4. **Deny wins.** A permit of either research code grants, but a deny on either revokes, also
    across multiple consents of the same donor. So a partial withdrawal that denies `…5.3.8`
    revokes research use even while the module permit still stands.
-4. Date-only period bounds cover the whole day (a start begins at midnight, an end expires at the
+5. Date-only period bounds cover the whole day (a start begins at midnight, an end expires at the
    end of that day); datetimes without a timezone are read as UTC.
-5. A consent that states neither research code grants nothing: silence is not consent.
+6. A consent that states neither research code grants nothing: silence is not consent.
 
 ## How this stays correct over time
 
