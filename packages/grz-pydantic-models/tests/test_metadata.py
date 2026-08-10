@@ -787,7 +787,7 @@ def test_consent_in_force_still_grants():
     assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
 
 
-@pytest.mark.parametrize("case", ("withdrawal_complete", "rejection_bc_v1_7_2"))
+@pytest.mark.parametrize("case", ("withdrawal_complete", "rejection_bc_v1_7_2", "status_rejected"))
 def test_withdrawal_and_rejection_do_not_consent_to_research(case: str):
     research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent(case))
     assert not ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
