@@ -787,6 +787,23 @@ def test_consent_in_force_still_grants():
     assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
 
 
+def test_consent_not_in_force_warns(caplog):
+    """A status that refuses is easy to state by mistake, and otherwise shows up only as a False flag."""
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["status"] = "rejected"
+
+    ResearchConsent(schemaVersion="2026.0.0", scope=Consent.model_validate(consent_raw))
+
+    assert "status 'rejected'" in caplog.text
+    assert "grants nothing" in caplog.text
+
+
+def test_consent_in_force_does_not_warn(caplog):
+    """A warning on every valid consent would train submitters to ignore it."""
+    ResearchConsent(schemaVersion="2026.0.0", scope=_consent("minimal_consented"))
+    assert "grants nothing" not in caplog.text
+
+
 @pytest.mark.parametrize("case", ("withdrawal_complete", "rejection_bc_v1_7_2", "status_rejected"))
 def test_withdrawal_and_rejection_do_not_consent_to_research(case: str):
     research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent(case))

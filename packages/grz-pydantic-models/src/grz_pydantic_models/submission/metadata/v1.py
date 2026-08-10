@@ -26,7 +26,7 @@ from pydantic import (
 from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel, as_aware_datetime
-from ...mii.consent import BroadConsentVersion, Consent, ProvisionType
+from ...mii.consent import BroadConsentVersion, Consent, ProvisionType, Status
 from .. import thresholds as thresholds_model
 from .versioning import Version
 
@@ -385,6 +385,19 @@ class ResearchConsent(StrictBaseModel):
                         f"Validation error of type '{error['type']}' at location '{'.'.join(str(l) for l in error['loc'])}': {error['msg']}"
                     )
 
+        return self
+
+    @model_validator(mode="after")
+    def warn_when_not_in_force(self):
+        """
+        A status other than active is easy to state by mistake, and otherwise surfaces only as a
+        consented flag reading False.
+        """
+        if isinstance(self.scope, Consent) and not self.scope.is_in_force:
+            log.warning(
+                f"Research consent has status '{self.scope.status}' rather than '{Status.ACTIVE}', "
+                "so it grants nothing regardless of its provisions."
+            )
         return self
 
     @staticmethod
