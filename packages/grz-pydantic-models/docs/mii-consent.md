@@ -101,7 +101,12 @@ Two quirks worth knowing:
 - The MII renamed the category CodeSystem at one point but kept shipping examples in the old
   spelling, so **both spellings are in the wild and both are accepted**
   (`MII_CONSENT_CATEGORY_SYSTEMS`).
-- Newer profiles allow a `period` without an `end`: such a period never expires.
+- Profile 1.0.9, shipped by package 2026.0.0, allows a `period` without an `end`, and such a
+  period never expires. Profile 1.0.8, shipped by every 2025 package, still requires an `end`, so
+  an open-ended period is **rejected under those `schemaVersion`s** and accepted only under
+  2026.0.0 (`PROFILES_REQUIRING_PERIOD_END`). The field is optional on `Period` itself, because
+  one model serves every profile version; the version that decides is the one the submission
+  declares.
 
 Unknown fields are generally ignored (FHIR resources carry much more than we read), **except**
 where ignoring would silently drop a permission the evaluation never looks at: a `code` on the

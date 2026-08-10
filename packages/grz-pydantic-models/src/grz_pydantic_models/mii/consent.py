@@ -68,7 +68,9 @@ def _date_to_datetime(value: Any, time_of_day: time) -> Any:
 
 class Period(FhirElement):
     start: datetime
-    #: Optional since MII consent package 2026.0.0: a period without an end never expires.
+    #: Optional here because profile 1.0.9 relaxed it and one model serves every profile version:
+    #: a period without an end never expires. ResearchConsent rejects one under the declared
+    #: schemaVersions whose profile still pins the end to 1..1.
     end: datetime | None = None
 
     # FHIR reads a date-only bound as the whole day: a start begins at midnight, an end expires

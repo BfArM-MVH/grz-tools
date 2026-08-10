@@ -288,10 +288,24 @@ class MvConsent(StrictBaseModel):
     """
 
 
-#: MII "Modul Consent" package versions the Consent model is checked against, in publication order.
+#: MII "Modul Consent" package versions the Consent model is checked against, in publication order,
+#: each mapped to the version of Profile_MII_Consent_Einwilligung it ships. The profile version
+#: decides which cardinalities apply, so a package cannot be accepted without naming its profile.
 #: GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has not released; add it here once it
 #: is, together with its artefacts in example_terminology.
-RESEARCH_CONSENT_SCHEMA_VERSIONS = ("2025.0.1", "2025.0.2", "2025.0.3", "2025.0.4", "2026.0.0")
+RESEARCH_CONSENT_PACKAGE_PROFILES = {
+    "2025.0.1": "1.0.8",
+    "2025.0.2": "1.0.8",
+    "2025.0.3": "1.0.8",
+    "2025.0.4": "1.0.8",
+    "2026.0.0": "1.0.9",
+}
+
+RESEARCH_CONSENT_SCHEMA_VERSIONS = tuple(RESEARCH_CONSENT_PACKAGE_PROFILES)
+
+#: Profile versions pinning both provision periods' end to 1..1. Profile 1.0.9 relaxed it to 0..1,
+#: so only there may a period stay open-ended.
+PROFILES_REQUIRING_PERIOD_END = frozenset({"1.0.8"})
 
 
 def _validate_research_consent_schema_version(value: str) -> str:
@@ -397,6 +411,33 @@ class ResearchConsent(StrictBaseModel):
             log.warning(
                 f"Research consent has status '{self.scope.status}' rather than '{Status.ACTIVE}', "
                 "so it grants nothing regardless of its provisions."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def ensure_period_end_where_the_profile_requires_it(self):
+        """
+        Reject an open-ended period under a package whose profile pins the period end to 1..1.
+
+        A period without an end never expires, so honouring one where the profile demands an end
+        would grant indefinitely a permission that was written to run out.
+        """
+        if self.schema_version is None or not isinstance(self.scope, Consent):
+            return self
+
+        profile = RESEARCH_CONSENT_PACKAGE_PROFILES[self.schema_version]
+        if profile not in PROFILES_REQUIRING_PERIOD_END or self.scope.provision is None:
+            return self
+
+        root = self.scope.provision
+        periods = [("provision.period", root.period)]
+        periods += [
+            (f"provision.provision[{index}].period", nested.period) for index, nested in enumerate(root.provision)
+        ]
+        if open_ended := [name for name, period in periods if period.end is None]:
+            raise ValueError(
+                f"researchConsent schemaVersion {self.schema_version} ships MII consent profile {profile}, "
+                f"which requires an end on every provision period; missing on {', '.join(open_ended)}"
             )
         return self
 

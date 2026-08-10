@@ -28,6 +28,8 @@ from grz_pydantic_models.submission.metadata import (
     get_accepted_versions,
 )
 from grz_pydantic_models.submission.metadata.v1 import (
+    PROFILES_REQUIRING_PERIOD_END,
+    RESEARCH_CONSENT_PACKAGE_PROFILES,
     RESEARCH_CONSENT_SCHEMA_VERSIONS,
     File,
     FileType,
@@ -644,6 +646,50 @@ def test_root_provision_period_caps_open_ended_sub_provisions():
     )
 
 
+_VERSIONS_REQUIRING_PERIOD_END = tuple(
+    version
+    for version, profile in RESEARCH_CONSENT_PACKAGE_PROFILES.items()
+    if profile in PROFILES_REQUIRING_PERIOD_END
+)
+
+
+@pytest.mark.parametrize("version", _VERSIONS_REQUIRING_PERIOD_END)
+def test_open_ended_period_rejected_where_the_profile_requires_an_end(version: str):
+    """A period without an end never expires, so honouring one would outlive what the donor signed."""
+    with pytest.raises(ValidationError, match="requires an end on every provision period"):
+        ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented_open_ended"))
+
+
+def test_open_ended_period_error_names_every_offending_period():
+    """The submitter has to be told which periods to fix, not only that one of them is wrong."""
+    consent_raw = _consent_raw("minimal_consented")
+    del consent_raw["provision"]["period"]["end"]
+    for provision in consent_raw["provision"]["provision"]:
+        del provision["period"]["end"]
+
+    with pytest.raises(ValidationError) as excinfo:
+        ResearchConsent(schemaVersion="2025.0.1", scope=Consent.model_validate(consent_raw))
+
+    assert "provision.period" in str(excinfo.value)
+    assert "provision.provision[0].period" in str(excinfo.value)
+
+
+def test_open_ended_nested_period_alone_is_rejected():
+    """The profile pins the end at both levels, so a bounded root does not excuse an open nested one."""
+    consent_raw = _consent_raw("minimal_consented")
+    for provision in consent_raw["provision"]["provision"]:
+        del provision["period"]["end"]
+
+    with pytest.raises(ValidationError, match=r"provision\.provision\[0\]\.period"):
+        ResearchConsent(schemaVersion="2025.0.1", scope=Consent.model_validate(consent_raw))
+
+
+def test_open_ended_period_accepted_without_a_declared_schema_version():
+    """Metadata 1.3 onwards may omit the version, which leaves no profile to enforce."""
+    research_consent = ResearchConsent(scope=_consent("minimal_consented_open_ended"))
+    assert research_consent.scope.provision.period.end is None
+
+
 def test_research_consent_rejects_category_in_both_spellings():
     """The MII broad consent category must appear exactly once, even across both CodeSystem spellings."""
     consent_raw = _consent_raw("minimal_consented")
@@ -1028,10 +1074,15 @@ def test_model_matches_the_profile(name: str):
     assert elements["Consent.provision.code"]["max"] == "0"
     assert elements["Consent.provision.provision.provision"]["max"] == "0"
 
-    # a period bound the profile makes optional must not be required by the model, and vice versa
+    # the model must demand a period end exactly where the profile does, at both provision levels
+    requires_end = _declared_version(name) in PROFILES_REQUIRING_PERIOD_END
     for element_id in ("Consent.provision.period.end", "Consent.provision.provision.period.end"):
-        if elements[element_id]["min"] == 0:
-            assert not Period.model_fields["end"].is_required(), f"{name} makes {element_id} optional"
+        assert (elements[element_id]["min"] == 1) == requires_end, (
+            f"{name} and PROFILES_REQUIRING_PERIOD_END disagree on {element_id}"
+        )
+    # the field itself stays optional, since one model serves every profile version
+    assert not Period.model_fields["end"].is_required()
+
     for element_id in ("Consent.provision.period.start", "Consent.provision.provision.period.start"):
         assert elements[element_id]["min"] == 1
     assert Period.model_fields["start"].is_required()
@@ -1047,6 +1098,12 @@ def test_model_matches_the_profile(name: str):
         assert elements[element_id]["min"] == 1
     assert Identifier.model_fields["system"].is_required()
     assert Identifier.model_fields["value"].is_required()
+
+
+def test_every_accepted_package_names_a_vendored_profile():
+    """A package mapped to a profile nobody vendored would be accepted against no cardinalities."""
+    vendored = {_declared_version(name) for name in _vendored("mii-pr-consent-einwilligung.")}
+    assert set(RESEARCH_CONSENT_PACKAGE_PROFILES.values()) == vendored
 
 
 def test_research_consent_schema_version_json_schema_states_the_accepted_versions():
