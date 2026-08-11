@@ -161,44 +161,6 @@ class TestQcStrategy:
         assert submission is not None
         assert submission.selected_for_qc is True
 
-    def test_should_qc_persists_false_result(self, db: SubmissionDb):
-        target_percentage = 20.0
-        salt = "ratio-test"
-        base_date = datetime.date(2025, 12, 1)
-        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
-
-        selected_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
-        _add_submission_with_history(
-            db,
-            selected_submission_id,
-            SUBMITTER_ID,
-            base_date,
-            [*DEFAULT_HISTORY, "qcing"],
-            base_timestamp=start_time,
-            is_qced=False,
-        )
-        db.modify_submission(selected_submission_id, "selected_for_qc", "true")
-
-        candidate_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
-        candidate_timestamp = start_time + datetime.timedelta(minutes=10)
-        _add_submission_with_history(
-            db,
-            candidate_submission_id,
-            SUBMITTER_ID,
-            base_date,
-            DEFAULT_HISTORY,
-            base_timestamp=candidate_timestamp,
-            is_qced=False,
-        )
-
-        should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
-
-        # whichever way the decision goes, it is the value that must be persisted. Asserting a
-        # fixed False would hold only for as long as the random branch happens not to fire.
-        submission = db.get_submission(candidate_submission_id)
-        assert submission is not None
-        assert submission.selected_for_qc is should_run
-
     def test_should_qc_persists_a_negative_decision(self, db: SubmissionDb):
         """A zero target leaves no branch that can select, so the stored flag must go to False.
 
@@ -229,16 +191,19 @@ class TestQcStrategy:
         assert submission is not None
         assert submission.selected_for_qc is False
 
-    def test_should_qc_counts_historical_qcing_or_qced_states(self, db: SubmissionDb):
-        target_percentage = 20.0
-        salt = "ratio-test"
+    def test_a_submission_with_qc_history_counts_toward_the_target(self, db: SubmissionDb):
+        """A submission already QCed counts even though its selected_for_qc flag was never set.
+
+        Asserted on the counting rule rather than on should_qc's verdict: routing through the full
+        decision would leave the outcome resting on whether the random branch happened to fire.
+        """
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
 
-        historical_qc_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
+        qced_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
         _add_submission_with_history(
             db,
-            historical_qc_submission_id,
+            qced_submission_id,
             SUBMITTER_ID,
             base_date,
             [*DEFAULT_HISTORY, "qcing", "qced", "cleaning", "cleaned"],
@@ -246,21 +211,45 @@ class TestQcStrategy:
             is_qced=True,
         )
 
-        candidate_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
-        candidate_timestamp = start_time + datetime.timedelta(minutes=10)
+        untouched_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
         _add_submission_with_history(
             db,
-            candidate_submission_id,
+            untouched_submission_id,
             SUBMITTER_ID,
             base_date,
             DEFAULT_HISTORY,
-            base_timestamp=candidate_timestamp,
-            is_qced=False,
+            base_timestamp=start_time + datetime.timedelta(minutes=10),
         )
 
-        should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
+        qced = db.get_submission(qced_submission_id)
+        untouched = db.get_submission(untouched_submission_id)
+        assert qced is not None and untouched is not None
+        assert qced.selected_for_qc is not True, "the flag is unset; only the state history should count it"
+        assert db._submission_counts_as_selected_for_qc(qced) is True
+        assert db._submission_counts_as_selected_for_qc(untouched) is False
 
-        assert should_run is False
+    def test_should_qc_still_selects_once_per_block_when_the_target_is_already_met(self, db: SubmissionDb):
+        """With the target already exceeded, only the random branch can select, so it must still fire.
+
+        The month and quarter rules are both satisfied here, so this is the one place that proves
+        ``should_qc`` actually consults the random selection rather than merely returning early.
+        """
+        target_percentage = 20.0
+        block_size = math.floor(1 / (target_percentage / 100.0))
+        base_date = datetime.date(2025, 12, 1)
+        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
+
+        submissions = _add_submission_block(db, base_date, start_time, count=block_size * 2)
+        # push the selected share far above the target so neither the month nor the quarter rule fires
+        for submission in submissions[:block_size]:
+            db.modify_submission(submission.id, "selected_for_qc", "true")
+
+        selected = [
+            submission.id
+            for submission in submissions[block_size:]
+            if db.should_qc(submission.id, target_percentage, "test-salt")
+        ]
+        assert len(selected) == 1, f"expected the random branch to pick exactly one, picked {selected}"
 
     def test_ratio_catchup_keeps_the_selected_share_at_or_above_target(self, db: SubmissionDb):
         """The running selected share must never drop below the target; that is what catch-up means.

@@ -237,6 +237,19 @@ def test_wgs_trio_1_3_fail_scope_and_justification_mutually_exclusive(version: s
     "version",
     [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
 )
+def test_wgs_trio_1_3_justification_replaces_scope(version: str):
+    """As of v1.3, a justification may stand in for a scope, with schemaVersion still present."""
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
+    metadata["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient unable to consent"
+    del metadata["donors"][0]["researchConsents"][0]["scope"]
+
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+@pytest.mark.parametrize(
+    "version",
+    [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
+)
 def test_wgs_trio_1_3_schema_version_now_optional(version: str):
     """As of v1.3, researchConsent no longer requires schemaVersion."""
     metadata = json.loads(_metadata_raw("wgs_trio", version))
