@@ -1,50 +1,18 @@
 import datetime
 import math
 import random
-from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from grz_db.errors import (
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
     SubmissionTypeIsNoneError,
 )
-from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum, SubmissionStateLog, SubmissionType
 from sqlmodel import Session
 
 SUBMITTER_ID = "123456789"
 DEFAULT_HISTORY = ["uploaded", "downloading", "downloaded", "decrypting", "decrypted", "validating", "validated"]
-
-
-@pytest.fixture(scope="function")
-def test_author() -> Author:
-    """Creates a test author with a valid temporary private key."""
-    key = ed25519.Ed25519PrivateKey.generate()
-    private_key_bytes = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    return Author(
-        name="alice",
-        private_key_bytes=private_key_bytes,
-        private_key_passphrase="",
-    )
-
-
-@pytest.fixture(scope="function")
-def db(tmp_path: Path, test_author: Author) -> SubmissionDb:
-    """Create a clean database initialized with schema for each test function."""
-    db_path = tmp_path / "submissions.sqlite"
-    db_url = f"sqlite:///{db_path.resolve()}"
-
-    submission_db = SubmissionDb(db_url=db_url, author=test_author, debug=False)
-    submission_db.initialize_schema()
-
-    return submission_db
 
 
 def _update_submission_state(

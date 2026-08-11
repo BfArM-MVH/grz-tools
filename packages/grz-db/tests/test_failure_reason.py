@@ -1,34 +1,8 @@
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 
 SUBMITTER_ID = "123456789"
-
-
-@pytest.fixture(scope="function")
-def test_author() -> Author:
-    key = ed25519.Ed25519PrivateKey.generate()
-    private_key_bytes = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    return Author(
-        name="alice",
-        private_key_bytes=private_key_bytes,
-        private_key_passphrase="",
-    )
-
-
-@pytest.fixture(scope="function")
-def db(tmp_path, test_author: Author) -> SubmissionDb:
-    db_path = tmp_path / "submissions.sqlite"
-    db_url = f"sqlite:///{db_path.resolve()}"
-    submission_db = SubmissionDb(db_url=db_url, author=test_author, debug=False)
-    submission_db.initialize_schema()
-    return submission_db
 
 
 @pytest.fixture(scope="function")
@@ -88,15 +62,13 @@ class TestFailureReasonPersistence:
         assert states[-1].failure_reason is None
         assert states[-2].failure_reason == FailureReasonEnum.DECRYPTION_ERROR
 
-    def test_failure_reason_persists_across_sessions(self, tmp_path, test_author: Author):
+    def test_failure_reason_persists_across_sessions(self, migrated_db_connection: str, test_author: Author):
         """failure_reason should survive closing and reopening the DB connection."""
-        db_path = tmp_path / "submissions.sqlite"
-        db_url = f"sqlite:///{db_path.resolve()}"
+        db_url = migrated_db_connection
 
         sid = f"{SUBMITTER_ID}_2025-01-01_00000000"
 
         db1 = SubmissionDb(db_url=db_url, author=test_author, debug=False)
-        db1.initialize_schema()
         db1.add_submission(sid)
         db1.update_submission_state(sid, SubmissionStateEnum.ERROR, failure_reason=FailureReasonEnum.NETWORK_ERROR)
 

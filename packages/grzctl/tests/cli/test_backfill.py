@@ -1,8 +1,8 @@
 # Backfill unit tests — see .vbw-planning/phases/02-implement-grzctl-db-backfill-command/02-02-PLAN.md
 """Unit tests for `_backfill_submission`.
 
-The tests target `_backfill_submission` directly with a real SubmissionDb on SQLite
-and a moto-mocked S3. Live in `grzctl/tests/` (not `grz-db/tests/`) because `grzctl`
+The tests target `_backfill_submission` directly with a real SubmissionDb on every supported
+backend and a moto-mocked S3. Live in `grzctl/tests/` (not `grz-db/tests/`) because `grzctl`
 is not a dev/test dependency of `grz-db`, but `moto[s3]`, `pytest-postgresql`, and
 `grz-pydantic-models-testing` are all in `grzctl`'s [test] dependency group.
 """
@@ -15,9 +15,6 @@ from typing import Any
 
 import boto3
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from grz_db.models.author import Author
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
@@ -43,25 +40,6 @@ def metadata() -> GrzSubmissionMetadata:
 @pytest.fixture(scope="session")
 def submission_id(metadata: GrzSubmissionMetadata) -> str:
     return metadata.submission_id
-
-
-@pytest.fixture
-def test_author() -> Author:
-    key = ed25519.Ed25519PrivateKey.generate()
-    private_key_bytes = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    return Author(name="alice", private_key_bytes=private_key_bytes, private_key_passphrase="")
-
-
-@pytest.fixture
-def db(tmp_path, test_author: Author) -> SubmissionDb:
-    db_url = f"sqlite:///{tmp_path / 'backfill.db'}"
-    submission_db = SubmissionDb(db_url=db_url, author=test_author, debug=False)
-    submission_db.initialize_schema()
-    return submission_db
 
 
 @pytest.fixture
