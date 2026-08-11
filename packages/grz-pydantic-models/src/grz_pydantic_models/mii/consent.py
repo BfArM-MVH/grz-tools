@@ -68,9 +68,9 @@ def _date_to_datetime(value: Any, time_of_day: time) -> Any:
 
 class Period(FhirElement):
     start: datetime
-    #: Optional here because profile 1.0.9 relaxed it and one model serves every profile version:
-    #: a period without an end never expires. ResearchConsent rejects one under the declared
-    #: schemaVersions whose profile still pins the end to 1..1.
+    #: Optional because one model serves every profile version and 1.0.9 relaxed this to 0..1. FHIR
+    #: reads a period without an end as still running, so ResearchConsent rejects one when the
+    #: declared schemaVersion ships a profile that still pins the end to 1..1.
     end: datetime | None = None
 
     # FHIR reads a date-only bound as the whole day: a start begins at midnight, an end expires
@@ -231,7 +231,7 @@ class ConsentDocumentKind(StrEnum):
     ADDITIONAL_MODULE = "additional module"
 
 
-#: What each code of the version and module CodeSystem declares. These OIDs identify the signed
+#: What each code of the version and modules CodeSystem declares. These OIDs identify the signed
 #: document and appear as Consent.policy[].uri, unlike schemaVersion, which names the KDS package.
 #: Unknown OIDs are reported, never rejected: a future broad consent version must not break
 #: submissions.
@@ -338,7 +338,10 @@ class Consent(StrictIgnoringBaseModel):
 
     @property
     def document_oids(self) -> frozenset[str]:
-        """Bare OIDs identifying the signed documents, from policy URIs and version/module categories."""
+        """
+        Bare OIDs identifying the signed documents, from policy URIs and from category codings in
+        the version and modules CodeSystem.
+        """
         from_policies = {_strip_oid_prefix(policy.uri) for policy in self.policy}
         from_categories = {
             coding.code
@@ -350,7 +353,7 @@ class Consent(StrictIgnoringBaseModel):
 
     @property
     def _known_documents(self) -> tuple[tuple[ConsentDocumentKind, BroadConsentVersion | None], ...]:
-        """The (kind, version) pairs of those document OIDs the version and module CodeSystem defines."""
+        """The (kind, version) pairs of those document OIDs the version and modules CodeSystem defines."""
         return tuple(
             BROAD_CONSENT_DOCUMENT_OIDS[oid] for oid in self.document_oids if oid in BROAD_CONSENT_DOCUMENT_OIDS
         )
@@ -368,7 +371,7 @@ class Consent(StrictIgnoringBaseModel):
     @property
     def unknown_document_oids(self) -> frozenset[str]:
         """
-        OIDs that are not part of the known version and module CodeSystem, e.g. a newer broad consent.
+        OIDs that are not part of the known version and modules CodeSystem, e.g. a newer broad consent.
 
         Policy URIs that are no OIDs at all are reported here unchanged.
         """

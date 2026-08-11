@@ -289,7 +289,7 @@ class MvConsent(StrictBaseModel):
 
 
 #: MII "Modul Consent" package versions the Consent model is checked against, in publication order,
-#: each mapped to the version of Profile_MII_Consent_Einwilligung it ships. The profile version
+#: each mapped to the version of MII_PR_Consent_Einwilligung it ships. The profile version
 #: decides which cardinalities apply, so a package cannot be accepted without naming its profile.
 #: GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has not released; add it here once it
 #: is, together with its artefacts in example_terminology.
@@ -304,7 +304,9 @@ RESEARCH_CONSENT_PACKAGE_PROFILES = {
 RESEARCH_CONSENT_SCHEMA_VERSIONS = tuple(RESEARCH_CONSENT_PACKAGE_PROFILES)
 
 #: Profile versions pinning both provision periods' end to 1..1. Profile 1.0.9 relaxed it to 0..1,
-#: so only there may a period stay open-ended.
+#: so only there may a period stay open-ended. A profile absent from this set is taken not to
+#: require an end, so a future profile that re-tightens the bound has to be added here;
+#: test_model_matches_the_profile fails against the vendored artefacts until it is.
 PROFILES_REQUIRING_PERIOD_END = frozenset({"1.0.8"})
 
 
@@ -421,6 +423,9 @@ class ResearchConsent(StrictBaseModel):
 
         A period without an end never expires, so honouring one where the profile demands an end
         would grant indefinitely a permission that was written to run out.
+
+        A submission declaring no schemaVersion, which metadata 1.3 permits, names no package and
+        therefore no profile, so nothing is enforced here.
         """
         if self.schema_version is None or not isinstance(self.scope, Consent):
             return self

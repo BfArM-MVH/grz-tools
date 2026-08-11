@@ -45,17 +45,20 @@ that case there is nothing to add. Copy the JSON verbatim apart from re-indentin
 
 Then add the package to `packages.json`, mapping its version to the version each artefact states.
 Nothing in the copied files records which package they came from, so this is the only place that
-link survives.
+link survives. Key the inner map by the file-name prefix from the table above
+(`mii-cs-consent-policy`, `mii-cs-consent-version-modules`, `mii-pr-consent-einwilligung`), not by
+the artefact's name inside `package/`.
 
-Then run the consent tests. Anything the model does not yet cover is reported by file name:
+Then run the consent tests. Anything the model does not yet cover fails by the file or the package
+version it concerns:
 
-- an OID added to the version and module CodeSystem that `BROAD_CONSENT_DOCUMENT_OIDS` does not
+- an OID added to the version and modules CodeSystem that `BROAD_CONSENT_DOCUMENT_OIDS` does not
   classify
 - either policy code research consent is derived from going missing, deprecated or inactive
 - a profile that pins a different category CodeSystem, relaxes or tightens a period bound, changes
   the minimum number of categories, or stops forbidding what the model rejects
-- a package version `RESEARCH_CONSENT_PACKAGE_PROFILES` does not list, or one it maps to a profile
-  the package does not ship
+- any disagreement between `packages.json` and `RESEARCH_CONSENT_PACKAGE_PROFILES`: a package one
+  names and the other does not, or a package the two map to different profiles
 
 A failure is a prompt to update the model, not a reason to edit these files.
 
@@ -71,6 +74,6 @@ The profile version is the one that matters most, because it decides which cardi
 nowhere inside the artefacts, which name only themselves, so the mapping cannot be recovered from
 this directory once it is lost.
 
-Package 2026.0.0 is the only published package defining the version and module CodeSystem. The 2025
+Package 2026.0.0 is the only published package defining the version and modules CodeSystem. The 2025
 packages use its OIDs as `Consent.policy[].uri` without defining them, and the 2026.0.1 release
 candidates drop the file again while still pinning its canonical URL in the profile.

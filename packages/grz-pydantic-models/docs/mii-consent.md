@@ -8,6 +8,10 @@ inside `researchConsents[].scope`, and this package answers two questions about 
 1. **Is it well-formed?** Does it follow the MII's FHIR specification (validation)?
 2. **What does it say?** May the donor's data be used for research at a given date (evaluation)?
 
+`scope` may also be absent, paired with a `noScopeJustification` saying why. And a `scope` that
+fails Consent validation is not rejected: it is kept as a plain object, the validation errors are
+logged as warnings, and both questions below then answer "nothing known" rather than "no".
+
 Current version numbers live in the code constants and in `example_terminology/packages.json` of
 `grz-pydantic-models-testing`.
 
@@ -19,7 +23,7 @@ Current version numbers live in the code constants and in `example_terminology/p
 | KDS consent package | The MII's FHIR package (`de.medizininformatikinitiative.kerndatensatz.consent`) that defines how to represent such a consent digitally ([registry](https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent)). |
 | Profile | The rulebook inside the package (`MII_PR_Consent_Einwilligung`): which fields a Consent resource must/may have. |
 | Policy CodeSystem | The catalogue of **permissions** ("use data scientifically", "contact again", …), one OID each, organized as modules with sub-items. |
-| Version & modules CodeSystem | The catalogue of **signable documents** (each broad consent version, withdrawal forms, additional modules), one OID each. |
+| Version and modules CodeSystem | The catalogue of **signable documents** (each broad consent version, withdrawal forms, additional modules), one OID each. |
 | GRZ metadata schema | BfArM's format for the whole submission; `researchConsents[]` is one small part of it. |
 
 ## A consent, annotated
@@ -31,13 +35,15 @@ Current version numbers live in the code constants and in `example_terminology/p
   "scope": { "coding": [ { "system": ".../consentscope", "code": "research" } ] },
   "category": [
     { "coding": [ { "system": "http://loinc.org", "code": "57016-8" } ] },
-    { "coding": [ { /* the MII broad consent category */ } ] }
+    { "coding": [ { "system": ".../mii-cs-consent-consent_category",
+                    "code": "2.16.840.1.113883.3.1937.777.24.2.184" } ] }
+    // ^ THAT this is an MII broad consent at all, not which version of it
   ],
   "patient": { "reference": "Patient/..." },     // or an identifier with system + value
   "dateTime": "2020-09-01",
   "policy": [
-    { "uri": "urn:oid:2.16.840.1.113883.3.1937.777.24.2.184" }
-    // ^ WHICH document was signed (an OID from the version & modules CodeSystem)
+    { "uri": "urn:oid:2.16.840.1.113883.3.1937.777.24.2.1791" }
+    // ^ WHICH document was signed: broad consent 1.6f, an OID from the version and modules CodeSystem
   ],
   "provision": {                   // root provision: the opt-in frame
     "type": "deny",                // nothing is allowed unless a nested rule permits it
@@ -58,8 +64,12 @@ Current version numbers live in the code constants and in `example_terminology/p
 
 Two different OID catalogues meet here, and telling them apart is the key to everything else:
 
-- `policy[].uri` says **which document** the donor signed → version & modules CodeSystem.
+- `policy[].uri` says **which document** the donor signed → version and modules CodeSystem.
 - `provision.provision[].code` says **what the donor allowed or refused** → policy CodeSystem.
+
+Some systems state the signed document as a `category` coding from the version and modules
+CodeSystem instead of in `policy[]`. `Consent.document_oids` reads both places, so either spelling
+works.
 
 ## Four version numbers that mean different things
 
@@ -68,11 +78,12 @@ Two different OID catalogues meet here, and telling them apart is the key to eve
 | the GRZ metadata schema | `$schema` URL of the submission | `is_supported_version`, `get_accepted_versions` |
 | the KDS consent package | `researchConsents[].schemaVersion` | `RESEARCH_CONSENT_SCHEMA_VERSIONS` |
 | each artefact inside the package (profile, CodeSystems) | inside the package files | `example_terminology/` file names + `example_terminology/packages.json` |
-| the signed broad consent document | OIDs in `Consent.policy[].uri` | `BroadConsentVersion`, `BROAD_CONSENT_DOCUMENT_OIDS` |
+| the signed broad consent document | OIDs in `Consent.policy[].uri`, or in a `category` coding from the version and modules CodeSystem | `BroadConsentVersion`, `BROAD_CONSENT_DOCUMENT_OIDS` |
 
 None of these implies another. The classic trap: **`schemaVersion` names the KDS package (the
 digital format), not the document the donor signed.** Which broad consent version the donor
-actually signed is derived from the policy OIDs (`Consent.broad_consent_versions`).
+actually signed is derived from those document OIDs (`Consent.broad_consent_versions`), wherever
+they appear.
 
 Two facts that follow from the axes moving independently:
 
@@ -85,16 +96,18 @@ Two facts that follow from the axes moving independently:
 
 ## Question 1: is it well-formed?
 
-The model (`grz_pydantic_models/mii/consent.py`) enforces what the profile pins:
+The model (`grz_pydantic_models/mii/consent.py`) enforces what the profile pins, plus two rules the
+profile leaves open but the GRZ requires, marked †. The root-provision rule is enforced one level
+up, on `ResearchConsent` in `submission/metadata/v1.py`.
 
 | Element | Rule |
 | --- | --- |
 | `status` | required; only `active` marks the consent as in force |
 | `scope` | exactly one coding, and it must be `research` |
 | `category` | must contain the LOINC consent category and the MII broad consent category, one coding each; extra categories are allowed (open slicing) |
-| `patient` | must identify the patient: reference or identifier (identifier needs `system` + `value`) |
+| `patient` | † must identify the patient: reference or identifier (identifier needs `system` + `value`). The profile requires `patient` but marks both ways of filling it mustSupport only |
 | `policy` | at least one document OID, with or without the `urn:oid:` prefix |
-| `provision` (root) | `type` must be `deny` (opt-in), `period` required, `code` forbidden |
+| `provision` (root) | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required, `code` forbidden |
 | `provision.provision[]` | the decisions: `type`, `period`, at least one `code` |
 | a third provision level | forbidden |
 
@@ -112,14 +125,16 @@ Two quirks worth knowing:
   optional on `Period` itself, because one model serves every profile version; the version that
   decides is the one the submission declares.
 
-Unknown fields are generally ignored (FHIR resources carry much more than we read), **except**
-where ignoring would silently drop a permission the evaluation never looks at: a `code` on the
-root provision, a third provision level, a wrong `resourceType`, an unidentified patient. Those
-are rejected so the submitter notices.
+Unknown fields are ignored on the resource and its provisions (FHIR carries much more than we
+read), but **forbidden** on the small leaf elements the evaluation reads field by field: `Period`,
+`Coding` and `CodeableConcept`. Four things are rejected outright rather than ignored: a `code` on
+the root provision and a third provision level, because they carry permissions the evaluation never
+looks at and accepting them would silently lose them; a wrong `resourceType` and a patient
+identified by neither reference nor identifier, because neither can be what the submitter meant.
 
 ## Question 1b: what was signed?
 
-Every OID the MII ships in the version & modules CodeSystem is classified in
+Every OID the MII ships in the version and modules CodeSystem is classified in
 `BROAD_CONSENT_DOCUMENT_OIDS` as one of:
 
 - **consent**: the broad consent itself, per document version (incl. minor / legal-guardian variants)
@@ -131,14 +146,24 @@ Every OID the MII ships in the version & modules CodeSystem is classified in
 An OID we do not recognize (e.g. a future broad consent version) is **reported, never rejected**
 (`unknown_document_oids`): new document versions must not break submissions.
 
+**None of this feeds the research decision.** Question 2 reads only `status` and the provisions; the
+document kind is reported, not enforced. A real withdrawal or rejection says so twice, through its
+document OID *and* by denying the permissions or stating none, and it is the second half that
+Question 2 acts on. The shipped `withdrawal_complete` example shows the shape: its status is
+`active`, and what refuses is its nested `deny` of the PATDAT module. So treat a withdrawal or
+rejection OID on a consent that still permits research as a contradiction worth investigating, not
+as a refusal the model has already applied.
+
 ## Question 2: does the donor consent to research?
 
 Research use requires one specific permission from the policy CodeSystem, and that catalogue is
 hierarchical: permissions live inside modules:
 
 ```text
-…24.5.3.1  "PATDAT erheben, speichern, nutzen"      ← the module
-└── …24.5.3.8  "MDAT wissenschaftlich nutzen"       ← the permission research needs
+…24.5.3.1  "Patientendaten erheben, speichern, nutzen"   ← the module (PATDAT_ERHEBEN_SPEICHERN_NUTZEN)
+└── …24.5.3.8  "MDAT wissenschaftlich nutzen"            ← what research needs
+                                                            (MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU;
+                                                             policy 1.0.5-1.0.7 display it as "… EU DSGVO NIVEAU")
 ```
 
 Permitting the module includes everything inside it, so **either** OID being permitted grants

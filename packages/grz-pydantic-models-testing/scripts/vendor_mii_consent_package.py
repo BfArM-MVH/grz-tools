@@ -54,7 +54,7 @@ def download(package_version: str) -> dict[str, dict]:
     with tarfile.open(fileobj=archive, mode="r:gz") as tar:
         shipped = set(tar.getnames())
         for name in ARTEFACTS:
-            # not every package ships every artefact: the version and module CodeSystem appears in
+            # not every package ships every artefact: the version and modules CodeSystem appears in
             # 2026.0.0 only, and the 2026.0.1 release candidates dropped it again
             if f"package/{name}" not in shipped:
                 continue
