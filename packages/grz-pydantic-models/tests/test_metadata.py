@@ -959,9 +959,14 @@ def _declared_version(name: str) -> str:
 
     Artefacts are named after their own resource version rather than the package that ships them:
     several packages ship the same CodeSystem or profile version, and the mapping between the two
-    is recorded in the directory README.
+    is recorded in packages.json.
     """
     return name.removesuffix(".json").split(".", 1)[1]
+
+
+def _artefact_prefix(name: str) -> str:
+    """The artefact a vendored file name claims, e.g. 'mii-cs-consent-policy.1.1.0.json' -> 'mii-cs-consent-policy'."""
+    return name.removesuffix(".json").split(".", 1)[0]
 
 
 def _codesystem_concepts(codesystem: dict) -> dict[str, dict[str, object]]:
@@ -1105,10 +1110,22 @@ def test_model_matches_the_profile(name: str):
     assert Identifier.model_fields["value"].is_required()
 
 
-def test_every_accepted_package_names_a_vendored_profile():
-    """A package mapped to a profile nobody vendored would be accepted against no cardinalities."""
-    vendored = {_declared_version(name) for name in _vendored("mii-pr-consent-einwilligung.")}
-    assert set(RESEARCH_CONSENT_PACKAGE_PROFILES.values()) == vendored
+def test_recorded_and_vendored_artefacts_agree():
+    """
+    Every vendored artefact must be accounted for by some package and every version a package
+    claims must be vendored. An artefact no package ships is checked against a version nothing
+    declares, and a package naming an absent one is checked against nothing at all.
+    """
+    vendored: dict[str, set[str]] = {}
+    for name in _vendored("mii-"):
+        vendored.setdefault(_artefact_prefix(name), set()).add(_declared_version(name))
+
+    recorded: dict[str, set[str]] = {}
+    for artefacts in _package_manifest().values():
+        for prefix, version in artefacts.items():
+            recorded.setdefault(prefix, set()).add(version)
+
+    assert recorded == vendored
 
 
 def test_accepted_packages_ship_the_profiles_the_model_assumes():
@@ -1119,13 +1136,6 @@ def test_accepted_packages_ship_the_profiles_the_model_assumes():
     """
     shipped = {package: artefacts["mii-pr-consent-einwilligung"] for package, artefacts in _package_manifest().items()}
     assert RESEARCH_CONSENT_PACKAGE_PROFILES == shipped
-
-
-def test_every_recorded_package_artefact_is_vendored():
-    """A package may only claim artefacts that are here for the model to be checked against."""
-    for package, artefacts in _package_manifest().items():
-        for prefix, version in artefacts.items():
-            assert f"{prefix}.{version}.json" in _vendored(prefix), f"{package} claims an unvendored {prefix}"
 
 
 def test_research_consent_schema_version_json_schema_states_the_accepted_versions():
