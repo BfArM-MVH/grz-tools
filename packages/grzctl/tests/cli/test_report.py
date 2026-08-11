@@ -7,6 +7,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import grzctl.cli
+import pytest
 import sqlalchemy
 from click.testing import CliRunner
 from grz_db.models.submission import Submission
@@ -63,8 +64,18 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     assert (Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv").exists()
 
 
-def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
-    """Small test case with a few submissions for quarterly reports."""
+@pytest.fixture
+def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Path:
+    """Seed three submissions and generate the Q3 2025 quarterly report.
+
+    Seeds: an initial submission whose basic QC passes; a second submitter's
+    submission whose basic QC passes but detailed QC fails (with a populated QC
+    report); and a correction submission for the first submitter that revokes the
+    index patient's consent, alongside a deletion change request against the
+    original submission.
+
+    Returns the directory containing the three generated TSV files.
+    """
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
@@ -261,7 +272,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     )
     assert result_change1.exit_code == 0, result_change1.output
 
-    # generate and check quarterly report
+    # generate quarterly report
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
@@ -270,7 +281,12 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         )
         assert result_report.exit_code == 0, result_report.output
 
-    overview_output_path = Path(report_tmp_dir) / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"
+    return Path(report_tmp_dir)
+
+
+def test_quarterly_overview(quarterly_report_dir: Path):
+    """The overview TSV should have one row per submitter with aggregate counts."""
+    overview_output_path = quarterly_report_dir / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"
     assert overview_output_path.exists()
     with open(overview_output_path, newline="", encoding="utf-8") as overview_file:
         overview_reader = csv.reader(overview_file, delimiter="\t")
@@ -313,7 +329,10 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         "0",
     ]
 
-    dataset_output_path = Path(report_tmp_dir) / "2-Infos_zu_Datensätzen_GRZX00000_3_2025.tsv"
+
+def test_quarterly_dataset(quarterly_report_dir: Path):
+    """The dataset TSV should have one row per submission with per-submission metadata."""
+    dataset_output_path = quarterly_report_dir / "2-Infos_zu_Datensätzen_GRZX00000_3_2025.tsv"
     assert dataset_output_path.exists()
     with open(dataset_output_path, newline="", encoding="utf-8") as dataset_file:
         dataset_reader = csv.reader(dataset_file, delimiter="\t")
@@ -379,7 +398,10 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         "germline;somatic",
     ]
 
-    qc_output_path = Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv"
+
+def test_quarterly_qc(quarterly_report_dir: Path):
+    """The QC TSV should have one row per lab datum that failed detailed QC."""
+    qc_output_path = quarterly_report_dir / "3-Detailprüfung_GRZX00000_3_2025.tsv"
     assert qc_output_path.exists()
     with open(qc_output_path, newline="", encoding="utf-8") as qc_file:
         qc_reader = csv.reader(qc_file, delimiter="\t")

@@ -10,6 +10,7 @@ from datetime import date
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 
 import click.testing
 import grzctl.cli
@@ -753,112 +754,89 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
     }
 
 
-def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
-
-    sub_latest_error = "123456789_2025-07-01_b1b2c3d1"
-    sub_latest_qced = "123456789_2025-07-01_b1b2c3d2"
-    sub_latest_downloaded = "123456789_2025-07-01_b1b2c3d3"
-    sub_history_error_latest_uploaded = "123456789_2025-07-01_b1b2c3d4"
-    sub_no_state = "123456789_2025-07-01_b1b2c3d5"
-
+def _seed_state_histories(cli, args_common: list) -> SimpleNamespace:
+    """Register five submissions covering every state-filter case and return their IDs."""
+    ids = SimpleNamespace(
+        latest_error="123456789_2025-07-01_b1b2c3d1",
+        latest_qced="123456789_2025-07-01_b1b2c3d2",
+        latest_downloaded="123456789_2025-07-01_b1b2c3d3",
+        history_error_latest_uploaded="123456789_2025-07-01_b1b2c3d4",
+        no_state="123456789_2025-07-01_b1b2c3d5",
+    )
     runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
 
-    for submission_id in [
-        sub_latest_error,
-        sub_latest_qced,
-        sub_latest_downloaded,
-        sub_history_error_latest_uploaded,
-        sub_no_state,
-    ]:
+    for submission_id in vars(ids).values():
         result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
         assert result_add.exit_code == 0, result_add.stderr
 
-    update_invocations = [
-        [*args_common, "submission", "update", sub_latest_error, "Error"],
-        [*args_common, "submission", "update", sub_latest_qced, "QCed"],
-        [*args_common, "submission", "update", sub_latest_downloaded, "Downloaded"],
-        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Uploaded"],
-        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Error"],
-    ]
-    for invoke_args in update_invocations:
+    for invoke_args in (
+        [*args_common, "submission", "update", ids.latest_error, "Error"],
+        [*args_common, "submission", "update", ids.latest_qced, "QCed"],
+        [*args_common, "submission", "update", ids.latest_downloaded, "Downloaded"],
+        [*args_common, "submission", "update", ids.history_error_latest_uploaded, "Uploaded"],
+        [*args_common, "submission", "update", ids.history_error_latest_uploaded, "Error"],
+    ):
         result_update = runner.invoke(cli, invoke_args)
         assert result_update.exit_code == 0, result_update.stderr
 
-    # Special transition from Error -> Uploaded, explicitly allowed by flag.
+    # leaves an Error in history while the latest state is Uploaded
     result_ignore_error = runner.invoke(
         cli,
-        [
-            *args_common,
-            "submission",
-            "update",
-            "--ignore-error-state",
-            sub_history_error_latest_uploaded,
-            "Uploaded",
-        ],
+        [*args_common, "submission", "update", "--ignore-error-state", ids.history_error_latest_uploaded, "Uploaded"],
     )
     assert result_ignore_error.exit_code == 0, result_ignore_error.stderr
 
-    result_all = runner.invoke(cli, [*args_common, "list", "--json"])
-    assert result_all.exit_code == 0, result_all.stderr
-    parsed_all = json.loads(result_all.stdout)
-    assert {item["id"] for item in parsed_all} == {
-        sub_latest_error,
-        sub_latest_qced,
-        sub_latest_downloaded,
-        sub_history_error_latest_uploaded,
-        sub_no_state,
+    return ids
+
+
+def _listed_ids(cli, args_common: list, *filter_args: str) -> set:
+    runner = click.testing.CliRunner()
+    result = runner.invoke(cli, [*args_common, "list", "--json", *filter_args])
+    assert result.exit_code == 0, result.stderr
+    return {item["id"] for item in json.loads(result.stdout)}
+
+
+@pytest.fixture
+def state_history_db(blank_database_config_path: Path):
+    """A database seeded with submissions covering every state-filter case."""
+    cli = grzctl.cli.build_cli()
+    args_common = ["db", "--config-file", blank_database_config_path]
+    return cli, args_common, _seed_state_histories(cli, args_common)
+
+
+def test_list_filters_on_the_latest_state_by_default(state_history_db):
+    """Without --filter-mode only the current state counts, so an Error in history does not match."""
+    cli, args_common, ids = state_history_db
+
+    assert _listed_ids(cli, args_common) == set(vars(ids).values()), "an unfiltered list must return every submission"
+    assert _listed_ids(cli, args_common, "--state", "error") == {ids.latest_error}
+    assert _listed_ids(cli, args_common, "--state", "downloaded") == {ids.latest_downloaded}
+
+
+def test_list_any_mode_matches_states_anywhere_in_history(state_history_db):
+    """--filter-mode any is what finds submissions that recovered from a state."""
+    cli, args_common, ids = state_history_db
+
+    runner = click.testing.CliRunner()
+    result = runner.invoke(cli, [*args_common, "list", "--json", "--state", "error", "--filter-mode", "any"])
+    assert result.exit_code == 0, result.stderr
+    parsed = json.loads(result.stdout)
+
+    assert {item["id"] for item in parsed} == {ids.latest_error, ids.history_error_latest_uploaded}
+    recovered = next(item for item in parsed if item["id"] == ids.history_error_latest_uploaded)
+    assert recovered["latest_state"]["state"] == "Uploaded", "matching on history must not alter the reported state"
+
+
+def test_list_ors_repeated_state_filters(state_history_db):
+    """Repeated --state values are OR-ed, in either filter mode."""
+    cli, args_common, ids = state_history_db
+
+    assert _listed_ids(cli, args_common, "--state", "error", "--state", "qced") == {ids.latest_error, ids.latest_qced}
+    assert _listed_ids(cli, args_common, "--state", "error", "--state", "qced", "--filter-mode", "any") == {
+        ids.latest_error,
+        ids.latest_qced,
+        ids.history_error_latest_uploaded,
     }
-
-    # default mode is latest
-    result_error_latest_default = runner.invoke(cli, [*args_common, "list", "--json", "--state", "error"])
-    assert result_error_latest_default.exit_code == 0, result_error_latest_default.stderr
-    parsed_error_latest_default = json.loads(result_error_latest_default.stdout)
-    assert {item["id"] for item in parsed_error_latest_default} == {sub_latest_error}
-    assert parsed_error_latest_default[0]["latest_state"]["state"] == "Error"
-
-    # any mode includes submissions that had Error in history but not as latest state
-    result_error_any = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "any"],
-    )
-    assert result_error_any.exit_code == 0, result_error_any.stderr
-    parsed_error_any = json.loads(result_error_any.stdout)
-    assert {item["id"] for item in parsed_error_any} == {sub_latest_error, sub_history_error_latest_uploaded}
-    history_match = next(filter(lambda item: item["id"] == sub_history_error_latest_uploaded, parsed_error_any))
-    assert history_match["latest_state"]["state"] == "Uploaded"
-
-    # multiple filters in default latest mode are OR-ed on latest state
-    result_multi_latest = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "error", "--state", "qced"],
-    )
-    assert result_multi_latest.exit_code == 0, result_multi_latest.stderr
-    parsed_multi_latest = json.loads(result_multi_latest.stdout)
-    assert {item["id"] for item in parsed_multi_latest} == {sub_latest_error, sub_latest_qced}
-
-    # multiple filters in any mode are OR-ed across all historic states
-    result_multi_any = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "error", "--state", "qced", "--filter-mode", "any"],
-    )
-    assert result_multi_any.exit_code == 0, result_multi_any.stderr
-    parsed_multi_any = json.loads(result_multi_any.stdout)
-    assert {item["id"] for item in parsed_multi_any} == {
-        sub_latest_error,
-        sub_history_error_latest_uploaded,
-        sub_latest_qced,
-    }
-
-    # "--state" supports repeated values
-    result_state_alias = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "downloaded"],
-    )
-    assert result_state_alias.exit_code == 0, result_state_alias.stderr
-    parsed_state_alias = json.loads(result_state_alias.stdout)
-    assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}
 
 
 _DELETE_CHANGE_REQUEST_DATA = {
