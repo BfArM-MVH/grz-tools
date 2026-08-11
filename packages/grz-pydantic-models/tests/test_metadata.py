@@ -3,7 +3,7 @@ import importlib.resources
 import itertools
 import json
 import re
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 from grz_pydantic_models.mii.consent import (
@@ -902,10 +902,113 @@ def test_date_only_provision_end_covers_the_whole_day():
 def test_datetime_provision_end_is_not_extended_to_the_whole_day():
     """A period end that states a time must keep it, otherwise it silently gains up to a day."""
     consent = _consent("minimal_consented_with_datetime")
-    assert consent.provision.period.end == datetime(2050, 8, 31, 18, 7)
+    berlin_summer = timezone(timedelta(hours=2))
+    assert consent.provision.period.end == datetime(2050, 8, 31, 18, 7, tzinfo=berlin_summer)
     period = consent.provision.provision[0].period
-    assert period.end == datetime(2025, 8, 31, 9, 4, 51)
+    assert period.end == datetime(2025, 8, 31, 9, 4, 51, tzinfo=berlin_summer)
     assert not period.contains(datetime(2025, 8, 31, 12, 0, tzinfo=UTC))
+
+
+@pytest.mark.parametrize(
+    ("bound", "start", "end"),
+    [
+        ("2020", datetime(2020, 1, 1, 0, 0, tzinfo=UTC), datetime(2020, 12, 31, 23, 59, 59, 999999, tzinfo=UTC)),
+        ("2020-09", datetime(2020, 9, 1, 0, 0, tzinfo=UTC), datetime(2020, 9, 30, 23, 59, 59, 999999, tzinfo=UTC)),
+        ("2020-02", datetime(2020, 2, 1, 0, 0, tzinfo=UTC), datetime(2020, 2, 29, 23, 59, 59, 999999, tzinfo=UTC)),
+        ("2021-02", datetime(2021, 2, 1, 0, 0, tzinfo=UTC), datetime(2021, 2, 28, 23, 59, 59, 999999, tzinfo=UTC)),
+        ("2020-09-01", datetime(2020, 9, 1, 0, 0, tzinfo=UTC), datetime(2020, 9, 1, 23, 59, 59, 999999, tzinfo=UTC)),
+    ],
+)
+def test_period_bound_covers_the_whole_period_it_names(bound: str, start: datetime, end: datetime):
+    """
+    FHIR dateTime states a year or a month in place of a full date, each naming a whole period.
+
+    A start therefore begins at that period's first instant and an end expires at its last, the same
+    rule FHIR spells out for a date-only end.
+    """
+    assert Period(start=bound).start == start
+    assert Period(start="2020-01-01", end=bound).end == end
+
+
+def test_period_bound_of_reduced_precision_stays_in_force_for_its_whole_period():
+    """
+    A permit ending in a stated year must run to that year's end.
+
+    Read as a Unix timestamp instead, such a bound lands in 1970 and refuses consent it grants.
+    """
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["provision"]["period"]["end"] = "2030"
+    for provision in consent_raw["provision"]["provision"]:
+        provision["period"]["end"] = "2030"
+
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=Consent.model_validate(consent_raw))
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2030, month=12, day=31))
+    assert not ResearchConsent.consents_to_research([research_consent], date=date(year=2031, month=1, day=1))
+
+
+@pytest.mark.parametrize(
+    "bound",
+    [
+        "2020-09-01 14:37:22+02:00",  # FHIR separates date and time by 'T', never by a space
+        "2020-09-01T14:37",  # seconds are not optional
+        "2020-09-01T14:37:22",  # a stated time demands a timezone
+        "20200901",  # the basic format is no FHIR dateTime
+        "2020-W36-2",  # nor is a week date
+        "2020-9",  # a month is two digits
+        "2021-02-30",  # the regex admits any day up to 31, but February has no 30th
+        "0000",  # year zero is excluded
+        "1700000000",  # a Unix timestamp would otherwise be read as one
+        1700000000,
+    ],
+)
+def test_period_rejects_a_bound_that_is_no_fhir_datetime(bound):
+    """
+    Pydantic reads an all-numeric string as a Unix timestamp, placing such a bound in 1970 unremarked
+    and refusing consent that was granted, so anything outside the dateTime regex must be rejected.
+    """
+    with pytest.raises(ValidationError, match=r"FHIR dateTime|existing date"):
+        Period(start=bound)
+    with pytest.raises(ValidationError, match=r"FHIR dateTime|existing date"):
+        Period(start="2020-01-01", end=bound)
+
+
+@pytest.mark.parametrize("case", VALID_CONSENT_CASES)
+def test_consent_round_trips_through_its_own_json(case: str):
+    """
+    A serialized consent must still be a document the model accepts.
+
+    FHIR demands a timezone alongside a time, so a bound widened to a datetime has to carry one for
+    its serialization to stay a dateTime.
+    """
+    consent = _consent(case)
+    assert Consent.model_validate_json(consent.model_dump_json(by_alias=True)) == consent
+
+
+def test_consent_date_time_rejects_a_value_that_is_no_fhir_datetime():
+    """Consent.dateTime is a FHIR dateTime like the period bounds and takes the same timestamp path."""
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["dateTime"] = "1700000000"
+
+    with pytest.raises(ValidationError, match="FHIR dateTime"):
+        Consent.model_validate(consent_raw)
+
+
+def test_consent_date_time_of_reduced_precision_takes_its_first_instant():
+    """A point in time bounds no period, so a year names the first instant it can denote."""
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["dateTime"] = "2020"
+
+    assert Consent.model_validate(consent_raw).date_time == datetime(2020, 1, 1, 0, 0, tzinfo=UTC)
+
+
+def test_verification_date_rejects_a_value_that_is_no_fhir_datetime():
+    """Consent.verification.verificationDate is a FHIR dateTime and takes the same timestamp path."""
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["verification"] = [{"verified": True, "verificationDate": "1700000000"}]
+
+    with pytest.raises(ValidationError, match="FHIR dateTime"):
+        Consent.model_validate(consent_raw)
 
 
 ### Conformance against the MII artefacts vendored in example_terminology. These tests discover

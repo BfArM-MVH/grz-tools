@@ -1,4 +1,6 @@
-from datetime import date, datetime, time
+import re
+from calendar import monthrange
+from datetime import UTC, date, datetime, time
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
@@ -37,33 +39,89 @@ class Status(StrEnum):
     ENTERED_IN_ERROR = "entered-in-error"
 
 
-def _date_to_datetime(value: Any, time_of_day: time) -> Any:
-    """
-    Widen a date-only period bound to a datetime at ``time_of_day``.
+# Value regex of the FHIR R4 dateTime primitive, which allows a year, a year and month, a full date,
+# or a date with a time. A time demands seconds and a timezone; ISO forms FHIR does not spell out,
+# such as a space in place of the 'T' or the basic format 20200901, are no dateTime.
+_FHIR_DATETIME = re.compile(
+    r"(?P<year>[0-9]([0-9]([0-9][1-9]|[1-9]0)|[1-9]00)|[1-9]000)"
+    r"(-(?P<month>0[1-9]|1[0-2])"
+    r"(-(?P<day>0[1-9]|[1-2][0-9]|3[0-1])"
+    r"(?P<time>T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)(\.[0-9]+)?"
+    r"(Z|(\+|-)((0[0-9]|1[0-3]):[0-5][0-9]|14:00)))?)?)?"
+)
 
-    Values that already carry a time component are passed through untouched for pydantic to parse.
 
-    :param value: raw period bound as submitted.
-    :param time_of_day: time to combine a date-only bound with.
-    :returns: a datetime for date-only bounds, otherwise ``value`` unchanged.
+def _covered_days(match: re.Match[str]) -> tuple[date, date]:
     """
-    if isinstance(value, datetime):
+    First and last day the matched FHIR date covers at the precision it states.
+
+    :param match: match of ``_FHIR_DATETIME`` stating no time.
+    :returns: first and last day covered.
+    :raises ValueError: if the date does not exist, which the regex alone does not rule out because
+        it accepts every day from 01 to 31 in any month.
+    """
+    year = int(match["year"])
+
+    if match["month"] is None:
+        return date(year, 1, 1), date(year, 12, 31)
+    month = int(match["month"])
+
+    if match["day"] is None:
+        return date(year, month, 1), date(year, month, monthrange(year, month)[1])
+
+    day = date(year, month, int(match["day"]))
+    return day, day
+
+
+def _to_datetime(value: Any, *, upper: bool) -> Any:
+    """
+    Widen a FHIR dateTime stating no time to the datetime bounding the period it names.
+
+    FHIR reads such a value as the whole period it names, be that a day, a month or a year, so a
+    lower bound begins at its first instant and an upper bound expires at its last. Values stating a
+    time are passed through untouched for pydantic to parse.
+
+    A string that is no FHIR dateTime is rejected rather than passed through: pydantic reads an
+    all-numeric string as a Unix timestamp, which would place such a value in 1970 unremarked.
+
+    The result is timezone-aware, reading a value that names no zone as UTC as the rest of the
+    pipeline does. FHIR demands a zone alongside a time, so a naive result would serialize to a
+    string this validator no longer accepts.
+
+    :param value: raw value as submitted.
+    :param upper: whether ``value`` bounds its period from above.
+    :returns: an aware datetime for values stating no time, otherwise ``value`` unchanged.
+    :raises ValueError: if ``value`` is neither empty nor a FHIR dateTime.
+    """
+    time_of_day = time.max if upper else time.min
+
+    if value is None:
         return value
 
+    if isinstance(value, datetime):
+        return as_aware_datetime(value)
+
     if isinstance(value, date):
-        return datetime.combine(value, time_of_day)
+        return datetime.combine(value, time_of_day, tzinfo=UTC)
 
-    if isinstance(value, str):
-        has_time_component = "T" in value or " " in value
-        if has_time_component:
-            return value
-        try:
-            parsed = date.fromisoformat(value)
-        except ValueError:
-            return value
-        return datetime.combine(parsed, time_of_day)
+    if not isinstance(value, str):
+        raise ValueError(f"expected a FHIR dateTime, got {type(value).__name__}")
 
-    return value
+    match = _FHIR_DATETIME.fullmatch(value)
+    if match is None:
+        raise ValueError(
+            f"'{value}' is no FHIR dateTime; expected YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DDThh:mm:ss+zz:zz"
+        )
+
+    if match["time"] is not None:
+        return value
+
+    try:
+        first, last = _covered_days(match)
+    except ValueError:
+        raise ValueError(f"'{value}' names no existing date") from None
+
+    return datetime.combine(last if upper else first, time_of_day, tzinfo=UTC)
 
 
 class Period(FhirElement):
@@ -75,18 +133,18 @@ class Period(FhirElement):
     schemaVersion ships a profile that still pins the end to 1..1.
     """
 
-    # FHIR reads a date-only bound as the whole day: a start begins at midnight, an end expires
-    # at the end of that day.
+    # FHIR reads a bound stating no time as the whole period it names: a start begins at its first
+    # instant, an end expires at its last.
 
     @field_validator("start", mode="before")
     @classmethod
-    def start_of_day(cls, v):
-        return _date_to_datetime(v, time.min)
+    def start_at_first_instant(cls, v):
+        return _to_datetime(v, upper=False)
 
     @field_validator("end", mode="before")
     @classmethod
-    def end_of_day(cls, v):
-        return _date_to_datetime(v, time.max)
+    def end_at_last_instant(cls, v):
+        return _to_datetime(v, upper=True)
 
     def contains(self, moment: datetime) -> bool:
         """
@@ -198,6 +256,13 @@ class Verification(StrictIgnoringBaseModel):
     verified: bool
     verification_date: datetime | None = None
 
+    # A point in time bounds no period, so one stating no time takes the first instant it can name.
+
+    @field_validator("verification_date", mode="before")
+    @classmethod
+    def verification_date_at_first_instant(cls, v):
+        return _to_datetime(v, upper=False)
+
 
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
 EXPECTED_SCOPE_CODING_CODE = "research"
@@ -296,6 +361,13 @@ class Consent(StrictIgnoringBaseModel):
     policy: Annotated[list[Policy], Field(min_length=1)]
     verification: list[Verification] | None = None
     provision: RootConsentProvision | None = None
+
+    # A point in time bounds no period, so one stating no time takes the first instant it can name.
+
+    @field_validator("date_time", mode="before")
+    @classmethod
+    def date_time_at_first_instant(cls, v):
+        return _to_datetime(v, upper=False)
 
     @model_validator(mode="after")
     def ensure_valid_scope(self):
