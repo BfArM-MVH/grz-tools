@@ -1129,7 +1129,10 @@ def test_every_recorded_package_artefact_is_vendored():
 
 
 def test_research_consent_schema_version_json_schema_states_the_accepted_versions():
-    """The exported schema must state the accepted versions, to agree with the GRZ metadata schema."""
+    """
+    The published schema constrains schemaVersion only through the restated enum, so a dropped
+    restatement leaves it an unconstrained string.
+    """
     schema = GrzSubmissionMetadata.model_json_schema()
     # the field is optional, so pydantic wraps the declared schema in an anyOf with null
     schema_version = schema["$defs"]["ResearchConsent"]["properties"]["schemaVersion"]
