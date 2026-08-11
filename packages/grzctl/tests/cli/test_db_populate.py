@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, DonorsDiffCollection, SubmissionDiffCollection
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
@@ -25,6 +26,17 @@ def _parse(metadata_raw: dict) -> GrzSubmissionMetadata:
     return GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
 
 
+def _db_ctx(config_path: Path, test_metadata_path: Path, *, register: bool) -> SimpleNamespace:
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata = _parse(metadata_raw)
+    submission_id = metadata.submission_id
+    config = DbConfig.from_path(config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    if register:
+        db.add_submission(submission_id)
+    return SimpleNamespace(db=db, metadata=metadata, metadata_raw=metadata_raw, submission_id=submission_id)
+
+
 @pytest.fixture
 def db_ctx(blank_database_config_path: Path, test_metadata_path: Path) -> SimpleNamespace:
     """SubmissionDb + parsed metadata wired up for populate tests.
@@ -32,13 +44,39 @@ def db_ctx(blank_database_config_path: Path, test_metadata_path: Path) -> Simple
     The submission is registered in the database (``db.add_submission``) but not
     yet populated, so every field starts as NULL.
     """
-    metadata_raw = json.loads(test_metadata_path.read_text())
-    metadata = _parse(metadata_raw)
-    submission_id = metadata.submission_id
-    config = DbConfig.from_path(blank_database_config_path)
-    db = SubmissionDb(db_url=config.db.database_url, author=None)
-    db.add_submission(submission_id)
-    return SimpleNamespace(db=db, metadata=metadata, metadata_raw=metadata_raw, submission_id=submission_id)
+    return _db_ctx(blank_database_config_path, test_metadata_path, register=True)
+
+
+@pytest.fixture
+def unregistered_db_ctx(blank_database_config_path: Path, test_metadata_path: Path) -> SimpleNamespace:
+    """Like :func:`db_ctx`, but the submission was never added, as after a fresh download."""
+    return _db_ctx(blank_database_config_path, test_metadata_path, register=False)
+
+
+def test_populate_registers_an_unknown_submission_when_asked(unregistered_db_ctx: SimpleNamespace):
+    """``download`` populates submissions it has just fetched, which are not yet in the database.
+
+    That is the only mode production passes, so the default-covering tests above would leave it
+    untested.
+    """
+    ctx = unregistered_db_ctx
+
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, on_missing="create")
+
+    submission = ctx.db.get_submission(ctx.submission_id)
+    assert submission is not None
+    assert submission.submitter_id == ctx.metadata.submission.submitter_id
+    assert len(ctx.db.get_donors(ctx.submission_id)) == len(ctx.metadata.donors)
+
+
+def test_populate_refuses_an_unknown_submission_by_default(unregistered_db_ctx: SimpleNamespace):
+    """Defaulting to an error keeps a mistyped ID from quietly creating a second submission."""
+    ctx = unregistered_db_ctx
+
+    with pytest.raises(SubmissionNotFoundError):
+        ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE)
+
+    assert ctx.db.get_submission(ctx.submission_id) is None
 
 
 def test_populate_no_raise_on_additive_changes(db_ctx: SimpleNamespace):
