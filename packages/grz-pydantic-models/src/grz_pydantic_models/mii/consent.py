@@ -202,12 +202,12 @@ class Verification(StrictIgnoringBaseModel):
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
 EXPECTED_SCOPE_CODING_CODE = "research"
 MII_BROAD_CONSENT_OID = "2.16.840.1.113883.3.1937.777.24.2.184"
-#: OIDs of the broad consent versions and additional modules, introduced in package 2026.0.0.
+# OIDs of the broad consent versions and additional modules, introduced in package 2026.0.0.
 MII_CONSENT_VERSION_MODULES_SYSTEM = (
     "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-version-modules"
 )
-#: The category CodeSystem was renamed in package version 2026.0.0, but that package's own
-#: examples still use the old spelling, so both are in the wild.
+# The category CodeSystem was renamed in package version 2026.0.0, but that package's own
+# examples still use the old spelling, so both are in the wild.
 MII_CONSENT_CATEGORY_SYSTEMS = (
     "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
     MII_CONSENT_VERSION_MODULES_SYSTEM,
@@ -229,22 +229,26 @@ class BroadConsentVersion(StrEnum):
 class ConsentDocumentKind(StrEnum):
     """What a broad consent document declares."""
 
-    #: Consent to the broad consent itself.
     CONSENT = "consent"
-    #: Refusal of the broad consent (Ablehnung).
+    """Consent to the broad consent itself."""
+
     REJECTION = "rejection"
-    #: Withdrawal of the entire broad consent (Komplettwiderruf).
+    """Refusal of the broad consent (Ablehnung)."""
+
     COMPLETE_WITHDRAWAL = "complete withdrawal"
-    #: Withdrawal of parts of the broad consent (Teilwiderruf).
+    """Withdrawal of the entire broad consent (Komplettwiderruf)."""
+
     PARTIAL_WITHDRAWAL = "partial withdrawal"
-    #: An additional module on top of the broad consent (Zusatzmodul).
+    """Withdrawal of parts of the broad consent (Teilwiderruf)."""
+
     ADDITIONAL_MODULE = "additional module"
+    """An additional module on top of the broad consent (Zusatzmodul)."""
 
 
-#: What each code of the version and modules CodeSystem declares. These OIDs identify the signed
-#: document and appear as Consent.policy[].uri, unlike schemaVersion, which names the KDS package.
-#: Unknown OIDs are reported, never rejected: a future broad consent version must not break
-#: submissions.
+# What each code of the version and modules CodeSystem declares. These OIDs identify the signed
+# document and appear as Consent.policy[].uri, unlike schemaVersion, which names the KDS package.
+# Unknown OIDs are reported, never rejected: a future broad consent version must not break
+# submissions.
 BROAD_CONSENT_DOCUMENT_OIDS: dict[str, tuple[ConsentDocumentKind, BroadConsentVersion | None]] = {
     MII_BROAD_CONSENT_OID: (ConsentDocumentKind.CONSENT, None),
     "2.16.840.1.113883.3.1937.777.24.2.1790": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_6D),

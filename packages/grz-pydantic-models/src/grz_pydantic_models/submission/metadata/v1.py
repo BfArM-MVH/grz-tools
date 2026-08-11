@@ -288,11 +288,11 @@ class MvConsent(StrictBaseModel):
     """
 
 
-#: MII "Modul Consent" package versions the Consent model is checked against, in publication order,
-#: each mapped to the version of MII_PR_Consent_Einwilligung it ships. The profile version
-#: decides which cardinalities apply, so a package cannot be accepted without naming its profile.
-#: GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has not released; add it here once it
-#: is, together with its artefacts in example_terminology.
+# MII "Modul Consent" package versions the Consent model is checked against, in publication order,
+# each mapped to the version of MII_PR_Consent_Einwilligung it ships. The profile version
+# decides which cardinalities apply, so a package cannot be accepted without naming its profile.
+# GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has not released; add it here once it
+# is, together with its artefacts in example_terminology.
 RESEARCH_CONSENT_PACKAGE_PROFILES = {
     "2025.0.1": "1.0.8",
     "2025.0.2": "1.0.8",
@@ -303,10 +303,10 @@ RESEARCH_CONSENT_PACKAGE_PROFILES = {
 
 RESEARCH_CONSENT_SCHEMA_VERSIONS = tuple(RESEARCH_CONSENT_PACKAGE_PROFILES)
 
-#: Profile versions pinning both provision periods' end to 1..1. Profile 1.0.9 relaxed it to 0..1,
-#: so only there may a period stay open-ended. A profile absent from this set is taken not to
-#: require an end, so a future profile that re-tightens the bound has to be added here;
-#: test_model_matches_the_profile fails against the vendored artefacts until it is.
+# Profile versions pinning both provision periods' end to 1..1. Profile 1.0.9 relaxed it to 0..1,
+# so only there may a period stay open-ended. A profile absent from this set is taken not to
+# require an end, so a future profile that re-tightens the bound has to be added here;
+# test_model_matches_the_profile fails against the vendored artefacts until it is.
 PROFILES_REQUIRING_PERIOD_END = frozenset({"1.0.8"})
 
 
@@ -319,7 +319,7 @@ def _validate_research_consent_schema_version(value: str) -> str:
     return value
 
 
-#: Restated for JSON Schema, which cannot express a validator and would export a bare string.
+# Restated for JSON Schema, which cannot express a validator and would export a bare string.
 ResearchConsentSchemaVersion = Annotated[
     str,
     AfterValidator(_validate_research_consent_schema_version),
