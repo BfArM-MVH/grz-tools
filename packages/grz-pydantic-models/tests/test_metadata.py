@@ -1012,17 +1012,18 @@ def test_period_bound_given_as_a_python_object_is_widened_and_made_aware():
         "20200901",  # the basic format is not a FHIR dateTime
         "2020-W36-2",  # nor is a week date
         "2020-9",  # a month is two digits
+        "20",  # a year is four digits, so a truncated one must not read as year 20
+        "202",
+        "20200",  # nor may a fifth digit be ignored
         "2020-00",  # month zero does not exist
         "2020-13",  # nor does month 13
         "2020-09-00",  # nor day zero
         "2020-09-32",  # nor day 32
-        "2021-02-30",  # the regex admits any day up to 31, but February has no 30th
         "2020-09-01T24:00:00Z",  # hours run to 23; FHIR has no end-of-day 24:00
         "2020-09-01T14:60:00Z",  # minutes run to 59, unlike seconds, which allow a leap second
         "2020-09-01T14:37:22+15:00",  # no timezone is that far ahead
         "2020-09-01T14:37:22+14:01",  # +14:00 is the furthest offset, and only exactly on the hour
         "2020-09-01T14:37:22+2:00",  # an offset hour is two digits
-        "0000",  # year zero is excluded
         "1700000000",  # a Unix timestamp would otherwise be read as one
         1700000000,
         "",  # an empty string names nothing
@@ -1033,11 +1034,53 @@ def test_period_rejects_a_bound_that_is_not_a_fhir_datetime(bound):
     """
     Pydantic reads an all-numeric string as a Unix timestamp, placing such a bound in 1970 unremarked
     and refusing consent that was granted, so anything outside the dateTime regex must be rejected.
+
+    The match is exact rather than an alternation over both rejection messages, so that a change
+    rerouting a value to the other message shows up here instead of passing quietly.
     """
-    with pytest.raises(ValidationError, match=r"FHIR dateTime|existing date"):
+    with pytest.raises(ValidationError, match="is not a FHIR dateTime"):
         Period(start=bound)
-    with pytest.raises(ValidationError, match=r"FHIR dateTime|existing date"):
+    with pytest.raises(ValidationError, match="is not a FHIR dateTime"):
         Period(start="2020-01-01", end=bound)
+
+
+@pytest.mark.parametrize(
+    "bound",
+    [
+        "2021-02-30",  # the regex admits any day up to 31, but February has no 30th
+        "2020-02-30",  # not even in a leap year
+        "2020-04-31",  # April has 30 days
+        "0000",  # the regex admits any four digits, but there is no year zero
+        "0000-01-01",
+    ],
+)
+def test_period_rejects_a_bound_that_names_no_existing_date(bound: str):
+    """
+    The regex checks shape, not whether the date exists, so `_covered_days` rejects the rest.
+
+    These reach a different error than a malformed bound does, and the split keeps that distinction
+    visible: were one path to swallow the other's cases, one of these two tests would fail.
+    """
+    with pytest.raises(ValidationError, match="is not an existing date"):
+        Period(start=bound)
+    with pytest.raises(ValidationError, match="is not an existing date"):
+        Period(start="2020-01-01", end=bound)
+
+
+def test_period_bound_is_revalidated_on_assignment():
+    """
+    The base model sets validate_assignment, so a bound replaced after construction is checked too.
+
+    Without this the widening and the timestamp rejection would apply only at construction, and code
+    that patches a period in place could reintroduce the 1970 bug the regex exists to prevent.
+    """
+    period = Period(start="2020-01-01")
+
+    period.end = "2030"
+    assert period.end == datetime(2030, 12, 31, 23, 59, 59, 999999, tzinfo=UTC)
+
+    with pytest.raises(ValidationError, match="is not a FHIR dateTime"):
+        period.end = "1700000000"
 
 
 @pytest.mark.parametrize("case", VALID_CONSENT_CASES)

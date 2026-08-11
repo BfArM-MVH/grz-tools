@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, time
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import BeforeValidator, ConfigDict, Field, model_validator
 
 from ..common import StrictBaseModel, as_aware_datetime
 
@@ -44,7 +44,9 @@ class Status(StrEnum):
 # such as a space in place of the 'T' or the basic format 20200901, are not dateTimes.
 # See https://hl7.org/fhir/R4/datatypes.html#dateTime
 _FHIR_DATETIME = re.compile(
-    r"(?P<year>[0-9]([0-9]([0-9][1-9]|[1-9]0)|[1-9]00)|[1-9]000)"
+    # FHIR spells year zero out of the grammar; here `_covered_days` rejects it along with every
+    # other date that does not exist, so a plain four-digit year is enough.
+    r"(?P<year>[0-9]{4})"
     r"(-(?P<month>0[1-9]|1[0-2])"
     r"(-(?P<day>0[1-9]|[1-2][0-9]|3[0-1])"
     r"(?P<time>T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)(\.[0-9]+)?"
@@ -108,7 +110,7 @@ def _to_datetime(value: Any, *, last_moment: bool) -> Any:
         return datetime.combine(value, time_of_day, tzinfo=UTC)
 
     if not isinstance(value, str):
-        raise ValueError(f"expected a FHIR dateTime, got {type(value).__name__}")
+        raise ValueError(f"{type(value).__name__} is not a FHIR dateTime")
 
     match = _FHIR_DATETIME.fullmatch(value)
     if match is None:
@@ -127,27 +129,39 @@ def _to_datetime(value: Any, *, last_moment: bool) -> Any:
     return datetime.combine(last if last_moment else first, time_of_day, tzinfo=UTC)
 
 
+def _at_first_moment(value: Any) -> Any:
+    return _to_datetime(value, last_moment=False)
+
+
+def _at_last_moment(value: Any) -> Any:
+    return _to_datetime(value, last_moment=True)
+
+
+FhirDateTime = Annotated[datetime, BeforeValidator(_at_first_moment)]
+"""
+A FHIR dateTime read as the first moment of the span it names.
+
+This is the reading for every dateTime except a period end: a point in time bounds nothing, so one
+stating only a year means the first moment that year can denote.
+"""
+
+FhirPeriodEnd = Annotated[datetime, BeforeValidator(_at_last_moment)]
+"""
+A FHIR dateTime read as the last moment of the span it names.
+
+FHIR reads a period end without a time as the whole span it names, so an end stating only a year
+stays in force until that year is over.
+"""
+
+
 class Period(FhirElement):
-    start: datetime
-    end: datetime | None = None
+    start: FhirDateTime
+    end: FhirPeriodEnd | None = None
     """
     Optional because one model serves every profile version and 1.0.9 relaxed this to 0..1. FHIR
     reads a period without an end as still running, so ResearchConsent rejects one when the declared
     schemaVersion ships a profile that still pins the end to 1..1.
     """
-
-    # FHIR reads a bound without a time as the whole span it names: a start begins at that span's
-    # first moment, an end expires at its last.
-
-    @field_validator("start", mode="before")
-    @classmethod
-    def start_at_first_moment(cls, v):
-        return _to_datetime(v, last_moment=False)
-
-    @field_validator("end", mode="before")
-    @classmethod
-    def end_at_last_moment(cls, v):
-        return _to_datetime(v, last_moment=True)
 
     def contains(self, moment: datetime) -> bool:
         """
@@ -257,14 +271,7 @@ class Patient(StrictIgnoringBaseModel):
 
 class Verification(StrictIgnoringBaseModel):
     verified: bool
-    verification_date: datetime | None = None
-
-    # A point in time bounds nothing, so one without a time takes the first moment it can name.
-
-    @field_validator("verification_date", mode="before")
-    @classmethod
-    def verification_date_at_first_moment(cls, v):
-        return _to_datetime(v, last_moment=False)
+    verification_date: FhirDateTime | None = None
 
 
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
@@ -360,17 +367,10 @@ class Consent(StrictIgnoringBaseModel):
     scope: CodeableConcept
     category: Annotated[list[CodeableConcept], Field(min_length=2)]
     patient: Patient
-    date_time: datetime
+    date_time: FhirDateTime
     policy: Annotated[list[Policy], Field(min_length=1)]
     verification: list[Verification] | None = None
     provision: RootConsentProvision | None = None
-
-    # A point in time bounds nothing, so one without a time takes the first moment it can name.
-
-    @field_validator("date_time", mode="before")
-    @classmethod
-    def date_time_at_first_moment(cls, v):
-        return _to_datetime(v, last_moment=False)
 
     @model_validator(mode="after")
     def ensure_valid_scope(self):
