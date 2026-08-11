@@ -12,7 +12,6 @@ import boto3
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
-import numpy as np
 import pytest
 import yaml
 from grz_common.utils.crypt import Crypt4GH
@@ -134,24 +133,6 @@ def temp_small_file_sha256sum():
     return "78858035d88f0c66d27984789ddd8fa8a8fc633cf7689ac2b4b1e2e7b37ee3be"
 
 
-def create_large_file(content: str | bytes, output_file: str | PathLike, target_size: int) -> int:
-    """
-    Write some content repeatedly to a file until some target size is reached.
-
-    :param content: Content of the file. Will be repeatedly written to output_file until `target_size` is reached.
-    :param output_file: Path to the output file.
-    :param target_size: target size in bytes.
-    :return: Actual bytes written
-    """
-    # Initialize the size of the new file and open it for writing
-    current_size = 0
-    with open(output_file, "w") as outfile:
-        while current_size < target_size:
-            bytes_written = outfile.write(content)
-            current_size += bytes_written
-    return current_size
-
-
 @pytest.fixture
 def remote_bucket_with_version(remote_bucket):
     """Mock S3 bucket with version.json file at root."""
@@ -185,46 +166,23 @@ def remote_bucket_with_version(remote_bucket):
     return remote_bucket
 
 
-@pytest.fixture
-def temp_large_file_path(temp_data_dir_path) -> Path:
-    temp_large_file_path = temp_data_dir_path / "temp_large_input_file.bed"
-    target_size = 1024 * 1024 * 6  # create 5MB file, multiupload limit is 5MB
+def generate_fastq(file_path: str | PathLike, target_size: int) -> int:
+    """Create a FASTQ file of at least *target_size* bytes.
 
-    with open(small_file_input_path) as fd:
-        content = fd.read()
-
-    create_large_file(content, temp_large_file_path, target_size)
-
-    return temp_large_file_path
-
-
-def generate_random_fastq(file_path: str | PathLike, target_size: int) -> int:
-    """
-    Create a random FASTQ file.
+    The reads repeat rather than being sampled per base: the tests using this only round-trip the
+    file through S3 and compare checksums, so the content never has to look like real sequencing
+    data. The size does matter, being what pushes the transfer over the multipart threshold.
 
     :param file_path: Path to the FASTQ file.
     :param target_size: Target size in bytes.
     :return: Actual bytes written
     """
-    nucleotides = np.array(["A", "T", "C", "G"])
-    quality_scores = np.array(list("!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHI"))
-    bases_per_read = 100  # Length of each read
+    bases_per_read = 100
+    record = f"@SEQ_ID\n{'ACGT' * (bases_per_read // 4)}\n+\n{'I' * bases_per_read}\n"
+    repeats = -(-target_size // len(record))  # ceiling division
 
     with open(file_path, "w") as fastq_file:
-        total_bytes_written = 0
-
-        while total_bytes_written < target_size:
-            # Generate a random sequence of nucleotides using numpy
-            seq = "".join(np.random.choice(nucleotides, bases_per_read))
-            qual = "".join(np.random.choice(quality_scores, bases_per_read))
-
-            # FASTQ entry format
-            entry = f"@SEQ_ID_{np.random.randint(1, 10**6)}\n{seq}\n+\n{qual}\n"
-
-            actual_bytes_written = fastq_file.write(entry)
-            total_bytes_written += actual_bytes_written
-
-    return total_bytes_written
+        return fastq_file.write(record * repeats)
 
 
 @pytest.fixture
@@ -233,7 +191,7 @@ def temp_fastq_file_path(temp_data_dir_path) -> Path:
     temp_fastq_gz_path = temp_data_dir_path / file_name
     target_size = 1024 * 1024 * 6  # create 5MB file, multiupload limit is 5MB
 
-    generate_random_fastq(temp_fastq_gz_path, target_size)
+    generate_fastq(temp_fastq_gz_path, target_size)
 
     return temp_fastq_gz_path
 
@@ -273,12 +231,12 @@ def temp_fastq_file_sha256sum(temp_fastq_file_path):
 
 
 @pytest.fixture
-def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
+def temp_metadata_file_path(temp_data_dir_path) -> Path:
+    """Metadata naming a file that is never created: validation reads paths, it does not open them."""
     with open(metadata_path) as fd:
         metadata = json.load(fd)
 
-    # insert large file
-    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = temp_large_file_path.name
+    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = "temp_large_input_file.bed"
 
     metadata_file_path = temp_data_dir_path / "metadata.json"
     with open(metadata_file_path, "w") as fd:
