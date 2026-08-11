@@ -68,8 +68,12 @@ def _date_to_datetime(value: Any, time_of_day: time) -> Any:
 
 class Period(FhirElement):
     start: datetime
-    #: Optional since MII consent package 2026.0.0: a period without an end never expires.
     end: datetime | None = None
+    """
+    Optional because one model serves every profile version and 1.0.9 relaxed this to 0..1. FHIR
+    reads a period without an end as still running, so ResearchConsent rejects one when the declared
+    schemaVersion ships a profile that still pins the end to 1..1.
+    """
 
     # FHIR reads a date-only bound as the whole day: a start begins at midnight, an end expires
     # at the end of that day.
@@ -131,8 +135,10 @@ class ConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
     period: Period
     code: Annotated[list[CodeableConcept], Field(min_length=1)]
-    #: Forbidden by the profile (0..0), and rejected rather than ignored: evaluation never reads it.
     provision: list[Any] | None = None
+    """
+    Forbidden by the profile (0..0), and rejected rather than ignored: evaluation never reads it.
+    """
 
     @model_validator(mode="after")
     def reject_nested_provision(self):
@@ -146,11 +152,17 @@ class ConsentProvision(StrictIgnoringBaseModel):
 
 class RootConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
-    #: Required by every profile version; only its end became optional in profile 1.0.9.
     period: Period
+    """
+    Required by every profile version; only its end became optional in profile 1.0.9.
+    """
+
     provision: list[ConsentProvision] = Field(default_factory=list)
-    #: The profile constrains Consent.provision.code to 0..0; permissions belong on the sub-provisions.
+
     code: list[Any] | None = None
+    """
+    The profile constrains Consent.provision.code to 0..0; permissions belong on the sub-provisions.
+    """
 
     @model_validator(mode="after")
     def reject_root_code(self):
@@ -190,12 +202,12 @@ class Verification(StrictIgnoringBaseModel):
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
 EXPECTED_SCOPE_CODING_CODE = "research"
 MII_BROAD_CONSENT_OID = "2.16.840.1.113883.3.1937.777.24.2.184"
-#: OIDs of the broad consent versions and additional modules, introduced in package 2026.0.0.
+# OIDs of the broad consent versions and additional modules, introduced in package 2026.0.0.
 MII_CONSENT_VERSION_MODULES_SYSTEM = (
     "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-version-modules"
 )
-#: The category CodeSystem was renamed in package version 2026.0.0, but that package's own
-#: examples still use the old spelling, so both are in the wild.
+# The category CodeSystem was renamed in package version 2026.0.0, but that package's own
+# examples still use the old spelling, so both are in the wild.
 MII_CONSENT_CATEGORY_SYSTEMS = (
     "https://www.medizininformatik-initiative.de/fhir/modul-consent/CodeSystem/mii-cs-consent-consent_category",
     MII_CONSENT_VERSION_MODULES_SYSTEM,
@@ -217,22 +229,26 @@ class BroadConsentVersion(StrEnum):
 class ConsentDocumentKind(StrEnum):
     """What a broad consent document declares."""
 
-    #: Consent to the broad consent itself.
     CONSENT = "consent"
-    #: Refusal of the broad consent (Ablehnung).
+    """Consent to the broad consent itself."""
+
     REJECTION = "rejection"
-    #: Withdrawal of the entire broad consent (Komplettwiderruf).
+    """Refusal of the broad consent (Ablehnung)."""
+
     COMPLETE_WITHDRAWAL = "complete withdrawal"
-    #: Withdrawal of parts of the broad consent (Teilwiderruf).
+    """Withdrawal of the entire broad consent (Komplettwiderruf)."""
+
     PARTIAL_WITHDRAWAL = "partial withdrawal"
-    #: An additional module on top of the broad consent (Zusatzmodul).
+    """Withdrawal of parts of the broad consent (Teilwiderruf)."""
+
     ADDITIONAL_MODULE = "additional module"
+    """An additional module on top of the broad consent (Zusatzmodul)."""
 
 
-#: What each code of the version and module CodeSystem declares. These OIDs identify the signed
-#: document and appear as Consent.policy[].uri, unlike schemaVersion, which names the KDS package.
-#: Unknown OIDs are reported, never rejected: a future broad consent version must not break
-#: submissions.
+# What each code of the version and modules CodeSystem declares. These OIDs identify the signed
+# document and appear as Consent.policy[].uri, unlike schemaVersion, which names the KDS package.
+# Unknown OIDs are reported, never rejected: a future broad consent version must not break
+# submissions.
 BROAD_CONSENT_DOCUMENT_OIDS: dict[str, tuple[ConsentDocumentKind, BroadConsentVersion | None]] = {
     MII_BROAD_CONSENT_OID: (ConsentDocumentKind.CONSENT, None),
     "2.16.840.1.113883.3.1937.777.24.2.1790": (ConsentDocumentKind.CONSENT, BroadConsentVersion.V1_6D),
@@ -325,8 +341,21 @@ class Consent(StrictIgnoringBaseModel):
         return self
 
     @property
+    def is_in_force(self) -> bool:
+        """
+        Whether the consent's status marks it as currently valid.
+
+        Consent.status is a FHIR modifier element: every status other than 'active' marks the consent
+        as not in force, so its provisions must not be read as permissions.
+        """
+        return self.status == Status.ACTIVE
+
+    @property
     def document_oids(self) -> frozenset[str]:
-        """Bare OIDs identifying the signed documents, from policy URIs and version/module categories."""
+        """
+        Bare OIDs identifying the signed documents, from policy URIs and from category codings in
+        the version and modules CodeSystem.
+        """
         from_policies = {_strip_oid_prefix(policy.uri) for policy in self.policy}
         from_categories = {
             coding.code
@@ -338,7 +367,7 @@ class Consent(StrictIgnoringBaseModel):
 
     @property
     def _known_documents(self) -> tuple[tuple[ConsentDocumentKind, BroadConsentVersion | None], ...]:
-        """The (kind, version) pairs of those document OIDs the version and module CodeSystem defines."""
+        """The (kind, version) pairs of those document OIDs the version and modules CodeSystem defines."""
         return tuple(
             BROAD_CONSENT_DOCUMENT_OIDS[oid] for oid in self.document_oids if oid in BROAD_CONSENT_DOCUMENT_OIDS
         )
@@ -356,7 +385,7 @@ class Consent(StrictIgnoringBaseModel):
     @property
     def unknown_document_oids(self) -> frozenset[str]:
         """
-        OIDs that are not part of the known version and module CodeSystem, e.g. a newer broad consent.
+        OIDs that are not part of the known version and modules CodeSystem, e.g. a newer broad consent.
 
         Policy URIs that are no OIDs at all are reported here unchanged.
         """

@@ -28,6 +28,8 @@ from grz_pydantic_models.submission.metadata import (
     get_accepted_versions,
 )
 from grz_pydantic_models.submission.metadata.v1 import (
+    PROFILES_REQUIRING_PERIOD_END,
+    RESEARCH_CONSENT_PACKAGE_PROFILES,
     RESEARCH_CONSENT_SCHEMA_VERSIONS,
     File,
     FileType,
@@ -384,7 +386,7 @@ def _consent(case: str) -> Consent:
     return Consent.model_validate(_consent_raw(case))
 
 
-#: Example consents the MII consent profile permits; each must parse.
+# Example consents the MII consent profile permits; each must parse.
 VALID_CONSENT_CASES = (
     "minimal_consented",
     "minimal_consented_with_datetime",
@@ -410,7 +412,7 @@ VALID_CONSENT_CASES = (
     "rejection_bc_v1_7_2",
     "status_rejected",
 )
-#: Instances the MII consent profile forbids and whose contents would otherwise be dropped silently.
+# Instances the MII consent profile forbids and whose contents would otherwise be dropped silently.
 INVALID_CONSENT_CASES = (
     "invalid_missing_fields",
     "invalid_wrong_resource_type",
@@ -644,6 +646,46 @@ def test_root_provision_period_caps_open_ended_sub_provisions():
     )
 
 
+_VERSIONS_REQUIRING_PERIOD_END = tuple(
+    version
+    for version, profile in RESEARCH_CONSENT_PACKAGE_PROFILES.items()
+    if profile in PROFILES_REQUIRING_PERIOD_END
+)
+# derived from the mapping under test, so an emptied mapping would silently leave nothing to run
+assert _VERSIONS_REQUIRING_PERIOD_END, "no accepted package ships a profile requiring a period end"
+
+
+@pytest.mark.parametrize("version", _VERSIONS_REQUIRING_PERIOD_END)
+def test_open_ended_period_rejected_where_the_profile_requires_an_end(version: str):
+    """
+    A period without an end never expires, so honouring one would outlive what the donor signed.
+
+    The submitter has to be told which periods to fix, not only that one of them is wrong.
+    """
+    with pytest.raises(ValidationError) as excinfo:
+        ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented_open_ended"))
+
+    assert "requires an end on every provision period" in str(excinfo.value)
+    assert "provision.period" in str(excinfo.value)
+    assert "provision.provision[0].period" in str(excinfo.value)
+
+
+def test_open_ended_nested_period_alone_is_rejected():
+    """The profile pins the end at both levels, so a bounded root does not excuse an open nested one."""
+    consent_raw = _consent_raw("minimal_consented")
+    for provision in consent_raw["provision"]["provision"]:
+        del provision["period"]["end"]
+
+    with pytest.raises(ValidationError, match=r"provision\.provision\[0\]\.period"):
+        ResearchConsent(schemaVersion="2025.0.1", scope=Consent.model_validate(consent_raw))
+
+
+def test_open_ended_period_accepted_without_a_declared_schema_version():
+    """Metadata 1.3 onwards may omit the version, which leaves no profile to enforce."""
+    research_consent = ResearchConsent(scope=_consent("minimal_consented_open_ended"))
+    assert research_consent.scope.provision.period.end is None
+
+
 def test_research_consent_rejects_category_in_both_spellings():
     """The MII broad consent category must appear exactly once, even across both CodeSystem spellings."""
     consent_raw = _consent_raw("minimal_consented")
@@ -765,7 +807,46 @@ def test_research_consent_without_parsed_scope_has_no_broad_consent_version():
     assert research_consent.broad_consent_versions == frozenset()
 
 
-@pytest.mark.parametrize("case", ("withdrawal_complete", "rejection_bc_v1_7_2"))
+@pytest.mark.parametrize("status", ("draft", "proposed", "rejected", "inactive", "entered-in-error"))
+def test_consent_not_in_force_grants_nothing(status: str):
+    """
+    Consent.status is a FHIR modifier element: anything but 'active' marks the consent as not
+    currently valid, so its permit provisions must not be read as research consent.
+    """
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["status"] = status
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=Consent.model_validate(consent_raw))
+
+    assert not research_consent.scope.is_in_force
+    assert research_consent.consent_by_code(date(year=2024, month=1, day=1)) == {}
+    assert not ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+
+
+def test_consent_in_force_still_grants():
+    """The status gate must not change the outcome for the active consents it guards."""
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent("minimal_consented"))
+    assert research_consent.scope.is_in_force
+    assert ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
+
+
+def test_consent_not_in_force_warns(caplog):
+    """A status that refuses is easy to state by mistake, and otherwise shows up only as a False flag."""
+    consent_raw = _consent_raw("minimal_consented")
+    consent_raw["status"] = "rejected"
+
+    ResearchConsent(schemaVersion="2026.0.0", scope=Consent.model_validate(consent_raw))
+
+    assert "status 'rejected'" in caplog.text
+    assert "grants nothing" in caplog.text
+
+
+def test_consent_in_force_does_not_warn(caplog):
+    """A warning on every valid consent would train submitters to ignore it."""
+    ResearchConsent(schemaVersion="2026.0.0", scope=_consent("minimal_consented"))
+    assert "grants nothing" not in caplog.text
+
+
+@pytest.mark.parametrize("case", ("withdrawal_complete", "rejection_bc_v1_7_2", "status_rejected"))
 def test_withdrawal_and_rejection_do_not_consent_to_research(case: str):
     research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=_consent(case))
     assert not ResearchConsent.consents_to_research([research_consent], date=date(year=2024, month=1, day=1))
@@ -863,15 +944,25 @@ def _load_vendored(name: str) -> dict:
     return json.loads(importlib.resources.files(example_terminology).joinpath(name).read_text())
 
 
+def _package_manifest() -> dict[str, dict[str, str]]:
+    """Which version each artefact of a published package states, as the vendoring script recorded it."""
+    return json.loads(importlib.resources.files(example_terminology).joinpath("packages.json").read_text())
+
+
 def _declared_version(name: str) -> str:
     """
     The version a vendored file name claims, e.g. 'mii-cs-consent-policy.1.1.0.json' -> '1.1.0'.
 
     Artefacts are named after their own resource version rather than the package that ships them:
     several packages ship the same CodeSystem or profile version, and the mapping between the two
-    is recorded in the directory README.
+    is recorded in packages.json.
     """
     return name.removesuffix(".json").split(".", 1)[1]
+
+
+def _artefact_prefix(name: str) -> str:
+    """The artefact a vendored file name claims, e.g. 'mii-cs-consent-policy.1.1.0.json' -> 'mii-cs-consent-policy'."""
+    return name.removesuffix(".json").split(".", 1)[0]
 
 
 def _codesystem_concepts(codesystem: dict) -> dict[str, dict[str, object]]:
@@ -928,6 +1019,28 @@ def test_evaluated_policy_codes_are_active(name: str):
         assert not properties.get("inactive"), f"{code.value} is inactive in {name}"
 
 
+def _concept_subtree(nodes: list[dict], code: str) -> dict | None:
+    """The concept carrying ``code``, searched at any depth."""
+    for node in nodes:
+        if node["code"] == code:
+            return node
+        if (found := _concept_subtree(node.get("concept", []), code)) is not None:
+            return found
+    return None
+
+
+@pytest.mark.parametrize("name", _vendored("mii-cs-consent-policy."))
+def test_scientific_use_stays_within_the_patdat_module(name: str):
+    """
+    consents_to_research accepts a permit of either research code alone. That is sound only while
+    the MII keeps the scientific-use permission a descendant of the PATDAT module, so that a permit
+    of the module subsumes it.
+    """
+    module = _concept_subtree(_load_vendored(name)["concept"], ResearchConsentCodes.PATDAT_ERHEBEN_SPEICHERN_NUTZEN)
+    assert module is not None, f"{name} does not define the PATDAT module"
+    assert ResearchConsentCodes.MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU in _codesystem_concepts(module)
+
+
 def _differential(profile: dict) -> dict[str, dict]:
     return {element["id"]: element for element in profile["differential"]["element"]}
 
@@ -962,10 +1075,15 @@ def test_model_matches_the_profile(name: str):
     assert elements["Consent.provision.code"]["max"] == "0"
     assert elements["Consent.provision.provision.provision"]["max"] == "0"
 
-    # a period bound the profile makes optional must not be required by the model, and vice versa
+    # the model must demand a period end exactly where the profile does, at both provision levels
+    requires_end = _declared_version(name) in PROFILES_REQUIRING_PERIOD_END
     for element_id in ("Consent.provision.period.end", "Consent.provision.provision.period.end"):
-        if elements[element_id]["min"] == 0:
-            assert not Period.model_fields["end"].is_required(), f"{name} makes {element_id} optional"
+        assert (elements[element_id]["min"] == 1) == requires_end, (
+            f"{name} and PROFILES_REQUIRING_PERIOD_END disagree on {element_id}"
+        )
+    # the field itself stays optional, since one model serves every profile version
+    assert not Period.model_fields["end"].is_required()
+
     for element_id in ("Consent.provision.period.start", "Consent.provision.provision.period.start"):
         assert elements[element_id]["min"] == 1
     assert Period.model_fields["start"].is_required()
@@ -983,8 +1101,35 @@ def test_model_matches_the_profile(name: str):
     assert Identifier.model_fields["value"].is_required()
 
 
+def test_recorded_and_vendored_artefacts_agree():
+    """
+    A vendored file no package lists would have the model checked against a version no accepted
+    schemaVersion can select; a version a package lists but nothing vendors would leave that
+    package checked against no artefact at all.
+    """
+    vendored = {(_artefact_prefix(name), _declared_version(name)) for name in _vendored("mii-")}
+    recorded = {
+        (prefix, version) for artefacts in _package_manifest().values() for prefix, version in artefacts.items()
+    }
+
+    assert recorded == vendored
+
+
+def test_accepted_packages_ship_the_profiles_the_model_assumes():
+    """
+    The profile a package ships decides which cardinalities apply, and it is stated by the package
+    rather than by the artefacts, which name only themselves. The mapping must repeat what the
+    vendoring script recorded, so that a newly released package cannot be classified from memory.
+    """
+    shipped = {package: artefacts["mii-pr-consent-einwilligung"] for package, artefacts in _package_manifest().items()}
+    assert RESEARCH_CONSENT_PACKAGE_PROFILES == shipped
+
+
 def test_research_consent_schema_version_json_schema_states_the_accepted_versions():
-    """The exported schema must state the accepted versions, to agree with the GRZ metadata schema."""
+    """
+    The published schema constrains schemaVersion only through the restated enum, so a dropped
+    restatement leaves it an unconstrained string.
+    """
     schema = GrzSubmissionMetadata.model_json_schema()
     # the field is optional, so pydantic wraps the declared schema in an anyOf with null
     schema_version = schema["$defs"]["ResearchConsent"]["properties"]["schemaVersion"]
