@@ -62,15 +62,15 @@ def _write_config(tmp_path: Path, config: DbConfig) -> Path:
 
 
 @pytest.fixture
-def blank_database_config(tmp_path: Path, migrated_db_connection: str) -> DbConfig:
+def migrated_database_config(tmp_path: Path, migrated_db_connection: str) -> DbConfig:
     """Config for a database already on the latest schema, one per supported backend."""
     return _database_config(tmp_path, migrated_db_connection)
 
 
 @pytest.fixture
-def blank_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
+def migrated_database_config_path(tmp_path: Path, migrated_database_config: DbConfig) -> Path:
     """Path to a config file for a database on the latest schema."""
-    return _write_config(tmp_path, blank_database_config)
+    return _write_config(tmp_path, migrated_database_config)
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ def empty_database_config_path(tmp_path: Path, db_test_connection: str) -> Path:
 
 
 @pytest.fixture
-def blank_initial_database_config_path(empty_database_config_path: Path) -> Path:
+def initial_revision_database_config_path(empty_database_config_path: Path) -> Path:
     """Path to a config file for a database at :data:`INITIAL_REVISION`, ready to be upgraded."""
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()

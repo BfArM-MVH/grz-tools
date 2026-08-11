@@ -41,7 +41,7 @@ def test_quarter_determination():
         assert year == expected_year
 
 
-def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
+def test_quarterly_empty(migrated_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on an empty database."""
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
@@ -54,7 +54,7 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            ["report", "--config-file", migrated_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
             catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
@@ -65,7 +65,7 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
 
 
 @pytest.fixture
-def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Path:
+def quarterly_report_dir(migrated_database_config_path: Path, tmp_path: Path) -> Path:
     """Seed three submissions and generate the Q3 2025 quarterly report.
 
     Seeds: an initial submission whose basic QC passes; a second submitter's
@@ -89,7 +89,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
     s1_metadata = GrzSubmissionMetadata.model_validate(s1_metadata_raw)
     s1_metadata_raw["submission"]["submissionType"] = "initial"
     result_add1 = runner.invoke(
-        cli, ["db", "--config-file", blank_database_config_path, "submission", "add", s1_metadata.submission_id]
+        cli, ["db", "--config-file", migrated_database_config_path, "submission", "add", s1_metadata.submission_id]
     )
     assert result_add1.exit_code == 0, result_add1.output
     s1_metadata_path = tmp_path / "submission1.metadata.json"
@@ -100,7 +100,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "populate",
             "--no-confirm",
@@ -114,7 +114,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "modify",
             s1_metadata.submission_id,
@@ -134,7 +134,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
     s2_metadata_raw["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient refuses to sign consent"
     s2_metadata = GrzSubmissionMetadata.model_validate(s2_metadata_raw)
     result_add2 = runner.invoke(
-        cli, ["db", "--config-file", blank_database_config_path, "submission", "add", s2_metadata.submission_id]
+        cli, ["db", "--config-file", migrated_database_config_path, "submission", "add", s2_metadata.submission_id]
     )
     assert result_add2.exit_code == 0, result_add2.output
     s2_metadata_path = tmp_path / "submission2.metadata.json"
@@ -145,7 +145,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "populate",
             "--no-confirm",
@@ -159,7 +159,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "modify",
             s2_metadata.submission_id,
@@ -173,7 +173,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "modify",
             s2_metadata.submission_id,
@@ -196,7 +196,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "populate-qc",
             s2_metadata.submission_id,
@@ -215,7 +215,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
     s3_metadata_raw["donors"][0]["researchConsents"][0]["scope"]["provision"]["provision"] = []
     s3_metadata = GrzSubmissionMetadata.model_validate(s3_metadata_raw)
     result_add3 = runner.invoke(
-        cli, ["db", "--config-file", blank_database_config_path, "submission", "add", s3_metadata.submission_id]
+        cli, ["db", "--config-file", migrated_database_config_path, "submission", "add", s3_metadata.submission_id]
     )
     assert result_add3.exit_code == 0, result_add3.output
     s3_metadata_path = tmp_path / "submission3.metadata.json"
@@ -226,7 +226,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "populate",
             "--no-confirm",
@@ -240,7 +240,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "modify",
             s3_metadata.submission_id,
@@ -254,7 +254,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
         [
             "db",
             "--config-file",
-            blank_database_config_path,
+            migrated_database_config_path,
             "submission",
             "change-request",
             s1_metadata.submission_id,
@@ -276,7 +276,7 @@ def quarterly_report_dir(blank_database_config_path: Path, tmp_path: Path) -> Pa
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            ["report", "--config-file", migrated_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
             catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
@@ -427,10 +427,10 @@ def test_quarterly_qc(quarterly_report_dir: Path):
     ]
 
 
-def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path: Path):
+def test_quarterly_migrated_database(migrated_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on databases migrated from prior schema without backpopulating metadata."""
     # add some minimal test data
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_date = date(year=2025, month=9, day=14)
@@ -463,7 +463,7 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["report", "--config-file", blank_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
+            ["report", "--config-file", migrated_database_config_path, "quarterly", "--year", "2025", "--quarter", "3"],
         )
         assert result_report.exit_code == 0, result_report.output
 

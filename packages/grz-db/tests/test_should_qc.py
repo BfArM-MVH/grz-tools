@@ -61,9 +61,7 @@ def _add_submission_with_history(
         current_timestamp += datetime.timedelta(seconds=1)
 
 
-def _add_submission_block(
-    db: SubmissionDb, base_date: datetime.date, start_time: datetime.datetime, count: int
-) -> list:
+def _add_qc_candidates(db: SubmissionDb, base_date: datetime.date, start_time: datetime.datetime, count: int) -> list:
     """Add *count* QC candidates ten minutes apart and return them in submission order."""
     submissions = []
     for i in range(count):
@@ -239,7 +237,7 @@ class TestQcStrategy:
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
 
-        submissions = _add_submission_block(db, base_date, start_time, count=block_size * 2)
+        submissions = _add_qc_candidates(db, base_date, start_time, count=block_size * 2)
         # push the selected share far above the target so neither the month nor the quarter rule fires
         for submission in submissions[:block_size]:
             db.modify_submission(submission.id, "selected_for_qc", "true")
@@ -306,7 +304,7 @@ class TestQcStrategy:
         start_time = datetime.datetime.combine(base_date, datetime.time(8, 0), tzinfo=datetime.UTC)
         block_size = math.floor(1 / target_proportion)
 
-        submissions = _add_submission_block(db, base_date, start_time, count=block_size * 2)
+        submissions = _add_qc_candidates(db, base_date, start_time, count=block_size * 2)
 
         for block in range(2):
             offset = block * block_size
@@ -325,7 +323,7 @@ class TestQcStrategy:
         start_time = datetime.datetime.combine(base_date, datetime.time(8, 0), tzinfo=datetime.UTC)
         block_size = math.floor(1 / target_proportion)
 
-        submissions = _add_submission_block(db, base_date, start_time, count=block_size)
+        submissions = _add_qc_candidates(db, base_date, start_time, count=block_size)
 
         first = [db._is_randomly_selected_for_qc(s, submissions, target_proportion, salt) for s in submissions]
         second = [db._is_randomly_selected_for_qc(s, submissions, target_proportion, salt) for s in submissions]
@@ -336,7 +334,7 @@ class TestQcStrategy:
         base_date = datetime.date(2025, 7, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(8, 0), tzinfo=datetime.UTC)
 
-        submissions = _add_submission_block(db, base_date, start_time, count=5)
+        submissions = _add_qc_candidates(db, base_date, start_time, count=5)
 
         assert not any(db._is_randomly_selected_for_qc(s, submissions, 0.0, "test-salt") for s in submissions)
 

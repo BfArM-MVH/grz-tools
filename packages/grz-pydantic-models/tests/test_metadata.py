@@ -46,7 +46,7 @@ TESTED_VERSIONS = ["1.2.1", "1.3.0"]
 
 
 def _metadata_raw(dataset: str, version: str) -> str:
-    """The raw JSON of an example metadata submission, for tests that mutate it before validation."""
+    """The raw JSON text of an example metadata submission."""
     return importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
 
 
@@ -337,9 +337,9 @@ def test_index_rna_with_dna(version: str):
 
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_lab_datum(version: str):
-    metadata = _metadata("wes_tumor_germline", version)
+    submission = _metadata("wes_tumor_germline", version)
     with pytest.raises(ValueError, match=re.escape("Long read libraries can't be paired-end.")):
-        metadata.donors[0].lab_data[0].library_type = "wes_lr"
+        submission.donors[0].lab_data[0].library_type = "wes_lr"
 
 
 def test_file_extensions():

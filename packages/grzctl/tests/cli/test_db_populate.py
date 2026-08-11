@@ -38,27 +38,23 @@ def _db_ctx(config_path: Path, test_metadata_path: Path, *, register: bool) -> S
 
 
 @pytest.fixture
-def db_ctx(blank_database_config_path: Path, test_metadata_path: Path) -> SimpleNamespace:
+def db_ctx(migrated_database_config_path: Path, test_metadata_path: Path) -> SimpleNamespace:
     """SubmissionDb + parsed metadata wired up for populate tests.
 
     The submission is registered in the database (``db.add_submission``) but not
     yet populated, so every field starts as NULL.
     """
-    return _db_ctx(blank_database_config_path, test_metadata_path, register=True)
+    return _db_ctx(migrated_database_config_path, test_metadata_path, register=True)
 
 
 @pytest.fixture
-def unregistered_db_ctx(blank_database_config_path: Path, test_metadata_path: Path) -> SimpleNamespace:
+def unregistered_db_ctx(migrated_database_config_path: Path, test_metadata_path: Path) -> SimpleNamespace:
     """Like :func:`db_ctx`, but the submission was never added, as after a fresh download."""
-    return _db_ctx(blank_database_config_path, test_metadata_path, register=False)
+    return _db_ctx(migrated_database_config_path, test_metadata_path, register=False)
 
 
 def test_populate_registers_an_unknown_submission_when_asked(unregistered_db_ctx: SimpleNamespace):
-    """``download`` populates submissions it has just fetched, which are not yet in the database.
-
-    That is the only mode production passes, so the default-covering tests above would leave it
-    untested.
-    """
+    """``download`` populates submissions it has just fetched, which are not yet in the database."""
     ctx = unregistered_db_ctx
 
     ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, on_missing="create")
