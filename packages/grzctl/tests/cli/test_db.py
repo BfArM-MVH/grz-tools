@@ -22,6 +22,20 @@ from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionM
 from grzctl.models.config import DbConfig
 
 
+def test_init_brings_an_empty_database_to_the_latest_schema(empty_database_config_path):
+    """``db init`` is the only way an operator creates a schema, so it must reach head unaided."""
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    args_common = ["db", "--config-file", str(empty_database_config_path)]
+
+    result_init = runner.invoke(cli, [*args_common, "init"])
+    assert result_init.exit_code == 0, result_init.stderr
+
+    # 'list' refuses to run against anything short of the latest schema
+    result_list = runner.invoke(cli, [*args_common, "list"])
+    assert result_list.exit_code == 0, result_list.stderr
+
+
 def test_all_migrations(blank_initial_database_config_path):
     """Database migrations should work all the way from the oldest supported to the latest version."""
     # add some test data
