@@ -209,10 +209,7 @@ def test_missing_sequence_subtype_warns_before_cutoff(version: str, caplog):
     del metadata["donors"][0]["labData"][0]
 
     # must not raise for this rule
-    try:
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-    except ValidationError as e:
-        assert "Index donor is missing sequence subtypes" not in str(e)
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
     assert "Index donor is missing sequence subtypes" in caplog.text
     assert "starting 04.12.2025" in caplog.text
@@ -1172,10 +1169,7 @@ def test_disease_type_rare_missing_wgs_warns_before_cutoff(dataset: str, version
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-05-31"
 
-    try:
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-    except ValidationError as e:
-        assert "starting 01.06.2026" not in str(e)
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
     assert "starting 01.06.2026" in caplog.text
 
@@ -1209,10 +1203,7 @@ def test_disease_type_rare_index_has_wgs_and_panel_passes(version: str):
 
     metadata["donors"][0]["labData"].append(panel_datum)
 
-    try:
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-    except ValidationError as e:
-        assert "starting 01.06.2026" not in str(e)
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
 @pytest.mark.parametrize(
@@ -1232,10 +1223,7 @@ def test_disease_type_rare_valid_library_passes(dataset: str, version: str):
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
-    try:
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-    except ValidationError as e:
-        assert "starting 01.06.2026" not in str(e)
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
@@ -1261,11 +1249,8 @@ def test_disease_type_rare_non_index_unrestricted(version: str):
             }
         )
 
-    try:
-        # should pass because the index donor still has WGS
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-    except ValidationError as e:
-        assert "starting 01.06.2026" not in str(e)
+    # should pass because the index donor still has WGS
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
 @pytest.mark.parametrize(
@@ -1311,10 +1296,7 @@ def test_no_scope_justification_tech_org_warns(version: str, justification: str,
             consent["noScopeJustification"] = justification
             consent.pop("scope", None)
 
-    try:
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-    except ValidationError as e:
-        assert "is no longer allowed starting 01.06.2026" not in str(e)
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
     assert "is no longer allowed starting 01.06.2026" in caplog.text
 
@@ -1343,7 +1325,4 @@ def test_no_scope_justification_standard_passes_after_cutoff(version: str, justi
             consent["noScopeJustification"] = justification
             consent.pop("scope", None)
 
-    try:
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-    except ValidationError as e:
-        assert "is no longer allowed starting 01.06.2026" not in str(e)
+    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
