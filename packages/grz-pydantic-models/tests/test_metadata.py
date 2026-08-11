@@ -45,6 +45,16 @@ from pydantic import ValidationError
 TESTED_VERSIONS = ["1.2.1", "1.3.0"]
 
 
+def _metadata_raw(dataset: str, version: str) -> str:
+    """The raw JSON of an example metadata submission, for tests that mutate it before validation."""
+    return importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
+
+
+def _metadata(dataset: str, version: str) -> GrzSubmissionMetadata:
+    """An example metadata submission parsed as the model under test."""
+    return GrzSubmissionMetadata.model_validate_json(_metadata_raw(dataset, version))
+
+
 @pytest.mark.parametrize(
     "dataset,version",
     itertools.product(
@@ -60,17 +70,14 @@ TESTED_VERSIONS = ["1.2.1", "1.3.0"]
     ),
 )
 def test_examples(dataset: str, version: str):
-    metadata_str = importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
-    GrzSubmissionMetadata.model_validate_json(metadata_str)
+    _metadata(dataset, version)
 
 
 def test_wgs_trio_special_consent():
     """
     Broad Consent obtained before 2025-06-15 for non-index donors is allowed to stand in for mvConsent if missing
     """
-    metadata_str = (
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.1.7.earlyBCException.json").read_text()
-    )
+    metadata_str = _metadata_raw("wgs_trio", "1.1.7.earlyBCException")
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
     # only non-index donors can have the special researchConsent exemption
@@ -92,7 +99,7 @@ def test_wgs_trio_no_vcf(version):
     """
     VCFs were downgraded from required to recommended for all submissions.
     """
-    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
+    metadata_str = _metadata_raw("wgs_trio", version)
     GrzSubmissionMetadata.model_validate_json(metadata_str)
 
     metadata = json.loads(metadata_str)
@@ -103,95 +110,41 @@ def test_wgs_trio_no_vcf(version):
 
 
 @pytest.mark.parametrize(
-    "version",
-    TESTED_VERSIONS,
+    "genomic_study_subtype,deleted_subtype,should_raise",
+    (
+        ("tumor+germline", "germline", True),
+        ("tumor+germline", "somatic", True),
+        ("tumor-only", "germline", False),
+        ("tumor-only", "somatic", True),
+        ("germline-only", "germline", True),
+        ("germline-only", "somatic", False),
+    ),
 )
-def test_wgs_tumor_germline_missing_dna(version):
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_wgs_tumor_germline_missing_dna(
+    version: str, genomic_study_subtype: str, deleted_subtype: str, should_raise: bool
+):
     """
-    Ensure that both tumor and germline DNA lab data are required for WGS tumor-germline submissions.
+    Ensure that both tumor and germline DNA lab data are required for WGS tumor-germline submissions,
+    except where the deleted subtype is not required by the declared genomicStudySubtype.
     """
-    metadata_str = (
-        importlib.resources.files(example_metadata).joinpath("wgs_tumor_germline", f"v{version}.json").read_text()
-    )
-
+    metadata = json.loads(_metadata_raw("wgs_tumor_germline", version))
     # The example predates the 04.12.2025 cutoff, before which a missing subtype only warns.
-    metadata = json.loads(metadata_str)
     metadata["submission"]["submissionDate"] = "2025-12-04"
-    metadata_str = json.dumps(metadata)
+    metadata["submission"]["genomicStudySubtype"] = genomic_study_subtype
 
-    ### tumor+germline
+    lab_datum_index = {"germline": 0, "somatic": 1}[deleted_subtype]
+    assert metadata["donors"][0]["labData"][lab_datum_index]["sequenceSubtype"] == deleted_subtype
+    del metadata["donors"][0]["labData"][lab_datum_index]
 
-    # delete germline DNA
-    metadata = json.loads(metadata_str)
-    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
-    del metadata["donors"][0]["labData"][0]
-
-    # missing germline DNA should fail
-    with pytest.raises(
-        ValidationError,
-        match=r"""Index donor is missing sequence subtypes for submission type 'tumor\+germline': germline""",
-    ):
+    if should_raise:
+        with pytest.raises(
+            ValidationError,
+            match=rf"""Index donor is missing sequence subtypes for submission type '{re.escape(genomic_study_subtype)}': {deleted_subtype}""",
+        ):
+            GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+    else:
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-
-    # delete tumor DNA
-    metadata = json.loads(metadata_str)
-    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
-    del metadata["donors"][0]["labData"][1]
-
-    # missing tumor DNA should fail
-    with pytest.raises(
-        ValidationError,
-        match=r"""Index donor is missing sequence subtypes for submission type 'tumor\+germline': somatic""",
-    ):
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-
-    ### tumor-only
-
-    # delete germline DNA
-    metadata = json.loads(metadata_str)
-    metadata["submission"]["genomicStudySubtype"] = "tumor-only"
-    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
-    del metadata["donors"][0]["labData"][0]
-
-    # missing germline DNA should pass
-    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-
-    # delete tumor DNA
-    metadata = json.loads(metadata_str)
-    metadata["submission"]["genomicStudySubtype"] = "tumor-only"
-    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
-    del metadata["donors"][0]["labData"][1]
-
-    # missing tumor DNA should fail
-    with pytest.raises(
-        ValidationError,
-        match=r"""Index donor is missing sequence subtypes for submission type 'tumor-only': somatic""",
-    ):
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-
-    ### germline-only
-
-    # delete germline DNA
-    metadata = json.loads(metadata_str)
-    metadata["submission"]["genomicStudySubtype"] = "germline-only"
-    assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
-    del metadata["donors"][0]["labData"][0]
-
-    # missing germline DNA should fail
-    with pytest.raises(
-        ValidationError,
-        match=r"""Index donor is missing sequence subtypes for submission type 'germline-only': germline""",
-    ):
-        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-
-    # delete tumor DNA
-    metadata = json.loads(metadata_str)
-    metadata["submission"]["genomicStudySubtype"] = "germline-only"
-    assert metadata["donors"][0]["labData"][1]["sequenceSubtype"] == "somatic"
-    del metadata["donors"][0]["labData"][1]
-
-    # missing tumor DNA should pass
-    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
@@ -201,9 +154,7 @@ def test_missing_sequence_subtype_warns_before_cutoff(version: str, caplog):
     Submissions predating that release must only warn, so that backfills and other operations
     replaying historical data do not fail retroactively.
     """
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wgs_tumor_germline", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wgs_tumor_germline", version))
     metadata["submission"]["submissionDate"] = "2025-12-03"
     assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
     del metadata["donors"][0]["labData"][0]
@@ -218,9 +169,7 @@ def test_missing_sequence_subtype_warns_before_cutoff(version: str, caplog):
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_missing_sequence_subtype_raises_on_cutoff(version: str):
     """On the cutoff date itself the check is enforced."""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wgs_tumor_germline", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wgs_tumor_germline", version))
     metadata["submission"]["submissionDate"] = "2025-12-04"
     assert metadata["donors"][0]["labData"][0]["sequenceSubtype"] == "germline"
     del metadata["donors"][0]["labData"][0]
@@ -238,46 +187,78 @@ def test_missing_sequence_subtype_raises_on_cutoff(version: str):
 )
 def test_wgs_trio_1_3_fail_empty_consent_list(version: str):
     """As of v1.3, empty consent lists are no longer allowed."""
-    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    metadata = json.loads(metadata_str)
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     metadata["donors"][0]["researchConsents"] = []
-    with pytest.raises(ValidationError):
-        GrzSubmissionMetadata.model_validate_json(metadata)
+    with pytest.raises(ValidationError, match=r"Donors must have research consent as of metadata schema v1\.3"):
+        GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
 @pytest.mark.parametrize(
     "version",
     [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
 )
-def test_wgs_trio_1_3_fail_malformed_consent(version: str):
-    """As of v1.3, non-empty scope or noScopeJustification must be provided."""
-    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    metadata = json.loads(metadata_str)
-
-    # scope, if provided, must be a valid consent object
+def test_wgs_trio_1_3_fail_scope_must_be_a_consent(version: str):
+    """As of v1.3, a scope that fails to parse as a Consent is rejected."""
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     del metadata["donors"][0]["researchConsents"][0]["scope"]["scope"]
+
     with pytest.raises(ValidationError, match=r"scope must be a valid MII Broad Consent as of metadata v1.3"):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
-    # scope can't be an empty dict
+
+@pytest.mark.parametrize(
+    "version",
+    [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
+)
+def test_wgs_trio_1_3_fail_empty_scope(version: str):
+    """As of v1.3, scope can't be an empty dict."""
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     metadata["donors"][0]["researchConsents"][0]["scope"] = {}
+
     with pytest.raises(ValidationError):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
+
+@pytest.mark.parametrize(
+    "version",
+    [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
+)
+def test_wgs_trio_1_3_fail_scope_and_justification_mutually_exclusive(version: str):
+    """As of v1.3, scope, even if an empty dict, can't be provided along with noScopeJustification."""
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
+    metadata["donors"][0]["researchConsents"][0]["scope"] = {}
     metadata["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient unable to consent"
-    # scope, even if an empty dict, can't be provided along with noScopeJustification
+
     with pytest.raises(ValidationError):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
+
+@pytest.mark.parametrize(
+    "version",
+    [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
+)
+def test_wgs_trio_1_3_schema_version_now_optional(version: str):
+    """As of v1.3, researchConsent no longer requires schemaVersion."""
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
+    metadata["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient unable to consent"
     del metadata["donors"][0]["researchConsents"][0]["scope"]
-    GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
-
-    # schemaVersion can be missing now
     del metadata["donors"][0]["researchConsents"][0]["schemaVersion"]
+
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
-    # but presentationDate no longer can
+
+@pytest.mark.parametrize(
+    "version",
+    [v for v in TESTED_VERSIONS if Version(v) >= Version("1.3.0")],
+)
+def test_wgs_trio_1_3_fail_missing_presentation_date(version: str):
+    """As of v1.3, presentationDate is required even where schemaVersion is not."""
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
+    metadata["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient unable to consent"
+    del metadata["donors"][0]["researchConsents"][0]["scope"]
+    del metadata["donors"][0]["researchConsents"][0]["schemaVersion"]
     del metadata["donors"][0]["researchConsents"][0]["presentationDate"]
+
     with pytest.raises(ValidationError):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
@@ -288,7 +269,7 @@ def test_wgs_trio_1_3_fail_malformed_consent(version: str):
 )
 def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
     """BAM files should only be allowed in *_lr lab data"""
-    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata = json.loads(_metadata_raw(dataset, version))
     # add a BAM file
     metadata["donors"][0]["labData"][0]["sequenceData"]["files"].append(
         {
@@ -308,9 +289,7 @@ def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_index_rna_without_dna(version: str):
     """Donors can only have RNA data if DNA data also present."""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wes_tumor_germline", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wes_tumor_germline", version))
     # reduce to a single lab datum
     metadata["donors"][0]["labData"] = [metadata["donors"][0]["labData"][0]]
     # set the library type to RNA
@@ -326,9 +305,7 @@ def test_index_rna_without_dna(version: str):
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_index_rna_with_dna(version: str):
     """Donors can only have RNA data if DNA data also present."""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wes_tumor_germline", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wes_tumor_germline", version))
     # duplicate the last lab datum
     metadata["donors"][0]["labData"].append(copy.deepcopy(metadata["donors"][0]["labData"][-1]))
     # set the library type to RNA
@@ -347,9 +324,7 @@ def test_index_rna_with_dna(version: str):
 
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_lab_datum(version: str):
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        importlib.resources.files(example_metadata).joinpath("wes_tumor_germline", f"v{version}.json").read_text()
-    )
+    metadata = _metadata("wes_tumor_germline", version)
     with pytest.raises(ValueError, match=re.escape("Long read libraries can't be paired-end.")):
         metadata.donors[0].lab_data[0].library_type = "wes_lr"
 
@@ -526,7 +501,7 @@ def test_research_consent_schema_version_rejected(version: str):
 
 def test_metadata_declaring_schema_1_3_1_validates():
     """Schema 1.3.1 only widens the consent version enum, so it must validate like 1.3.0."""
-    metadata = json.loads(importlib.resources.files(example_metadata).joinpath("wgs_trio", "v1.3.0.json").read_text())
+    metadata = json.loads(_metadata_raw("wgs_trio", "1.3.0"))
     metadata["$schema"] = metadata["$schema"].replace("/v1.3.0/", "/v1.3.1/")
 
     submission = GrzSubmissionMetadata.model_validate(metadata)
@@ -557,8 +532,7 @@ def test_wgs_trio_accepts_renamed_consent_category_system(version: str, category
     Either category CodeSystem spelling must parse: the 2026.0.0 package renamed it but still
     ships examples using the old name.
     """
-    metadata_str = importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    metadata = json.loads(metadata_str)
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     research_consent = metadata["donors"][0]["researchConsents"][0]
     mii_codings = [
         coding
@@ -590,8 +564,7 @@ def test_wgs_trio_accepts_renamed_consent_category_system(version: str, category
 )
 def test_example_research_consent_scopes_parse_as_consent(dataset: str, version: str):
     """The scope union falls back to dict silently, so every example scope must parse as a Consent."""
-    metadata_str = importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text()
-    submission = GrzSubmissionMetadata.model_validate_json(metadata_str)
+    submission = _metadata(dataset, version)
     for donor in submission.donors:
         for research_consent in donor.research_consents:
             assert research_consent.scope is None or isinstance(research_consent.scope, Consent)
@@ -1149,7 +1122,7 @@ def test_disease_type_rare_missing_wgs_raises(dataset: str, version: str):
     """
     These datasets natively use panel or wes. For rare diseases, they fail the wgs check.
     """
-    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata = json.loads(_metadata_raw(dataset, version))
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
@@ -1165,7 +1138,7 @@ def test_disease_type_rare_missing_wgs_raises(dataset: str, version: str):
 )
 def test_disease_type_rare_missing_wgs_warns_before_cutoff(dataset: str, version: str, caplog):
     """Before the cutoff, missing wgs for a rare disease should only log a warning."""
-    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata = json.loads(_metadata_raw(dataset, version))
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-05-31"
 
@@ -1179,9 +1152,7 @@ def test_disease_type_rare_index_has_wgs_and_panel_passes(version: str):
     """
     If the index donor has at least WGS but additionally some panel data, it should still pass.
     """
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
@@ -1219,7 +1190,7 @@ def test_disease_type_rare_index_has_wgs_and_panel_passes(version: str):
 )
 def test_disease_type_rare_valid_library_passes(dataset: str, version: str):
     """These datasets natively use wgs or wgs_lr. For rare diseases, they must pass."""
-    metadata = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, f"v{version}.json").read_text())
+    metadata = json.loads(_metadata_raw(dataset, version))
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
@@ -1229,9 +1200,7 @@ def test_disease_type_rare_valid_library_passes(dataset: str, version: str):
 @pytest.mark.parametrize("version", TESTED_VERSIONS)
 def test_disease_type_rare_non_index_unrestricted(version: str):
     """Non-index donors (e.g., parents in a trio) are exempt from the WGS rule."""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     metadata["submission"]["diseaseType"] = DiseaseType.rare.value
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
@@ -1262,9 +1231,7 @@ def test_disease_type_rare_non_index_unrestricted(version: str):
 )
 def test_no_scope_justification_tech_org_raises(version: str, justification: str):
     """LE_TECH and LE_ORG justifications should raise an error starting exactly 01.06.2026."""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
     # Apply to all consents to be thorough
@@ -1286,9 +1253,7 @@ def test_no_scope_justification_tech_org_raises(version: str, justification: str
 )
 def test_no_scope_justification_tech_org_warns(version: str, justification: str, caplog):
     """LE_TECH and LE_ORG justifications should only warn strictly before 01.06.2026."""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     metadata["submission"]["submissionDate"] = "2026-05-31"
 
     for donor in metadata["donors"]:
@@ -1315,9 +1280,7 @@ def test_no_scope_justification_tech_org_warns(version: str, justification: str,
 )
 def test_no_scope_justification_standard_passes_after_cutoff(version: str, justification: str):
     """Standard valid justifications should continue to pass seamlessly after 01.06.2026."""
-    metadata = json.loads(
-        importlib.resources.files(example_metadata).joinpath("wgs_trio", f"v{version}.json").read_text()
-    )
+    metadata = json.loads(_metadata_raw("wgs_trio", version))
     metadata["submission"]["submissionDate"] = "2026-06-01"
 
     for donor in metadata["donors"]:
