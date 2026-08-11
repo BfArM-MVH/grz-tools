@@ -16,9 +16,9 @@ uv run pytest packages/grz-pydantic-models
 The script fetches the package, writes each artefact under the name given below, records in
 `packages.json` which version each of them states, and reports whether the artefact was added, was
 already vendored unchanged, or is not shipped by that package. It refuses to overwrite a vendored
-file whose contents differ from upstream and exits non-zero instead: the MII has published two
-different profiles under version 1.0.9, so a version number alone is not proof that nothing changed.
-Pass `--force` once you have looked at the difference and want upstream to win.
+file whose contents differ from upstream, records nothing, and exits non-zero instead: the MII has
+published two different profiles under version 1.0.9, so a version number alone is not proof that
+nothing changed. Pass `--force` once you have looked at the difference and want upstream to win.
 
 Only a human runs this. The test suite never reaches the network, so a registry outage cannot turn a
 build red and every change to these artefacts arrives as a reviewable diff.

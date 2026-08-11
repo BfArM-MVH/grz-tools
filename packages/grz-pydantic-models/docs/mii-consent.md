@@ -8,7 +8,7 @@ inside `researchConsents[].scope`, and this package answers two questions about 
 1. **Is it well-formed?** Does it follow the MII's FHIR specification (validation)?
 2. **What does it say?** May the donor's data be used for research at a given date (evaluation)?
 
-Current version numbers live in the code constants and in the `example_terminology` README of
+Current version numbers live in the code constants and in `example_terminology/packages.json` of
 `grz-pydantic-models-testing`.
 
 ## Glossary
@@ -67,7 +67,7 @@ Two different OID catalogues meet here, and telling them apart is the key to eve
 | --- | --- | --- |
 | the GRZ metadata schema | `$schema` URL of the submission | `is_supported_version`, `get_accepted_versions` |
 | the KDS consent package | `researchConsents[].schemaVersion` | `RESEARCH_CONSENT_SCHEMA_VERSIONS` |
-| each artefact inside the package (profile, CodeSystems) | inside the package files | `example_terminology/` file names + its README's mapping table |
+| each artefact inside the package (profile, CodeSystems) | inside the package files | `example_terminology/` file names + `example_terminology/packages.json` |
 | the signed broad consent document | OIDs in `Consent.policy[].uri` | `BroadConsentVersion`, `BROAD_CONSENT_DOCUMENT_OIDS` |
 
 None of these implies another. The classic trap: **`schemaVersion` names the KDS package (the
@@ -76,8 +76,10 @@ actually signed is derived from the policy OIDs (`Consent.broad_consent_versions
 
 Two facts that follow from the axes moving independently:
 
-- Most package releases only grow the terminology and leave the profile untouched, so one and the
-  same Consent stays valid under every accepted `schemaVersion` (a test asserts this).
+- Most package releases only grow the terminology and leave the profile untouched, so a Consent
+  that parses under one `schemaVersion` usually parses under all of them
+  (`test_every_published_package_version_parses_the_same_consent` pins this for a fully bounded
+  consent). Where the profile did change, portability ends: see the period rule below.
 - The GRZ metadata schema sometimes lists a package version before the MII has released it; such
   versions stay rejected until the release exists and its artefacts are vendored.
 
@@ -101,12 +103,14 @@ Two quirks worth knowing:
 - The MII renamed the category CodeSystem at one point but kept shipping examples in the old
   spelling, so **both spellings are in the wild and both are accepted**
   (`MII_CONSENT_CATEGORY_SYSTEMS`).
-- Profile 1.0.9, shipped by package 2026.0.0, allows a `period` without an `end`, and such a
-  period never expires. Profile 1.0.8, shipped by every 2025 package, still requires an `end`, so
-  an open-ended period is **rejected under those `schemaVersion`s** and accepted only under
-  2026.0.0 (`PROFILES_REQUIRING_PERIOD_END`). The field is optional on `Period` itself, because
-  one model serves every profile version; the version that decides is the one the submission
-  declares.
+- Profile 1.0.9, shipped by package 2026.0.0, relaxed both provision `period.end` elements from
+  1..1 to 0..1. FHIR reads a period with no `end` as still running, so such a permission never
+  expires. Profile 1.0.8, shipped by every 2025 package, still requires an `end`, so an open-ended
+  period is **rejected under those `schemaVersion`s** (`PROFILES_REQUIRING_PERIOD_END`). It is
+  accepted under 2026.0.0, and also when the submission declares no `schemaVersion` at all, which
+  metadata 1.3 permits: with no package named there is no profile to enforce. The field stays
+  optional on `Period` itself, because one model serves every profile version; the version that
+  decides is the one the submission declares.
 
 Unknown fields are generally ignored (FHIR resources carry much more than we read), **except**
 where ignoring would silently drop a permission the evaluation never looks at: a `code` on the
@@ -160,5 +164,5 @@ research consent. That is why `ResearchConsentCodes` contains both.
 
 Every assumption above (the OID classification, the research codes' existence and hierarchy, the
 profile's cardinalities and prohibitions) is re-checked against the MII's own artefacts, vendored
-in `example_terminology/` of `grz-pydantic-models-testing`. Its README describes the
-package-to-artefact mapping and the update workflow.
+in `example_terminology/` of `grz-pydantic-models-testing`. Its `packages.json` records which
+package ships which artefact version, and its README describes the update workflow.

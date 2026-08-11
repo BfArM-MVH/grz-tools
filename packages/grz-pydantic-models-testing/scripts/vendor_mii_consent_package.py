@@ -123,7 +123,10 @@ def main() -> int:
 
     artefacts = download(args.package_version)
     exit_code = vendor(artefacts, args.force)
-    record(args.package_version, artefacts)
+    if exit_code == 0:
+        record(args.package_version, artefacts)
+    else:
+        print(f"  {MANIFEST.name}: left alone, since the artefacts on disk are not this package's")
     print(f"\nvendored into {TERMINOLOGY_DIR}")
     print("next: uv run pytest packages/grz-pydantic-models")
     return exit_code
