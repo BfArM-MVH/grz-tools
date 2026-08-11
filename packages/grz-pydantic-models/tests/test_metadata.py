@@ -651,25 +651,21 @@ _VERSIONS_REQUIRING_PERIOD_END = tuple(
     for version, profile in RESEARCH_CONSENT_PACKAGE_PROFILES.items()
     if profile in PROFILES_REQUIRING_PERIOD_END
 )
+# derived from the mapping under test, so an emptied mapping would silently leave nothing to run
+assert _VERSIONS_REQUIRING_PERIOD_END, "no accepted package ships a profile requiring a period end"
 
 
 @pytest.mark.parametrize("version", _VERSIONS_REQUIRING_PERIOD_END)
 def test_open_ended_period_rejected_where_the_profile_requires_an_end(version: str):
-    """A period without an end never expires, so honouring one would outlive what the donor signed."""
-    with pytest.raises(ValidationError, match="requires an end on every provision period"):
+    """
+    A period without an end never expires, so honouring one would outlive what the donor signed.
+
+    The submitter has to be told which periods to fix, not only that one of them is wrong.
+    """
+    with pytest.raises(ValidationError) as excinfo:
         ResearchConsent(schemaVersion=version, scope=_consent("minimal_consented_open_ended"))
 
-
-def test_open_ended_period_error_names_every_offending_period():
-    """The submitter has to be told which periods to fix, not only that one of them is wrong."""
-    consent_raw = _consent_raw("minimal_consented")
-    del consent_raw["provision"]["period"]["end"]
-    for provision in consent_raw["provision"]["provision"]:
-        del provision["period"]["end"]
-
-    with pytest.raises(ValidationError) as excinfo:
-        ResearchConsent(schemaVersion="2025.0.1", scope=Consent.model_validate(consent_raw))
-
+    assert "requires an end on every provision period" in str(excinfo.value)
     assert "provision.period" in str(excinfo.value)
     assert "provision.provision[0].period" in str(excinfo.value)
 
@@ -1033,11 +1029,6 @@ def _concept_subtree(nodes: list[dict], code: str) -> dict | None:
     return None
 
 
-def _descendant_codes(node: dict) -> set[str]:
-    children = node.get("concept", [])
-    return {child["code"] for child in children} | {c for child in children for c in _descendant_codes(child)}
-
-
 @pytest.mark.parametrize("name", _vendored("mii-cs-consent-policy."))
 def test_scientific_use_stays_within_the_patdat_module(name: str):
     """
@@ -1047,7 +1038,7 @@ def test_scientific_use_stays_within_the_patdat_module(name: str):
     """
     module = _concept_subtree(_load_vendored(name)["concept"], ResearchConsentCodes.PATDAT_ERHEBEN_SPEICHERN_NUTZEN)
     assert module is not None, f"{name} does not define the PATDAT module"
-    assert ResearchConsentCodes.MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU in _descendant_codes(module)
+    assert ResearchConsentCodes.MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU in _codesystem_concepts(module)
 
 
 def _differential(profile: dict) -> dict[str, dict]:
@@ -1112,18 +1103,14 @@ def test_model_matches_the_profile(name: str):
 
 def test_recorded_and_vendored_artefacts_agree():
     """
-    Every vendored artefact must be accounted for by some package and every version a package
-    claims must be vendored. An artefact no package ships is checked against a version nothing
-    declares, and a package naming an absent one is checked against nothing at all.
+    A vendored file no package lists would have the model checked against a version no accepted
+    schemaVersion can select; a version a package lists but nothing vendors would leave that
+    package checked against no artefact at all.
     """
-    vendored: dict[str, set[str]] = {}
-    for name in _vendored("mii-"):
-        vendored.setdefault(_artefact_prefix(name), set()).add(_declared_version(name))
-
-    recorded: dict[str, set[str]] = {}
-    for artefacts in _package_manifest().values():
-        for prefix, version in artefacts.items():
-            recorded.setdefault(prefix, set()).add(version)
+    vendored = {(_artefact_prefix(name), _declared_version(name)) for name in _vendored("mii-")}
+    recorded = {
+        (prefix, version) for artefacts in _package_manifest().values() for prefix, version in artefacts.items()
+    }
 
     assert recorded == vendored
 
