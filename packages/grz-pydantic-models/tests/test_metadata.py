@@ -386,7 +386,7 @@ def _consent(case: str) -> Consent:
     return Consent.model_validate(_consent_raw(case))
 
 
-#: Example consents the MII consent profile permits; each must parse.
+# Example consents the MII consent profile permits; each must parse.
 VALID_CONSENT_CASES = (
     "minimal_consented",
     "minimal_consented_with_datetime",
@@ -412,7 +412,7 @@ VALID_CONSENT_CASES = (
     "rejection_bc_v1_7_2",
     "status_rejected",
 )
-#: Instances the MII consent profile forbids and whose contents would otherwise be dropped silently.
+# Instances the MII consent profile forbids and whose contents would otherwise be dropped silently.
 INVALID_CONSENT_CASES = (
     "invalid_missing_fields",
     "invalid_wrong_resource_type",

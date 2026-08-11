@@ -25,7 +25,7 @@ from pathlib import Path
 
 REGISTRY = "https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent"
 
-#: Artefact inside the FHIR package -> file name prefix used in example_terminology.
+# Artefact inside the FHIR package -> file name prefix used in example_terminology.
 ARTEFACTS = {
     "CodeSystem-MiiConsentPolicyCodeSystem.json": "mii-cs-consent-policy",
     "CodeSystem-MiiConsentVersionModuleCodeSystem.json": "mii-cs-consent-version-modules",
@@ -34,8 +34,8 @@ ARTEFACTS = {
 
 TERMINOLOGY_DIR = Path(__file__).resolve().parent.parent / "src/grz_pydantic_models_testing/example_terminology"
 
-#: Package version -> version each artefact of that package states. A package version appears
-#: nowhere inside the artefacts it ships, so writing them out by resource version alone loses it.
+# Package version -> version each artefact of that package states. A package version appears
+# nowhere inside the artefacts it ships, so writing them out by resource version alone loses it.
 MANIFEST = TERMINOLOGY_DIR / "packages.json"
 
 
