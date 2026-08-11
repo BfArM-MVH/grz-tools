@@ -1503,7 +1503,9 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         "grz-pydantic-models": "1.0.0",
         "grz-check": "1.0.0",
     }
-    monkeypatch.setattr("grzctl.get_versions", lambda: test_versions_dict)
+    # patch the binding the writer actually calls: db.cli imported the name, so patching it on the
+    # grzctl package would leave the real versions being recorded
+    monkeypatch.setattr("grzctl.commands.db.cli.get_versions", lambda: test_versions_dict)
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -1559,7 +1561,16 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         assert "data_steward" in state
         assert "data_steward_signature" in state
 
-    # Test 2: Verify database records have the version
+    # Test 2: Verify grzctl_versions reaches the human-readable table too. The column is rendered
+    # wide enough to read only on a wide terminal; at the default width rich truncates it away.
+    wide_runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test", "COLUMNS": "500"})
+    result_show_table = wide_runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
+    assert result_show_table.exit_code == 0, result_show_table.stderr
+    # the cell holds a JSON blob that rich wraps, so compare with the layout whitespace removed
+    rendered = "".join(result_show_table.stdout.split())
+    assert test_version in rendered, "the Dependency Versions column should carry the versions"
+
+    # Test 3: Verify database records have the version
     config = DbConfig.from_path(blank_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submission = db.get_submission(metadata.submission_id)
@@ -1600,7 +1611,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #1 with version 0.1.0
     monkeypatch.setattr(
-        "grzctl.get_versions",
+        "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.1.0",
             "grz-cli": "1.0.0",
@@ -1617,7 +1628,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #2 with version 0.1.1
     monkeypatch.setattr(
-        "grzctl.get_versions",
+        "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.1.1",
             "grz-cli": "1.0.0",
@@ -1634,7 +1645,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #3 with version 0.2.0
     monkeypatch.setattr(
-        "grzctl.get_versions",
+        "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.2.0",
             "grz-cli": "1.0.0",
@@ -1657,14 +1668,15 @@ def test_submission_grzctl_version_different_versions(
     # Verify each state has grzctl_versions recorded
     assert len(parsed_json["states"]) == 3, "Expected 3 state transitions"
     expected_states = ["Downloading", "Downloaded", "QCing"]
+    expected_versions = ["0.1.0", "0.1.1", "0.2.0"]
     for i, state in enumerate(parsed_json["states"]):
         assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
         assert state["state"] == expected_states[i], (
             f"Expected state {expected_states[i]}, got {state['state']} at index {i}"
         )
-        # Verify grzctl_versions structure (not checking specific versions due to import-time binding)
-        assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
-        assert "grzctl" in state["grzctl_versions"], f"grzctl missing in grzctl_versions for state {i}"
+        assert state["grzctl_versions"]["grzctl"] == expected_versions[i], (
+            f"state {i} should carry the version recorded at write time, not the current one"
+        )
 
 
 def test_failure_reason_migration(blank_initial_database_config_path):

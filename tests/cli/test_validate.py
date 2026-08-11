@@ -38,10 +38,11 @@ def test_validate_submission(
         assert "Starting file validation with `grz-check`..." in caplog.text
     caplog.clear()
 
-    # check if re-validation is skipped
+    # the recorded progress must be reused rather than the files re-checked. Asserting on the
+    # "Starting file validation" line would prove nothing: it is logged before that decision.
     with caplog.at_level(logging.INFO):
         result = runner.invoke(cli, testargs, catch_exceptions=False)
-        assert "Starting file validation with `grz-check`..." in caplog.text
+        assert "All files are already validated. Skipping `grz-check`." in caplog.text
 
     assert result.exit_code == 0, result.output
 
