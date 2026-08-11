@@ -334,19 +334,16 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
 
 
 @pytest.fixture
-def pruefbericht_db_config(tmp_path):
-    """Create a test database config for pruefbericht tests."""
+def pruefbericht_db_config(tmp_path, migrated_db_connection):
+    """Config file for a database already on the latest schema, one per supported backend."""
     import json
 
-    db_path = tmp_path / "test.db"
-    db_url = f"sqlite:///{db_path}"
-
-    config = {"db": {"database_url": db_url, "author": {"name": "test_author"}}}
+    config = {"db": {"database_url": migrated_db_connection, "author": {"name": "test_author"}}}
 
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config))
 
-    return {"db_path": db_path, "db_url": db_url, "config": config, "config_path": config_path}
+    return {"db_url": migrated_db_connection, "config": config, "config_path": config_path}
 
 
 def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht_db_config):
@@ -372,7 +369,6 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
     config_path = pruefbericht_db_config["config_path"]
 
     db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
 
     db.add_submission(TEST_SUBMISSION_ID)
     # Populate submission fields to match the mock data used in other tests
@@ -435,14 +431,8 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
 
 def test_generate_from_database_missing_submission(pruefbericht_db_config):
     """Test error when submission doesn't exist in database."""
-    from grz_db.models.submission import SubmissionDb
-
-    # Use the fixture
-    db_url = pruefbericht_db_config["db_url"]
+    # the schema is present but empty, so the submission is genuinely absent rather than unreachable
     config_path = pruefbericht_db_config["config_path"]
-
-    db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -472,7 +462,6 @@ def test_generate_from_database_missing_fields(pruefbericht_db_config):
     config_path = pruefbericht_db_config["config_path"]
 
     db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
 
     # Add submission without populating required fields
     db.add_submission(TEST_SUBMISSION_ID)
@@ -518,7 +507,6 @@ def test_generate_from_database_no_index_donor(pruefbericht_db_config):
     config_path = pruefbericht_db_config["config_path"]
 
     db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
     db.add_submission(TEST_SUBMISSION_ID)
 
     # Populate all required fields (matching the pattern from test_generate_from_database)
