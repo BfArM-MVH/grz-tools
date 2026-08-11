@@ -1,6 +1,4 @@
 import re
-import shutil
-from pathlib import Path
 
 import grz_cli.cli
 import grzctl.cli
@@ -11,16 +9,15 @@ from grz_common.progress import FileProgressLogger, ValidationState
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.submission import Submission
 
+from .common import SUBMISSION_DIR, copy_submission
+
 
 def test_encrypt_submission_protect_overwrite(
     working_dir_path,
     temp_keys_config_file_path,
     tmpdir_factory: pytest.TempdirFactory,
 ):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
 
     testargs = [
         "encrypt",
@@ -46,14 +43,7 @@ def test_encrypt_submission_protect_overwrite(
 
 
 def test_decrypt_submission(working_dir_path, temp_keys_config_file_path):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(
-        submission_dir / "encrypted_files",
-        working_dir_path / "encrypted_files",
-        dirs_exist_ok=True,
-    )
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "encrypted_files", "metadata")
 
     testargs = [
         "decrypt",
@@ -82,7 +72,7 @@ def test_decrypt_submission(working_dir_path, temp_keys_config_file_path):
         "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf",
         "target_regions.bed",
     ]:
-        expected_checksum = calculate_sha256(submission_dir / "files" / file)
+        expected_checksum = calculate_sha256(SUBMISSION_DIR / "files" / file)
         observed_checksum = calculate_sha256(working_dir_path / "files" / file)
 
         assert expected_checksum == observed_checksum
@@ -94,10 +84,7 @@ def test_encrypt_decrypt_submission(
     # crypt4gh_grz_private_key_file_path,
     tmpdir_factory: pytest.TempdirFactory,
 ):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
 
     # first, encrypt the data
     testargs = [
@@ -140,7 +127,7 @@ def test_encrypt_decrypt_submission(
         "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
         "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
     ]:
-        expected_checksum = calculate_sha256(submission_dir / "files" / file)
+        expected_checksum = calculate_sha256(SUBMISSION_DIR / "files" / file)
         observed_checksum = calculate_sha256(working_dir_path / "files" / file)
 
         assert expected_checksum == observed_checksum
@@ -148,9 +135,7 @@ def test_encrypt_decrypt_submission(
 
 def test_encrypt_succeeds_with_valid_logs(working_dir_path, temp_keys_config_file_path):
     """Verify that the encrypt command succeeds if validation logs are present and mark all files as valid."""
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
     logs_dir = working_dir_path / "logs"
     logs_dir.mkdir()
 
@@ -197,9 +182,7 @@ def test_encrypt_succeeds_with_valid_logs(working_dir_path, temp_keys_config_fil
 
 def test_encrypt_aborts_on_incomplete_validation(working_dir_path, temp_keys_config_file_path):
     """Verify that the encrypt command fails if the validation log marks a file as not successful."""
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
     logs_dir = working_dir_path / "logs"
     logs_dir.mkdir()
 
@@ -248,9 +231,7 @@ def test_encrypt_aborts_on_incomplete_validation(working_dir_path, temp_keys_con
 
 def test_encrypt_aborts_if_validation_log_missing(working_dir_path, temp_keys_config_file_path):
     """Verify that the encrypt command fails if the validation log is missing entirely."""
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
     (working_dir_path / "logs").mkdir()  # create empty logs dir
 
     # Attempt encryption

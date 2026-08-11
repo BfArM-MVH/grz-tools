@@ -1,15 +1,11 @@
-import shutil
-from pathlib import Path
-
 import grzctl.cli
 from click.testing import CliRunner
 
+from .common import copy_submission
+
 
 def test_consent_submission(working_dir_path):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
 
     testargs = [
         "consent",

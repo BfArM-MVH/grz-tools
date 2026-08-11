@@ -4,7 +4,6 @@ Tests for the Prüfbericht submission functionality.
 
 import importlib.resources
 import json
-import shutil
 
 import click.testing
 import grzctl.cli
@@ -14,6 +13,7 @@ from grz_pydantic_models.pruefbericht.v0 import LibraryType
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from .. import mock_files
+from .common import copy_submission
 
 TEST_SUBMISSION_ID = "123456789_1970-01-01_00000000"
 
@@ -222,7 +222,7 @@ def test_generate_pruefbericht_multiple_library_types(temp_pruefbericht_config_f
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
-        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        copy_submission(tmp_path, source=submission_dir)
         with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
             metadata = json.load(metadata_file)
 
@@ -258,7 +258,7 @@ def test_generate_fails_with_invalid_library_type(temp_pruefbericht_config_file_
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
-        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        copy_submission(tmp_path, source=submission_dir)
         with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
             metadata = json.load(metadata_file)
 
@@ -290,7 +290,7 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
-        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        copy_submission(tmp_path, source=submission_dir)
         with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
             metadata = json.load(metadata_file)
 

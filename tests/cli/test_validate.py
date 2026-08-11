@@ -1,12 +1,12 @@
 import json
 import logging
-import shutil
-from pathlib import Path
 
 import grz_cli.cli
 import pytest
 from click.testing import CliRunner
 from grz_common.workers.submission import SubmissionValidationError
+
+from .common import copy_submission
 
 
 @pytest.mark.parametrize("grz_check_mmap", ["--mmap", "--no-mmap"])
@@ -16,10 +16,7 @@ def test_validate_submission(
     grz_check_mmap,
     caplog,
 ):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
 
     testargs = [
         "validate",
@@ -51,10 +48,7 @@ def test_validate_submission_incorrect_grz_id(
     temp_identifiers_config_file_path,
     working_dir_path,
 ):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
 
     with open(working_dir_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
         metadata = json.load(metadata_file)
