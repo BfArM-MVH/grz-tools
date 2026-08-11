@@ -948,6 +948,11 @@ def _load_vendored(name: str) -> dict:
     return json.loads(importlib.resources.files(example_terminology).joinpath(name).read_text())
 
 
+def _package_manifest() -> dict[str, dict[str, str]]:
+    """Which version each artefact of a published package states, as the vendoring script recorded it."""
+    return json.loads(importlib.resources.files(example_terminology).joinpath("packages.json").read_text())
+
+
 def _declared_version(name: str) -> str:
     """
     The version a vendored file name claims, e.g. 'mii-cs-consent-policy.1.1.0.json' -> '1.1.0'.
@@ -1104,6 +1109,23 @@ def test_every_accepted_package_names_a_vendored_profile():
     """A package mapped to a profile nobody vendored would be accepted against no cardinalities."""
     vendored = {_declared_version(name) for name in _vendored("mii-pr-consent-einwilligung.")}
     assert set(RESEARCH_CONSENT_PACKAGE_PROFILES.values()) == vendored
+
+
+def test_accepted_packages_ship_the_profiles_the_model_assumes():
+    """
+    The profile a package ships decides which cardinalities apply, and it is stated by the package
+    rather than by the artefacts, which name only themselves. The mapping must repeat what the
+    vendoring script recorded, so that a newly released package cannot be classified from memory.
+    """
+    shipped = {package: artefacts["mii-pr-consent-einwilligung"] for package, artefacts in _package_manifest().items()}
+    assert RESEARCH_CONSENT_PACKAGE_PROFILES == shipped
+
+
+def test_every_recorded_package_artefact_is_vendored():
+    """A package may only claim artefacts that are here for the model to be checked against."""
+    for package, artefacts in _package_manifest().items():
+        for prefix, version in artefacts.items():
+            assert f"{prefix}.{version}.json" in _vendored(prefix), f"{package} claims an unvendored {prefix}"
 
 
 def test_research_consent_schema_version_json_schema_states_the_accepted_versions():

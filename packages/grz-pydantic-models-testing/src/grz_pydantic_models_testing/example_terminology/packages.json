@@ -1,0 +1,23 @@
+{
+  "2025.0.1": {
+    "mii-cs-consent-policy": "1.0.5",
+    "mii-pr-consent-einwilligung": "1.0.8"
+  },
+  "2025.0.2": {
+    "mii-cs-consent-policy": "1.0.6",
+    "mii-pr-consent-einwilligung": "1.0.8"
+  },
+  "2025.0.3": {
+    "mii-cs-consent-policy": "1.0.7",
+    "mii-pr-consent-einwilligung": "1.0.8"
+  },
+  "2025.0.4": {
+    "mii-cs-consent-policy": "1.0.7",
+    "mii-pr-consent-einwilligung": "1.0.8"
+  },
+  "2026.0.0": {
+    "mii-cs-consent-policy": "1.1.0",
+    "mii-cs-consent-version-modules": "0.2.0",
+    "mii-pr-consent-einwilligung": "1.0.9"
+  }
+}

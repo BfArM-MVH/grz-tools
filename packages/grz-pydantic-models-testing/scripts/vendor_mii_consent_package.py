@@ -4,8 +4,9 @@ Vendor the MII consent artefacts the consent tests check the model against.
 
 Downloads one published version of ``de.medizininformatikinitiative.kerndatensatz.consent`` and
 writes the CodeSystems and the Consent profile into ``example_terminology``, named after the version
-stated inside each resource. Run this by hand when the MII publishes a release; the test suite never
-reaches the network itself.
+stated inside each resource, plus an entry in ``packages.json`` tying the package version to the
+versions it ships. Run this by hand when the MII publishes a release; the test suite never reaches
+the network itself.
 
 Usage::
 
@@ -32,6 +33,10 @@ ARTEFACTS = {
 }
 
 TERMINOLOGY_DIR = Path(__file__).resolve().parent.parent / "src/grz_pydantic_models_testing/example_terminology"
+
+#: Package version -> version each artefact of that package states. A package version appears
+#: nowhere inside the artefacts it ships, so writing them out by resource version alone loses it.
+MANIFEST = TERMINOLOGY_DIR / "packages.json"
 
 
 def download(package_version: str) -> dict[str, dict]:
@@ -92,6 +97,20 @@ def vendor(artefacts: dict[str, dict], force: bool) -> int:
     return 1 if conflicts and not force else 0
 
 
+def record(package_version: str, artefacts: dict[str, dict]) -> None:
+    """Record which version each artefact of a package states, keyed by the package version.
+
+    :param package_version: published package version the artefacts came from.
+    :param artefacts: parsed artefacts keyed by their file name in the package.
+    """
+    manifest = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
+    manifest[package_version] = {
+        prefix: artefacts[name]["version"] for name, prefix in ARTEFACTS.items() if name in artefacts
+    }
+    MANIFEST.write_text(json.dumps(dict(sorted(manifest.items())), indent=2, ensure_ascii=False) + "\n")
+    print(f"  {MANIFEST.name}: recorded {package_version}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("package_version", help="published package version, e.g. 2026.0.1")
@@ -102,7 +121,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    exit_code = vendor(download(args.package_version), args.force)
+    artefacts = download(args.package_version)
+    exit_code = vendor(artefacts, args.force)
+    record(args.package_version, artefacts)
     print(f"\nvendored into {TERMINOLOGY_DIR}")
     print("next: uv run pytest packages/grz-pydantic-models")
     return exit_code
