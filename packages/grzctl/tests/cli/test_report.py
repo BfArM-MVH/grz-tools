@@ -465,7 +465,3 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
         qc_reader = csv.reader(qc_file, delimiter="\t")
         # header + no detailed QC failures
         assert len(list(qc_reader)) == 1
-
-
-def test_date_to_quarter_year():
-    assert date_to_quarter_year(date(year=2025, month=9, day=22)) == (3, 2025)

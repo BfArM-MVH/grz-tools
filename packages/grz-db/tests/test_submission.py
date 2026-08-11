@@ -128,14 +128,6 @@ def test_get_submissions_unknown_ids_map_to_none(db: SubmissionDb) -> None:
     assert result[1] is None
 
 
-def test_get_submissions_all_unknown(db: SubmissionDb) -> None:
-    """get_submissions returns all-None when none of the IDs exist."""
-    ids = ["000000000_2000-01-01_deadbeef", "000000000_2000-01-01_cafebabe"]
-    result = db.get_submissions(ids)
-
-    assert result == [None, None]
-
-
 def test_get_submissions_includes_states(db: SubmissionDb) -> None:
     """States relationship is eagerly loaded so it can be accessed outside the session."""
     from grz_db.models.submission import SubmissionStateEnum

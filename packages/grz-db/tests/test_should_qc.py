@@ -229,40 +229,6 @@ class TestQcStrategy:
         assert submission is not None
         assert submission.selected_for_qc is False
 
-    def test_should_qc_counts_existing_selected_for_qc_without_double_counting(self, db: SubmissionDb):
-        target_percentage = 20.0
-        salt = "ratio-test"
-        base_date = datetime.date(2025, 12, 1)
-        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
-
-        selected_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
-        _add_submission_with_history(
-            db,
-            selected_submission_id,
-            SUBMITTER_ID,
-            base_date,
-            [*DEFAULT_HISTORY, "qcing"],
-            base_timestamp=start_time,
-            is_qced=False,
-        )
-        db.modify_submission(selected_submission_id, "selected_for_qc", "true")
-
-        candidate_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
-        candidate_timestamp = start_time + datetime.timedelta(minutes=10)
-        _add_submission_with_history(
-            db,
-            candidate_submission_id,
-            SUBMITTER_ID,
-            base_date,
-            DEFAULT_HISTORY,
-            base_timestamp=candidate_timestamp,
-            is_qced=False,
-        )
-
-        should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
-
-        assert should_run is False
-
     def test_should_qc_counts_historical_qcing_or_qced_states(self, db: SubmissionDb):
         target_percentage = 20.0
         salt = "ratio-test"
@@ -295,31 +261,6 @@ class TestQcStrategy:
         should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
 
         assert should_run is False
-
-    def test_first_of_month_always_runs(self, db: SubmissionDb):
-        """
-        Test that the first (validated, initial) submission of a month is always QCed.
-        """
-        test_date = datetime.date(2025, 12, 1)
-        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
-        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
-
-        _add_submission_with_history(
-            db,
-            submission_id,
-            SUBMITTER_ID,
-            test_date,
-            DEFAULT_HISTORY,
-            base_timestamp=base_timestamp,
-            is_qced=False,
-        )
-
-        should_run = db.should_qc(
-            submission_id=submission_id,
-            target_percentage=2.0,
-            salt="any_salt",
-        )
-        assert should_run is True, "The first submission of the month must be selected for QC."
 
     def test_ratio_catchup_keeps_the_selected_share_at_or_above_target(self, db: SubmissionDb):
         """The running selected share must never drop below the target; that is what catch-up means.

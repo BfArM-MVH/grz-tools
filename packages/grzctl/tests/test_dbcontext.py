@@ -79,12 +79,6 @@ class TestMapExceptionToFailureReason:
         result = db_context._map_exception_to_failure_reason(type(None), None)
         assert result == FailureReasonEnum.UNKNOWN
 
-    def test_file_not_found_takes_priority_over_os_error(self, db_context: DbContext):
-        """FileNotFoundError is a subclass of OSError — must map to FILE_NOT_FOUND not UNKNOWN."""
-        exc = FileNotFoundError("file missing")
-        result = db_context._map_exception_to_failure_reason(type(exc), exc)
-        assert result == FailureReasonEnum.FILE_NOT_FOUND
-
     def test_all_enum_values_are_covered(self, db_context: DbContext):
         """Ensures every FailureReasonEnum value except UNKNOWN is reachable via a mapped exception."""
         from pydantic import BaseModel

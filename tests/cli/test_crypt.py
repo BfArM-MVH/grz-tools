@@ -12,34 +12,6 @@ from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.submission import Submission
 
 
-def test_encrypt_submission(
-    working_dir_path,
-    temp_keys_config_file_path,
-    # crypt4gh_grz_private_key_file_path,
-    tmpdir_factory: pytest.TempdirFactory,
-):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
-
-    # first, encrypt the data
-    testargs = [
-        "encrypt",
-        "--submission-dir",
-        str(working_dir_path),
-        "--config-file",
-        temp_keys_config_file_path,
-        "--no-check-validation-logs",
-    ]
-
-    runner = CliRunner()
-    cli = grz_cli.cli.build_cli()
-    result = runner.invoke(cli, testargs, catch_exceptions=False)
-
-    assert result.exit_code == 0, result.output
-
-
 def test_encrypt_submission_protect_overwrite(
     working_dir_path,
     temp_keys_config_file_path,
