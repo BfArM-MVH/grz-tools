@@ -68,10 +68,12 @@ def _date_to_datetime(value: Any, time_of_day: time) -> Any:
 
 class Period(FhirElement):
     start: datetime
-    #: Optional because one model serves every profile version and 1.0.9 relaxed this to 0..1. FHIR
-    #: reads a period without an end as still running, so ResearchConsent rejects one when the
-    #: declared schemaVersion ships a profile that still pins the end to 1..1.
     end: datetime | None = None
+    """
+    Optional because one model serves every profile version and 1.0.9 relaxed this to 0..1. FHIR
+    reads a period without an end as still running, so ResearchConsent rejects one when the declared
+    schemaVersion ships a profile that still pins the end to 1..1.
+    """
 
     # FHIR reads a date-only bound as the whole day: a start begins at midnight, an end expires
     # at the end of that day.
@@ -133,8 +135,10 @@ class ConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
     period: Period
     code: Annotated[list[CodeableConcept], Field(min_length=1)]
-    #: Forbidden by the profile (0..0), and rejected rather than ignored: evaluation never reads it.
     provision: list[Any] | None = None
+    """
+    Forbidden by the profile (0..0), and rejected rather than ignored: evaluation never reads it.
+    """
 
     @model_validator(mode="after")
     def reject_nested_provision(self):
@@ -148,11 +152,17 @@ class ConsentProvision(StrictIgnoringBaseModel):
 
 class RootConsentProvision(StrictIgnoringBaseModel):
     type: ProvisionType
-    #: Required by every profile version; only its end became optional in profile 1.0.9.
     period: Period
+    """
+    Required by every profile version; only its end became optional in profile 1.0.9.
+    """
+
     provision: list[ConsentProvision] = Field(default_factory=list)
-    #: The profile constrains Consent.provision.code to 0..0; permissions belong on the sub-provisions.
+
     code: list[Any] | None = None
+    """
+    The profile constrains Consent.provision.code to 0..0; permissions belong on the sub-provisions.
+    """
 
     @model_validator(mode="after")
     def reject_root_code(self):
