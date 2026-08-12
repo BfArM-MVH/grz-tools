@@ -13,6 +13,7 @@ from os import PathLike
 from pathlib import Path
 
 import grz_check
+from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
@@ -209,6 +210,19 @@ class SubmissionMetadata:
                 f"Submitter (LE) identifier specified in the metadata.json ({submitted_le_id}) "
                 f"does not match submitter (LE) identifier in config ({expected_le_id})"
             )
+
+        # The models keep a consent dateTime as submitted, so a document written before FHIR's
+        # timezone requirement was enforced still parses and stays readable. Holding submitters to
+        # the specification is a submission-time rule, so it lives here rather than in the model.
+        for donor in self.content.donors:
+            for research_consent in donor.research_consents:
+                if not isinstance(research_consent.scope, Consent):
+                    continue
+                for offending in research_consent.scope.datetimes_fhir_does_not_permit():
+                    yield (
+                        f"Consent dateTime '{offending}' states a time without a timezone. "
+                        f"FHIR requires one, e.g. '{offending}Z' or '{offending}+02:00'."
+                    )
 
         submission_files: dict[str | PathLike, SubmissionFileMetadata] = {}
         for donor in self.content.donors:

@@ -18,6 +18,7 @@ from grz_pydantic_models.mii.consent import (
     Consent,
     ConsentDocumentKind,
     ConsentProvision,
+    FhirDateTime,
     Identifier,
     Period,
     RootConsentProvision,
@@ -595,7 +596,7 @@ def test_research_consent_open_ended_provision_period():
     assert all(provision.period.end is None for provision in consent.provision.provision)
 
     research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=consent)
-    start = consent.provision.provision[0].period.start.date()
+    start = consent.provision.provision[0].period.start.first_moment.date()
     assert ResearchConsent.consents_to_research([research_consent], date=start)
     assert ResearchConsent.consents_to_research([research_consent], date=date(year=2999, month=12, day=31))
     assert not ResearchConsent.consents_to_research([research_consent], date=start - timedelta(days=1)), (
@@ -620,7 +621,7 @@ def test_root_provision_period_caps_open_ended_sub_provisions():
 
     consent = Consent.model_validate(consent_raw)
     research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=consent)
-    root_end_day = consent.provision.period.end.date()
+    root_end_day = consent.provision.period.end.last_moment.date()
     assert ResearchConsent.consents_to_research([research_consent], date=root_end_day), (
         "consent must still apply on the last day of the root provision period"
     )
@@ -886,7 +887,7 @@ def test_date_only_provision_end_covers_the_whole_day():
     """FHIR treats a date-only end as inclusive of that day, not as midnight."""
     consent = _consent("minimal_consented")
     provision = consent.provision.provision[0]
-    end_day = provision.period.end.date()
+    end_day = provision.period.end.last_moment.date()
 
     assert provision.period.contains(datetime(end_day.year, end_day.month, end_day.day, 12, 0, tzinfo=UTC))
     assert provision.period.contains(datetime(end_day.year, end_day.month, end_day.day, 23, 59, tzinfo=UTC))
@@ -903,9 +904,9 @@ def test_datetime_provision_end_is_not_extended_to_the_whole_day():
     """A period end that states a time must keep it, otherwise it silently gains up to a day."""
     consent = _consent("minimal_consented_with_datetime")
     berlin_summer = timezone(timedelta(hours=2))
-    assert consent.provision.period.end == datetime(2050, 8, 31, 18, 7, tzinfo=berlin_summer)
+    assert consent.provision.period.end.last_moment == datetime(2050, 8, 31, 18, 7, tzinfo=berlin_summer)
     period = consent.provision.provision[0].period
-    assert period.end == datetime(2025, 8, 31, 9, 4, 51, tzinfo=berlin_summer)
+    assert period.end.last_moment == datetime(2025, 8, 31, 9, 4, 51, tzinfo=berlin_summer)
     assert not period.contains(datetime(2025, 8, 31, 12, 0, tzinfo=UTC))
 
 
@@ -929,8 +930,8 @@ def test_period_bound_covers_the_whole_span_it_names(bound: str, start: datetime
     A start therefore begins at that span's first moment and an end expires at its last, the same
     rule FHIR spells out for a date-only end.
     """
-    assert Period(start=bound).start == start
-    assert Period(start="2020-01-01", end=bound).end == end
+    assert Period(start=bound).start.first_moment == start
+    assert Period(start="2020-01-01", end=bound).end.last_moment == end
 
 
 def test_period_bound_of_reduced_precision_stays_in_force_for_its_whole_span():
@@ -968,47 +969,148 @@ def test_period_bound_of_reduced_precision_stays_in_force_for_its_whole_span():
     ],
 )
 def test_period_bound_carrying_a_time_is_kept_as_submitted(bound: str, expected: datetime):
-    """A bound that already states a time is complete, so neither end of a period may widen it."""
-    assert Period(start=bound).start == expected
-    assert Period(start="2020-01-01", end=bound).end == expected
+    """A bound that already states a time names one moment, so neither end of a period widens it."""
+    start = Period(start=bound).start
+    end = Period(start="2020-01-01", end=bound).end
+
+    assert str(start) == bound, "the submitted spelling must survive"
+    assert start.first_moment == expected
+    assert end.last_moment == expected
 
 
-def test_period_bound_with_a_leap_second_is_rejected_by_pydantic():
+@pytest.mark.parametrize("bound", ["2020-09-01T00:00:00", "2020-09-01T14:37:22", "2020-12-31T23:59:59.999999"])
+def test_period_bound_without_a_timezone_is_read_but_not_conformant(bound: str):
     """
-    Known gap: FHIR admits a leap second and the dateTime regex follows it, but pydantic does not.
+    A bound written before FHIR's timezone rule was enforced still parses, so an old document
+    stays readable, and it still resolves to a moment by reading the zone as UTC.
 
-    Such a bound therefore passes the regex and fails afterwards with a pydantic parser message
-    rather than one of this module's, which reads as if the value were malformed rather than as if
-    the parser could not represent it.
+    Refusing it is a submission-time rule, checked where a submission is validated, so nothing
+    here has to guess on the submitter's behalf or rewrite what they wrote.
     """
-    with pytest.raises(ValidationError, match="valid datetime"):
-        Period(start="2020-09-01T23:59:60Z")
+    start = Period(start=bound).start
+
+    assert str(start) == bound
+    assert not start.is_valid_fhir
+    assert start.first_moment.tzinfo is not None
 
 
-def test_period_bound_given_as_a_python_object_is_widened_and_made_aware():
+@pytest.mark.parametrize(
+    ("value", "states_a_time", "has_timezone", "is_valid_fhir"),
+    [
+        ("2020", False, False, True),  # no time, so no zone is required
+        ("2020-09", False, False, True),
+        ("2020-09-01", False, False, True),
+        ("2020-09-01T14:37:22Z", True, True, True),
+        ("2020-09-01T14:37:22+02:00", True, True, True),
+        ("2020-09-01T14:37:22", True, False, False),  # the one shape FHIR forbids
+    ],
+)
+def test_fhir_datetime_reports_what_it_names(value: str, states_a_time, has_timezone, is_valid_fhir):
     """
-    A model built in code rather than parsed from JSON hands the validator date and datetime objects.
+    The pattern admits a superset of FHIR, so a parsed value has to say whether FHIR permits it.
 
-    Those take their own branch, so they need the same widening and the same UTC default as strings.
+    Shape and validity are separate questions: a zone-less time parses, which is what allows it to
+    be repaired, but it is not valid FHIR.
     """
-    assert Period(start=date(2020, 9, 1)).start == datetime(2020, 9, 1, 0, 0, tzinfo=UTC)
-    assert Period(start=date(2020, 1, 1), end=date(2020, 9, 1)).end == datetime(
+    parsed = FhirDateTime.parse(value)
+
+    assert parsed.raw == value
+    assert str(parsed) == value
+    assert parsed.states_a_time is states_a_time
+    assert parsed.has_timezone is has_timezone
+    assert parsed.is_valid_fhir is is_valid_fhir
+
+
+@pytest.mark.parametrize("mode", ["python", "json"])
+def test_period_dumps_a_bound_as_the_value_it_is(mode: str, recwarn):
+    """
+    Dumping must hand back the value in either mode, not this type's own fields.
+
+    A python-mode dump that serialized the dataclass would leak `raw`, `year` and the rest to any
+    caller not passing mode="json", and warn while doing it.
+    """
+    dumped = Period(start="2020-09-01").model_dump(mode=mode)
+
+    assert dumped["start"] == "2020-09-01"
+    assert not [warning for warning in recwarn if "Serialization" in str(warning.message)]
+
+
+@pytest.mark.parametrize("value", ["20200901", "2020-09-01 14:37:22", "1700000000", "", 1700000000, None])
+def test_fhir_datetime_refuses_what_is_not_shaped_like_one(value):
+    """Anything outside the pattern has no reading at all, so it does not parse."""
+    with pytest.raises(ValueError, match="is not a FHIR dateTime"):
+        FhirDateTime.parse(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "first", "last"),
+    [
+        ("2020", date(2020, 1, 1), date(2020, 12, 31)),
+        ("2020-02", date(2020, 2, 1), date(2020, 2, 29)),
+        ("2021-02", date(2021, 2, 1), date(2021, 2, 28)),
+        ("2020-09-01", date(2020, 9, 1), date(2020, 9, 1)),
+    ],
+)
+def test_fhir_datetime_covers_the_span_its_precision_names(value: str, first: date, last: date):
+    parsed = FhirDateTime.parse(value)
+
+    assert parsed.covered_days() == (first, last)
+    assert parsed.first_moment == datetime.combine(first, datetime.min.time(), tzinfo=UTC)
+    assert parsed.last_moment.date() == last
+
+
+@pytest.mark.parametrize("value", ["2021-02-30", "0000", "2020-04-31"])
+def test_fhir_datetime_refuses_a_date_that_does_not_exist(value: str):
+    """
+    The pattern admits any day up to 31 in any month, so parsing checks the date exists.
+
+    Catching it here means the document is still in hand to blame, rather than something later
+    failing when it asks the value for a moment.
+    """
+    assert FhirDateTime._PATTERN.fullmatch(value), "the shape is fine; only the date is not"
+
+    with pytest.raises(ValueError, match="is not an existing date"):
+        FhirDateTime.parse(value)
+
+
+def test_period_bound_with_a_leap_second_cannot_be_resolved():
+    """
+    Known gap: FHIR admits a leap second and the pattern follows it, but datetime cannot hold one.
+
+    Such a bound parses, so a document carrying one is still readable, and only resolving it to a
+    moment fails.
+    """
+    start = Period(start="2020-09-01T23:59:60Z").start
+
+    assert str(start) == "2020-09-01T23:59:60Z"
+    with pytest.raises(ValueError, match="cannot be represented"):
+        _ = start.first_moment
+
+
+def test_period_bound_given_as_a_python_object_is_spelled_as_a_document_would():
+    """
+    A model built in code hands the field a date or datetime rather than the string a document has.
+
+    Those are spelled the way a document would state them, so a model built in code and one parsed
+    from JSON hold the same value.
+    """
+    assert str(Period(start=date(2020, 9, 1)).start) == "2020-09-01"
+    assert Period(start=date(2020, 9, 1)).start.first_moment == datetime(2020, 9, 1, 0, 0, tzinfo=UTC)
+    assert Period(start=date(2020, 1, 1), end=date(2020, 9, 1)).end.last_moment == datetime(
         2020, 9, 1, 23, 59, 59, 999999, tzinfo=UTC
     )
 
-    assert Period(start=datetime(2020, 9, 1, 14, 37)).start == datetime(2020, 9, 1, 14, 37, tzinfo=UTC)
     berlin_summer = timezone(timedelta(hours=2))
-    assert Period(start=datetime(2020, 9, 1, 14, 37, tzinfo=berlin_summer)).start == datetime(
-        2020, 9, 1, 12, 37, tzinfo=UTC
-    )
+    aware = Period(start=datetime(2020, 9, 1, 14, 37, 0, tzinfo=berlin_summer)).start
+    assert str(aware) == "2020-09-01T14:37:00+02:00"
+    assert aware.first_moment == datetime(2020, 9, 1, 12, 37, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
     "bound",
     [
         "2020-09-01 14:37:22+02:00",  # FHIR separates date and time by 'T', never by a space
-        "2020-09-01T14:37",  # seconds are not optional
-        "2020-09-01T14:37:22",  # a stated time demands a timezone
+        "2020-09-01T14:37",  # seconds are not optional, unlike the timezone
         "20200901",  # the basic format is not a FHIR dateTime
         "2020-W36-2",  # nor is a week date
         "2020-9",  # a month is two digits
@@ -1077,7 +1179,7 @@ def test_period_bound_is_revalidated_on_assignment():
     period = Period(start="2020-01-01")
 
     period.end = "2030"
-    assert period.end == datetime(2030, 12, 31, 23, 59, 59, 999999, tzinfo=UTC)
+    assert period.end.last_moment == datetime(2030, 12, 31, 23, 59, 59, 999999, tzinfo=UTC)
 
     with pytest.raises(ValidationError, match="is not a FHIR dateTime"):
         period.end = "1700000000"
@@ -1095,6 +1197,79 @@ def test_consent_round_trips_through_its_own_json(case: str):
     assert Consent.model_validate_json(consent.model_dump_json(by_alias=True)) == consent
 
 
+@pytest.mark.parametrize("case", VALID_CONSENT_CASES)
+def test_consent_stored_as_naive_datetimes_still_parses(case: str):
+    """
+    Stored submission_metadata was dumped from the naive datetimes the previous validator produced,
+    so every date-only value in the database reads "2020-09-01T00:00:00".
+
+    Keeping the submitted value means such a document parses as it stands: `db backfill` and every
+    other reader of an archived submission need no repair step, and nothing has to be migrated.
+    """
+    stored = _as_stored_by_the_previous_validator(_consent_raw(case))
+
+    consent = Consent.model_validate(stored)
+
+    assert consent.date_time.first_moment.tzinfo is not None
+    assert Consent.model_validate_json(consent.model_dump_json(by_alias=True)) == consent
+
+
+def _as_stored_by_the_previous_validator(raw):
+    """Rewrite every date-only value the way a naive `model_dump(mode="json")` would have."""
+    if isinstance(raw, dict):
+        return {key: _as_stored_by_the_previous_validator(value) for key, value in raw.items()}
+    if isinstance(raw, list):
+        return [_as_stored_by_the_previous_validator(value) for value in raw]
+    if isinstance(raw, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", raw):
+        return f"{raw}T00:00:00"
+    return raw
+
+
+@pytest.mark.parametrize("case", VALID_CONSENT_CASES)
+def test_consent_round_trips_without_rewriting_what_was_submitted(case: str):
+    """
+    Serializing must return the document, not a normalised reading of it.
+
+    A date that came back as a midnight timestamp would lose the fact that it named a whole day,
+    which is exactly how stored metadata came to hold ends that expire a day early.
+    """
+    raw = _consent_raw(case)
+
+    dumped = json.loads(Consent.model_validate(raw).model_dump_json(by_alias=True, exclude_none=True))
+
+    assert dumped["dateTime"] == raw["dateTime"]
+    if period := raw.get("provision", {}).get("period"):
+        assert dumped["provision"]["period"]["start"] == period["start"]
+
+
+def test_consent_reports_the_datetimes_fhir_does_not_permit():
+    """
+    The report walks the parsed model, so a period buried in a nested provision cannot hide one and
+    no raw document has to be re-read to find it.
+    """
+    raw = _consent_raw("minimal_consented")
+    raw["dateTime"] = "2020-09-01T14:37:22"
+    raw["provision"]["period"]["end"] = "2050-08-31T00:00:00"
+    raw["provision"]["provision"][0]["period"]["start"] = "2020-09-01T08:00:00+02:00"
+    raw["provision"]["provision"][0]["period"]["end"] = "2025-01-01T00:00:00"
+    raw["verification"] = [{"verified": True, "verificationDate": "2021-01-01T09:00:00"}]
+
+    offending = [str(value) for value in Consent.model_validate(raw).datetimes_fhir_does_not_permit()]
+
+    assert offending == [
+        "2020-09-01T14:37:22",
+        "2050-08-31T00:00:00",
+        "2025-01-01T00:00:00",
+        "2021-01-01T09:00:00",
+    ]
+
+
+@pytest.mark.parametrize("case", VALID_CONSENT_CASES)
+def test_shipped_consent_examples_are_fhir_conformant(case: str):
+    """The bundled examples must stay conformant, or they would fail validation on submission."""
+    assert Consent.model_validate(_consent_raw(case)).datetimes_fhir_does_not_permit() == []
+
+
 def test_consent_date_time_rejects_a_value_that_is_not_a_fhir_datetime():
     """Consent.dateTime is a FHIR dateTime like the period bounds and takes the same timestamp path."""
     consent_raw = _consent_raw("minimal_consented")
@@ -1109,7 +1284,7 @@ def test_consent_date_time_of_reduced_precision_takes_its_first_moment():
     consent_raw = _consent_raw("minimal_consented")
     consent_raw["dateTime"] = "2020"
 
-    assert Consent.model_validate(consent_raw).date_time == datetime(2020, 1, 1, 0, 0, tzinfo=UTC)
+    assert Consent.model_validate(consent_raw).date_time.first_moment == datetime(2020, 1, 1, 0, 0, tzinfo=UTC)
 
 
 def test_consent_date_time_carrying_a_time_is_kept_as_submitted():
@@ -1117,7 +1292,7 @@ def test_consent_date_time_carrying_a_time_is_kept_as_submitted():
     consent_raw = _consent_raw("minimal_consented")
     consent_raw["dateTime"] = "2020-09-01T14:37:22+02:00"
 
-    assert Consent.model_validate(consent_raw).date_time == datetime(
+    assert Consent.model_validate(consent_raw).date_time.first_moment == datetime(
         2020, 9, 1, 14, 37, 22, tzinfo=timezone(timedelta(hours=2))
     )
 
@@ -1136,7 +1311,7 @@ def test_verification_date_of_reduced_precision_takes_its_first_moment():
     consent_raw = _consent_raw("minimal_consented")
     consent_raw["verification"] = [{"verified": True, "verificationDate": "2020"}]
 
-    assert Consent.model_validate(consent_raw).verification[0].verification_date == datetime(
+    assert Consent.model_validate(consent_raw).verification[0].verification_date.first_moment == datetime(
         2020, 1, 1, 0, 0, tzinfo=UTC
     )
 
@@ -1146,7 +1321,7 @@ def test_verification_date_carrying_a_time_is_kept_as_submitted():
     consent_raw = _consent_raw("minimal_consented")
     consent_raw["verification"] = [{"verified": True, "verificationDate": "2020-09-01T14:37:22+02:00"}]
 
-    assert Consent.model_validate(consent_raw).verification[0].verification_date == datetime(
+    assert Consent.model_validate(consent_raw).verification[0].verification_date.first_moment == datetime(
         2020, 9, 1, 14, 37, 22, tzinfo=timezone(timedelta(hours=2))
     )
 

@@ -26,7 +26,12 @@ from pydantic import (
 from pydantic.json_schema import GenerateJsonSchema
 
 from ...common import StrictBaseModel, as_aware_datetime
-from ...mii.consent import BroadConsentVersion, Consent, ProvisionType, Status
+from ...mii.consent import (
+    BroadConsentVersion,
+    Consent,
+    ProvisionType,
+    Status,
+)
 from .. import thresholds as thresholds_model
 from .versioning import Version
 
