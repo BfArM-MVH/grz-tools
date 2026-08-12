@@ -20,8 +20,9 @@ from grz_db import testing as grz_db_testing
 from grz_db.models.submission import SubmissionDb
 from moto import mock_aws
 
-# Bound by assignment rather than imported: fixtures below take ``db_test_connection`` as a
-# parameter, which ruff reads as redefining an imported name.
+# These names are bound by assignment rather than imported directly, because fixtures below take
+# ``db_test_connection`` as a parameter name, which ruff would otherwise read as redefining an
+# imported name.
 db_backend = grz_db_testing.db_backend
 db_test_connection = grz_db_testing.db_test_connection
 migrated_db_connection = grz_db_testing.migrated_db_connection
@@ -89,8 +90,8 @@ def db_known_keys_file_path():
 def initiated_db_test_connection(db_test_connection):
     """The database behind :func:`db_config_content`, brought to the latest schema.
 
-    Not the shared ``migrated_db_connection``: that hands back a separate database, whereas the
-    tests here need the one their config file already points at.
+    This is not the shared ``migrated_db_connection`` fixture: that one hands back a separate
+    database, whereas the tests here need the specific database their config file already points at.
     """
     submission_db = SubmissionDb(db_test_connection, author=None)
     submission_db.initialize_schema()
@@ -171,7 +172,7 @@ def generate_fastq(file_path: str | PathLike, target_size: int) -> int:
 
     The reads repeat rather than being sampled per base: the tests using this only round-trip the
     file through S3 and compare checksums, so the content never has to look like real sequencing
-    data. The size does matter, being what pushes the transfer over the multipart threshold.
+    data. The size does matter: it is what pushes the transfer over the multipart threshold.
 
     :param file_path: Path to the FASTQ file.
     :param target_size: Target size in bytes.
@@ -232,7 +233,7 @@ def temp_fastq_file_sha256sum(temp_fastq_file_path):
 
 @pytest.fixture
 def temp_metadata_file_path(temp_data_dir_path) -> Path:
-    """Metadata naming a file that is never created: validation reads paths, it does not open them."""
+    """Metadata naming a file that is never created: validation reads paths; it does not open them."""
     with open(metadata_path) as fd:
         metadata = json.load(fd)
 

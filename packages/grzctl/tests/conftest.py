@@ -13,10 +13,11 @@ from grz_db.testing import (  # noqa: F401
     test_author,
 )
 
-# Rich decides whether to emit ANSI colour when a Console is constructed, which for the CLI modules
-# happens at import. TTY_COMPATIBLE=0 outranks both FORCE_COLOR and isatty detection, so captured
-# output stays plain whatever the developer's shell exports. Set at import: a fixture would run
-# after the test modules have already built their consoles.
+# Rich decides whether to emit ANSI colour when a Console is constructed, and for the CLI modules
+# that happens at import time. TTY_COMPATIBLE=0 outranks both FORCE_COLOR and isatty detection, so
+# captured output stays plain no matter what the developer's shell exports. This is set here, at
+# import time, because a fixture would only run after the test modules have already built their
+# consoles.
 os.environ["TTY_COMPATIBLE"] = "0"
 
 

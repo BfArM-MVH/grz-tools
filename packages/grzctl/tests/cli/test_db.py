@@ -1475,8 +1475,8 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
         "grz-pydantic-models": "1.0.0",
         "grz-check": "1.0.0",
     }
-    # patch the binding the writer actually calls: db.cli imported the name, so patching it on the
-    # grzctl package would leave the real versions being recorded
+    # Patch the binding the writer actually calls: the db.cli module imported the name, so patching
+    # it on the grzctl package would leave the real versions being recorded.
     monkeypatch.setattr("grzctl.commands.db.cli.get_versions", lambda: test_versions_dict)
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
@@ -1534,11 +1534,11 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
         assert "data_steward_signature" in state
 
     # Test 2: Verify grzctl_versions reaches the human-readable table too. The column is rendered
-    # wide enough to read only on a wide terminal; at the default width rich truncates it away.
+    # wide enough to read only on a wide terminal; at the default width Rich truncates it away.
     wide_runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test", "COLUMNS": "500"})
     result_show_table = wide_runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
     assert result_show_table.exit_code == 0, result_show_table.stderr
-    # the cell holds a JSON blob that rich wraps, so compare with the layout whitespace removed
+    # the cell holds a JSON blob that Rich wraps, so compare with the layout whitespace removed
     rendered = "".join(result_show_table.stdout.split())
     assert test_version in rendered, "the Dependency Versions column should carry the versions"
 
