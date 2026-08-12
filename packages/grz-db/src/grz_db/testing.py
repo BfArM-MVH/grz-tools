@@ -14,16 +14,17 @@ Requires the ``testing`` extra. Import the fixtures into a ``conftest.py``::
         test_author,
     )
 
-The underscore-prefixed session fixtures are resolved by name at runtime, so they have to be
-imported too. Importing rather than declaring ``pytest_plugins`` is deliberate twice over: pytest
-only accepts that declaration in a conftest at the rootdir, and a rootdir declaration would load
-this module for every package in the workspace, including those whose environments have no
-pytest-postgresql. No ``pytest11`` entry point is registered for the same reason.
+The underscore-prefixed session fixtures are resolved by name at runtime, so they must be
+imported as well. They are imported rather than declared through ``pytest_plugins`` for two
+reasons: pytest only accepts that declaration in a conftest at the repository root, and a
+declaration there would load this module for every package in the workspace, including those
+that do not have pytest-postgresql installed. No ``pytest11`` entry point is registered for
+the same reason.
 
-Each database is cloned from a template migrated once per session, rather than migrated per test.
-The template is a real Alembic run because the partial unique indexes live in migrations rather
-than in the models, so a schema built from ``SQLModel.metadata.create_all`` would silently lack
-them.
+Each database is cloned from a template that is migrated once per session, rather than being migrated individually for each test.
+The template is created through a real Alembic migration run, ensuring that the test databases match the schema of the production databases.
+This is the same schema that the migrations are designed to build.
+Using ``SQLModel.metadata.create_all`` instead would create the schema based on the models as they are currently declared, which could lead to deviations from the actual production schema.
 """
 
 import itertools
