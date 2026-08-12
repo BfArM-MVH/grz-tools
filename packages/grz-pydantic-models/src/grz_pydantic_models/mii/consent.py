@@ -110,13 +110,21 @@ class FhirDateTime:
         Parse a value as submitted, or a date or datetime built in code.
 
         A date or datetime is spelled the way a document would state it, so a model built in code
-        holds the same value as one parsed from JSON.
+        holds the same value as one parsed from JSON. A naive datetime is refused rather than read
+        as UTC: guessing a zone is what this type exists to avoid, and code building a consent is
+        the one place where the caller still knows which zone was meant. A plain date needs none,
+        since FHIR asks for one only alongside a time.
 
         :param value: candidate value.
         :returns: the parsed value, which may still not be :attr:`is_valid_fhir`.
-        :raises ValueError: if ``value`` is not shaped like a dateTime.
+        :raises ValueError: if ``value`` is a naive datetime, or is not shaped like a dateTime.
         """
         if isinstance(value, datetime):
+            if value.tzinfo is None:
+                raise ValueError(
+                    f"'{value.isoformat()}' names no timezone; FHIR requires one alongside a time, "
+                    "so attach it, e.g. datetime(..., tzinfo=UTC)"
+                )
             value = value.isoformat().replace("+00:00", "Z")
         elif isinstance(value, date):
             value = value.isoformat()

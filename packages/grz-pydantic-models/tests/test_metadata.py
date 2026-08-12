@@ -1106,6 +1106,23 @@ def test_period_bound_given_as_a_python_object_is_spelled_as_a_document_would():
     assert aware.first_moment == datetime(2020, 9, 1, 12, 37, tzinfo=UTC)
 
 
+def test_period_bound_refuses_a_naive_datetime():
+    """
+    A datetime built in code without a zone is refused rather than read as UTC.
+
+    Guessing is what this type exists to avoid, and code building a consent is the one place where
+    the caller still knows which zone was meant. Reading it as UTC would instead produce a value
+    that only fails later, when the submission is validated.
+    """
+    with pytest.raises(ValidationError, match="names no timezone"):
+        Period(start=datetime(2020, 9, 1, 14, 37))
+
+
+def test_period_bound_accepts_a_plain_date():
+    """A date names no time, so FHIR asks for no zone and nothing has to be guessed."""
+    assert str(Period(start=date(2020, 9, 1)).start) == "2020-09-01"
+
+
 @pytest.mark.parametrize(
     "bound",
     [
