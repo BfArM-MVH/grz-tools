@@ -6,11 +6,11 @@ import datetime
 import hashlib
 import json
 import random
-import sqlite3
 from datetime import date
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 
 import click.testing
 import grzctl.cli
@@ -22,10 +22,24 @@ from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionM
 from grzctl.models.config import DbConfig
 
 
-def test_all_migrations(blank_initial_database_config_path):
+def test_init_brings_an_empty_database_to_the_latest_schema(empty_database_config_path):
+    """``db init`` is the only way an operator creates a schema, so it must reach head unaided."""
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    args_common = ["db", "--config-file", str(empty_database_config_path)]
+
+    result_init = runner.invoke(cli, [*args_common, "init"])
+    assert result_init.exit_code == 0, result_init.stderr
+
+    # 'list' refuses to run against anything short of the latest schema
+    result_list = runner.invoke(cli, [*args_common, "list"])
+    assert result_list.exit_code == 0, result_list.stderr
+
+
+def test_all_migrations(initial_revision_database_config_path):
     """Database migrations should work all the way from the oldest supported to the latest version."""
     # add some test data
-    config = DbConfig.from_path(blank_initial_database_config_path)
+    config = DbConfig.from_path(initial_revision_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_id = "123456789_2024-11-08_d0f805c5"
@@ -55,7 +69,7 @@ def test_all_migrations(blank_initial_database_config_path):
     # ensure db command raises appropriate error before migration
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    args_common = ["db", "--config-file", blank_initial_database_config_path]
+    args_common = ["db", "--config-file", initial_revision_database_config_path]
     result_premature_list = runner.invoke(cli, [*args_common, "list"])
     assert result_premature_list.exit_code != 0
     assert "Database not at latest schema" in result_premature_list.stderr
@@ -96,8 +110,8 @@ def test_all_migrations(blank_initial_database_config_path):
     assert latest_state.failure_reason == FailureReasonEnum.DECRYPTION_ERROR
 
 
-def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_populate(migrated_database_config_path: Path, test_metadata_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -115,7 +129,7 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
@@ -135,8 +149,8 @@ def test_populate(blank_database_config_path: Path, test_metadata_path: Path):
     assert submission.submission_size == metadata.get_submission_size()
 
 
-def test_populate_date(blank_database_config_path: Path, test_metadata_path: Path):
-    db_args = ["db", "--config-file", blank_database_config_path]
+def test_populate_date(migrated_database_config_path: Path, test_metadata_path: Path):
+    db_args = ["db", "--config-file", migrated_database_config_path]
     changed_date = date(2026, 1, 1)
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -165,15 +179,15 @@ def test_populate_date(blank_database_config_path: Path, test_metadata_path: Pat
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
     assert submission.submission_uploaded_date == changed_date
 
 
-def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path, test_metadata_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_populate_redacted(tmp_path: Path, migrated_database_config_path: Path, test_metadata_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     # compute submission ID _before_ tanG is redacted (changing the property return value)
@@ -198,7 +212,7 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path, tes
         )
 
 
-def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
     """
     Repopulating a database should work, including when:
     - two donors from different submitters have the same pseudonym.
@@ -208,7 +222,7 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metad
     rng.seed(42)
     changed_date = date(2026, 1, 1)
 
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
@@ -282,8 +296,8 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metad
     assert result_repopulate_s1.exit_code == 0, result_repopulate_s1.stderr
 
     # sanity check the database
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
     db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
 
     submissions = db.list_submissions(limit=None)
@@ -303,8 +317,8 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path, test_metad
     assert len(donors_s2) == 2, "Expected two donors in submission 2"
 
 
-def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_populate_qc(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -352,8 +366,8 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_meta
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
     db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
 
     results = db.get_detailed_qc_results(metadata.submission_id)
@@ -363,10 +377,10 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path, test_meta
 
 
 def test_populate_qc_with_qc_workflow_version_flag(
-    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
 ):
     """Test populate-qc with --qc-workflow-version flag."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -411,8 +425,8 @@ def test_populate_qc_with_qc_workflow_version_flag(
     )
     assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
 
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
     db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
 
     results = db.get_detailed_qc_results(metadata.submission_id)
@@ -421,10 +435,10 @@ def test_populate_qc_with_qc_workflow_version_flag(
 
 
 def test_populate_qc_with_qc_workflow_version_env_var(
-    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path, monkeypatch
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path, monkeypatch
 ):
     """Test populate-qc with GRZCTL_QC_WORKFLOW_VERSION environment variable."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     # Set the environment variable
@@ -470,8 +484,8 @@ def test_populate_qc_with_qc_workflow_version_env_var(
     )
     assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
 
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
     db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
 
     results = db.get_detailed_qc_results(metadata.submission_id)
@@ -480,10 +494,10 @@ def test_populate_qc_with_qc_workflow_version_env_var(
 
 
 def test_populate_qc_missing_qc_workflow_version(
-    blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
 ):
     """Test populate-qc fails when qc_workflow_version is not provided."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -528,9 +542,9 @@ def test_populate_qc_missing_qc_workflow_version(
     assert "No QC workflow version found" in result_populate_qc.output
 
 
-def test_populate_qc_version_from_report(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+def test_populate_qc_version_from_report(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
     """populate-qc takes the version from the report's grzQcWorkflowVersion column when no flag is given."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -564,8 +578,8 @@ def test_populate_qc_version_from_report(blank_database_config_path: Path, tmp_p
     )
     assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
 
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
     db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
 
     results = db.get_detailed_qc_results(metadata.submission_id)
@@ -573,9 +587,11 @@ def test_populate_qc_version_from_report(blank_database_config_path: Path, tmp_p
     assert results[0].qc_workflow_version == "2.1.0+nonredundant"
 
 
-def test_populate_qc_flag_report_mismatch(blank_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+def test_populate_qc_flag_report_mismatch(
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
     """populate-qc errors when --qc-workflow-version disagrees with the report's grzQcWorkflowVersion."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
@@ -620,9 +636,9 @@ def test_populate_qc_flag_report_mismatch(blank_database_config_path: Path, tmp_
     assert "disagrees" in result_populate_qc.output
 
 
-def test_update_error_confirm(blank_database_config_path: Path, test_metadata_path: Path):
+def test_update_error_confirm(migrated_database_config_path: Path, test_metadata_path: Path):
     """Database should confirm before updating a submission from an Error state."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner()
@@ -646,13 +662,13 @@ def test_update_error_confirm(blank_database_config_path: Path, test_metadata_pa
     assert result_update3.exit_code == 0, result_update3.output
 
 
-def test_list_sort(blank_database_config_path: Path):
+def test_list_sort(migrated_database_config_path: Path):
     """
     List command should sort in the expected order:
     0. null latest state timestamp and null submission date
     1. latest state timestamp if not null, otherwise submission date
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
 
     expected_ordering = [
         {"id": "123456789_2025-07-01_a1b2c3d4"},
@@ -685,12 +701,12 @@ def test_list_sort(blank_database_config_path: Path):
         assert submission["id"] == result_list_parsed[i]["id"]
 
 
-def test_submission_show_json(blank_database_config_path: Path, test_metadata_path: Path):
+def test_submission_show_json(migrated_database_config_path: Path, test_metadata_path: Path):
     """
     `grzctl db submission show --json` should return machine-readable JSON
     with submission metadata and state history.
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -740,121 +756,89 @@ def test_submission_show_json(blank_database_config_path: Path, test_metadata_pa
     }
 
 
-def test_list_filter_modes_and_multiple_states(blank_database_config_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
-
-    sub_latest_error = "123456789_2025-07-01_b1b2c3d1"
-    sub_latest_qced = "123456789_2025-07-01_b1b2c3d2"
-    sub_latest_downloaded = "123456789_2025-07-01_b1b2c3d3"
-    sub_history_error_latest_uploaded = "123456789_2025-07-01_b1b2c3d4"
-    sub_no_state = "123456789_2025-07-01_b1b2c3d5"
-
+def _seed_state_histories(cli, args_common: list) -> SimpleNamespace:
+    """Register five submissions covering every state-filter case and return their IDs."""
+    ids = SimpleNamespace(
+        latest_error="123456789_2025-07-01_b1b2c3d1",
+        latest_qced="123456789_2025-07-01_b1b2c3d2",
+        latest_downloaded="123456789_2025-07-01_b1b2c3d3",
+        history_error_latest_uploaded="123456789_2025-07-01_b1b2c3d4",
+        no_state="123456789_2025-07-01_b1b2c3d5",
+    )
     runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
 
-    for submission_id in [
-        sub_latest_error,
-        sub_latest_qced,
-        sub_latest_downloaded,
-        sub_history_error_latest_uploaded,
-        sub_no_state,
-    ]:
+    for submission_id in vars(ids).values():
         result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
         assert result_add.exit_code == 0, result_add.stderr
 
-    update_invocations = [
-        [*args_common, "submission", "update", sub_latest_error, "Error"],
-        [*args_common, "submission", "update", sub_latest_qced, "QCed"],
-        [*args_common, "submission", "update", sub_latest_downloaded, "Downloaded"],
-        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Uploaded"],
-        [*args_common, "submission", "update", sub_history_error_latest_uploaded, "Error"],
-    ]
-    for invoke_args in update_invocations:
+    for invoke_args in (
+        [*args_common, "submission", "update", ids.latest_error, "Error"],
+        [*args_common, "submission", "update", ids.latest_qced, "QCed"],
+        [*args_common, "submission", "update", ids.latest_downloaded, "Downloaded"],
+        [*args_common, "submission", "update", ids.history_error_latest_uploaded, "Uploaded"],
+        [*args_common, "submission", "update", ids.history_error_latest_uploaded, "Error"],
+    ):
         result_update = runner.invoke(cli, invoke_args)
         assert result_update.exit_code == 0, result_update.stderr
 
-    # Special transition from Error -> Uploaded, explicitly allowed by flag.
+    # leaves an Error in history while the latest state is Uploaded
     result_ignore_error = runner.invoke(
         cli,
-        [
-            *args_common,
-            "submission",
-            "update",
-            "--ignore-error-state",
-            sub_history_error_latest_uploaded,
-            "Uploaded",
-        ],
+        [*args_common, "submission", "update", "--ignore-error-state", ids.history_error_latest_uploaded, "Uploaded"],
     )
     assert result_ignore_error.exit_code == 0, result_ignore_error.stderr
 
-    result_all = runner.invoke(cli, [*args_common, "list", "--json"])
-    assert result_all.exit_code == 0, result_all.stderr
-    parsed_all = json.loads(result_all.stdout)
-    assert {item["id"] for item in parsed_all} == {
-        sub_latest_error,
-        sub_latest_qced,
-        sub_latest_downloaded,
-        sub_history_error_latest_uploaded,
-        sub_no_state,
+    return ids
+
+
+def _listed_ids(cli, args_common: list, *filter_args: str) -> set:
+    runner = click.testing.CliRunner()
+    result = runner.invoke(cli, [*args_common, "list", "--json", *filter_args])
+    assert result.exit_code == 0, result.stderr
+    return {item["id"] for item in json.loads(result.stdout)}
+
+
+@pytest.fixture
+def seeded_state_histories(migrated_database_config_path: Path):
+    """The CLI, its common arguments, and the IDs of submissions covering every state-filter case."""
+    cli = grzctl.cli.build_cli()
+    args_common = ["db", "--config-file", migrated_database_config_path]
+    return cli, args_common, _seed_state_histories(cli, args_common)
+
+
+def test_list_filters_on_the_latest_state_by_default(seeded_state_histories):
+    """Without --filter-mode only the current state counts, so an Error in history does not match."""
+    cli, args_common, ids = seeded_state_histories
+
+    assert _listed_ids(cli, args_common) == set(vars(ids).values()), "an unfiltered list must return every submission"
+    assert _listed_ids(cli, args_common, "--state", "error") == {ids.latest_error}
+    assert _listed_ids(cli, args_common, "--state", "downloaded") == {ids.latest_downloaded}
+
+
+def test_list_any_mode_matches_states_anywhere_in_history(seeded_state_histories):
+    """--filter-mode any is what finds submissions that recovered from a state."""
+    cli, args_common, ids = seeded_state_histories
+
+    runner = click.testing.CliRunner()
+    result = runner.invoke(cli, [*args_common, "list", "--json", "--state", "error", "--filter-mode", "any"])
+    assert result.exit_code == 0, result.stderr
+    parsed = json.loads(result.stdout)
+
+    assert {item["id"] for item in parsed} == {ids.latest_error, ids.history_error_latest_uploaded}
+    recovered = next(item for item in parsed if item["id"] == ids.history_error_latest_uploaded)
+    assert recovered["latest_state"]["state"] == "Uploaded", "matching on history must not alter the reported state"
+
+
+def test_list_ors_repeated_state_filters(seeded_state_histories):
+    """Repeated --state values are OR-ed, in either filter mode."""
+    cli, args_common, ids = seeded_state_histories
+
+    assert _listed_ids(cli, args_common, "--state", "error", "--state", "qced") == {ids.latest_error, ids.latest_qced}
+    assert _listed_ids(cli, args_common, "--state", "error", "--state", "qced", "--filter-mode", "any") == {
+        ids.latest_error,
+        ids.latest_qced,
+        ids.history_error_latest_uploaded,
     }
-
-    # default mode is latest
-    result_error_latest_default = runner.invoke(cli, [*args_common, "list", "--json", "--state", "error"])
-    assert result_error_latest_default.exit_code == 0, result_error_latest_default.stderr
-    parsed_error_latest_default = json.loads(result_error_latest_default.stdout)
-    assert {item["id"] for item in parsed_error_latest_default} == {sub_latest_error}
-    assert parsed_error_latest_default[0]["latest_state"]["state"] == "Error"
-
-    # any mode includes submissions that had Error in history but not as latest state
-    result_error_any = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "any"],
-    )
-    assert result_error_any.exit_code == 0, result_error_any.stderr
-    parsed_error_any = json.loads(result_error_any.stdout)
-    assert {item["id"] for item in parsed_error_any} == {sub_latest_error, sub_history_error_latest_uploaded}
-    history_match = next(filter(lambda item: item["id"] == sub_history_error_latest_uploaded, parsed_error_any))
-    assert history_match["latest_state"]["state"] == "Uploaded"
-
-    # filter mode parsing remains case-insensitive
-    result_error_any_upper = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "error", "--filter-mode", "ANY"],
-    )
-    assert result_error_any_upper.exit_code == 0, result_error_any_upper.stderr
-    parsed_error_any_upper = json.loads(result_error_any_upper.stdout)
-    assert {item["id"] for item in parsed_error_any_upper} == {sub_latest_error, sub_history_error_latest_uploaded}
-
-    # multiple filters in default latest mode are OR-ed on latest state
-    result_multi_latest = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "error", "--state", "qced"],
-    )
-    assert result_multi_latest.exit_code == 0, result_multi_latest.stderr
-    parsed_multi_latest = json.loads(result_multi_latest.stdout)
-    assert {item["id"] for item in parsed_multi_latest} == {sub_latest_error, sub_latest_qced}
-
-    # multiple filters in any mode are OR-ed across all historic states
-    result_multi_any = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "error", "--state", "qced", "--filter-mode", "any"],
-    )
-    assert result_multi_any.exit_code == 0, result_multi_any.stderr
-    parsed_multi_any = json.loads(result_multi_any.stdout)
-    assert {item["id"] for item in parsed_multi_any} == {
-        sub_latest_error,
-        sub_history_error_latest_uploaded,
-        sub_latest_qced,
-    }
-
-    # "--state" supports repeated values
-    result_state_alias = runner.invoke(
-        cli,
-        [*args_common, "list", "--json", "--state", "downloaded"],
-    )
-    assert result_state_alias.exit_code == 0, result_state_alias.stderr
-    parsed_state_alias = json.loads(result_state_alias.stdout)
-    assert {item["id"] for item in parsed_state_alias} == {sub_latest_downloaded}
 
 
 _DELETE_CHANGE_REQUEST_DATA = {
@@ -878,8 +862,8 @@ def _add_submission(runner: click.testing.CliRunner, cli, args_common: list, sub
     assert result.exit_code == 0, result.stderr
 
 
-def test_change_request_delete_succeeds_with_yaml_data_file(blank_database_config_path: Path, tmp_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_change_request_delete_succeeds_with_yaml_data_file(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -904,7 +888,7 @@ def test_change_request_delete_succeeds_with_yaml_data_file(blank_database_confi
     assert "has undergone a change request" in result.stderr.replace("\n", " ")
     assert "Delete" in result.stderr
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
     assert len(submissions_with_changes) == 1
@@ -914,9 +898,9 @@ def test_change_request_delete_succeeds_with_yaml_data_file(blank_database_confi
     assert changes[0].data is None
 
 
-def test_change_request_delete_succeeds_with_inline_data(blank_database_config_path: Path):
+def test_change_request_delete_succeeds_with_inline_data(migrated_database_config_path: Path):
     """`--data` accepts valid Delete data and stores it the same way `--data-file` does."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -936,15 +920,15 @@ def test_change_request_delete_succeeds_with_inline_data(blank_database_config_p
     )
     assert result.exit_code == 0, result.stderr
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
     _assert_audit_columns_match(submissions_with_changes[0].changes[0], _DELETE_CHANGE_REQUEST_DATA)
 
 
-def test_change_request_delete_inline_data_rejects_placeholder(blank_database_config_path: Path):
+def test_change_request_delete_inline_data_rejects_placeholder(migrated_database_config_path: Path):
     """`--data` is subject to the same placeholder rejection as `--data-file`."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -967,9 +951,9 @@ def test_change_request_delete_inline_data_rejects_placeholder(blank_database_co
     assert "FILL IN" in result.stderr or "placeholder" in result.stderr
 
 
-def test_change_request_delete_inline_data_rejects_missing_field(blank_database_config_path: Path):
+def test_change_request_delete_inline_data_rejects_missing_field(migrated_database_config_path: Path):
     """`--data` is subject to the same required-field check as `--data-file`."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -992,8 +976,8 @@ def test_change_request_delete_inline_data_rejects_missing_field(blank_database_
     assert "requester_email" in result.stderr
 
 
-def test_change_request_delete_fails_without_data(blank_database_config_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_change_request_delete_fails_without_data(migrated_database_config_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1006,8 +990,8 @@ def test_change_request_delete_fails_without_data(blank_database_config_path: Pa
     assert "request_email_content" in result.stderr
 
 
-def test_change_request_delete_fails_with_missing_field(blank_database_config_path: Path, tmp_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_change_request_delete_fails_with_missing_field(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1033,9 +1017,9 @@ def test_change_request_delete_fails_with_missing_field(blank_database_config_pa
     assert "requester_email" in result.stderr
 
 
-def test_change_request_delete_accepts_and_persists_extra_field(blank_database_config_path: Path, tmp_path: Path):
+def test_change_request_delete_accepts_and_persists_extra_field(migrated_database_config_path: Path, tmp_path: Path):
     """Extras are allowed alongside the required schema fields and stored verbatim."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1059,7 +1043,7 @@ def test_change_request_delete_accepts_and_persists_extra_field(blank_database_c
     )
     assert result.exit_code == 0, result.stderr
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
     persisted = submissions_with_changes[0].changes[0]
@@ -1067,8 +1051,8 @@ def test_change_request_delete_accepts_and_persists_extra_field(blank_database_c
     assert persisted.data == {"internal_note": "received fax 2026-04-30"}
 
 
-def test_change_request_data_and_data_file_mutually_exclusive(blank_database_config_path: Path, tmp_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_change_request_data_and_data_file_mutually_exclusive(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1115,9 +1099,9 @@ def test_change_request_template_subcommand_prints_template():
     assert "data" in parsed
 
 
-def test_unmodified_template_fails_validation(blank_database_config_path: Path, tmp_path: Path):
+def test_unmodified_template_fails_validation(migrated_database_config_path: Path, tmp_path: Path):
     """A user who saves the template and submits it unchanged must not pass validation."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1146,9 +1130,9 @@ def test_unmodified_template_fails_validation(blank_database_config_path: Path, 
     assert "requested_at" in result.stderr
 
 
-def test_template_with_only_date_filled_in_still_fails(blank_database_config_path: Path, tmp_path: Path):
+def test_template_with_only_date_filled_in_still_fails(migrated_database_config_path: Path, tmp_path: Path):
     """If the user fills in only the date but leaves text placeholders, validation must still fail."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1246,8 +1230,8 @@ def test_change_request_validate_accepts_mislabeled_extension(tmp_path: Path):
     assert "valid" in result.stderr.lower()
 
 
-def test_change_request_dry_run_does_not_write(blank_database_config_path: Path, tmp_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_change_request_dry_run_does_not_write(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1274,14 +1258,14 @@ def test_change_request_dry_run_does_not_write(blank_database_config_path: Path,
     assert "would register change request" in result.stderr.replace("\n", " ")
     assert "Validated fields" in result.stderr
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submissions_with_changes = list(db.list_change_requests())
     assert submissions_with_changes == []
 
 
-def test_change_request_dry_run_aborts_when_submission_missing(blank_database_config_path: Path, tmp_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
+def test_change_request_dry_run_aborts_when_submission_missing(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["db", "--config-file", migrated_database_config_path]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     data_file = tmp_path / "delete.yaml"
@@ -1304,9 +1288,9 @@ def test_change_request_dry_run_aborts_when_submission_missing(blank_database_co
     assert "not found" in result.stderr
 
 
-def test_change_request_dry_run_validates_before_db_check(blank_database_config_path: Path, tmp_path: Path):
+def test_change_request_dry_run_validates_before_db_check(migrated_database_config_path: Path, tmp_path: Path):
     """Schema validation runs first; missing fields fail even with --dry-run."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
@@ -1330,9 +1314,9 @@ def test_change_request_dry_run_validates_before_db_check(blank_database_config_
     assert "requester_email" in result.stderr
 
 
-def test_change_request_modify_requires_audit_fields_too(blank_database_config_path: Path, tmp_path: Path):
+def test_change_request_modify_requires_audit_fields_too(migrated_database_config_path: Path, tmp_path: Path):
     """Audit fields are universal — Modify also requires them via --data/--data-file."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1357,9 +1341,9 @@ def test_change_request_modify_requires_audit_fields_too(blank_database_config_p
     assert "Modify" in ok.stderr
 
 
-def test_change_request_with_raw_content_pdf(blank_database_config_path: Path, tmp_path: Path):
+def test_change_request_with_raw_content_pdf(migrated_database_config_path: Path, tmp_path: Path):
     """--raw-content provides the binary blob; type is identified from the content's magic bytes."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1389,7 +1373,7 @@ def test_change_request_with_raw_content_pdf(blank_database_config_path: Path, t
     )
     assert result.exit_code == 0, result.stderr
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     persisted = next(s for s in db.list_change_requests() if s.id == submission_id).changes[0]
     assert persisted.request_email_content is None
@@ -1397,9 +1381,9 @@ def test_change_request_with_raw_content_pdf(blank_database_config_path: Path, t
     assert persisted.request_raw_content_type.value == "PDF"
 
 
-def test_change_request_raw_content_unrecognized_bytes_fail(blank_database_config_path: Path, tmp_path: Path):
+def test_change_request_raw_content_unrecognized_bytes_fail(migrated_database_config_path: Path, tmp_path: Path):
     """Content matching no supported type is rejected, regardless of the file's name."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1429,9 +1413,11 @@ def test_change_request_raw_content_unrecognized_bytes_fail(blank_database_confi
     assert "not a recognized attachment" in result.stderr
 
 
-def test_change_request_raw_content_type_from_content_not_extension(blank_database_config_path: Path, tmp_path: Path):
+def test_change_request_raw_content_type_from_content_not_extension(
+    migrated_database_config_path: Path, tmp_path: Path
+):
     """The attachment type follows the magic bytes, not the extension: PNG bytes in a .pdf file store as PNG."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -1460,14 +1446,14 @@ def test_change_request_raw_content_type_from_content_not_extension(blank_databa
     )
     assert result.exit_code == 0, result.stderr
 
-    config = DbConfig.from_path(blank_database_config_path)
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     persisted = next(s for s in db.list_change_requests() if s.id == submission_id).changes[0]
     assert persisted.request_raw_content == png_bytes
     assert persisted.request_raw_content_type.value == "PNG"
 
 
-def test_submission_grzctl_versions_logging(blank_database_config_path: Path, test_metadata_path: Path, monkeypatch):
+def test_submission_grzctl_versions_logging(migrated_database_config_path: Path, test_metadata_path: Path, monkeypatch):
     """
     Test that grzctl_versions is correctly logged on state transitions and appears in CLI output.
 
@@ -1477,7 +1463,7 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
     - grzctl_versions appears in human-readable table output
     - Versions are preserved across multiple state transitions
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
 
     # Mock the version to a known test value for reproducibility
     test_version = "0.1.2-test"
@@ -1489,7 +1475,9 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         "grz-pydantic-models": "1.0.0",
         "grz-check": "1.0.0",
     }
-    monkeypatch.setattr("grzctl.get_versions", lambda: test_versions_dict)
+    # Patch the binding the writer actually calls: the db.cli module imported the name, so patching
+    # it on the grzctl package would leave the real versions being recorded.
+    monkeypatch.setattr("grzctl.commands.db.cli.get_versions", lambda: test_versions_dict)
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -1545,8 +1533,17 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
         assert "data_steward" in state
         assert "data_steward_signature" in state
 
-    # Test 2: Verify database records have the version
-    config = DbConfig.from_path(blank_database_config_path)
+    # Test 2: Verify grzctl_versions reaches the human-readable table too. The column is rendered
+    # wide enough to read only on a wide terminal; at the default width Rich truncates it away.
+    wide_runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test", "COLUMNS": "500"})
+    result_show_table = wide_runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
+    assert result_show_table.exit_code == 0, result_show_table.stderr
+    # the cell holds a JSON blob that Rich wraps, so compare with the layout whitespace removed
+    rendered = "".join(result_show_table.stdout.split())
+    assert test_version in rendered, "the Dependency Versions column should carry the versions"
+
+    # Test 3: Verify database records have the version
+    config = DbConfig.from_path(migrated_database_config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     submission = db.get_submission(metadata.submission_id)
 
@@ -1569,12 +1566,12 @@ def test_submission_grzctl_versions_logging(blank_database_config_path: Path, te
 
 
 def test_submission_grzctl_version_different_versions(
-    blank_database_config_path: Path, test_metadata_path: Path, monkeypatch
+    migrated_database_config_path: Path, test_metadata_path: Path, monkeypatch
 ):
     """
     Verify that state logs show their logged version, not the current runtime version.
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"})
@@ -1586,7 +1583,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #1 with version 0.1.0
     monkeypatch.setattr(
-        "grzctl.get_versions",
+        "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.1.0",
             "grz-cli": "1.0.0",
@@ -1603,7 +1600,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #2 with version 0.1.1
     monkeypatch.setattr(
-        "grzctl.get_versions",
+        "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.1.1",
             "grz-cli": "1.0.0",
@@ -1620,7 +1617,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #3 with version 0.2.0
     monkeypatch.setattr(
-        "grzctl.get_versions",
+        "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.2.0",
             "grz-cli": "1.0.0",
@@ -1643,60 +1640,20 @@ def test_submission_grzctl_version_different_versions(
     # Verify each state has grzctl_versions recorded
     assert len(parsed_json["states"]) == 3, "Expected 3 state transitions"
     expected_states = ["Downloading", "Downloaded", "QCing"]
+    expected_versions = ["0.1.0", "0.1.1", "0.2.0"]
     for i, state in enumerate(parsed_json["states"]):
         assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
         assert state["state"] == expected_states[i], (
             f"Expected state {expected_states[i]}, got {state['state']} at index {i}"
         )
-        # Verify grzctl_versions structure (not checking specific versions due to import-time binding)
-        assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
-        assert "grzctl" in state["grzctl_versions"], f"grzctl missing in grzctl_versions for state {i}"
-
-
-def test_failure_reason_migration(blank_initial_database_config_path):
-    """Test the failure_reason migration works correctly."""
-    # Set up test data before migration
-    config = DbConfig.from_path(blank_initial_database_config_path)
-
-    if not config.db.database_url.startswith("sqlite:///"):
-        pytest.skip("Test uses sqlite3 directly and only works with SQLite")
-
-    submission_id = "123456789_2024-11-08_d0f805c5"
-
-    with sqlite3.connect(config.db.database_url[len("sqlite:///") :]) as connection:
-        connection.execute(
-            "INSERT INTO submissions(id) VALUES(:id)",
-            {"id": submission_id},
+        assert state["grzctl_versions"]["grzctl"] == expected_versions[i], (
+            f"state {i} should carry the version recorded at write time, not the current one"
         )
 
-    # Test CLI commands fail before migration
-    runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
-    args_common = ["db", "--config-file", blank_initial_database_config_path]
 
-    result_premature = runner.invoke(cli, [*args_common, "list"])
-    assert result_premature.exit_code != 0
-    assert "Database not at latest schema" in result_premature.stderr
-
-    # Run the migration
-    result_upgrade = runner.invoke(cli, [*args_common, "upgrade"])
-    assert result_upgrade.exit_code == 0, result_upgrade.stderr
-
-    # Test that failure_reason functionality works
-    result_update = runner.invoke(
-        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryption_error"]
-    )
-    assert result_update.exit_code == 0, result_update.stderr
-
-    # Verify the failure reason was stored
-    result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
-    assert result_show.exit_code == 0, result_show.stderr
-    assert "decryption_err" in result_show.stdout
-
-
-def test_submission_show_json_includes_failure_reason(blank_database_config_path: Path):
+def test_submission_show_json_includes_failure_reason(migrated_database_config_path: Path):
     """Submission show --json should include failure_reason in state history."""
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["db", "--config-file", migrated_database_config_path]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 

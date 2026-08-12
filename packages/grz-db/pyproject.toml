@@ -22,6 +22,13 @@ dependencies = [
     "psycopg[binary] ~=3.2"
 ]
 
+[project.optional-dependencies]
+# Fixtures in grz_db.testing, for downstream packages that provision a database in their tests.
+testing = [
+    "pytest",
+    "pytest-postgresql",
+]
+
 
 
 [dependency-groups]
