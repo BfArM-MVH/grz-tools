@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v3.0.0...grzctl-v4.0.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** grzctl requires grz-db 3 and grz-cli 2, and so applies the same consent rules when it reads or backfills submission metadata.
+* **grz-cli:** grz-cli requires grz-common 3. Metadata naming a consent dateTime outside the FHIR grammar, or leaving a 2025 researchConsent provision period open-ended, is now rejected rather than accepted.
+
+### Bug Fixes
+
+* **grz-cli:** require grz-common 3 ([#649](https://github.com/BfArM-MVH/grz-tools/issues/649)) ([69b9c17](https://github.com/BfArM-MVH/grz-tools/commit/69b9c171dd1e248bb38bbc6822dc4e7f3857accc))
+* **grzctl:** require grz-db 3 and grz-cli 2 ([69b9c17](https://github.com/BfArM-MVH/grz-tools/commit/69b9c171dd1e248bb38bbc6822dc4e7f3857accc))
+
 ## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.4...grzctl-v3.0.0) (2026-08-13)
 
 
