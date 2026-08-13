@@ -1,8 +1,12 @@
-from datetime import date, datetime, time
+import re
+from calendar import monthrange
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, model_validator
+from pydantic_core import core_schema
 
 from ..common import StrictBaseModel, as_aware_datetime
 
@@ -37,60 +41,240 @@ class Status(StrEnum):
     ENTERED_IN_ERROR = "entered-in-error"
 
 
-def _date_to_datetime(value: Any, time_of_day: time) -> Any:
+@dataclass(frozen=True)
+class FhirDateTime:
     """
-    Widen a date-only period bound to a datetime at ``time_of_day``.
+    A FHIR dateTime, parsed far enough to say what it names and whether FHIR permits it.
 
-    Values that already carry a time component are passed through untouched for pydantic to parse.
+    The value keeps the spelling it was submitted with. It resolves to a moment only when asked,
+    because the same value means different moments depending on where it sits: a period end covers
+    the span it names to the last moment, everything else takes the first.
 
-    :param value: raw period bound as submitted.
-    :param time_of_day: time to combine a date-only bound with.
-    :returns: a datetime for date-only bounds, otherwise ``value`` unchanged.
+    The pattern matches a superset of the FHIR grammar: it admits a time that names no timezone,
+    which FHIR forbids. Parsing one anyway is what keeps a document written before that rule was
+    enforced readable, and :attr:`is_valid_fhir` is what tells a conformant value from such a one.
     """
-    if isinstance(value, datetime):
-        return value
 
-    if isinstance(value, date):
-        return datetime.combine(value, time_of_day)
+    raw: str
+    """The value exactly as submitted."""
 
-    if isinstance(value, str):
-        has_time_component = "T" in value or " " in value
-        if has_time_component:
-            return value
+    year: int
+    month: int | None
+    day: int | None
+    states_a_time: bool
+    """Whether the value names a time of day rather than only a year, a month or a day."""
+
+    timezone: str | None
+    """The stated zone, ``None`` when the value names none."""
+
+    # A time demands seconds; ISO forms FHIR does not spell out, such as a space in place of the 'T'
+    # or the basic format 20200901, are not dateTimes.
+    # See https://hl7.org/fhir/R4/datatypes.html#dateTime
+    _PATTERN: ClassVar[re.Pattern[str]] = re.compile(
+        # FHIR spells year zero out of the grammar; here `covered_days` rejects it along with every
+        # other date that does not exist, so a plain four-digit year is enough.
+        r"(?P<year>[0-9]{4})"
+        r"(-(?P<month>0[1-9]|1[0-2])"
+        r"(-(?P<day>0[1-9]|[1-2][0-9]|3[0-1])"
+        r"(?P<time>T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)(\.[0-9]+)?"
+        r"(?P<zone>Z|(\+|-)((0[0-9]|1[0-3]):[0-5][0-9]|14:00))?)?)?)?"
+    )
+
+    @classmethod
+    def _try_parse(cls, value: Any) -> "FhirDateTime | None":
+        """
+        Parse ``value``, or return ``None`` when it is not shaped like a dateTime at all.
+
+        :param value: candidate value; anything that is not a string is not a dateTime.
+        :returns: the parsed value, or ``None``.
+        """
+        if not isinstance(value, str):
+            return None
+
+        match = cls._PATTERN.fullmatch(value)
+        if match is None:
+            return None
+
+        return cls(
+            raw=value,
+            year=int(match["year"]),
+            month=int(match["month"]) if match["month"] else None,
+            day=int(match["day"]) if match["day"] else None,
+            states_a_time=match["time"] is not None,
+            timezone=match["zone"],
+        )
+
+    @classmethod
+    def parse(cls, value: Any) -> "FhirDateTime":
+        """
+        Parse a value as submitted, or a date or datetime built in code.
+
+        A date or datetime is spelled the way a document would state it, so a model built in code
+        holds the same value as one parsed from JSON. A naive datetime is refused rather than read
+        as UTC: guessing a zone is what this type exists to avoid, and code building a consent is
+        the one place where the caller still knows which zone was meant. A plain date needs none,
+        since FHIR asks for one only alongside a time.
+
+        :param value: candidate value.
+        :returns: the parsed value, which may still not be :attr:`is_valid_fhir`.
+        :raises ValueError: if ``value`` is a naive datetime, or is not shaped like a dateTime.
+        """
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                raise ValueError(
+                    f"'{value.isoformat()}' names no timezone; FHIR requires one alongside a time, "
+                    "so attach it, e.g. datetime(..., tzinfo=UTC)"
+                )
+            value = value.isoformat().replace("+00:00", "Z")
+        elif isinstance(value, date):
+            value = value.isoformat()
+
+        if not isinstance(value, str):
+            raise ValueError(f"{type(value).__name__} is not a FHIR dateTime")
+
+        parsed = cls._try_parse(value)
+        if parsed is None:
+            raise ValueError(
+                f"'{value}' is not a FHIR dateTime; "
+                "expected YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DDThh:mm:ss with an optional +zz:zz"
+            )
+
+        # the pattern admits every day from 01 to 31 in any month, so check the date exists while
+        # there is still a document to blame rather than when something later asks for a moment
+        parsed.covered_days()
+        return parsed
+
+    @property
+    def has_timezone(self) -> bool:
+        """Whether the value names a timezone."""
+        return self.timezone is not None
+
+    @property
+    def is_valid_fhir(self) -> bool:
+        """
+        Whether FHIR permits this value.
+
+        A value that states a time must name its zone. One that states no time needs none, so a
+        plain date is valid as it stands.
+        """
+        return self.has_timezone or not self.states_a_time
+
+    def covered_days(self) -> tuple[date, date]:
+        """
+        First and last day this value covers at the precision it states.
+
+        :returns: first and last day covered.
+        :raises ValueError: if the date does not exist, which the pattern alone does not rule out
+            because it accepts every day from 01 to 31 in any month.
+        """
         try:
-            parsed = date.fromisoformat(value)
-        except ValueError:
-            return value
-        return datetime.combine(parsed, time_of_day)
+            if self.month is None:
+                return date(self.year, 1, 1), date(self.year, 12, 31)
 
-    return value
+            if self.day is None:
+                last = monthrange(self.year, self.month)[1]
+                return date(self.year, self.month, 1), date(self.year, self.month, last)
+
+            day = date(self.year, self.month, self.day)
+            return day, day
+        except ValueError:
+            raise ValueError(f"'{self.raw}' is not an existing date") from None
+
+    @property
+    def first_moment(self) -> datetime:
+        """
+        The first moment this value covers, in UTC.
+
+        A value naming a whole year, month or day begins at that span's first moment. One stating a
+        time already names a moment, and is read as UTC when it names no zone, as
+        ``as_aware_datetime`` does elsewhere in the pipeline.
+
+        :raises ValueError: if the value names no existing date, or a time pydantic cannot represent.
+        """
+        return self._stated_moment() or datetime.combine(self.covered_days()[0], time.min, tzinfo=UTC)
+
+    @property
+    def last_moment(self) -> datetime:
+        """
+        The last moment this value covers, in UTC.
+
+        A value naming a whole year, month or day expires at that span's last moment. One stating a
+        time names a single moment, so it is both its first and its last.
+
+        :raises ValueError: if the value names no existing date, or a time pydantic cannot represent.
+        """
+        return self._stated_moment() or datetime.combine(self.covered_days()[1], time.max, tzinfo=UTC)
+
+    def _stated_moment(self) -> datetime | None:
+        """The moment this value states outright, or ``None`` when it names a span instead."""
+        if not self.states_a_time:
+            return None
+
+        try:
+            moment = datetime.fromisoformat(self.raw)
+        except ValueError:
+            # the pattern admits a leap second, which datetime cannot represent
+            raise ValueError(f"'{self.raw}' names a time that cannot be represented") from None
+
+        return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+    def __str__(self) -> str:
+        """The value as it would be written back into a document."""
+        return self.raw
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> core_schema.CoreSchema:
+        """
+        Validate through :meth:`parse` and serialize back to the submitted value, unchanged.
+
+        Keeping the spelling is the point: a document round-trips exactly as written, so storing what
+        was parsed cannot quietly turn a date into a midnight timestamp.
+
+        `parse` is the whole validator rather than a step after a string schema, so every reason a
+        value is refused is stated in one place and can say what was expected.
+        """
+        return core_schema.no_info_plain_validator_function(
+            cls.parse,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                # always, not only in JSON mode: a python-mode dump would otherwise hand back this
+                # type's own fields rather than the value, and warn while doing it
+                str,
+                return_schema=core_schema.str_schema(),
+                when_used="always",
+            ),
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, schema: Any, handler: Any) -> dict[str, Any]:
+        """
+        Describe the value as the string it is, constrained to the FHIR grammar.
+
+        Built rather than handed on, because a plain validator has no schema of its own to extend.
+        ``format: date-time`` would be wrong: it promises a full timestamp, while FHIR also permits
+        a year, a year and month, or a date.
+        """
+        # JSON Schema patterns are ECMA-262, which has no `(?P<name>...)`, and are unanchored, so a
+        # substring would otherwise satisfy them.
+        ecma = re.sub(r"\(\?P<[a-z]+>", "(?:", cls._PATTERN.pattern)
+        return {"type": "string", "pattern": "^" + ecma + "$"}
 
 
 class Period(FhirElement):
-    start: datetime
-    end: datetime | None = None
+    start: FhirDateTime
+    end: FhirDateTime | None = None
     """
     Optional because one model serves every profile version and 1.0.9 relaxed this to 0..1. FHIR
     reads a period without an end as still running, so ResearchConsent rejects one when the declared
     schemaVersion ships a profile that still pins the end to 1..1.
     """
 
-    # FHIR reads a date-only bound as the whole day: a start begins at midnight, an end expires
-    # at the end of that day.
-
-    @field_validator("start", mode="before")
-    @classmethod
-    def start_of_day(cls, v):
-        return _date_to_datetime(v, time.min)
-
-    @field_validator("end", mode="before")
-    @classmethod
-    def end_of_day(cls, v):
-        return _date_to_datetime(v, time.max)
-
     def contains(self, moment: datetime) -> bool:
         """
         Whether ``moment`` falls within this period, both bounds inclusive.
+
+        FHIR reads a bound stating no time as the whole span it names, so a start begins at that
+        span's first moment and an end expires at its last. Resolving the bounds here rather than
+        when they were parsed keeps the submitted value intact and puts the asymmetry in view.
 
         Naive datetimes on either side are read as UTC, matching the rest of the pipeline.
 
@@ -99,14 +283,14 @@ class Period(FhirElement):
         """
         moment = as_aware_datetime(moment)
 
-        if moment < as_aware_datetime(self.start):
+        if moment < self.start.first_moment:
             return False
 
         if self.end is None:
             # a period without an end never expires
             return True
 
-        return moment <= as_aware_datetime(self.end)
+        return moment <= self.end.last_moment
 
 
 class Policy(StrictIgnoringBaseModel):
@@ -196,7 +380,7 @@ class Patient(StrictIgnoringBaseModel):
 
 class Verification(StrictIgnoringBaseModel):
     verified: bool
-    verification_date: datetime | None = None
+    verification_date: FhirDateTime | None = None
 
 
 EXPECTED_SCOPE_CODING_SYSTEM = "http://terminology.hl7.org/CodeSystem/consentscope"
@@ -292,10 +476,36 @@ class Consent(StrictIgnoringBaseModel):
     scope: CodeableConcept
     category: Annotated[list[CodeableConcept], Field(min_length=2)]
     patient: Patient
-    date_time: datetime
+    date_time: FhirDateTime
     policy: Annotated[list[Policy], Field(min_length=1)]
     verification: list[Verification] | None = None
     provision: RootConsentProvision | None = None
+
+    def datetimes_fhir_does_not_permit(self) -> list[FhirDateTime]:
+        """
+        Every dateTime in this consent that states a time but names no timezone.
+
+        The models keep a value as submitted, so a document written before the timezone was required
+        still parses and can still be read. Refusing one is a submission-time rule, and this is what
+        an ingest path asks rather than re-reading the raw document.
+
+        :returns: the offending values, in the order encountered.
+        """
+        periods = []
+        if self.provision is not None:
+            periods.append(self.provision.period)
+            periods.extend(provision.period for provision in self.provision.provision)
+
+        candidates = [self.date_time]
+        for period in periods:
+            candidates.extend(bound for bound in (period.start, period.end) if bound is not None)
+        candidates.extend(
+            verification.verification_date
+            for verification in self.verification or []
+            if verification.verification_date is not None
+        )
+
+        return [candidate for candidate in candidates if not candidate.is_valid_fhir]
 
     @model_validator(mode="after")
     def ensure_valid_scope(self):
