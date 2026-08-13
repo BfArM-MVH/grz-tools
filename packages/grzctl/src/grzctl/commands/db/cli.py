@@ -1,7 +1,6 @@
 """Command for managing a submission database"""
 
 import csv
-import itertools
 import json
 import logging
 import sys
@@ -1174,6 +1173,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     dry_run: bool,
     force: bool,
     ignore_fields: set[str],
+    allow_overwrite: frozenset[str] = frozenset(),
 ) -> _BackfillResult:
     """Fetch metadata.json from S3 for one submission and commit a diff to the database.
 
@@ -1229,17 +1229,24 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
         return _BackfillResult.UP_TO_DATE
 
+    # Filling a field that was NULL destroys nothing, so it is always written. Replacing one that
+    # already has a value needs saying so: --force permits every such overwrite, --allow-overwrite
+    # only the fields it names, and anything else is held back and reported.
+    allowed = {diff.key for diff in submission_diff.pending} if force else allow_overwrite
+    submission_diff, withheld = submission_diff.withhold_destructive(allowed)
+    if withheld:
+        console_err.print(
+            f"[dim]  {submission_id}: not overwriting {', '.join(diff.key for diff in withheld)} "
+            f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
+        )
+    if not submission_diff.has_pending and not donors_diff.has_pending:
+        return _BackfillResult.WOULD_OVERWRITE
+
     if dry_run:
         console_err.print(
             f"[yellow]  [dry-run] {submission_id}: would update fields: {[d.key for d in submission_diff.pending]}[/yellow]"
         )
         return _BackfillResult.UPDATED
-
-    if not force and submission_diff.has_pending_destructive:
-        console_err.print(
-            f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}, skipping (use --force to overwrite).[/dim]"
-        )
-        return _BackfillResult.WOULD_OVERWRITE
 
     try:
         db_service.commit_changes(submission_id, submission_diff, donors_diff)
@@ -1263,7 +1270,16 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     "--force/--no-force",
     default=False,
     help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
-    "Without this flag, such submissions are reported and skipped.",
+    "Without this flag, such fields are reported and left alone while the rest is still written.",
+)
+@click.option(
+    "--allow-overwrite",
+    "allow_overwrite",
+    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
+    multiple=True,
+    help="Overwrite only these existing non-NULL fields when the metadata.json value differs "
+    "(may be repeated). Other destructive changes are held back and the submission is updated in "
+    "part. Mutually exclusive with --force, which permits every overwrite.",
 )
 @click.option(
     "--submission-id",
@@ -1291,6 +1307,7 @@ def backfill(  # noqa: PLR0913
     configuration: dict[str, Any],
     dry_run: bool,
     force: bool,
+    allow_overwrite: tuple[str, ...],
     submission_ids: tuple[str, ...],
     start_date: datetime,
     end_date: datetime,
@@ -1303,8 +1320,10 @@ def backfill(  # noqa: PLR0913
     that are actually missing or changed are written, donor records are synchronised,
     and already-up-to-date submissions are silently skipped.
 
-    Existing non-NULL fields whose values differ from metadata.json are not overwritten
-    unless --force is given.
+    A field that is missing in the database is always filled. One that already has a
+    different value is only overwritten with --force, or when --allow-overwrite names it;
+    any other overwrite is reported and held back, so a submission is updated in part
+    rather than skipped entirely.
 
     Candidate selection (mutually exclusive):
 
@@ -1318,6 +1337,9 @@ def backfill(  # noqa: PLR0913
     # ── Validate option combinations ────────────────────────────────────────
     if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
+
+    if force and allow_overwrite:
+        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
 
     ignore_fields = set(ignore_field) | {
         "submission_uploaded_date",
@@ -1366,6 +1388,7 @@ def backfill(  # noqa: PLR0913
                 dry_run,
                 force,
                 ignore_fields,
+                frozenset(allow_overwrite),
             )
         ] += 1
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Container, Generator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Self, cast
@@ -114,6 +114,24 @@ class SubmissionDiffCollection:
     def has_pending_destructive(self) -> bool:
         """True if any field will overwrite or remove an existing database value (updated or deleted)."""
         return len(self.updated) > 0 or len(self.deleted) > 0
+
+    def withhold_destructive(self, allowed: Container[str]) -> tuple[SubmissionDiffCollection, list[FieldDiff]]:
+        """Split off the destructive diffs whose field is not in ``allowed``.
+
+        Additive diffs are always safe to write, so they stay regardless. This lets a caller permit
+        overwriting a named field without permitting every other overwrite the same diff carries.
+
+        :param allowed: field names whose existing database value may be overwritten or removed.
+        :returns: a collection holding only what may be written, and the diffs held back.
+        """
+        committable = SubmissionDiffCollection(
+            added=list(self.added),
+            updated=[field_diff for field_diff in self.updated if field_diff.key in allowed],
+            deleted=[field_diff for field_diff in self.deleted if field_diff.key in allowed],
+            unchanged=list(self.unchanged),
+        )
+        withheld = [field_diff for field_diff in (*self.updated, *self.deleted) if field_diff.key not in allowed]
+        return committable, withheld
 
     def append(self, field_diff: FieldDiff):
         match field_diff.diff.state:
