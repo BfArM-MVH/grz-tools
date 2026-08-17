@@ -47,6 +47,11 @@ pruefbericht:
   client_secret: ${GRZ_PRUEFBERICHT__CLIENT_SECRET}
   api_base_url: ${GRZ_PRUEFBERICHT__API_BASE_URL}
 
+detailed_qc:
+  local_storage: /path/to/local_storage
+  salt: ${GRZ_DETAILED_QC__SALT}
+  target_percentage: 2.0
+
 db:
   database_url: sqlite:///path/to/submission.db.sqlite
   author:
