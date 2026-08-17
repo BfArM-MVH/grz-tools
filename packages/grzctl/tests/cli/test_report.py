@@ -7,6 +7,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import grzctl.cli
+import pytest
 import sqlalchemy
 from click.testing import CliRunner
 from grz_db.models.submission import Submission
@@ -40,7 +41,7 @@ def test_quarter_determination():
         assert year == expected_year
 
 
-def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
+def test_quarterly_empty(migrated_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on an empty database."""
     env = {
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
@@ -52,7 +53,7 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["--config", blank_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
+            ["--config", migrated_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
             catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
@@ -62,8 +63,18 @@ def test_quarterly_empty(blank_database_config_path: Path, tmp_path: Path):
     assert (Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv").exists()
 
 
-def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
-    """Small test case with a few submissions for quarterly reports."""
+@pytest.fixture
+def quarterly_report_dir(migrated_database_config_path: Path, tmp_path: Path) -> Path:
+    """Seed three submissions and generate the Q3 2025 quarterly report.
+
+    Seeds: an initial submission whose basic QC passes; a second submitter's
+    submission whose basic QC passes but detailed QC fails (with a populated QC
+    report); and a correction submission for the first submitter that revokes the
+    index patient's consent, alongside a deletion change request against the
+    original submission.
+
+    Returns the directory containing the three generated TSV files.
+    """
     env = {
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
     }
@@ -76,7 +87,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     s1_metadata = GrzSubmissionMetadata.model_validate(s1_metadata_raw)
     s1_metadata_raw["submission"]["submissionType"] = "initial"
     result_add1 = runner.invoke(
-        cli, ["--config", blank_database_config_path, "db", "submission", "add", s1_metadata.submission_id]
+        cli, ["--config", migrated_database_config_path, "db", "submission", "add", s1_metadata.submission_id]
     )
     assert result_add1.exit_code == 0, result_add1.output
     s1_metadata_path = tmp_path / "submission1.metadata.json"
@@ -86,7 +97,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "populate",
@@ -100,7 +111,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "modify",
@@ -121,7 +132,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     s2_metadata_raw["donors"][0]["researchConsents"][0]["noScopeJustification"] = "patient refuses to sign consent"
     s2_metadata = GrzSubmissionMetadata.model_validate(s2_metadata_raw)
     result_add2 = runner.invoke(
-        cli, ["--config", blank_database_config_path, "db", "submission", "add", s2_metadata.submission_id]
+        cli, ["--config", migrated_database_config_path, "db", "submission", "add", s2_metadata.submission_id]
     )
     assert result_add2.exit_code == 0, result_add2.output
     s2_metadata_path = tmp_path / "submission2.metadata.json"
@@ -131,7 +142,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "populate",
@@ -145,7 +156,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "modify",
@@ -159,7 +170,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "modify",
@@ -182,7 +193,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "populate-qc",
@@ -202,7 +213,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     s3_metadata_raw["donors"][0]["researchConsents"][0]["scope"]["provision"]["provision"] = []
     s3_metadata = GrzSubmissionMetadata.model_validate(s3_metadata_raw)
     result_add3 = runner.invoke(
-        cli, ["--config", blank_database_config_path, "db", "submission", "add", s3_metadata.submission_id]
+        cli, ["--config", migrated_database_config_path, "db", "submission", "add", s3_metadata.submission_id]
     )
     assert result_add3.exit_code == 0, result_add3.output
     s3_metadata_path = tmp_path / "submission3.metadata.json"
@@ -212,7 +223,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "populate",
@@ -226,7 +237,7 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "modify",
@@ -240,26 +251,40 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         cli,
         [
             "--config",
-            blank_database_config_path,
+            migrated_database_config_path,
             "db",
             "submission",
             "change-request",
             s1_metadata.submission_id,
             "delete",
+            "--data",
+            json.dumps(
+                {
+                    "requester_name": "Test Requester",
+                    "requester_email": "requester@example.com",
+                    "requested_at": "2025-09-01",
+                    "request_email_content": "Please delete this submission.",
+                }
+            ),
         ],
     )
     assert result_change1.exit_code == 0, result_change1.output
 
-    # generate and check quarterly report
+    # generate quarterly report
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["--config", blank_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
+            ["--config", migrated_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
             catch_exceptions=False,
         )
         assert result_report.exit_code == 0, result_report.output
 
-    overview_output_path = Path(report_tmp_dir) / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"
+    return Path(report_tmp_dir)
+
+
+def test_quarterly_overview(quarterly_report_dir: Path):
+    """The overview TSV should have one row per submitter with aggregate counts."""
+    overview_output_path = quarterly_report_dir / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"
     assert overview_output_path.exists()
     with open(overview_output_path, newline="", encoding="utf-8") as overview_file:
         overview_reader = csv.reader(overview_file, delimiter="\t")
@@ -302,7 +327,10 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         "0",
     ]
 
-    dataset_output_path = Path(report_tmp_dir) / "2-Infos_zu_Datensätzen_GRZX00000_3_2025.tsv"
+
+def test_quarterly_dataset(quarterly_report_dir: Path):
+    """The dataset TSV should have one row per submission with per-submission metadata."""
+    dataset_output_path = quarterly_report_dir / "2-Infos_zu_Datensätzen_GRZX00000_3_2025.tsv"
     assert dataset_output_path.exists()
     with open(dataset_output_path, newline="", encoding="utf-8") as dataset_file:
         dataset_reader = csv.reader(dataset_file, delimiter="\t")
@@ -368,7 +396,10 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
         "germline;somatic",
     ]
 
-    qc_output_path = Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv"
+
+def test_quarterly_qc(quarterly_report_dir: Path):
+    """The QC TSV should have one row per lab datum that failed detailed QC."""
+    qc_output_path = quarterly_report_dir / "3-Detailprüfung_GRZX00000_3_2025.tsv"
     assert qc_output_path.exists()
     with open(qc_output_path, newline="", encoding="utf-8") as qc_file:
         qc_reader = csv.reader(qc_file, delimiter="\t")
@@ -394,10 +425,10 @@ def test_quarterly(blank_database_config_path: Path, tmp_path: Path):
     ]
 
 
-def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path: Path):
+def test_quarterly_migrated_database(migrated_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on databases migrated from prior schema without backpopulating metadata."""
     # add some minimal test data
-    config = GrzctlConfig.from_path(blank_database_config_path)
+    config = GrzctlConfig.from_path(migrated_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_date = date(year=2025, month=9, day=14)
@@ -429,7 +460,7 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
         result_report = runner.invoke(
             cli,
-            ["--config", blank_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
+            ["--config", migrated_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
         )
         assert result_report.exit_code == 0, result_report.output
 
@@ -453,7 +484,3 @@ def test_quarterly_migrated_database(blank_database_config_path: Path, tmp_path:
         qc_reader = csv.reader(qc_file, delimiter="\t")
         # header + no detailed QC failures
         assert len(list(qc_reader)) == 1
-
-
-def test_date_to_quarter_year():
-    assert date_to_quarter_year(date(year=2025, month=9, day=22)) == (3, 2025)

@@ -25,7 +25,7 @@ def captured_browser_args(monkeypatch):
     return captured
 
 
-def test_db_tui_passes_quarter_year(captured_browser_args, blank_database_config_path):
+def test_db_tui_passes_quarter_year(captured_browser_args, migrated_database_config_path):
     root_logger = logging.getLogger()
     old_handlers = list(root_logger.handlers)
     try:
@@ -35,7 +35,7 @@ def test_db_tui_passes_quarter_year(captured_browser_args, blank_database_config
             cli,
             [
                 "--config",
-                str(blank_database_config_path),
+                str(migrated_database_config_path),
                 "db",
                 "tui",
                 "--quarter",
@@ -52,7 +52,7 @@ def test_db_tui_passes_quarter_year(captured_browser_args, blank_database_config
         root_logger.handlers[:] = old_handlers
 
 
-def test_db_tui_passes_none_when_quarter_year_omitted(captured_browser_args, blank_database_config_path):
+def test_db_tui_passes_none_when_quarter_year_omitted(captured_browser_args, migrated_database_config_path):
     root_logger = logging.getLogger()
     old_handlers = list(root_logger.handlers)
     try:
@@ -62,7 +62,7 @@ def test_db_tui_passes_none_when_quarter_year_omitted(captured_browser_args, bla
             cli,
             [
                 "--config",
-                str(blank_database_config_path),
+                str(migrated_database_config_path),
                 "db",
                 "tui",
             ],

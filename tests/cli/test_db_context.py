@@ -18,12 +18,10 @@ from sqlmodel import Session, select
 @pytest.fixture
 def full_config_path(
     tmp_path,
-    db_config_content,
-    s3_config_content,
+    migrated_db_config_content,
     keys_config_content,
     pruefbericht_config_content,
 ):
-    # Build a valid GrzctlConfig structure
     from tests.conftest import _grzctl_archives
 
     config_data = {
@@ -38,16 +36,11 @@ def full_config_path(
             }
         },
         "archives": _grzctl_archives(endpoint_url="http://localhost:9000"),
-        "pruefbericht": {
-            "authorization_url": "https://bfarm.localhost/token",
-            "api_base_url": "https://bfarm.localhost/api/",
-            "client_id": "pytest",
-            "client_secret": "pysecret",
-        },
         "identifiers": {"grz": "GRZK00007"},
     }
-    config_data.update(db_config_content)
+    config_data.update(migrated_db_config_content)
     config_data.update(keys_config_content)
+    config_data.update(pruefbericht_config_content)
 
     if "author" in config_data.get("db", {}):
         config_data["db"]["author"]["private_key_passphrase"] = "test"
@@ -55,11 +48,6 @@ def full_config_path(
     config_path = tmp_path / "config.yaml"
     with open(config_path, "w") as f:
         yaml.dump(config_data, f)
-
-    runner = click.testing.CliRunner()
-    cli = build_cli()
-    result = runner.invoke(cli, ["--config", str(config_path), "db", "init"])
-    assert result.exit_code == 0, f"DB Init failed: {result.output}"
 
     return config_path
 

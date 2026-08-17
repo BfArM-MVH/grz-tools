@@ -6,19 +6,29 @@ from datetime import datetime
 from importlib.metadata import version
 from os import PathLike
 from pathlib import Path
-from shutil import copyfile, which
+from shutil import copyfile
 
 import boto3
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
-import numpy as np
-import psycopg
 import pytest
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
+from grz_db import testing as grz_db_testing
 from grz_db.models.submission import SubmissionDb
 from moto import mock_aws
+
+# These names are bound by assignment rather than imported directly, because fixtures below take
+# ``db_test_connection`` as a parameter name, which ruff would otherwise read as redefining an
+# imported name.
+db_backend = grz_db_testing.db_backend
+db_test_connection = grz_db_testing.db_test_connection
+migrated_db_connection = grz_db_testing.migrated_db_connection
+postgresql_proc = grz_db_testing.postgresql_proc
+_migrated_postgresql_template = grz_db_testing._migrated_postgresql_template
+_migrated_sqlite_template = grz_db_testing._migrated_sqlite_template
+_pg_test_dbnames = grz_db_testing._pg_test_dbnames
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -75,28 +85,13 @@ def db_known_keys_file_path():
     return Path(db_known_keys_file)
 
 
-@pytest.fixture(
-    params=[
-        "sqlite",
-        pytest.param(
-            "postgresql",
-            marks=pytest.mark.skipif(condition=which("pg_config") is None, reason="postgresql not detected"),
-        ),
-    ],
-)
-def db_test_connection(request: pytest.FixtureRequest):
-    if request.param == "sqlite":
-        tmpdir_factory: pytest.TempdirFactory = request.getfixturevalue("tmpdir_factory")
-        db_dir = tmpdir_factory.mktemp("db")
-        db_file = db_dir / "test.db"
-        yield f"sqlite:///{str(db_file)}"
-    elif request.param == "postgresql":
-        postgresql: psycopg.Connection = request.getfixturevalue("postgresql")
-        yield f"postgresql+psycopg://{postgresql.info.user}:@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
-
-
 @pytest.fixture()
 def initiated_db_test_connection(db_test_connection):
+    """The database behind :func:`db_config_content`, brought to the latest schema.
+
+    This is not the shared ``migrated_db_connection`` fixture: that one hands back a separate
+    database, whereas the tests here need the specific database their config file already points at.
+    """
     submission_db = SubmissionDb(db_test_connection, author=None)
     submission_db.initialize_schema()
     return db_test_connection
@@ -136,24 +131,6 @@ def temp_small_file_md5sum():
 @pytest.fixture()
 def temp_small_file_sha256sum():
     return "78858035d88f0c66d27984789ddd8fa8a8fc633cf7689ac2b4b1e2e7b37ee3be"
-
-
-def create_large_file(content: str | bytes, output_file: str | PathLike, target_size: int) -> int:
-    """
-    Write some content repeatedly to a file until some target size is reached.
-
-    :param content: Content of the file. Will be repeatedly written to output_file until `target_size` is reached.
-    :param output_file: Path to the output file.
-    :param target_size: target size in bytes.
-    :return: Actual bytes written
-    """
-    # Initialize the size of the new file and open it for writing
-    current_size = 0
-    with open(output_file, "w") as outfile:
-        while current_size < target_size:
-            bytes_written = outfile.write(content)
-            current_size += bytes_written
-    return current_size
 
 
 @pytest.fixture
@@ -197,46 +174,23 @@ def remote_bucket_with_version(remote_bucket):
     return remote_bucket
 
 
-@pytest.fixture
-def temp_large_file_path(temp_data_dir_path) -> Path:
-    temp_large_file_path = temp_data_dir_path / "temp_large_input_file.bed"
-    target_size = 1024 * 1024 * 6  # create 5MB file, multiupload limit is 5MB
+def generate_fastq(file_path: str | PathLike, target_size: int) -> int:
+    """Create a FASTQ file of at least *target_size* bytes.
 
-    with open(small_file_input_path) as fd:
-        content = fd.read()
-
-    create_large_file(content, temp_large_file_path, target_size)
-
-    return temp_large_file_path
-
-
-def generate_random_fastq(file_path: str | PathLike, target_size: int) -> int:
-    """
-    Create a random FASTQ file.
+    The reads repeat rather than being sampled per base: the tests using this only round-trip the
+    file through S3 and compare checksums, so the content never has to look like real sequencing
+    data. The size does matter: it is what pushes the transfer over the multipart threshold.
 
     :param file_path: Path to the FASTQ file.
     :param target_size: Target size in bytes.
     :return: Actual bytes written
     """
-    nucleotides = np.array(["A", "T", "C", "G"])
-    quality_scores = np.array(list("!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHI"))
-    bases_per_read = 100  # Length of each read
+    bases_per_read = 100
+    record = f"@SEQ_ID\n{'ACGT' * (bases_per_read // 4)}\n+\n{'I' * bases_per_read}\n"
+    repeats = -(-target_size // len(record))  # ceiling division
 
     with open(file_path, "w") as fastq_file:
-        total_bytes_written = 0
-
-        while total_bytes_written < target_size:
-            # Generate a random sequence of nucleotides using numpy
-            seq = "".join(np.random.choice(nucleotides, bases_per_read))
-            qual = "".join(np.random.choice(quality_scores, bases_per_read))
-
-            # FASTQ entry format
-            entry = f"@SEQ_ID_{np.random.randint(1, 10**6)}\n{seq}\n+\n{qual}\n"
-
-            actual_bytes_written = fastq_file.write(entry)
-            total_bytes_written += actual_bytes_written
-
-    return total_bytes_written
+        return fastq_file.write(record * repeats)
 
 
 @pytest.fixture
@@ -245,7 +199,7 @@ def temp_fastq_file_path(temp_data_dir_path) -> Path:
     temp_fastq_gz_path = temp_data_dir_path / file_name
     target_size = 1024 * 1024 * 6  # create 5MB file, multiupload limit is 5MB
 
-    generate_random_fastq(temp_fastq_gz_path, target_size)
+    generate_fastq(temp_fastq_gz_path, target_size)
 
     return temp_fastq_gz_path
 
@@ -285,12 +239,12 @@ def temp_fastq_file_sha256sum(temp_fastq_file_path):
 
 
 @pytest.fixture
-def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
+def temp_metadata_file_path(temp_data_dir_path) -> Path:
+    """Metadata naming a file that is never created: validation reads paths; it does not open them."""
     with open(metadata_path) as fd:
         metadata = json.load(fd)
 
-    # insert large file
-    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = temp_large_file_path.name
+    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = "temp_large_input_file.bed"
 
     metadata_file_path = temp_data_dir_path / "metadata.json"
     with open(metadata_file_path, "w") as fd:
@@ -326,19 +280,34 @@ def s3_config_content():
     }
 
 
+def _db_config_content(private_key_path, known_keys_path, database_url):
+    return {
+        "db": {
+            "database_url": database_url,
+            "author": {"name": "Alice", "private_key_path": str(private_key_path)},
+            "known_public_keys": str(known_keys_path),
+        }
+    }
+
+
 @pytest.fixture
 def db_config_content(
     db_alice_private_key_file_path,
     db_known_keys_file_path,
     db_test_connection,
 ):
-    return {
-        "db": {
-            "database_url": db_test_connection,
-            "author": {"name": "Alice", "private_key_path": str(db_alice_private_key_file_path)},
-            "known_public_keys": str(db_known_keys_file_path),
-        }
-    }
+    """Config for a database with no schema, for tests that run ``db init`` themselves."""
+    return _db_config_content(db_alice_private_key_file_path, db_known_keys_file_path, db_test_connection)
+
+
+@pytest.fixture
+def migrated_db_config_content(
+    db_alice_private_key_file_path,
+    db_known_keys_file_path,
+    migrated_db_connection,
+):
+    """Config for a database already on the latest schema."""
+    return _db_config_content(db_alice_private_key_file_path, db_known_keys_file_path, migrated_db_connection)
 
 
 @pytest.fixture
@@ -386,6 +355,18 @@ def db_config_model(db_config_content, grzctl_keys_config, grzctl_identifiers_co
 
 
 @pytest.fixture
+def migrated_db_config_model(migrated_db_config_content, grzctl_keys_config, grzctl_identifiers_config):
+    return grzctl.models.config.GrzctlConfig(
+        **migrated_db_config_content,
+        s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
+        archives=_grzctl_archives(),
+        pruefbericht={},
+        keys=grzctl_keys_config,
+        identifiers=grzctl_identifiers_config,
+    )
+
+
+@pytest.fixture
 def identifiers_config_model(identifiers_config_content):
     return grz_cli.models.config.ValidateConfig(**identifiers_config_content)
 
@@ -405,9 +386,19 @@ def temp_s3_config_file_path(temp_data_dir_path, s3_config_model) -> Path:
 
 @pytest.fixture
 def temp_db_config_file_path(temp_data_dir_path, db_config_model) -> Path:
+    """Config file for a database with no schema, for tests that run ``db init`` themselves."""
     config_file = temp_data_dir_path / "config.db.yaml"
     with open(config_file, "w") as fd:
         db_config_model.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_migrated_db_config_file_path(temp_data_dir_path, migrated_db_config_model) -> Path:
+    """Config file for a database already on the latest schema."""
+    config_file = temp_data_dir_path / "config.migrated_db.yaml"
+    with open(config_file, "w") as fd:
+        migrated_db_config_model.to_yaml(fd)
     return config_file
 
 
@@ -440,8 +431,6 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
         config.to_yaml(fd)
     return config_file
 
-
-# -- GrzctlConfig-format fixtures for tests that use grzctl.cli.build_cli() --
 
 # Shared building blocks for GrzctlConfig test fixtures
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}

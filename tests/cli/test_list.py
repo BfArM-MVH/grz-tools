@@ -4,7 +4,6 @@ Tests for the grzctl list functionality.
 
 import importlib.resources
 import json
-import shutil
 from pathlib import Path
 from unittest import mock
 
@@ -15,14 +14,13 @@ from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
 
 from .. import mock_files
+from .common import copy_submission
 
 
 def test_list(temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-        shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
-        shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+        copy_submission(working_dir_path, "files", "encrypted_files", "metadata", source=submission_dir)
 
         logs_dir = working_dir_path / "logs"
         logs_dir.mkdir(exist_ok=True)
@@ -113,9 +111,7 @@ def test_list_with_broken_env(
     """Env vars that corrupt the config cause a validation error."""
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-        shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
-        shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+        copy_submission(working_dir_path, "files", "encrypted_files", "metadata", source=submission_dir)
 
         logs_dir = working_dir_path / "logs"
         logs_dir.mkdir(exist_ok=True)

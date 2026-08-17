@@ -4,7 +4,6 @@ Tests for the Prüfbericht submission functionality.
 
 import importlib.resources
 import json
-import shutil
 from unittest import mock
 
 import click.testing
@@ -13,6 +12,7 @@ from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
 
 from .. import mock_files
+from .common import copy_submission
 
 
 def test_clean_and_list(
@@ -24,9 +24,7 @@ def test_clean_and_list(
 ):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-        shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
-        shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+        copy_submission(working_dir_path, "files", "encrypted_files", "metadata", source=submission_dir)
 
         # manually set successful encrypted state in progress logs since upload checks for this
         logs_dir = working_dir_path / "logs"

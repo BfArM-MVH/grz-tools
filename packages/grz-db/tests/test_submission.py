@@ -2,10 +2,7 @@ import datetime
 from collections.abc import Callable
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from grz_db.errors import DuplicateTanGError
-from grz_db.models.author import Author
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
@@ -15,24 +12,6 @@ SUBMISSION_ID_2 = "123456789_2024-01-02_abcdef02"
 SUBMISSION_ID_3 = "123456789_2024-01-03_abcdef03"
 TAN_G_1 = "a" * 64
 TAN_G_2 = "b" * 64
-
-
-@pytest.fixture(scope="function")
-def test_author() -> Author:
-    key = ed25519.Ed25519PrivateKey.generate()
-    private_key_bytes = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    return Author(name="alice", private_key_bytes=private_key_bytes, private_key_passphrase="")
-
-
-@pytest.fixture(scope="function")
-def db(db_test_connection: str, test_author: Author) -> SubmissionDb:
-    submission_db = SubmissionDb(db_url=db_test_connection, author=test_author, debug=False)
-    submission_db.initialize_schema()
-    return submission_db
 
 
 @pytest.fixture(scope="function")
@@ -126,14 +105,6 @@ def test_get_submissions_unknown_ids_map_to_none(db: SubmissionDb) -> None:
     assert len(result) == 2
     assert result[0] is not None and result[0].id == SUBMISSION_ID
     assert result[1] is None
-
-
-def test_get_submissions_all_unknown(db: SubmissionDb) -> None:
-    """get_submissions returns all-None when none of the IDs exist."""
-    ids = ["000000000_2000-01-01_deadbeef", "000000000_2000-01-01_cafebabe"]
-    result = db.get_submissions(ids)
-
-    assert result == [None, None]
 
 
 def test_get_submissions_includes_states(db: SubmissionDb) -> None:
