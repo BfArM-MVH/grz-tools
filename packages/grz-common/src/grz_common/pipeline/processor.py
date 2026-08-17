@@ -232,12 +232,14 @@ class FilePipelineExecutor:
                 size=-1,
                 mtime=-1.0,
             )
+            run_state.context.mark_completed(file_path_str)
             return
 
         state = self._progress_logger.get_state(file_path_str, file_meta, size=s3_size, mtime=s3_mtime)
         if state and state.get("processing_successful"):
             log.info(f"Skipping {file_meta.file_path}, already processed.")
             pbar_global.update(file_meta.file_size_in_bytes)
+            run_state.context.mark_completed(file_path_str)
             return
 
         if run_state.context.has_errors:
@@ -256,6 +258,7 @@ class FilePipelineExecutor:
                 size=s3_size,
                 mtime=s3_mtime,
             )
+            run_state.context.mark_completed(file_path_str)
 
         except Exception as e:
             log.exception(
@@ -274,6 +277,7 @@ class FilePipelineExecutor:
                 size=s3_size,
                 mtime=s3_mtime,
             )
+            run_state.context.mark_completed(file_path_str)
 
     @staticmethod
     def build_format_validator(

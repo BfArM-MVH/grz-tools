@@ -13,10 +13,20 @@ class SubmissionContext:
         self._lock = threading.Lock()
         self._stats: dict[str, dict[str, Any]] = defaultdict(dict)
         self._errors: list[str] = []
+        self._completed_files: set[str] = set()
 
     def record_stats(self, file_path: str, stats: dict[str, Any]) -> None:
         with self._lock:
             self._stats[file_path].update(stats)
+            self._completed_files.add(file_path)
+
+    def mark_completed(self, file_path: str) -> None:
+        with self._lock:
+            self._completed_files.add(file_path)
+
+    def is_completed(self, file_path: str) -> bool:
+        with self._lock:
+            return file_path in self._completed_files
 
     def get_stats(self, file_path: str) -> dict[str, Any]:
         with self._lock:
@@ -53,14 +63,25 @@ class ReadPairConsistencyValidator:
     def check_pair(self, path_a: str, path_b: str) -> bool:
         """
         Fail-Fast check: If both files are done, compare them.
-        Returns False if mismatch.
+        Returns False if mismatch or if a completed partner is missing stats.
         """
+        # If the partner hasn't completed yet, nothing to check.
+        a_done = self.context.is_completed(path_a)
+        b_done = self.context.is_completed(path_b)
+        if not a_done or not b_done:
+            return True
+
         stats_a = self.context.get_stats(path_a)
         stats_b = self.context.get_stats(path_b)
 
-        # If one is missing, it's not ready to check (or failed earlier). Pass for now.
+        # Both completed but one has no stats — something went wrong.
         if not stats_a or not stats_b:
-            return True
+            msg = (
+                f"Partner file missing stats after completion: {path_a} ({'has stats' if stats_a else 'no stats'}), "
+                f"{path_b} ({'has stats' if stats_b else 'no stats'})"
+            )
+            self.context.add_error(msg)
+            return False
 
         reads_a = stats_a.get("read_count")
         reads_b = stats_b.get("read_count")
