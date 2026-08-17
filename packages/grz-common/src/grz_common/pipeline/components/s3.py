@@ -53,13 +53,14 @@ class S3MultipartUploader(Observer):
     It buffers data and uploads parts.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         s3_client: Any,
         bucket: str,
         key: str,
         part_size: int | None = None,
         max_threads: int = 4,
+        content_type: str | None = None,
     ):
         super().__init__()
         self.s3 = s3_client
@@ -67,6 +68,7 @@ class S3MultipartUploader(Observer):
         self.key = key
         self.part_size = calculate_s3_part_size(None, part_size)
         self.max_threads = max_threads
+        self.content_type = content_type
 
         self._executor: ThreadPoolExecutor | None = None
         self._upload_id: str | None = None
@@ -89,7 +91,10 @@ class S3MultipartUploader(Observer):
             return
         log.info(f"S3Uploader: Starting upload to s3://{self.bucket}/{self.key}")
         try:
-            resp = self.s3.create_multipart_upload(Bucket=self.bucket, Key=self.key)
+            kwargs: dict[str, Any] = {"Bucket": self.bucket, "Key": self.key}
+            if self.content_type:
+                kwargs["ContentType"] = self.content_type
+            resp = self.s3.create_multipart_upload(**kwargs)
             self._upload_id = resp["UploadId"]
             self._executor = ThreadPoolExecutor(max_workers=self.max_threads)
         except Exception:
