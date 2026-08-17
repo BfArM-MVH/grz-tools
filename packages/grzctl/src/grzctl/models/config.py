@@ -73,19 +73,6 @@ class ProcessS3Options(IgnoringBaseModel):
     """
 
 
-class ProcessKeyConfigModel(IgnoringBaseSettings):
-    """Key configuration for the process command."""
-
-    grz_private_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the GRZ private key for decryption."""
-
-    consented_archive_public_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the public key for re-encryption of consented submissions."""
-
-    non_consented_archive_public_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the public key for re-encryption of non-consented submissions."""
-
-
 class DetailedQcModel(IgnoringBaseSettings):
     local_storage: Annotated[str, Field(min_length=1)]
     """Path to local storage for detailed QC staging."""

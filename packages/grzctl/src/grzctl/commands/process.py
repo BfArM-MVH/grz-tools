@@ -11,7 +11,7 @@ import grz_common.cli as grzcli
 from grz_common.models.s3 import S3Options
 from grz_common.pipeline.processor import SubmissionProcessor
 from grz_common.workers.download import S3BotoDownloadWorker
-from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
+from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
 from grz_db.models.submission import SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
@@ -82,7 +82,7 @@ def process(  # noqa: PLR0913
     concurrent_uploads: int,
     inbox_bucket: str | None = None,
     clean_inbox: bool = True,
-    **kwargs,
+    **kwargs: Any,
 ):
     """
     Process a submission through the streaming pipeline.
@@ -90,7 +90,7 @@ def process(  # noqa: PLR0913
     config = ProcessConfig.model_validate(configuration)
 
     inbox = _resolve_inbox_target(config, submission_id, inbox_bucket)
-    _, metadata_dir, log_dir, _encrypted_files_dir = _setup_directories(output_dir)
+    _, metadata_dir, log_dir = _setup_directories(output_dir)
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
 
@@ -175,30 +175,16 @@ def _resolve_inbox_target(config: ProcessConfig, submission_id: str, requested_b
     return InboxTarget(s3=s3_options, private_key_path=inbox_config.private_key_path)
 
 
-def _setup_directories(output_dir: str) -> tuple[Path, Path, Path, Path]:
+def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
     """Create and return required directories."""
     base_dir = Path(output_dir)
     metadata_dir = base_dir / "metadata"
     log_dir = base_dir / "logs"
-    encrypted_files_dir = base_dir / "encrypted_files"
 
-    for d in [base_dir, metadata_dir, log_dir, encrypted_files_dir]:
+    for d in [base_dir, metadata_dir, log_dir]:
         d.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-    return base_dir, metadata_dir, log_dir, encrypted_files_dir
-
-
-def _prepare_redact_patterns(encrypted_submission: EncryptedSubmission) -> list[tuple[str, str]]:
-    """
-    Prepare redaction patterns for tanG and localCaseId.
-
-    :param encrypted_submission: The encrypted submission
-    :returns: List of (pattern, replacement) tuples
-    """
-    patterns = encrypted_submission.metadata.content.create_redaction_patterns()
-    if patterns:
-        log.info(f"Log redaction enabled with {len(patterns)} pattern(s)")
-    return patterns
+    return base_dir, metadata_dir, log_dir
 
 
 def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
