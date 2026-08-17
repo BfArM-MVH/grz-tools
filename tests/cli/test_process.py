@@ -90,7 +90,12 @@ def process_config_content(
             },
             "known_public_keys": str(db_known_keys_file_path),
         },
-        "detailed_qc": {"salt": "salty", "target_percentage": "0.0", "local_storage": str(local_storage_dir)},
+        "detailed_qc": {
+            "salt": "salty",
+            "target_percentage": "0.0",
+            "local_storage": str(local_storage_dir),
+            "auto_run": False,
+        },
     }
 
 

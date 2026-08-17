@@ -1,5 +1,6 @@
 import json
 import logging
+import subprocess
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
@@ -644,8 +645,29 @@ class SubmissionProcessor:
                 log.info(f"Running detailed QC pass for {submission_run.submission_id}...")
                 qc_logger = FileProgressLogger[ProcessingState](self._log_dir / "progress_qc.cjson")
                 self._pipeline_executor.process_submission_files(
-                    submission_run, qc_only=True, progress_logger=qc_logger,
+                    submission_run,
+                    qc_only=True,
+                    progress_logger=qc_logger,
                 )
+
+                # write metadata to local storage for the QC workflow
+                submission_basepath = Path(self.config.detailed_qc.local_storage) / submission_run.submission_id
+                metadata_dir = submission_basepath / "metadata"
+                metadata_dir.mkdir(parents=True, exist_ok=True)
+                metadata_file = metadata_dir / "metadata.json"
+                metadata_file.write_text(json.dumps(submission_metadata.content.model_dump(), indent=2))
+                log.info(f"Wrote submission metadata to {metadata_file}")
+
+                if self.config.detailed_qc.auto_run:
+                    output_basepath = submission_basepath / "qc"
+                    shell_command = self.config.detailed_qc.shell_command.format(
+                        submission_basepath=str(submission_basepath),
+                        output_basepath=str(output_basepath),
+                        submission_id=submission_run.submission_id,
+                    )
+                    log.info(f"Running detailed QC workflow: {shell_command}")
+                    subprocess.run(shell_command, shell=True, check=True)  # noqa: S602
+                    log.info(f"Detailed QC workflow completed for {submission_run.submission_id}.")
 
             self._upload_final_metadata(submission_metadata, submission_run)
             self._upload_redacted_logs(submission_metadata, submission_run)

@@ -51,6 +51,8 @@ detailed_qc:
   local_storage: /path/to/local_storage
   salt: ${GRZ_DETAILED_QC__SALT}
   target_percentage: 2.0
+  # shell_command: "nextflow run main.nf -profile docker --submission_basepath '{submission_basepath}' --outdir '{output_basepath}/grzqc_output' -work-dir '{output_basepath}/work'"
+  # auto_run: true
 
 db:
   database_url: sqlite:///path/to/submission.db.sqlite

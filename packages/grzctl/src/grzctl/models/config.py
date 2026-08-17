@@ -83,6 +83,23 @@ class DetailedQcModel(IgnoringBaseSettings):
     target_percentage: Annotated[float, Field(ge=0.0, le=100.0)] = 2.0
     """Target percentage of submissions selected for detailed QC per month."""
 
+    shell_command: Annotated[str, Field(min_length=1)] = (
+        "nextflow run main.nf -profile docker "
+        "--submission_basepath '{submission_basepath}' "
+        "--outdir '{output_basepath}/grzqc_output' "
+        "-work-dir '{output_basepath}/work'"
+    )
+    """Shell command template for invoking the GRZ QC workflow.
+
+    Available placeholders:
+      - {submission_basepath}: path to decrypted files (local_storage/submission_id)
+      - {output_basepath}: output directory for QC results (defaults to submission_basepath/qc)
+      - {submission_id}: the raw submission ID
+    """
+
+    auto_run: bool = False
+    """If true, automatically run the QC shell command after the QC pass completes."""
+
 
 class ArchiveTarget(IgnoringBaseModel):
     """Encapsulates everything needed to write to a specific archive."""
