@@ -109,8 +109,7 @@ class RunSetupCoordinator:
             else False
         )
         if should_qc:
-            # TODO: set selected_for_qc to TRUE for this submission in database
-            log.info(f"Submission {submission_id} should be QCed.")
+            log.info(f"Submission {submission_id} selected for detailed QC.")
 
         return should_qc
 
@@ -128,7 +127,7 @@ class RunSetupCoordinator:
             final_s3=self._s3_client_cache.get(target_archive.s3),
             final_bucket=target_archive.s3.bucket,
             target_public_key=self._consented_pub_key if is_research_consented else self._non_consented_pub_key,
-            should_qc=self._determine_qc_flag(submission_metadata.content.submission_id),
+            should_qc=False,
         )
 
         log.info(f"Consent Status: {'Consented' if is_research_consented else 'Non-Consented'}")
@@ -176,17 +175,40 @@ class FilePipelineExecutor:
     def process_submission_files(
         self,
         run_state: SubmissionRunState,
+        qc_only: bool = False,
+        progress_logger: FileProgressLogger[ProcessingState] | None = None,
     ) -> None:
         files_map = run_state.submission_metadata.files
         total_bytes = sum(f.file_size_in_bytes for f in files_map.values())
         thresholds = self.get_thresholds(run_state.submission_metadata)
 
-        log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
+        if progress_logger is not None:
+            original_logger = self._progress_logger
+            self._progress_logger = progress_logger
+        else:
+            original_logger = None
 
-        with (
-            tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global,  # type: ignore[call-overload]
-            ThreadPoolExecutor(max_workers=self._threads) as pool,
-        ):
+        try:
+            if qc_only:
+                log.info(f"Downloading {len(files_map)} files for QC ({total_bytes / (1024**3):.2f} GB)...")
+                self._process_files_concurrent(run_state, files_map, thresholds, qc_only=True)
+            else:
+                log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
+                with tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global:  # type: ignore[call-overload]
+                    self._process_files_concurrent(run_state, files_map, thresholds, pbar_global=pbar_global)
+        finally:
+            if original_logger is not None:
+                self._progress_logger = original_logger
+
+    def _process_files_concurrent(
+        self,
+        run_state: SubmissionRunState,
+        files_map: dict[str, File],
+        thresholds: dict[str, Thresholds],
+        qc_only: bool = False,
+        pbar_global: Any = None,
+    ) -> None:
+        with ThreadPoolExecutor(max_workers=self._threads) as pool:
             futures: list[Future] = [
                 pool.submit(
                     self._process_one_file,
@@ -194,6 +216,7 @@ class FilePipelineExecutor:
                     file_meta=file_meta,
                     threshold=thresholds.get(file_meta.file_path),
                     pbar_global=pbar_global,
+                    qc_only=qc_only,
                 )
                 for file_meta in files_map.values()
             ]
@@ -206,6 +229,7 @@ class FilePipelineExecutor:
         file_meta: File,
         threshold: Thresholds | None,
         pbar_global: Any,
+        qc_only: bool = False,
     ) -> None:
         src_key = f"{run_state.submission_id}/files/{file_meta.file_path}.c4gh"
         file_path_str = str(file_meta.file_path)
@@ -238,7 +262,8 @@ class FilePipelineExecutor:
         state = self._progress_logger.get_state(file_path_str, file_meta, size=s3_size, mtime=s3_mtime)
         if state and state.get("processing_successful"):
             log.info(f"Skipping {file_meta.file_path}, already processed.")
-            pbar_global.update(file_meta.file_size_in_bytes)
+            if pbar_global is not None:
+                pbar_global.update(file_meta.file_size_in_bytes)
             run_state.context.mark_completed(file_path_str)
             return
 
@@ -246,9 +271,9 @@ class FilePipelineExecutor:
             return
 
         try:
-            self._run_pipeline(run_state, file_meta, threshold, pbar_global, file_name)
+            self._run_pipeline(run_state, file_meta, threshold, pbar_global, file_name, qc_only=qc_only)
 
-            if not run_state.consistency_validator.check(file_meta.file_path):
+            if not qc_only and not run_state.consistency_validator.check(file_meta.file_path):
                 raise RuntimeError(f"Consistency Check Failed: {file_meta.file_path}")
 
             self._progress_logger.set_state(
@@ -294,14 +319,21 @@ class FilePipelineExecutor:
 
         return format_validator
 
-    def _run_pipeline(
+    def _run_pipeline(  # noqa: PLR0913
         self,
         run_state: SubmissionRunState,
         file_meta: File,
         threshold: Thresholds | None,
         pbar_global: Any,
         file_name: str,
+        qc_only: bool = False,
     ) -> None:
+        src_key = f"{run_state.submission_id}/files/{file_meta.file_path}.c4gh"
+
+        if qc_only:
+            self._run_qc_pipeline(run_state, file_meta, src_key)
+            return
+
         if not run_state.target_public_key:
             raise RuntimeError("Target public key not set.")
         if not run_state.final_bucket or not run_state.interrogation_bucket:
@@ -309,7 +341,6 @@ class FilePipelineExecutor:
         if run_state.final_s3 is None or run_state.interrogation_s3 is None:
             raise RuntimeError("Target S3 client not set.")
 
-        src_key = f"{run_state.submission_id}/files/{file_meta.file_path}.c4gh"
         dest_key = f"{run_state.submission_id}/files/{file_meta.encrypted_file_path()}"
 
         metrics = StreamMetricsRegistry(enabled=self._enable_metrics)
@@ -386,6 +417,29 @@ class FilePipelineExecutor:
             log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
 
         run_state.context.record_stats(file_meta.file_path, stats)
+
+    def _run_qc_pipeline(
+        self,
+        run_state: SubmissionRunState,
+        file_meta: File,
+        src_key: str,
+    ) -> None:
+        """Download, decrypt, checksum-validate, and write to local QC storage."""
+        dest_path = Path(self._qc_local_storage) / run_state.submission_id / "files" / file_meta.file_path
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
+
+        pipeline = (
+            S3Downloader(self._source_s3, self._source_bucket, src_key)
+            | Crypt4GHDecryptor(private_key=self._private_key)
+            | Tee(checksum_validator, threaded=self._background_tee)
+        )
+
+        with open(dest_path, "wb") as f:
+            pipeline >> f
+
+        run_state.context.record_stats(str(file_meta.file_path), checksum_validator.metrics)
 
 
 class SubmissionProcessor:
@@ -552,14 +606,22 @@ class SubmissionProcessor:
 
         High-level view:
         1. Determine the target archive based on consent status (at the time of execution!).
-        2. Check if submission should undergo detailed QC, in which case the decrypted files are written to local storage.
-        3. Spawn threads to process files (Download -> Decrypt -> Validate -> Encrypt -> Archive).
-        4. Stage redacted metadata.
-        5. Move encrypted submission from interrogation bucket to target archive bucket.
-        6. Optionally clean the inbox.
+        2. Spawn threads to process files (Download -> Decrypt -> Validate -> Encrypt -> Archive).
+        3. Mark basic QC as passed in the database.
+        4. Determine detailed QC eligibility and update the database accordingly.
+        5. If detailed QC is needed, re-process files to write decrypted data to local storage.
+        6. Stage redacted metadata.
+        7. Copy files from interrogation bucket to target archive bucket, then clean up.
+        8. Optionally clean the inbox.
+
+        The interrogation bucket serves as a staging area: files are first uploaded there
+        during processing, then copied to the final archive on success. If processing fails,
+        files are either cleaned up or left in the interrogation bucket depending on the
+        ``keep_failed`` configuration. A lifecycle rule on the interrogation bucket is
+        recommended to automatically clean up orphaned files from incomplete transfers.
 
         :param submission_metadata: The parsed metadata object containing donor and file information.
-        :raises RuntimeError: If consistency checks fail or any file fails validation.
+        :raises PipelineValidationError: If consistency checks fail or any file fails validation.
         """
         submission_run = self._setup.new_submission_run(submission_metadata)
         try:
@@ -569,10 +631,26 @@ class SubmissionProcessor:
                 log.error(f"Pipeline errors: {submission_run.context._errors}")
                 raise PipelineValidationError("Submission failed consistency checks or validation.")
 
+            # validation passed, so mark basic QC as passed in the database.
+            if self._update_db:
+                db = SubmissionDb(self.config.db.database_url, self.config.db.author)  # type: ignore[arg-type]
+                db.modify_submission(submission_run.submission_id, "basic_qc_passed", True)
+
+            # determine whether to perform detailed QC (now that basic QC is marked as passed).
+            should_qc = self._setup._determine_qc_flag(submission_run.submission_id)
+            submission_run.should_qc = should_qc
+
+            if should_qc:
+                log.info(f"Running detailed QC pass for {submission_run.submission_id}...")
+                qc_logger = FileProgressLogger[ProcessingState](self._log_dir / "progress_qc.cjson")
+                self._pipeline_executor.process_submission_files(
+                    submission_run, qc_only=True, progress_logger=qc_logger,
+                )
+
             self._upload_final_metadata(submission_metadata, submission_run)
             self._upload_redacted_logs(submission_metadata, submission_run)
 
-            # Commit files from interrogation bucket to final archive
+            # Copy files from interrogation bucket to final archive.
             self._commit_to_archive(submission_run)
 
             log.info(f"Submission {submission_run.submission_id} processed successfully.")
