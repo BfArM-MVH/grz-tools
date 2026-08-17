@@ -95,7 +95,16 @@ class ArchiveTarget(IgnoringBaseModel):
 
 
 class InterrogationConfig(IgnoringBaseModel):
-    """Configuration for the staging interrogation bucket."""
+    """Configuration for the staging interrogation bucket.
+
+    This bucket acts as a staging area: processed files are uploaded here first,
+    then copied to the final archive on success. If processing fails, files are
+    either cleaned up or left here depending on the ``keep_failed`` setting.
+
+    A lifecycle rule is recommended on this bucket to automatically clean up
+    incomplete multipart uploads and orphaned files from failed transfers
+    (e.g. expire incomplete parts after 10 days).
+    """
 
     s3: S3Options
     """S3 connection details and bucket for the staging interrogation bucket."""
