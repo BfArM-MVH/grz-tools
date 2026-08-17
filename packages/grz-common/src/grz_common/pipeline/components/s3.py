@@ -5,14 +5,11 @@ import math
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any
 
+from grz_common.constants import MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MAX_PARTS, MULTIPART_MIN_PART_SIZE
+
 from . import DataIntegrityError, Observer, ReadStream
 
 log = logging.getLogger(__name__)
-
-
-MULTIPART_DEFAULT_PART_SIZE = 8 * 1024 * 1024  # 8MiB
-MULTIPART_MAX_PARTS = 1000  # Ceph S3 limit
-MULTIPART_MIN_PART_SIZE = 5 * 1024 * 1024  # S3 Standard Min (5MB)
 
 
 def calculate_s3_part_size(file_size: int | None, user_part_size: int | None = None) -> int:
