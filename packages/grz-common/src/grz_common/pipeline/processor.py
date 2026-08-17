@@ -361,13 +361,14 @@ class FilePipelineExecutor:
             pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]), threaded=self._background_tee)
 
             # upload to archive bucket
-            part_size = calculate_s3_part_size(file_meta.file_size_in_bytes, None)
+            part_size = calculate_s3_part_size(file_meta.file_size_in_bytes)
             uploader = S3MultipartUploader(
                 run_state.interrogation_s3,
                 run_state.interrogation_bucket,
                 dest_key,
                 part_size=part_size,
                 max_threads=self._max_concurrent_uploads,
+                content_type="application/octet-stream",
             )
 
             # run the whole pipeline
