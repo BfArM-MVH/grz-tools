@@ -1,6 +1,5 @@
 import filecmp
 import os
-import shutil
 from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
@@ -12,6 +11,8 @@ from click.testing import CliRunner
 from grz_common.exceptions import IncompleteSubmissionError
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
+
+from .common import SUBMISSION_DIR, copy_submission
 
 
 def are_dir_trees_equal(dir1, dir2):
@@ -46,16 +47,9 @@ def test_upload_download_submission(
     temp_s3_db_config_file_path,
     initiated_db_test_connection,  # necessary to initiate DB
 ):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
     env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
 
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(
-        submission_dir / "encrypted_files",
-        working_dir_path / "encrypted_files",
-        dirs_exist_ok=True,
-    )
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "encrypted_files", "metadata")
 
     logs_dir = working_dir_path / "logs"
     logs_dir.mkdir()
@@ -143,9 +137,7 @@ def test_upload_download_submission(
 
 def test_upload_aborts_on_incomplete_encryption(working_dir_path, temp_s3_config_file_path, remote_bucket_with_version):
     """Verify that the upload command fails if the encryption log marks a file as not successful."""
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
     (working_dir_path / "encrypted_files").mkdir()
 
     logs_dir = working_dir_path / "logs"
@@ -203,9 +195,7 @@ def test_upload_aborts_if_encryption_log_missing(
     working_dir_path, temp_s3_config_file_path, remote_bucket_with_version
 ):
     """Verify that the upload command fails if the encryption log is missing entirely."""
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
     (working_dir_path / "encrypted_files").mkdir()
     (working_dir_path / "logs").mkdir()
 
@@ -245,12 +235,10 @@ def test_upload_workflow_succeeds_with_symlinks_to_real_test_files(
     End-to-end smoke test for LE submissions where `files/` entries are symlinks
     to real fixture files in tests/.
     """
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
     # Create files/ directory with symlinks to real test fixture files
     (working_dir_path / "files").mkdir(parents=True, exist_ok=True)
-    for source_path in (submission_dir / "files").rglob("*"):
-        relative_path = source_path.relative_to(submission_dir / "files")
+    for source_path in (SUBMISSION_DIR / "files").rglob("*"):
+        relative_path = source_path.relative_to(SUBMISSION_DIR / "files")
         link_path = working_dir_path / "files" / relative_path
 
         if source_path.is_dir():
@@ -264,7 +252,7 @@ def test_upload_workflow_succeeds_with_symlinks_to_real_test_files(
             pytest.skip(f"Symlinks not supported in this environment: {e}")
 
     # Copy metadata (not symlinked since it's not validated by grz-check)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "metadata")
 
     runner = CliRunner()
     cli = grz_cli.cli.build_cli()

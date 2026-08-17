@@ -18,13 +18,13 @@ from sqlmodel import Session, select
 @pytest.fixture
 def full_config_path(
     tmp_path,
-    db_config_content,
+    migrated_db_config_content,
     s3_config_content,
     keys_config_content,
     pruefbericht_config_content,
 ):
     config_data = {}
-    config_data.update(db_config_content)
+    config_data.update(migrated_db_config_content)
     config_data.update(s3_config_content)
     config_data.update(keys_config_content)
     config_data.update(pruefbericht_config_content)
@@ -35,11 +35,6 @@ def full_config_path(
     config_path = tmp_path / "config.yaml"
     with open(config_path, "w") as f:
         yaml.dump(config_data, f)
-
-    runner = click.testing.CliRunner()
-    cli = build_cli()
-    result = runner.invoke(cli, ["db", "--config-file", str(config_path), "init"])
-    assert result.exit_code == 0, f"DB Init failed: {result.output}"
 
     return config_path
 

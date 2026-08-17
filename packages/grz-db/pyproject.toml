@@ -18,8 +18,15 @@ dependencies = [
     "alembic[tz] >=1.16.1",
     "cryptography >=45.0.3,<49",
     "sqlmodel >=0.0.38",
-    "grz-pydantic-models >=2.7,<3",
+    "grz-pydantic-models >=3,<4",
     "psycopg[binary] ~=3.2"
+]
+
+[project.optional-dependencies]
+# Fixtures in grz_db.testing, for downstream packages that provision a database in their tests.
+testing = [
+    "pytest",
+    "pytest-postgresql",
 ]
 
 

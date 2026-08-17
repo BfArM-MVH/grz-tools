@@ -1,5 +1,41 @@
 # Changelog
 
+## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v3.0.0...grzctl-v4.0.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** grzctl requires grz-db 3 and grz-cli 2, and so applies the same consent rules when it reads or backfills submission metadata.
+* **grz-cli:** grz-cli requires grz-common 3. Metadata naming a consent dateTime outside the FHIR grammar, or leaving a 2025 researchConsent provision period open-ended, is now rejected rather than accepted.
+
+### Bug Fixes
+
+* **grz-cli:** require grz-common 3 ([#649](https://github.com/BfArM-MVH/grz-tools/issues/649)) ([69b9c17](https://github.com/BfArM-MVH/grz-tools/commit/69b9c171dd1e248bb38bbc6822dc4e7f3857accc))
+* **grzctl:** require grz-db 3 and grz-cli 2 ([69b9c17](https://github.com/BfArM-MVH/grz-tools/commit/69b9c171dd1e248bb38bbc6822dc4e7f3857accc))
+
+## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.4...grzctl-v3.0.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grz-pydantic-models:** a consent dateTime stating a time must spell out seconds and separate date from time by T, and a date must be a dashed calendar date, as the FHIR dateTime regex requires. Metadata stating a bound in any other form is now rejected rather than parsed. The four fields hold a FhirDateTime rather than a datetime, keeping the value as submitted and resolving to a moment through .first_moment or .last_moment. A naive datetime handed to one of them in code is refused rather than read as UTC.
+* **grz-db:** track requester name, email, request date in change requests ([#540](https://github.com/BfArM-MVH/grz-tools/issues/540)) (#566)
+
+### Features
+
+* **grz-common:** report a consent dateTime without a timezone when ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+* **grz-db:** let a submission diff withhold overwrites outside an ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+* **grz-db:** ship reusable database fixtures for downstream tests ([#647](https://github.com/BfArM-MVH/grz-tools/issues/647)) ([a72caba](https://github.com/BfArM-MVH/grz-tools/commit/a72caba963512876be92ac4a8469b931fd1c3767))
+* **grz-db:** track requester name, email, request date in change requests ([#540](https://github.com/BfArM-MVH/grz-tools/issues/540)) ([#566](https://github.com/BfArM-MVH/grz-tools/issues/566)) ([ffbea72](https://github.com/BfArM-MVH/grz-tools/commit/ffbea72ca7121a7d72727601dec658965f105ed5))
+* **grzctl, grz-db, grz-common:** Metadata schema version check via version.json ([#624](https://github.com/BfArM-MVH/grz-tools/issues/624)) ([c6f1e7c](https://github.com/BfArM-MVH/grz-tools/commit/c6f1e7ce07cd5772beee5551e0b95b02a9f83914))
+* **grzctl:** overwrite selected fields during db backfill ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** read consent dateTimes as FHIR defines them ([#646](https://github.com/BfArM-MVH/grz-tools/issues/646)) ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f)), closes [#645](https://github.com/BfArM-MVH/grz-tools/issues/645)
+* **grzctl:** require grz-db 2.2 ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+
 ## [2.1.4](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v2.1.3...grzctl-v2.1.4) (2026-06-16)
 
 

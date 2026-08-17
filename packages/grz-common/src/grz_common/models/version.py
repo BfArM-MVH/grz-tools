@@ -1,9 +1,10 @@
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Self
 
 import botocore
+from grz_pydantic_models.common import as_aware_datetime
 from packaging.version import Version
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_core import core_schema
@@ -59,17 +60,10 @@ class VersionInfo(BaseModel):
     @field_validator("enforced_from", mode="before")
     @classmethod
     def parse_datetime(cls, v):
-        if isinstance(v, datetime):
-            # Already a datetime — ensure it is timezone-aware by treating naive datetimes as UTC.
-            # This guarantees safe comparison with datetime.now(UTC) regardless of whether the
-            # value was constructed programmatically (e.g. in tests) or parsed from a string.
-            return v if v.tzinfo is not None else v.replace(tzinfo=UTC)
-
-        # Parse ISO 8601 strings. Strings without a timezone offset (e.g. "2026-03-01T00:00:00")
-        # are treated as UTC rather than local time, ensuring consistent behaviour across
-        # environments and avoiding ambiguity when comparing against datetime.now(UTC).
-        dt = datetime.fromisoformat(str(v))
-        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+        # Naive values, whether constructed programmatically (e.g. in tests) or parsed from a string
+        # without an offset (e.g. "2026-03-01T00:00:00"), are treated as UTC so that comparisons
+        # against datetime.now(UTC) stay unambiguous across environments.
+        return as_aware_datetime(v if isinstance(v, datetime) else datetime.fromisoformat(str(v)))
 
     @model_validator(mode="after")
     def check_version_order(self):
@@ -93,6 +87,9 @@ class VersionFile(BaseModel):
 
     # List allows staged future policies (empty list disables version checking)
     grzcli_version: list[VersionInfo] = Field(default_factory=list, description="List of version policies for grz-cli")
+    metadata_version: list[VersionInfo] = Field(
+        default_factory=list, description="List of version policies for metadata schema"
+    )
 
     @classmethod
     def from_s3(cls, s3_options: S3Options, version_file_key: str) -> Self:

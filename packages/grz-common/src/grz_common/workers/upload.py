@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import botocore.handlers
+from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
+from grz_common.exceptions import UploadError
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from tqdm.auto import tqdm
 
@@ -33,12 +35,6 @@ log = logging.getLogger(__name__)
 # accept bucket names with ":" in the name
 # see: https://github.com/boto/boto3/discussions/4251
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")  # type: ignore[import-untyped]
-
-
-class UploadError(Exception):
-    """Exception raised when an upload fails"""
-
-    pass
 
 
 class UploadWorker(metaclass=abc.ABCMeta):

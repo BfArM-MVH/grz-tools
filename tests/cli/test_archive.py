@@ -4,20 +4,19 @@ Tests for the Prüfbericht submission functionality.
 
 import importlib.resources
 import json
-import shutil
 
 import click.testing
 import grzctl
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 
 from .. import mock_files
+from .common import copy_submission
 
 
 def test_archive(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
-        shutil.copytree(submission_dir / "encrypted_files", working_dir_path / "encrypted_files", dirs_exist_ok=True)
-        shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+        copy_submission(working_dir_path, "encrypted_files", "metadata", source=submission_dir)
 
         with open(working_dir_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
             metadata_json = json.load(metadata_file)

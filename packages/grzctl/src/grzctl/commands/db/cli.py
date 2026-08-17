@@ -1,7 +1,6 @@
 """Command for managing a submission database"""
 
 import csv
-import itertools
 import json
 import logging
 import sys
@@ -60,6 +59,7 @@ from tqdm.auto import tqdm
 from ... import get_versions
 from ...models.config import DbConfig, ListConfig
 from .. import limit
+from ..change_request import resolve_and_validate_change_request
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
@@ -400,7 +400,7 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
 def _build_submission_dict_from(
     log_obj: SubmissionStateLog | ChangeRequestLog | None,
     submission: Submission,
-    signature_status: SignatureStatus,
+    signature_status: SignatureStatus = SignatureStatus.UNKNOWN,
 ) -> dict[str, Any]:
     """Serialize a submission and its latest log entry to a JSON-compatible dict.
 
@@ -408,6 +408,7 @@ def _build_submission_dict_from(
         :class:`~grz_db.models.submission.ChangeRequestLog`, or ``None`` if no log exists yet.
     :param submission: The submission ORM/Pydantic model instance.
     :param signature_status: Verification result for the log entry's author signature.
+        Defaults to :attr:`~SignatureStatus.UNKNOWN` when no verification was performed.
     :returns: A dictionary suitable for JSON serialisation that contains the submission identifiers
         and either a ``latest_state`` or ``latest_change_request`` key depending on *log_obj*.
     :raises TypeError: If *log_obj* is neither ``None`` nor one of the two expected log types.
@@ -904,27 +905,80 @@ def populate_qc(
 @submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
-@click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.option("--data", "data_json", type=str, default=None, help='Inline JSON data (e.g., \'{"k":"v"}\').')
+@click.option(
+    "--data-file",
+    "data_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to a JSON or YAML file with the change-request fields (see `grzctl change-request-template`).",
+)
+@click.option(
+    "--raw-content",
+    "raw_content_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Optional path to a binary file (e.g. a .pdf or .png) accompanying the request. "
+        "Type is inferred from the file extension and verified by magic bytes."
+    ),
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Validate inputs and check the submission exists, but do not write the change request.",
+)
 @click.pass_context
-def change_request(ctx: click.Context, submission_id: str, change_str: str, data_json: str | None):
-    """Register a completed change request for the given submission. Optionally accepts additional JSON data to associate with the log entry."""
-    db = ctx.obj["db_url"]
-    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+def change_request(  # noqa: PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    change_str: str,
+    data_json: str | None,
+    data_file: Path | None,
+    raw_content_path: Path | None,
+    dry_run: bool,
+):
+    """Register a completed change request for the given submission.
+
+    The audit fields (requester name, email, requested-at, request content) are required.
+    See ``grzctl change-request-template`` for a fill-in YAML template, and
+    ``packages/grzctl/examples/demo_change_request.py`` for a runnable end-to-end
+    walkthrough including the optional ``--raw-content`` (PDF/PNG) attachment path.
+    """
     try:
         change_request_enum = ChangeRequestEnum(change_str)
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
         raise click.Abort() from e
 
-    parsed_data = None
-    if data_json:
-        try:
-            parsed_data = json.loads(data_json)
-        except json.JSONDecodeError as e:
-            console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
-            raise click.Abort() from e
+    kwargs = resolve_and_validate_change_request(change_request_enum, data_json, data_file, raw_content_path)
+
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    if dry_run:
+        existing = db_service.get_submission(submission_id)
+        if existing is None:
+            console_err.print(
+                f"[red]Dry run: submission '{submission_id}' not found. "
+                f"You might need to add it first: grz-cli db submission add {submission_id}[/red]"
+            )
+            raise click.Abort()
+        console_err.print(
+            f"[yellow]Dry run: would register change request '{change_request_enum.value}' "
+            f"for submission '{submission_id}'. No changes were written.[/yellow]"
+        )
+        console_err.print("[yellow]Validated fields:[/yellow]")
+        preview = {k: v for k, v in kwargs.items() if k != "request_raw_content"}
+        if kwargs["request_raw_content"] is not None:
+            preview["request_raw_content"] = f"<{len(kwargs['request_raw_content'])} bytes>"
+        click.echo(json.dumps(preview, indent=2, ensure_ascii=False, default=str), err=True)
+        return
+
     try:
-        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, parsed_data)
+        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, **kwargs)
         console_err.print(
             f"[green]Submission '{submission_id}' has undergone a change request of '{new_change_request_log.change.value}'. Log ID: {new_change_request_log.id}[/green]"
         )
@@ -1119,6 +1173,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     dry_run: bool,
     force: bool,
     ignore_fields: set[str],
+    allow_overwrite: frozenset[str] = frozenset(),
 ) -> _BackfillResult:
     """Fetch metadata.json from S3 for one submission and commit a diff to the database.
 
@@ -1174,17 +1229,24 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
         return _BackfillResult.UP_TO_DATE
 
+    # Filling a field that was NULL destroys nothing, so it is always written. Replacing one that
+    # already has a value needs saying so: --force permits every such overwrite, --allow-overwrite
+    # only the fields it names, and anything else is held back and reported.
+    allowed = {diff.key for diff in submission_diff.pending} if force else allow_overwrite
+    submission_diff, withheld = submission_diff.withhold_destructive(allowed)
+    if withheld:
+        console_err.print(
+            f"[dim]  {submission_id}: not overwriting {', '.join(diff.key for diff in withheld)} "
+            f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
+        )
+    if not submission_diff.has_pending and not donors_diff.has_pending:
+        return _BackfillResult.WOULD_OVERWRITE
+
     if dry_run:
         console_err.print(
             f"[yellow]  [dry-run] {submission_id}: would update fields: {[d.key for d in submission_diff.pending]}[/yellow]"
         )
         return _BackfillResult.UPDATED
-
-    if not force and submission_diff.has_pending_destructive:
-        console_err.print(
-            f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}, skipping (use --force to overwrite).[/dim]"
-        )
-        return _BackfillResult.WOULD_OVERWRITE
 
     try:
         db_service.commit_changes(submission_id, submission_diff, donors_diff)
@@ -1208,7 +1270,16 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     "--force/--no-force",
     default=False,
     help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
-    "Without this flag, such submissions are reported and skipped.",
+    "Without this flag, such fields are reported and left alone while the rest is still written.",
+)
+@click.option(
+    "--allow-overwrite",
+    "allow_overwrite",
+    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
+    multiple=True,
+    help="Overwrite only these existing non-NULL fields when the metadata.json value differs "
+    "(may be repeated). Other destructive changes are held back and the submission is updated in "
+    "part. Mutually exclusive with --force, which permits every overwrite.",
 )
 @click.option(
     "--submission-id",
@@ -1236,6 +1307,7 @@ def backfill(  # noqa: PLR0913
     configuration: dict[str, Any],
     dry_run: bool,
     force: bool,
+    allow_overwrite: tuple[str, ...],
     submission_ids: tuple[str, ...],
     start_date: datetime,
     end_date: datetime,
@@ -1248,8 +1320,10 @@ def backfill(  # noqa: PLR0913
     that are actually missing or changed are written, donor records are synchronised,
     and already-up-to-date submissions are silently skipped.
 
-    Existing non-NULL fields whose values differ from metadata.json are not overwritten
-    unless --force is given.
+    A field that is missing in the database is always filled. One that already has a
+    different value is only overwritten with --force, or when --allow-overwrite names it;
+    any other overwrite is reported and held back, so a submission is updated in part
+    rather than skipped entirely.
 
     Candidate selection (mutually exclusive):
 
@@ -1263,6 +1337,9 @@ def backfill(  # noqa: PLR0913
     # ── Validate option combinations ────────────────────────────────────────
     if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
+
+    if force and allow_overwrite:
+        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
 
     ignore_fields = set(ignore_field) | {
         "submission_uploaded_date",
@@ -1311,6 +1388,7 @@ def backfill(  # noqa: PLR0913
                 dry_run,
                 force,
                 ignore_fields,
+                frozenset(allow_overwrite),
             )
         ] += 1
 

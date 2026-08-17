@@ -19,13 +19,19 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
 
-from ...common import StrictBaseModel
-from ...mii.consent import Consent, ProvisionType
+from ...common import StrictBaseModel, as_aware_datetime
+from ...mii.consent import (
+    BroadConsentVersion,
+    Consent,
+    ProvisionType,
+    Status,
+)
 from .. import thresholds as thresholds_model
 from .versioning import Version
 
@@ -43,10 +49,22 @@ ClinicalDataNodeId = Annotated[str, StringConstraints(pattern=r"^KDK[A-Z0-9]{3}[
 
 
 def is_supported_version(version: str) -> bool:
-    return Version("1.1.1") <= Version(version) <= Version("1.3")
+    return Version("1.1.1") <= Version(version) <= Version("1.3.1")
 
 
 class ResearchConsentCodes(StrEnum):
+    """
+    Permissions consent to research is derived from. Neither has been retired by the MII.
+
+    Research use needs MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU, which the MII policy
+    CodeSystem places inside the PATDAT_ERHEBEN_SPEICHERN_NUTZEN module, so permitting the module
+    grants it as well. Either permit therefore suffices, while a deny on either revokes; see
+    ``ResearchConsent.consents_to_research``.
+
+    Matched on the OID alone: OIDs are globally unique, while the policy system is stated
+    inconsistently, with and without its 'urn:oid:' prefix.
+    """
+
     PATDAT_ERHEBEN_SPEICHERN_NUTZEN = "2.16.840.1.113883.3.1937.777.24.5.3.1"
     MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
 
@@ -275,8 +293,49 @@ class MvConsent(StrictBaseModel):
     """
 
 
-class ResearchConsentSchemaVersion(StrEnum):
-    v_2025_0_1 = "2025.0.1"
+# MII "Modul Consent" package versions the Consent model is checked against, in publication order,
+# each mapped to the version of MII_PR_Consent_Einwilligung it ships. The profile version
+# decides which cardinalities apply, so a package cannot be accepted without naming its profile.
+# GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has not released; add it here once it
+# is, together with its artefacts in example_terminology.
+RESEARCH_CONSENT_PACKAGE_PROFILES = {
+    "2025.0.1": "1.0.8",
+    "2025.0.2": "1.0.8",
+    "2025.0.3": "1.0.8",
+    "2025.0.4": "1.0.8",
+    "2026.0.0": "1.0.9",
+}
+
+RESEARCH_CONSENT_SCHEMA_VERSIONS = tuple(RESEARCH_CONSENT_PACKAGE_PROFILES)
+
+# Profile versions pinning both provision periods' end to 1..1. Profile 1.0.9 relaxed it to 0..1,
+# so only there may a period stay open-ended. A profile absent from this set is taken not to
+# require an end, so a future profile that re-tightens the bound has to be added here;
+# test_model_matches_the_profile fails against the vendored artefacts until it is.
+PROFILES_REQUIRING_PERIOD_END = frozenset({"1.0.8"})
+
+
+def _validate_research_consent_schema_version(value: str) -> str:
+    if value not in RESEARCH_CONSENT_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"Unsupported researchConsent schemaVersion {value!r}; "
+            f"accepted versions are {', '.join(RESEARCH_CONSENT_SCHEMA_VERSIONS)}"
+        )
+    return value
+
+
+# Restated for JSON Schema, which cannot express a validator and would export a bare string.
+ResearchConsentSchemaVersion = Annotated[
+    str,
+    AfterValidator(_validate_research_consent_schema_version),
+    WithJsonSchema(
+        {
+            "type": "string",
+            "description": "Schema version of de.medizininformatikinitiative.kerndatensatz.consent",
+            "enum": list(RESEARCH_CONSENT_SCHEMA_VERSIONS),
+        }
+    ),
+]
 
 
 class ResearchConsentNoScopeJustification(StrEnum):
@@ -306,8 +365,9 @@ class ResearchConsent(StrictBaseModel):
     # try Consent model first, falling back to dict
     scope: Annotated[Consent | dict | None, Field(union_mode="left_to_right")] = None
     """
-    Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
-    See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
+    Scope of the research consent in JSON format following the MII IG Consent FHIR schema
+    (schemaVersion 2025.0.1 or newer).
+    See 'https://simplifier.net/guide/mii-ig-modul-consent-2026' and
     'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
     """
 
@@ -348,39 +408,98 @@ class ResearchConsent(StrictBaseModel):
 
         return self
 
+    @model_validator(mode="after")
+    def warn_when_not_in_force(self):
+        """
+        A status other than active is easy to state by mistake, and otherwise surfaces only as a
+        consented flag reading False.
+        """
+        if isinstance(self.scope, Consent) and not self.scope.is_in_force:
+            log.warning(
+                f"Research consent has status '{self.scope.status}' rather than '{Status.ACTIVE}', "
+                "so it grants nothing regardless of its provisions."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def ensure_period_end_where_the_profile_requires_it(self):
+        """
+        Reject an open-ended period under a package whose profile pins the period end to 1..1.
+
+        A period without an end never expires, so honouring one where the profile demands an end
+        would grant indefinitely a permission that was written to run out.
+
+        A submission declaring no schemaVersion, which metadata 1.3 permits, names no package and
+        therefore no profile, so nothing is enforced here.
+        """
+        if self.schema_version is None or not isinstance(self.scope, Consent):
+            return self
+
+        profile = RESEARCH_CONSENT_PACKAGE_PROFILES[self.schema_version]
+        if profile not in PROFILES_REQUIRING_PERIOD_END or self.scope.provision is None:
+            return self
+
+        root = self.scope.provision
+        periods = [("provision.period", root.period)]
+        periods += [
+            (f"provision.provision[{index}].period", nested.period) for index, nested in enumerate(root.provision)
+        ]
+        if open_ended := [name for name, period in periods if period.end is None]:
+            raise ValueError(
+                f"researchConsent schemaVersion {self.schema_version} ships MII consent profile {profile}, "
+                f"which requires an end on every provision period; missing on {', '.join(open_ended)}"
+            )
+        return self
+
     @staticmethod
-    def _as_utc_datetime(
-        value: date | datetime,
-        time_default: time = time.min,
-        zone_default: tzinfo = UTC,
-    ) -> datetime:
+    def _as_utc_datetime(value: date | datetime, zone_default: tzinfo = UTC) -> datetime:
         """Coerce a date or datetime to a timezone-aware datetime.
 
         :param value: date or datetime to coerce.
-        :param time_default: time to use when ``value`` is a plain date (no time component).
         :param zone_default: tzinfo to attach when ``value`` is naive (no tzinfo).
         :returns: timezone-aware datetime.
         """
         if isinstance(value, datetime):
-            return value.replace(tzinfo=zone_default) if value.tzinfo is None else value
-        return datetime.combine(value, time_default, tzinfo=zone_default)
+            return as_aware_datetime(value, zone_default)
+        return datetime.combine(value, time.min, tzinfo=zone_default)
+
+    @property
+    def broad_consent_versions(self) -> frozenset[BroadConsentVersion]:
+        """
+        Versions of the MII broad consent document this consent declares, derived from its policy OIDs.
+
+        Empty if the scope did not parse as a FHIR Consent or states no recognized OID. The declared
+        ``schemaVersion`` names the KDS package instead and says nothing about the document version.
+        """
+        return self.scope.broad_consent_versions if isinstance(self.scope, Consent) else frozenset()
 
     def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
         dt = self._as_utc_datetime(dt)
-
         code2consent: dict[str, bool] = {}
-        if isinstance(self.scope, Consent) and (self.scope.provision is not None):
-            for provision in self.scope.provision.provision:
-                start = self._as_utc_datetime(provision.period.start, time.min)
-                end = self._as_utc_datetime(provision.period.end, time.max)
 
-                if start <= dt <= end:
-                    for codeable_concept in provision.code:
-                        for coding in codeable_concept.coding:
-                            if provision.type == ProvisionType.PERMIT:
-                                code2consent[coding.code] = code2consent.get(coding.code, True)
-                            else:
-                                code2consent[coding.code] = False
+        if not isinstance(self.scope, Consent):
+            # the scope fell back to dict, so nothing can be read from it
+            return code2consent
+
+        # Consent.status is a modifier element: a consent that is not in force grants nothing,
+        # no matter what its provisions say.
+        if not self.scope.is_in_force or self.scope.provision is None:
+            return code2consent
+
+        # the root provision frames every nested rule: outside its period, none of them applies
+        if not self.scope.provision.period.contains(dt):
+            return code2consent
+
+        for provision in self.scope.provision.provision:
+            if not provision.period.contains(dt):
+                continue
+            for codeable_concept in provision.code:
+                for coding in codeable_concept.coding:
+                    if provision.type == ProvisionType.PERMIT:
+                        code2consent[coding.code] = code2consent.get(coding.code, True)
+                    else:
+                        code2consent[coding.code] = False
+
         return code2consent
 
     @staticmethod
@@ -397,6 +516,16 @@ class ResearchConsent(StrictBaseModel):
 
     @staticmethod
     def consents_to_research(consents: list[ResearchConsent], date: date) -> bool:
+        """
+        Whether ``consents`` grant consent to research at ``date``.
+
+        True if at least one of the ``ResearchConsentCodes`` is stated across ``consents`` and every
+        stated one is permitted; a single deny, or no stated research permission at all, refuses.
+
+        :param consents: research consents to evaluate together.
+        :param date: date the consent state is evaluated at.
+        :returns: True if research consent is granted at ``date``.
+        """
         all_consented = None
         code2consent = ResearchConsent.merged_consent_by_code(consents, date)
 
@@ -1282,10 +1411,16 @@ class GrzSubmissionMetadata(StrictBaseModel):
             missing_subtypes = required_sequencing_subtypes - donor_sequence_subtypes
 
             if missing_subtypes:
-                raise ValueError(
+                message = (
                     f"Index donor is missing sequence subtypes for submission type '{self.submission.genomic_study_subtype}': "
-                    f"{', '.join(missing_subtypes)}."
+                    f"{', '.join(missing_subtypes)}, starting 04.12.2025."
                 )
+                # This check was published in grz-pydantic-models v2.5.0 (2025-12-04); submissions
+                # predating that release were not subject to it, so only warn for them.
+                if self.submission.submission_date >= date(2025, 12, 4):
+                    raise ValueError(message)
+                else:
+                    log.warning(message)
 
             return self
 

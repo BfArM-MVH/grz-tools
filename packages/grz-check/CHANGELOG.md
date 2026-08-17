@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-check-v0.3.1...grz-check-v0.4.0) (2026-08-13)
+
+
+### Features
+
+* **grz-db:** ship reusable database fixtures for downstream tests ([#647](https://github.com/BfArM-MVH/grz-tools/issues/647)) ([a72caba](https://github.com/BfArM-MVH/grz-tools/commit/a72caba963512876be92ac4a8469b931fd1c3767))
+
 ## [0.3.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-check-v0.3.0...grz-check-v0.3.1) (2026-05-15)
 
 
