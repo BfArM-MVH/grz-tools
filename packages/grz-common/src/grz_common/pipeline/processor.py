@@ -204,7 +204,7 @@ class FilePipelineExecutor:
     def _process_files_concurrent(
         self,
         run_state: SubmissionRunState,
-        files_map: dict[str, File],
+        files_map: dict[Path, File],
         thresholds: dict[str, Thresholds],
         qc_only: bool = False,
         pbar_global: Any = None,
