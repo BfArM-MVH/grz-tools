@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v3.0.0...grz-common-v4.0.0) (2026-08-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** unified config ([#635](https://github.com/BfArM-MVH/grz-tools/issues/635))
+
+### Features
+
+* **grzctl:** unified config ([#635](https://github.com/BfArM-MVH/grz-tools/issues/635)) ([f993399](https://github.com/BfArM-MVH/grz-tools/commit/f993399d433c246f4cb4f162d5122397283f6bce))
+
+
+### Bug Fixes
+
+* **grz-common:** KeyModel/KeyConfigModel use BaseModel not BaseSettings ([f993399](https://github.com/BfArM-MVH/grz-tools/commit/f993399d433c246f4cb4f162d5122397283f6bce))
+
 ## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.1.0...grz-common-v3.0.0) (2026-08-13)
 
 
