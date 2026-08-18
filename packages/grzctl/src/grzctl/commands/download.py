@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
@@ -11,32 +10,35 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
+from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
-from ..models.config import DownloadConfig
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_id
 @grzcli.output_dir
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db
+@inbox_option
 @click.option(
     "--populate/--no-populate",
     default=True,
-    help="Update the submission metadata with information from metadata.json and S3. If combined with --force, will overwrite information in db without asking.",
+    help="Update the submission metadata with information from metadata.json and S3.",
 )
 def download(  # noqa: PLR0913
-    configuration: dict[str, Any],
-    submission_id,
-    output_dir,
-    threads,
-    force,
-    update_db,
-    populate,
+    configuration: GrzctlConfig,
+    submission_id: str,
+    output_dir: str,
+    threads: int,
+    force: bool,
+    update_db: bool,
+    inbox_name: str,
+    populate: bool,
     **kwargs,
 ):
     """
@@ -45,9 +47,12 @@ def download(  # noqa: PLR0913
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    config = DownloadConfig.model_validate(configuration)
+    submitter_id = submission_id.split("_", maxsplit=1)[0]
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    bucket_name = s3_options.bucket
+    inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
 
-    log.info("Starting download...")
+    log.info(f"Starting download from inbox {inbox_desc}...")
 
     submission_dir_path = Path(output_dir)
     if not submission_dir_path.is_dir():
@@ -70,11 +75,11 @@ def download(  # noqa: PLR0913
         enabled=update_db,
     ) as db_context:
         worker_inst.download(
-            config.s3,
+            s3_options,
             submission_id,
             force=force,
             metadata_version_check=lambda metadata_schema_version: check_metadata_version_and_exit_if_needed(
-                config.s3,
+                s3_options,
                 metadata_schema_version,
             ),
         )
@@ -82,8 +87,8 @@ def download(  # noqa: PLR0913
             if not db_context.db:
                 log.warning("Database context is not available, skipping population of submission metadata in DB.")
             else:
-                s3_client = init_s3_client(config.s3)
-                submission_date = get_metadata_upload_timestamp(s3_client, config.s3.bucket, submission_id).date()
+                s3_client = init_s3_client(s3_options)
+                submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
                 metadata = worker_inst.parse_submission().metadata.content
                 db_context.db.populate(
                     submission_id,

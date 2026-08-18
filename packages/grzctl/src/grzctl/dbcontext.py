@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from . import get_versions
 from .commands.db.cli import get_submission_db_instance
-from .models.config import DbConfig
+from .models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class DbContext:
 
     def __init__(
         self,
-        configuration: dict[str, Any],
+        configuration: dict[str, Any] | GrzctlConfig,
         submission_id: str,
         start_state: SubmissionStateEnum,
         end_state: SubmissionStateEnum,
@@ -86,6 +86,13 @@ class DbContext:
         self.end_state = end_state
         self.enabled = enabled
         self.db: SubmissionDb | None = None
+
+    @cached_property
+    def config(self) -> GrzctlConfig:
+        """Parse and cache the GrzctlConfig from the raw configuration dict or object."""
+        if isinstance(self.configuration, GrzctlConfig):
+            return self.configuration
+        return GrzctlConfig.from_configuration(self.configuration)
 
     @cached_property
     def grzctl_versions(self) -> dict[str, str]:
@@ -112,7 +119,7 @@ class DbContext:
             return self
 
         try:
-            db_config = DbConfig.model_validate(self.configuration).db
+            db_config = self.config.db
 
             self.db = get_submission_db_instance(db_config.database_url, author=self.author)
 
@@ -124,8 +131,6 @@ class DbContext:
 
         except SubmissionNotFoundError:
             raise
-        except (ValidationError, KeyError) as e:
-            raise RuntimeError("DB Configuration invalid or missing") from e
         except Exception as e:
             raise RuntimeError("Failed to connect to DB") from e
 
@@ -177,7 +182,7 @@ class DbContext:
 
     @cached_property
     def author(self) -> Author:
-        db_config = DbConfig.model_validate(self.configuration).db
+        db_config = self.config.db
 
         if not db_config.author:
             raise ValueError("Author configuration is missing")

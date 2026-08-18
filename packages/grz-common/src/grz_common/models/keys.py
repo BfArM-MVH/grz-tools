@@ -1,10 +1,10 @@
 from typing import Self
 
-from grz_common.models.base import FilePath, IgnoringBaseSettings
+from grz_common.models.base import FilePath, IgnoringBaseModel
 from pydantic import field_validator, model_validator
 
 
-class KeyModel(IgnoringBaseSettings):
+class KeyModel(IgnoringBaseModel):
     grz_public_key: str | None = None
     """
     The public key of the recipient (the associated GRZ).
@@ -41,5 +41,5 @@ class KeyModel(IgnoringBaseSettings):
         return self
 
 
-class KeyConfigModel(IgnoringBaseSettings):
+class KeyConfigModel(IgnoringBaseModel):
     keys: KeyModel

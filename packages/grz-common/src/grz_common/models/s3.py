@@ -22,15 +22,15 @@ class ProxyOptions(IgnoringBaseModel):
     """
 
 
-class S3Options(IgnoringBaseModel):
-    endpoint_url: AnyHttpUrl
+class S3ConnectionBase(IgnoringBaseModel):
     """
-    The URL for the S3 service.
+    Base configuration for S3 connection details.
     """
 
-    bucket: str
+    endpoint_url: AnyHttpUrl | None = None
     """
-    The name of the S3 bucket.
+    The URL for the S3 service.
+    If undefined, the default AWS endpoint is used.
     """
 
     access_key: str | None = None
@@ -94,6 +94,17 @@ class S3Options(IgnoringBaseModel):
     multipart_chunksize: int = 256 * 1024**2
     """
     The size of the chunks to use for multipart uploads in bytes.
+    """
+
+
+class S3Options(S3ConnectionBase):
+    """
+    S3ConnectionBase with a mandatory bucket name.
+    """
+
+    bucket: str
+    """
+    The name of the S3 bucket.
     """
 
 

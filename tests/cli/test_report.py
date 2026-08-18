@@ -17,7 +17,7 @@ def test_report_processed(temp_migrated_db_config_file_path):
     cli = grzctl.cli.build_cli()
     execute = lambda args: runner.invoke(cli, args, catch_exceptions=False)
 
-    args_prefix = ["db", "--config-file", temp_migrated_db_config_file_path]
+    args_prefix = ["--config", temp_migrated_db_config_file_path, "db"]
 
     submission_id = "123456789_1970-01-01_a0b1c2d3"
     result = execute([*args_prefix, "submission", "add", submission_id])
@@ -48,9 +48,9 @@ def test_report_processed(temp_migrated_db_config_file_path):
 
     today = datetime.date.today()
     report_args = [
-        "report",
-        "--config-file",
+        "--config",
         temp_migrated_db_config_file_path,
+        "report",
         "processed",
         "--since",
         (today - datetime.timedelta(days=1)).isoformat(),

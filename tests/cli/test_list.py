@@ -4,10 +4,12 @@ Tests for the grzctl list functionality.
 
 import importlib.resources
 import json
+from pathlib import Path
 from unittest import mock
 
 import click.testing
-import grzctl
+import grzctl.cli
+import yaml
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
 
@@ -15,7 +17,7 @@ from .. import mock_files
 from .common import copy_submission
 
 
-def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
+def test_list(temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         copy_submission(working_dir_path, "files", "encrypted_files", "metadata", source=submission_dir)
@@ -41,11 +43,14 @@ def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_
     ):
         # upload encrypted submission
         upload_args = [
+            "--config",
+            temp_grzctl_s3_db_config_file_path,
             "upload",
             "--submission-dir",
             str(working_dir_path),
-            "--config-file",
-            temp_s3_config_file_path,
+            "--no-update-db",
+            "--inbox",
+            "testing",
         ]
 
         runner = click.testing.CliRunner()
@@ -57,7 +62,17 @@ def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_
 
         submission_id = result_upload.stdout.strip()
 
-        list_args = ["list", "--config-file", temp_s3_config_file_path, "--json", "--show-cleaned"]
+        list_args = [
+            "--config",
+            temp_grzctl_s3_db_config_file_path,
+            "list",
+            "--json",
+            "--show-cleaned",
+            "--inbox",
+            "testing",
+            "--submitter-id",
+            "260914050",
+        ]
 
         result_list = runner.invoke(cli, list_args, catch_exceptions=False)
 
@@ -69,8 +84,53 @@ def test_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_
         assert listed_submissions[0]["state"] == "complete"
 
 
-def test_list_with_partial_env(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
-    """If database configuration is partially-populated via environment variables, it should still be ignored."""
+def test_list_with_partial_env(remote_bucket_with_version, working_dir_path, tmp_path):
+    """If database configuration is partially-populated via environment variables, config validation must fail."""
+    from tests.conftest import (
+        _grzctl_archives,
+        crypt4gh_grz_private_key_file,
+        crypt4gh_grz_public_key_file,
+    )
+
+    keys = {
+        "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
+        "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
+    }
+    no_db_config = {
+        "leistungserbringer": {"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
+        "archives": _grzctl_archives(),
+        "keys": keys,
+        "pruefbericht": {},
+        "identifiers": {"grz": "GRZK00007"},
+    }
+    config_file = tmp_path / "config.no_db.yaml"
+    with open(config_file, "w") as fd:
+        yaml.dump(no_db_config, fd)
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    list_args = [
+        "--config",
+        str(config_file),
+        "list",
+        "--json",
+        "--show-cleaned",
+        "--inbox",
+        "testing",
+        "--submitter-id",
+        "260914050",
+    ]
+
+    result_list = runner.invoke(cli, list_args, env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "secret"})
+
+    assert result_list.exit_code != 0
+
+
+def test_list_with_broken_env(
+    temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path
+):
+    """Env vars that corrupt the config cause a validation error."""
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         copy_submission(working_dir_path, "files", "encrypted_files", "metadata", source=submission_dir)
@@ -90,37 +150,37 @@ def test_list_with_partial_env(temp_s3_config_file_path, remote_bucket_with_vers
                 state=EncryptionState(encryption_successful=True),
             )
 
-    with mock.patch(
-        "grz_common.models.s3.S3Options.__getattr__",
-        lambda self, name: None if name == "endpoint_url" else AttributeError,
-    ):
-        # upload encrypted submission
-        upload_args = [
-            "upload",
-            "--submission-dir",
-            str(working_dir_path),
-            "--config-file",
-            temp_s3_config_file_path,
-        ]
+    # upload encrypted submission
+    upload_args = [
+        "--config",
+        temp_grzctl_s3_db_config_file_path,
+        "upload",
+        "--submission-dir",
+        str(working_dir_path),
+        "--no-update-db",
+        "--inbox",
+        "testing",
+    ]
 
-        runner = click.testing.CliRunner()
-        cli = grzctl.cli.build_cli()
-        result_upload = runner.invoke(cli, upload_args, catch_exceptions=False)
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result_upload = runner.invoke(cli, upload_args, catch_exceptions=False)
 
-        assert result_upload.exit_code == 0, result_upload.output
-        assert len(result_upload.output) != 0, result_upload.stderr
+    assert result_upload.exit_code == 0, result_upload.output
+    assert len(result_upload.output) != 0, result_upload.stderr
 
-        submission_id = result_upload.stdout.strip()
+    list_args = [
+        "--config",
+        temp_grzctl_s3_db_config_file_path,
+        "list",
+        "--json",
+        "--show-cleaned",
+        "--inbox",
+        "testing",
+        "--submitter-id",
+        "260914050",
+    ]
 
-        list_args = ["list", "--config-file", temp_s3_config_file_path, "--json", "--show-cleaned"]
+    result_list = runner.invoke(cli, list_args, env={"GRZ_DB__AUTHOR__NAME": ""})
 
-        result_list = runner.invoke(
-            cli, list_args, catch_exceptions=False, env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "secret"}
-        )
-
-        assert result_list.exit_code == 0, result_list.output
-
-        listed_submissions = json.loads(result_list.stdout.strip())
-        assert len(listed_submissions) == 1
-        assert listed_submissions[0]["submission_id"] == submission_id
-        assert listed_submissions[0]["state"] == "complete"
+    assert result_list.exit_code != 0
