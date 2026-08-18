@@ -93,6 +93,24 @@ def test_case_create_duplicate_psn_rejected(migrated_database_config_path: Path)
     assert len(_list_cases(cli, migrated_database_config_path)) == 1
 
 
+def test_case_create_invalid_submitter_id_rejected(migrated_database_config_path: Path):
+    """A malformed submitter ID fails ``Case``'s pydantic validation, not an uncaught crash.
+
+    ``submitter_id`` is pattern-constrained (``^[0-9]{9}$``) and ``Case`` validates on assignment,
+    so this is a ``ValidationError`` (a ``ValueError`` subclass), distinct from the db-level
+    ``DuplicateCaseError``/``DuplicatePsnError`` this command already catches.
+    """
+    cli = grzctl.cli.build_cli()
+
+    result = _create_case(cli, migrated_database_config_path, "not-a-submitter-id", "case-X")
+
+    assert result.exit_code != 0
+    # a caught, reported error, not an exception that escaped to the runner uncaught
+    assert "Error:" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert len(_list_cases(cli, migrated_database_config_path)) == 0
+
+
 def test_case_list_and_show_json(migrated_database_config_path: Path):
     """``case list --json`` and ``case show --json`` expose the expected fields."""
     cli = grzctl.cli.build_cli()
@@ -157,6 +175,40 @@ def test_case_modify_psn(migrated_database_config_path: Path):
         cli, migrated_database_config_path, "case", "modify", str(case_id), "not_a_real_key", "value"
     )
     assert result_modify_bad_key.exit_code != 0
+
+
+def test_case_modify_duplicate_pair_rejected(migrated_database_config_path: Path):
+    """Modifying ``local_case_id`` into another case's ``(submitter_id, local_case_id)`` pair is
+    rejected cleanly, not an uncaught crash.
+
+    The pair is enforced by the partial unique index ``ux_cases_submitter_local_case``, so this
+    raises ``DuplicateCaseError``, distinct from the ``CaseNotFoundError``/``DuplicatePsnError``/
+    ``ValueError`` this command already catches.
+    """
+    cli = grzctl.cli.build_cli()
+
+    result_first = _create_case(cli, migrated_database_config_path, "123456789", "case-A")
+    assert result_first.exit_code == 0, result_first.stderr
+    result_second = _create_case(cli, migrated_database_config_path, "123456789", "case-B")
+    assert result_second.exit_code == 0, result_second.stderr
+    second_case_id = next(
+        c["id"] for c in _list_cases(cli, migrated_database_config_path) if c["local_case_id"] == "case-B"
+    )
+
+    result_modify = _invoke(
+        cli, migrated_database_config_path, "case", "modify", str(second_case_id), "local_case_id", "case-A"
+    )
+
+    assert result_modify.exit_code != 0
+    # a caught, reported error, not an exception that escaped to the runner uncaught
+    assert "Error:" in result_modify.stderr
+    assert "Traceback" not in result_modify.stderr
+
+    # the change must not have gone through
+    unchanged = next(
+        c["local_case_id"] for c in _list_cases(cli, migrated_database_config_path) if c["id"] == second_case_id
+    )
+    assert unchanged == "case-B"
 
 
 def test_case_show_unknown_exits_nonzero(migrated_database_config_path: Path):
