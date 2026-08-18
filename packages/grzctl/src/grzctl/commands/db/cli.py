@@ -296,7 +296,7 @@ def case_modify(ctx: click.Context, case_id: int, key: str, value: str):
     try:
         db_service.modify_case(case_id, key, value)
         console_err.print(f"[green]Updated {key} of case {case_id}[/green]")
-    except (CaseNotFoundError, DuplicatePsnError, ValueError) as e:
+    except (CaseNotFoundError, DuplicateCaseError, DuplicatePsnError, ValueError) as e:
         _abort(e)
 
 
@@ -314,7 +314,7 @@ def case_create(ctx: click.Context, submitter_id: str, local_case_id: str, psn: 
         console_err.print(
             f"[green]Created case {case_obj.id} for submitter '{submitter_id}', local case '{local_case_id}'[/green]"
         )
-    except (DuplicateCaseError, DuplicatePsnError) as e:
+    except (DuplicateCaseError, DuplicatePsnError, ValueError) as e:
         _abort(e)
 
 
