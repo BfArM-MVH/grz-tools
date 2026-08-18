@@ -20,14 +20,11 @@ import grz_pydantic_models_testing
 from grz_pydantic_models_testing import example_metadata, failing_metadata
 
 # Read an example metadata file
-json_text = (
-    importlib.resources.files(example_metadata)
-    .joinpath("wes_tumor_germline", "v1.2.1.json")
-    .read_text()
-)
+json_text = importlib.resources.files(example_metadata).joinpath("wes_tumor_germline", "v1.2.1.json").read_text()
 
 # Parse it directly
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+
 metadata = GrzSubmissionMetadata.model_validate_json(json_text)
 ```
 

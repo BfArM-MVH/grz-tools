@@ -39,6 +39,34 @@ SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/
 REDACTED_TAN = "0" * 64
 REDACTED_LOCAL_CASE_ID = "REDACTED_LOCAL_CASE_ID"
 
+
+def redact_metadata_dict(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Redact a metadata document's sensitive fields, in place.
+
+    Replaces ``tanG`` with :data:`REDACTED_TAN`, ``localCaseId`` with
+    :data:`REDACTED_LOCAL_CASE_ID`, and the index donor's pseudonym with ``"index"``.
+    That last one is the value every accepted schema version prescribes anyway, so it only
+    removes something on a v1.1.x document, whose description named the tanG instead.
+
+    Takes a plain dict so archival can apply it to the raw metadata.json it read from disk,
+    keeping the archived record faithful to what the submitter sent, while
+    :meth:`GrzSubmissionMetadata.to_redacted_dict` applies the same rule to a model dump.
+    One list of sensitive fields, two carriers.
+
+    Archival wrote an empty ``localCaseId`` before this was shared, so that spelling is in
+    the archive too and a reader has to treat both as redacted.
+
+    :param metadata: Parsed metadata JSON, mutated in place.
+    :returns: The same dict, for convenience.
+    """
+    metadata["submission"]["tanG"] = REDACTED_TAN
+    metadata["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
+    for donor in metadata.get("donors", []):
+        if donor.get("relation") == "index":
+            donor["donorPseudonym"] = "index"
+    return metadata
+
+
 log = logging.getLogger(__name__)
 
 
@@ -1078,12 +1106,14 @@ class LabDatum(StrictBaseModel):
 
 
 class Donor(StrictBaseModel):
+    # Up to schema v1.1.7 the description below ended "For Index patient use TanG", so a
+    # document from that era may carry the tanG here. Every accepted version says "index".
     donor_pseudonym: str
     """
-    A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing; 
-    the donorPseudonym needs to be identifiable by the Leistungserbringer 
-    in case of changes to the consents by one of the donors. 
-    For Index patient use TanG.
+    A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing;
+    the donorPseudonym needs to be identifiable by the Leistungserbringer
+    in case of changes to the consents by one of the donors.
+    For Index patient use index.
     """
 
     gender: Gender
@@ -1266,26 +1296,15 @@ class GrzSubmissionMetadata(StrictBaseModel):
         """
         Create a redacted dictionary representation suitable for archiving.
 
-        Redacts:
-        - tanG (replaced with REDACTED_TAN constant)
-        - localCaseId (replaced with REDACTED_LOCAL_CASE_ID constant)
-        - Index donor pseudonym (replaced with "index")
+        Redacts the fields listed in :func:`redact_metadata_dict`.
+
+        ``exclude_unset`` keeps the dump to what the submitter actually sent: emitting
+        every optional field with its default would add keys that were never submitted,
+        and this dump has to stand in for the submitted document.
 
         :returns: Redacted metadata dictionary
         """
-        # get the base dictionary representation
-        metadata_dict = self.model_dump(mode="json", by_alias=True)
-
-        # redact sensitive fields
-        metadata_dict["submission"]["tanG"] = REDACTED_TAN
-        metadata_dict["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
-
-        # redact index donor pseudonym
-        for donor in metadata_dict.get("donors", []):
-            if donor.get("relation") == "index":
-                donor["donorPseudonym"] = "index"
-
-        return metadata_dict
+        return redact_metadata_dict(self.model_dump(mode="json", by_alias=True, exclude_unset=True))
 
     @field_validator("donors", mode="after")
     @classmethod

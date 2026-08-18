@@ -12,11 +12,23 @@ from ..common import StrictBaseModel, as_aware_datetime
 
 
 class StrictIgnoringBaseModel(StrictBaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """A FHIR element that models the fields this package uses and keeps the rest.
+
+    These models cover a subset of each FHIR resource, so a real consent document carries
+    fields they do not declare (``id``, ``meta``, ``extension``, ``organization``,
+    ``policyRule`` on a Consent, among others). Retaining them costs nothing and is what
+    lets a parsed document round-trip: archival records what the submitter sent, and a
+    dump that had silently dropped these could not be that record.
+
+    ``extra="allow"`` accepts exactly what ``extra="ignore"`` accepted; it only stops
+    discarding it.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
 
 class Extension(StrictBaseModel):
-    # Extensions carry an open-ended value[x] payload, so extra keys are allowed here only.
+    # Extensions carry an open-ended value[x] payload, so extra keys are allowed here too.
     model_config = ConfigDict(extra="allow")
     url: str
 

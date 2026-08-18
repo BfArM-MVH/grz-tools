@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, override
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_common.exceptions import UploadError
-from grz_pydantic_models.submission.metadata import REDACTED_TAN
+from grz_pydantic_models.submission.metadata import redact_metadata_dict
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
@@ -278,23 +278,15 @@ class S3BotoUploadWorker(UploadWorker):
                 self.__log.error("Upload failed for '%s'", str(file_path))
                 raise e
 
+        # The archived metadata.json is the record of what the submitter sent, so the redaction is
+        # applied to the raw file rather than to a re-serialisation of the parsed model. The rule
+        # itself is shared with GrzSubmissionMetadata.to_redacted_dict() so the two cannot drift.
         with tempfile.NamedTemporaryFile(mode="w") as redacted_metadata_tmpfile:
             # read original metadata
             with open(metadata_file_path) as fd:
                 metadata = json.load(fd)
 
-            # redact tanG as all zeros
-            metadata["submission"]["tanG"] = REDACTED_TAN
-
-            # redact local case ID
-            metadata["submission"]["localCaseId"] = ""
-
-            for donor in metadata["donors"]:
-                if donor["relation"] == "index":
-                    # redact index donorPseudonym (which can be the tanG)
-                    donor["donorPseudonym"] = "index"
-
-            json.dump(metadata, redacted_metadata_tmpfile, indent=2)
+            json.dump(redact_metadata_dict(metadata), redacted_metadata_tmpfile, indent=2)
             # ensure all data is written to disk before upload
             redacted_metadata_tmpfile.flush()
 

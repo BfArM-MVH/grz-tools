@@ -52,10 +52,11 @@ def s3_client_mock() -> Iterator[Any]:
 
 
 def _put_metadata(s3_client: Any, submission_id: str, metadata: GrzSubmissionMetadata) -> None:
+    """Write *metadata* to S3 the way archival writes it: what was submitted, nothing added."""
     s3_client.put_object(
         Bucket=BUCKET,
         Key=f"{submission_id}/metadata/metadata.json",
-        Body=metadata.model_dump_json(by_alias=True).encode("utf-8"),
+        Body=metadata.model_dump_json(by_alias=True, exclude_unset=True).encode("utf-8"),
     )
 
 
