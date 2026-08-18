@@ -7,11 +7,10 @@ import click
 import grz_cli.commands.encrypt as encrypt_module
 import grz_cli.commands.validate as validate_module
 import grz_common.cli as grzcli
-from grz_common.models.s3 import S3Options
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
-from ..commands import grzctl_configuration
+from ..commands import grzctl_configuration, inbox_bucket_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -153,23 +152,17 @@ def encrypt(
 @grzcli.submission_dir
 @grzcli.threads
 @grzctl_configuration
-@click.option(
-    "--inbox-bucket",
-    default=None,
-    help="Inbox bucket name to upload to. Required when multiple inboxes are configured.",
-)
+@inbox_bucket_option
 @grzcli.update_db
 def upload(
     configuration: GrzctlConfig,
     submission_dir,
-    threads,
-    inbox_bucket,
-    update_db,
+    threads: int,
+    inbox_bucket: str | None,
+    update_db: bool,
     **kwargs,
 ):
     """Upload a submission to a GRZ/GDC (wrapper with DB updates)."""
-    inbox_s3 = configuration.resolve_inbox_by_bucket(inbox_bucket)
-
     submission_dir = Path(submission_dir)
 
     worker_inst = Worker(
@@ -182,12 +175,8 @@ def upload(
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
 
-    s3_options = S3Options(
-        endpoint_url=inbox_s3.endpoint_url,
-        bucket=inbox_s3.bucket,
-        access_key=inbox_s3.access_key,
-        secret=inbox_s3.secret,
-    )
+    # Resolve using the submission_id extracted from metadata
+    s3_options = configuration.resolve_inbox(submission_id=submission_id, bucket=inbox_bucket).s3
 
     with DbContext(
         configuration=configuration,

@@ -27,3 +27,28 @@ def grzctl_configuration(f):
         return ctx.invoke(f, *args, **kwargs)
 
     return functools.update_wrapper(wrapper, f)
+
+
+inbox_bucket_option = click.option(
+    "-b",
+    "--bucket",
+    "--inbox-bucket",
+    "inbox_bucket",
+    default=None,
+    help="Inbox bucket name. Required when multiple inboxes are configured.",
+)
+
+submitter_option = click.option(
+    "-s",
+    "--submitter",
+    "submitter_id",
+    default=None,
+    help="Submitter (LE) ID. Required when multiple submitters are configured.",
+)
+
+
+def inbox_options(func):
+    """Composite decorator providing both --submitter and --bucket / --inbox-bucket."""
+    func = inbox_bucket_option(func)
+    func = submitter_option(func)
+    return func

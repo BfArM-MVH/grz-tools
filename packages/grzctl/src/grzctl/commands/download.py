@@ -10,7 +10,7 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
-from ..commands import grzctl_configuration
+from ..commands import grzctl_configuration, inbox_bucket_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -24,25 +24,21 @@ log = logging.getLogger(__name__)
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db
-@click.option(
-    "--inbox-bucket",
-    default=None,
-    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
-)
+@inbox_bucket_option
 @click.option(
     "--populate/--no-populate",
     default=True,
-    help="Update the submission metadata with information from metadata.json and S3. If combined with --force, will overwrite information in db without asking.",
+    help="Update the submission metadata with information from metadata.json and S3.",
 )
 def download(  # noqa: PLR0913
     configuration: GrzctlConfig,
-    submission_id,
-    output_dir,
-    threads,
-    force,
-    update_db,
-    inbox_bucket,
-    populate,
+    submission_id: str,
+    output_dir: str,
+    threads: int,
+    force: bool,
+    update_db: bool,
+    inbox_bucket: str | None,
+    populate: bool,
     **kwargs,
 ):
     """
@@ -51,7 +47,7 @@ def download(  # noqa: PLR0913
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    s3_options = configuration.resolve_inbox_by_submission_id(submission_id, inbox_bucket).s3
+    s3_options = configuration.resolve_inbox(submission_id=submission_id, bucket=inbox_bucket).s3
 
     log.info("Starting download...")
 

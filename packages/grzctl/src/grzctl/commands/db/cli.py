@@ -57,7 +57,7 @@ from pydantic import Field, ValidationError
 from tqdm.auto import tqdm
 
 from ... import get_versions
-from ...commands import grzctl_configuration
+from ...commands import grzctl_configuration, inbox_options
 from ...models.config import GrzctlConfig
 from .. import limit
 from ..change_request import resolve_and_validate_change_request
@@ -1464,27 +1464,20 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
 @db.command("sync-from-inbox")
 @grzctl_configuration
-@click.option(
-    "--inbox-bucket",
-    default=None,
-    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
-)
+@inbox_options
 @click.pass_context
 def sync_from_inbox(
     ctx: click.Context,
     configuration: GrzctlConfig,
-    inbox_bucket,
+    submitter_id: str | None,
+    inbox_bucket: str | None,
     **kwargs,
 ):
-    """
-    Synchronize the database with submissions found in the inbox.
-    """
+    """Synchronize the database with submissions found in the inbox."""
     try:
-        s3_options = configuration.resolve_inbox_by_bucket(inbox_bucket)
+        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
     except Exception:
-        console_err.print(
-            f"[red]Error resolving S3 configuration from supplied inbox-bucket {inbox_bucket}: {traceback.format_exc()}[/red]"
-        )
+        console_err.print(f"[red]Error resolving S3 configuration for inbox: {traceback.format_exc()}[/red]")
         sys.exit(1)
 
     db_url = ctx.obj["db_url"]
