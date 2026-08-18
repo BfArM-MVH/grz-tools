@@ -7,10 +7,12 @@ Create Date: 2026-07-08 00:00:00.000000+00:00
 Introduces the ``cases`` table and links each submission to its case via ``submissions.case_id``.
 
 A case's authoritative identity is ``psn`` (the RKI pseudonym), unique once assigned.
-``submitter_id`` and ``local_case_id`` are resolution keys (indexed, but not a uniqueness
-constraint) used to locate a case before a ``psn`` exists. Existing submissions are grouped by
-``(submitter_id, pseudonym)`` (the ``pseudonym`` column holds the submitter-local case id) and
-backfilled into cases. ``submissions.submitter_id`` is kept.
+``submitter_id`` and ``local_case_id`` are resolution keys used to locate a case before a ``psn``
+exists, not the authoritative identity themselves. The partial unique index
+``ux_cases_submitter_local_case`` keeps the pair unique wherever both halves are present; neither
+is required, since a future flow may resolve a case by ``psn`` alone. Existing submissions are
+grouped by ``(submitter_id, pseudonym)`` (the ``pseudonym`` column holds the submitter-local case
+id) and backfilled into cases. ``submissions.submitter_id`` is kept.
 
 Also extends ``failurereasonenum`` with ``duplicate_initial``, recorded on a duplicate initial
 submission: one being validated for a case whose initial submission already passed basic QC.
