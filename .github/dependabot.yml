@@ -1,0 +1,17 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # Actions are pinned to commit SHAs, so Dependabot is what keeps them
+    # current. `include: scope` yields titles like "ci(deps): bump ...", which
+    # satisfies the requireScope rule enforced by check-pr.yml.
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
