@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import SubmissionDb
-from grz_db.models.submission.diff import DiffState, DonorDiff, DonorsDiffCollection, SubmissionDiffCollection
+from grz_db.models.submission.diff import DiffState, DonorDiff, SubmissionChangeSet
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
 
@@ -122,18 +122,17 @@ def test_populate_raises_without_force_on_submission_update(db_ctx: SimpleNamesp
 def test_populate_raises_without_force_on_donor_deletion(db_ctx: SimpleNamespace):
     """RuntimeError when donors would be deleted and force=False.
 
-    ``db.diff`` is mocked so the submission diff is clean but one donor is
-    deleted, isolating the donors guard.
+    ``db.diff`` is mocked so the field diffs are clean but one donor is
+    deleted, isolating the donor part of the destructive guard.
     """
     ctx = db_ctx
-    clean_submission_diff = SubmissionDiffCollection()
-    donors_diff_with_deletion = DonorsDiffCollection()
-    donors_diff_with_deletion.deleted.append(
+    changes = SubmissionChangeSet()
+    changes.donors.deleted.append(
         DonorDiff(before=MagicMock(), after=None, state=DiffState.DELETED, pseudonym="deleted_donor")
     )
 
-    with patch.object(ctx.db, "diff", return_value=(clean_submission_diff, donors_diff_with_deletion)):
-        with pytest.raises(RuntimeError, match="donors"):
+    with patch.object(ctx.db, "diff", return_value=changes):
+        with pytest.raises(RuntimeError, match="donor 'deleted_donor'"):
             ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=False)
 
 

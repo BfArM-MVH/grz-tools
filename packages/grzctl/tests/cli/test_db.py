@@ -742,6 +742,7 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
         "submission_type": metadata.submission.submission_type,
         "submission_metadata": metadata.to_redacted_dict(),
         "submitter_id": metadata.submission.submitter_id,
+        "case_id": None,  # the example is a test submission, which is never case-tracked
         "data_node_id": metadata.submission.genomic_data_center_id,
         "coverage_type": metadata.submission.coverage_type,
         "disease_type": metadata.submission.disease_type,
@@ -1688,22 +1689,23 @@ def test_submission_show_json_includes_failure_reason(migrated_database_config_p
 def test_modify_offers_exactly_the_keys_it_accepts():
     """A key the command lists must be one it can honour.
 
-    The choices and the epilog were built from two different field sets, so `modify` offered
-    `id` and then died on a traceback when it was chosen.
+    These were built from two different field sets, so `modify` offered `case_id` and `id` and
+    then died on a traceback when either was chosen.
     """
     from grzctl.commands.db.cli import _MODIFIABLE_SUBMISSION_KEYS
 
     assert set(_MODIFIABLE_SUBMISSION_KEYS) == SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields
 
 
-def test_modify_refuses_an_unofferable_key_with_a_usage_error(migrated_database_config_path):
+@pytest.mark.parametrize("key", ["case_id", "id"])
+def test_modify_refuses_an_unofferable_key_with_a_usage_error(migrated_database_config_path, key: str):
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     args_common = ["--config", str(migrated_database_config_path), "db"]
     submission_id = "111111111_2025-01-01_0000000a"
     assert runner.invoke(cli, [*args_common, "submission", "add", submission_id]).exit_code == 0
 
-    result = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, "id", "1"])
+    result = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, key, "1"])
 
     assert result.exit_code == 2, result.output
     assert "An unexpected error occurred" not in result.output
