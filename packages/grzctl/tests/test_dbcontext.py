@@ -9,7 +9,7 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
-from grz_db.errors import DuplicateTanGError
+from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError
 from grz_db.models.submission import FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext
 from pydantic import ValidationError
@@ -104,6 +104,7 @@ class TestMapExceptionToFailureReason:
                 NetworkError(),
                 UploadError(),
                 DuplicateTanGError(),
+                DuplicateInitialSubmissionError(1),
                 IncompleteSubmissionError(),
                 validation_exc,
             ]
