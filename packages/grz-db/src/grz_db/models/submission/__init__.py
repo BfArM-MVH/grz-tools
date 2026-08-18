@@ -307,9 +307,10 @@ class Case(SQLModel, table=True):
 
     Groups the submissions for one patient. The authoritative identity is
     ``psn`` (the RKI pseudonym), unique once assigned. ``submitter_id`` and ``local_case_id`` are
-    lookup keys used to resolve the case before a ``psn`` exists; they are deliberately *not* a
-    uniqueness constraint, since a future flow may resolve a case by ``psn`` alone (with
-    ``local_case_id`` absent).
+    lookup keys used to resolve the case before a ``psn`` exists, not the authoritative identity
+    themselves. The partial unique index ``ux_cases_submitter_local_case`` keeps the pair unique
+    wherever both halves are present; neither is required, since a future flow may resolve a case
+    by ``psn`` alone (with ``local_case_id`` absent).
     """
 
     # Without this a table model takes any value its annotations forbid, so a mistyped
@@ -1627,11 +1628,12 @@ class SubmissionDb:
         no other ``initial`` submission of that case may pass.
 
         The *resolver* strategy decides how an existing case is located (default:
-        ``(submitter_id, local_case_id)``). A brand-new case requires an ``initial`` submission.
-        Competing initial submissions may share a case while pending basic QC, since the data
-        alone cannot tell a re-upload from a duplicate; only one of them may ever pass basic QC.
-        A non-initial submission requires the case to have an initial submission that has not
-        failed basic QC.
+        ``(submitter_id, local_case_id)``). Competing initial submissions may share a case while
+        pending basic QC, since the data alone cannot tell a re-upload from a duplicate; only one
+        of them may ever pass basic QC. A non-initial submission may also open a brand-new case:
+        a patient's ``initial`` submission may never reach this GRZ, and refusing to link a
+        ``followup`` in that situation would keep a real, BfArM-reported submission out of the
+        case record.
         ``test`` submissions are never case-tracked and are rejected. Re-running for an
         already-linked submission makes no further change (safe to repeat).
 
