@@ -35,12 +35,13 @@ def clean(
     submitter_id = submission_id.split("_", maxsplit=1)[0]
     s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     bucket_name = s3_options.bucket
+    inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
 
     if not submission_id:
         sys.exit("No submission ID provided. Please specify a submission ID to clean.")
 
     if yes_i_really_mean_it or click.confirm(
-        f"Are you SURE you want to delete the submission '{submission_id}' from the bucket '{bucket_name}'?",
+        f"Are you SURE you want to delete the submission '{submission_id}' from inbox {inbox_desc}?",
         default=False,
         show_default=True,
     ):
@@ -51,16 +52,16 @@ def clean(
             end_state=SubmissionStateEnum.CLEANED,
             enabled=update_db,
         ):
-            _clean_submission_from_bucket(bucket_name, s3_options, submission_id)
+            _clean_submission_from_bucket(bucket_name, s3_options, submission_id, inbox_desc)
 
 
-def _clean_submission_from_bucket(bucket_name: str, s3_options, submission_id):
+def _clean_submission_from_bucket(bucket_name: str, s3_options, submission_id, inbox_desc: str):
     prefix = submission_id
     prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
     resource = init_s3_resource(s3_options)
     bucket = resource.Bucket(bucket_name)
-    log.info(f"Cleaning '{prefix}' from '{bucket_name}' …")
+    log.info(f"Cleaning '{prefix}' from inbox {inbox_desc} …")
     # add a marker at start of cleaning to
     #  1.) ensure user can upload the "cleaned" marker at the end _before_ we start deleting things
     #  2.) detect incomplete cleans if needed
@@ -74,7 +75,7 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options, submission_id):
             _ = obj.delete()
             num_deleted += 1
     if not num_deleted:
-        sys.exit(f"No objects with prefix '{prefix}' in bucket '{bucket_name}' found for deletion.")
+        sys.exit(f"No objects with prefix '{prefix}' in inbox {inbox_desc} found for deletion.")
 
     log.info(f"Successfully deleted {num_deleted} objects.")
 
@@ -85,4 +86,4 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options, submission_id):
     bucket.put_object(Body=b"", Key=f"{submission_id}/cleaned")
     bucket.Object(f"{submission_id}/cleaning").delete()
 
-    log.info(f"Cleaned '{prefix}' from '{bucket_name}'.")
+    log.info(f"Cleaned '{prefix}' from inbox {inbox_desc}.")

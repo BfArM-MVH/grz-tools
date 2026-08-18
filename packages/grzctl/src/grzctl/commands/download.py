@@ -49,8 +49,10 @@ def download(  # noqa: PLR0913
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
     s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    bucket_name = s3_options.bucket
+    inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
 
-    log.info("Starting download...")
+    log.info(f"Starting download from inbox {inbox_desc}...")
 
     submission_dir_path = Path(output_dir)
     if not submission_dir_path.is_dir():

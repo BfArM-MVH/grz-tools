@@ -206,21 +206,20 @@ class GrzctlConfig(IgnoringBaseSettings):
             _config_ctx.reset(token)
 
     def resolve_inbox(self, submitter_id: str, inbox_name: str) -> InboxTarget:
-        """Retrieve a specific inbox target by exact submitter (LE) ID or alias and inbox name.
+        """Retrieve a specific inbox target by exact submitter (LE) ID and inbox name.
 
-        No auto-guessing or fallback search.
+        No auto-guessing, fallback, or alias lookup.
         """
-        entry = self._le_by_id.get(submitter_id) or self._le_by_alias.get(submitter_id)
+        entry = self._le_by_id.get(submitter_id)
         if entry is None:
             available = ", ".join(self._describe_le(le_id, e) for le_id, e in self.leistungserbringer.items())
             log.error(f"Submitter '{submitter_id}' not found. Available: {available}")
             sys.exit(1)
 
-        le_id = next(k for k, v in self.leistungserbringer.items() if v is entry)
         if inbox_name not in entry.inbox_buckets:
             available = ", ".join(entry.inbox_buckets.keys())
             log.error(
-                f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(le_id, entry)}. "
+                f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(submitter_id, entry)}. "
                 f"Available: {available}"
             )
             sys.exit(1)

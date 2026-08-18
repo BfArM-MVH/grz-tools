@@ -1477,15 +1477,20 @@ def sync_from_inbox(
     try:
         s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     except Exception:
-        console_err.print(f"[red]Error resolving S3 configuration for inbox: {traceback.format_exc()}[/red]")
+        console_err.print(
+            f"[red]Error resolving S3 configuration for inbox '{inbox_name}': {traceback.format_exc()}[/red]"
+        )
         sys.exit(1)
 
     db_url = ctx.obj["db_url"]
     author = ctx.obj["author"]
     db_service = get_submission_db_instance(db_url, author=author)
 
+    bucket_name = s3_options.bucket
+    inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
+
     try:
-        console_err.print(f"[cyan]Scanning inbox '{s3_options.bucket}'...[/cyan]")
+        console_err.print(f"[cyan]Scanning inbox {inbox_desc}...[/cyan]")
         s3_submissions = query_submissions(s3_options, show_cleaned=False)
 
         console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
