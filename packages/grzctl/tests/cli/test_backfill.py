@@ -15,15 +15,15 @@ from typing import Any
 
 import boto3
 import pytest
-from grz_db.models.submission import Submission, SubmissionDb
+from grz_db.models.submission import Submission, SubmissionBase, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.commands.db.cli import _backfill_submission, _BackfillResult
+from grzctl.commands.db.cli import _BACKFILL_IGNORE_FIELDS, _backfill_submission, _BackfillResult
 from moto import mock_aws
 
 BUCKET = "test-backfill-bucket"
 REGION = "us-east-1"
-IGNORE_FIELDS = {"submission_uploaded_date", "tan_g", "pseudonym"}
+IGNORE_FIELDS = set(_BACKFILL_IGNORE_FIELDS)
 DIFFERENT_TAN_G = "b" * 64
 DIFFERENT_PSEUDONYM = "different-pseudonym"
 DIFFERENT_DATE = datetime.date(1999, 1, 1)
@@ -391,3 +391,17 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
 
     assert result == _BackfillResult.WOULD_OVERWRITE
     assert db.get_submission(submission_id).submission_size == 1
+
+
+def test_backfill_ignores_only_fields_that_exist() -> None:
+    """A key that names no column ignores nothing.
+
+    The set named "local_case_id", which is not a Submission field; the column holding the
+    submitter's local case ID is "pseudonym". Archived metadata.json always carries a redacted
+    localCaseId, so backfill diffed the placeholder against the stored pseudonym: withheld as
+    destructive where a value was already there, written straight in where the column was NULL.
+
+    These tests did not catch it because they passed their own ignore set rather than the one
+    the command builds.
+    """
+    assert _BACKFILL_IGNORE_FIELDS <= SubmissionBase.model_fields.keys()
