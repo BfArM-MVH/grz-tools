@@ -88,8 +88,7 @@ def db(
     # set up context object
     ctx.ensure_object(dict)
 
-    config = configuration
-    db_config = config.db
+    db_config = configuration.db
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:
@@ -1348,12 +1347,11 @@ def backfill(  # noqa: C901, PLR0912, PLR0913
         "tan_g",
         "local_case_id",
     }
-    config = configuration
 
     # ── Build S3 clients for both archive targets ────────────────────────────
     archive_targets = [
-        ("consented", config.archives.consented.s3),
-        ("non_consented", config.archives.non_consented.s3),
+        ("consented", configuration.archives.consented.s3),
+        ("non_consented", configuration.archives.non_consented.s3),
     ]
 
     _s3_clients: dict[str | None, Any] = {}
@@ -1448,8 +1446,7 @@ def sync_from_inbox(
     Synchronize the database with submissions found in the inbox.
     """
     try:
-        config = configuration
-        s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
+        s3_options = configuration.resolve_inbox_by_bucket(inbox_bucket)
     except Exception:
         console_err.print(
             f"[red]Error resolving S3 configuration from supplied inbox-bucket {inbox_bucket}: {traceback.format_exc()}[/red]"

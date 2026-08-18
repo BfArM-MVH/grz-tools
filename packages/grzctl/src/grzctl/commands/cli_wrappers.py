@@ -168,8 +168,7 @@ def upload(
     **kwargs,
 ):
     """Upload a submission to a GRZ/GDC (wrapper with DB updates)."""
-    config = configuration
-    inbox_s3 = config.resolve_inbox_by_bucket(inbox_bucket)
+    inbox_s3 = configuration.resolve_inbox_by_bucket(inbox_bucket)
 
     submission_dir = Path(submission_dir)
 

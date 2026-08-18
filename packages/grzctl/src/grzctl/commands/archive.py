@@ -37,9 +37,7 @@ def archive(
     """
     Archive a submission within a GRZ/GDC.
     """
-    config = configuration
-
-    archive_s3 = config.archives.consented.s3 if consented else config.archives.non_consented.s3
+    archive_s3 = configuration.archives.consented.s3 if consented else configuration.archives.non_consented.s3
 
     log.info("Starting archival...")
 

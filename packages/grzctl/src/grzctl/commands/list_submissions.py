@@ -136,14 +136,13 @@ def list_submissions(
     """
     List submissions within an inbox from oldest to newest, up to the requested limit.
     """
-    config = configuration
-    s3_options = config.resolve_inbox_by_bucket(inbox_bucket)
+    s3_options = configuration.resolve_inbox_by_bucket(inbox_bucket)
 
     submissions = query_submissions(s3_options, show_cleaned)
 
     database_states: dict[str, str | None] | None = None
     try:
-        submission_db = get_submission_db_instance(db_url=config.db.database_url)
+        submission_db = get_submission_db_instance(db_url=configuration.db.database_url)
         database_states = {}
         for submission in submissions:
             database_states[submission.submission_id] = _get_latest_state_str(submission_db, submission.submission_id)

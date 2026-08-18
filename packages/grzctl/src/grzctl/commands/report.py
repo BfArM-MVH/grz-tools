@@ -45,12 +45,11 @@ def report(ctx: click.Context, configuration: GrzctlConfig):
     """
     Generate various reports related to GRZ activities.
     """
-    config = configuration
-    db = config.db
+    db = configuration.db
 
     ctx.obj = {
         "db_url": db.database_url,
-        "grz_id": config.identifiers.grz,
+        "grz_id": configuration.identifiers.grz,
     }
 
 

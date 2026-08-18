@@ -33,8 +33,7 @@ def decrypt(
 
     Decrypting a submission requires the _private_ key of the original recipient.
     """
-    config = configuration
-    keys = config.keys
+    keys = configuration.keys
 
     grz_privkey_path = keys.grz_private_key_path
     if not grz_privkey_path:

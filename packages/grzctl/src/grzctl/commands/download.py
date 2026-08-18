@@ -51,8 +51,7 @@ def download(  # noqa: PLR0913
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    config = configuration
-    s3_options = config.resolve_inbox_by_submission_id(submission_id, inbox_bucket).s3
+    s3_options = configuration.resolve_inbox_by_submission_id(submission_id, inbox_bucket).s3
 
     log.info("Starting download...")
 
