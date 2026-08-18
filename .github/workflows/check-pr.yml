@@ -1,5 +1,22 @@
 name: "Conventional commit PRs"
 
+# SECURITY NOTE: this workflow runs on `pull_request_target`, so it executes in
+# the context of the BASE branch with a token that is available even when the
+# pull request comes from a fork.
+#
+# That is only safe because this workflow:
+#   - never checks out or executes PR code (no actions/checkout),
+#   - never interpolates PR-controlled data (title, body, branch name) into a
+#     `run:` script; the only expression used in one is `needs.main.result`,
+#     which is a fixed enum,
+#   - grants nothing by default (`permissions: {}` below), so the job that
+#     needs the PR title opts in to `pull-requests: read` and nothing else.
+#
+# DO NOT add a checkout of PR code, or run any PR-provided content, here. Doing
+# so would let a fork execute arbitrary code with write access to this
+# repository (a "pwn request"). If code from a PR ever needs to be tested, use
+# a separate workflow on the plain `pull_request` trigger.
+
 on:
   pull_request_target:
     types:
@@ -12,6 +29,9 @@ on:
   # Merge queue: the workflow must run on merge_group so the required
   # "Conventional commit PRs" check reports on the queue's merge commit.
   merge_group:
+
+# Default-deny; each job opts in to what it needs. The aggregator needs nothing.
+permissions: {}
 
 jobs:
   main:
