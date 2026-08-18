@@ -37,7 +37,7 @@ def download(  # noqa: PLR0913
     threads: int,
     force: bool,
     update_db: bool,
-    inbox_bucket: str | None,
+    inbox_bucket: str,
     populate: bool,
     **kwargs,
 ):
@@ -47,7 +47,8 @@ def download(  # noqa: PLR0913
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
-    s3_options = configuration.resolve_inbox(submission_id=submission_id, bucket=inbox_bucket).s3
+    submitter_id = submission_id.split("_", maxsplit=1)[0]
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
 
     log.info("Starting download...")
 

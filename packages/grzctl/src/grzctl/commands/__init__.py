@@ -34,21 +34,21 @@ inbox_bucket_option = click.option(
     "--bucket",
     "--inbox-bucket",
     "inbox_bucket",
-    default=None,
-    help="Inbox bucket name. Required when multiple inboxes are configured.",
+    required=True,
+    help="Inbox bucket name.",
 )
 
 submitter_option = click.option(
     "-s",
     "--submitter",
     "submitter_id",
-    default=None,
-    help="Submitter (LE) ID. Required when multiple submitters are configured.",
+    required=True,
+    help="Submitter (LE) ID.",
 )
 
 
 def inbox_options(func):
-    """Composite decorator providing both --submitter and --bucket / --inbox-bucket."""
+    """Decorator requiring both --submitter and --bucket."""
     func = inbox_bucket_option(func)
     func = submitter_option(func)
     return func

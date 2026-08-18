@@ -116,6 +116,8 @@ def test_upload_download_submission(
         str(download_dir_path),
         "--no-update-db",
         "--populate",
+        "--bucket",
+        "testing",
     ]
     result = runner.invoke(cli, download_args, catch_exceptions=False)
 

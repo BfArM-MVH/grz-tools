@@ -158,7 +158,7 @@ def upload(
     configuration: GrzctlConfig,
     submission_dir,
     threads: int,
-    inbox_bucket: str | None,
+    inbox_bucket: str,
     update_db: bool,
     **kwargs,
 ):
@@ -174,9 +174,9 @@ def upload(
     )
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
+    submitter_id = submission.metadata.content.submission.submitter_id
 
-    # Resolve using the submission_id extracted from metadata
-    s3_options = configuration.resolve_inbox(submission_id=submission_id, bucket=inbox_bucket).s3
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
 
     with DbContext(
         configuration=configuration,

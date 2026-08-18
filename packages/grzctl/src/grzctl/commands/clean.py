@@ -23,16 +23,17 @@ log = logging.getLogger(__name__)
 @inbox_bucket_option
 def clean(
     configuration: GrzctlConfig,
-    submission_id,
+    submission_id: str,
     yes_i_really_mean_it: bool,
     update_db: bool,
-    inbox_bucket: str | None,
+    inbox_bucket: str,
     **kwargs,
 ):
     """
     Remove all files of a submission from the S3 inbox.
     """
-    s3_options = configuration.resolve_inbox(submission_id=submission_id, bucket=inbox_bucket).s3
+    submitter_id = submission_id.split("_", maxsplit=1)[0]
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
     bucket_name = s3_options.bucket
 
     if not submission_id:

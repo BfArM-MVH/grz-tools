@@ -49,6 +49,8 @@ def test_list(temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, wo
             "--submission-dir",
             str(working_dir_path),
             "--no-update-db",
+            "--bucket",
+            "testing",
         ]
 
         runner = click.testing.CliRunner()
@@ -60,7 +62,17 @@ def test_list(temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, wo
 
         submission_id = result_upload.stdout.strip()
 
-        list_args = ["--config", temp_grzctl_s3_db_config_file_path, "list", "--json", "--show-cleaned"]
+        list_args = [
+            "--config",
+            temp_grzctl_s3_db_config_file_path,
+            "list",
+            "--json",
+            "--show-cleaned",
+            "--bucket",
+            "testing",
+            "--submitter",
+            "260914050",
+        ]
 
         result_list = runner.invoke(cli, list_args, catch_exceptions=False)
 
@@ -98,7 +110,17 @@ def test_list_with_partial_env(remote_bucket_with_version, working_dir_path, tmp
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
-    list_args = ["--config", str(config_file), "list", "--json", "--show-cleaned"]
+    list_args = [
+        "--config",
+        str(config_file),
+        "list",
+        "--json",
+        "--show-cleaned",
+        "--bucket",
+        "testing",
+        "--submitter",
+        "260914050",
+    ]
 
     result_list = runner.invoke(cli, list_args, env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "secret"})
 
@@ -136,6 +158,8 @@ def test_list_with_broken_env(
         "--submission-dir",
         str(working_dir_path),
         "--no-update-db",
+        "--bucket",
+        "testing",
     ]
 
     runner = click.testing.CliRunner()
@@ -145,7 +169,17 @@ def test_list_with_broken_env(
     assert result_upload.exit_code == 0, result_upload.output
     assert len(result_upload.output) != 0, result_upload.stderr
 
-    list_args = ["--config", temp_grzctl_s3_db_config_file_path, "list", "--json", "--show-cleaned"]
+    list_args = [
+        "--config",
+        temp_grzctl_s3_db_config_file_path,
+        "list",
+        "--json",
+        "--show-cleaned",
+        "--bucket",
+        "testing",
+        "--submitter",
+        "260914050",
+    ]
 
     result_list = runner.invoke(cli, list_args, env={"GRZ_DB__AUTHOR__NAME": ""})
 

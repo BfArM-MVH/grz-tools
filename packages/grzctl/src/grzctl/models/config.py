@@ -184,65 +184,26 @@ class GrzctlConfig(IgnoringBaseSettings):
         finally:
             _config_ctx.reset(token)
 
-    def resolve_inbox(
-        self,
-        *,
-        submission_id: str | None = None,
-        submitter_id: str | None = None,
-        bucket: str | None = None,
-    ) -> InboxTarget:
-        """Resolve an InboxTarget from submission_id, submitter_id, and/or bucket name.
+    def resolve_inbox(self, submitter_id: str, bucket: str) -> InboxTarget:
+        """Retrieve a specific inbox target by exact submitter (LE) ID and bucket name.
 
-        - If submission_id is provided, the submitter (LE) ID is extracted automatically.
-        - If submitter_id is explicitly provided, it takes precedence.
-        - If neither is provided, all configured LEs are considered.
-        - If bucket is provided, candidates are filtered by bucket name.
-        - Auto-resolves if there is exactly one unambiguous candidate.
+        No auto-guessing or fallback search.
         """
-        target_le = submitter_id
-        if not target_le and submission_id:
-            target_le = submission_id.split("_", maxsplit=1)[0]
-
-        # filter candidate LEs
-        if target_le:
-            if target_le not in self.s3.inboxes:
-                available = ", ".join(self.s3.inboxes.keys())
-                log.error(f"Submitter ID '{target_le}' not found in configuration. Available: {available}")
-                sys.exit(1)
-            candidate_les = {target_le: self.s3.inboxes[target_le]}
-        else:
-            candidate_les = self.s3.inboxes
-
-        # collect matching (le_id, bucket_name, config)
-        matches = [
-            (le, b_name, cfg)
-            for le, buckets in candidate_les.items()
-            for b_name, cfg in buckets.items()
-            if bucket is None or b_name == bucket
-        ]
-
-        # handle resolution
-        if len(matches) == 1:
-            _le, b_name, cfg = matches[0]
-            s3_options = S3Options(bucket=b_name, **cfg.model_dump())
-            return InboxTarget(
-                s3=s3_options,
-                **cfg.model_dump(include={"private_key_path", "private_key_passphrase"}),
-            )
-
-        if not matches:
-            criteria = []
-            if target_le:
-                criteria.append(f"submitter '{target_le}'")
-            if bucket:
-                criteria.append(f"bucket '{bucket}'")
-            log.error(f"No inbox found matching {' and '.join(criteria) or 'any criteria'}.")
+        if submitter_id not in self.s3.inboxes:
+            available_les = ", ".join(self.s3.inboxes.keys())
+            log.error(f"Submitter ID '{submitter_id}' not found in configuration. Available: {available_les}")
             sys.exit(1)
 
-        # ambiguity handling
-        available_choices = ", ".join(f"{le}/{b_name}" for le, b_name, _ in matches)
-        if target_le is None and len({le for le, _, _ in matches}) > 1:
-            log.error(f"Multiple submitters match ({available_choices}). Please specify --submitter.")
-        else:
-            log.error(f"Multiple inboxes match ({available_choices}). Please specify --bucket / --inbox-bucket.")
-        sys.exit(1)
+        submitter_inboxes = self.s3.inboxes[submitter_id]
+        if bucket not in submitter_inboxes:
+            available_buckets = ", ".join(submitter_inboxes.keys())
+            log.error(
+                f"Bucket '{bucket}' not configured for submitter '{submitter_id}'. Available: {available_buckets}"
+            )
+            sys.exit(1)
+
+        inbox_cfg = submitter_inboxes[bucket]
+        return InboxTarget(
+            s3=S3Options(bucket=bucket, **inbox_cfg.model_dump()),
+            **inbox_cfg.model_dump(include={"private_key_path", "private_key_passphrase"}),
+        )

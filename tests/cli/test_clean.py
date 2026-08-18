@@ -54,6 +54,8 @@ def test_clean_and_list(
             "--submission-dir",
             str(working_dir_path),
             "--no-update-db",
+            "--bucket",
+            "testing",
         ]
 
         runner = click.testing.CliRunner()
@@ -73,6 +75,8 @@ def test_clean_and_list(
             submission_id,
             "--yes-i-really-mean-it",
             "--no-update-db",
+            "--bucket",
+            "testing",
         ]
 
         result_clean = runner.invoke(cli, clean_args, catch_exceptions=False)
@@ -87,7 +91,17 @@ def test_clean_and_list(
         # ensure metadata is empty
         assert remote_bucket_with_version.Object(f"{submission_id}/metadata/metadata.json").content_length == 0
 
-        list_args = ["--config", temp_grzctl_s3_db_config_file_path, "list", "--json", "--show-cleaned"]
+        list_args = [
+            "--config",
+            temp_grzctl_s3_db_config_file_path,
+            "list",
+            "--json",
+            "--show-cleaned",
+            "--bucket",
+            "testing",
+            "--submitter",
+            "260914050",
+        ]
 
         result_list = runner.invoke(cli, list_args, catch_exceptions=False)
 

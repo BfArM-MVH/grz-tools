@@ -125,8 +125,8 @@ def list_submissions(  # noqa: PLR0913
     configuration: GrzctlConfig,
     output_json: bool,
     show_cleaned: bool,
-    submitter_id: str | None,
-    inbox_bucket: str | None,
+    submitter_id: str,
+    inbox_bucket: str,
     limit: int,
     **kwargs,
 ):

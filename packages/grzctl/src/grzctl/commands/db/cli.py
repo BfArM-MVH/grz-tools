@@ -1469,8 +1469,8 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
 def sync_from_inbox(
     ctx: click.Context,
     configuration: GrzctlConfig,
-    submitter_id: str | None,
-    inbox_bucket: str | None,
+    submitter_id: str,
+    inbox_bucket: str,
     **kwargs,
 ):
     """Synchronize the database with submissions found in the inbox."""
