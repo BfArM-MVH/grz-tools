@@ -1,10 +1,15 @@
 import datetime
+import json
 from collections.abc import Callable
 
 import pytest
 from grz_db.errors import DuplicateTanGError
-from grz_db.models.submission import Submission, SubmissionDb
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grz_db.models.submission import OutdatedDatabaseSchemaError, Submission, SubmissionDb
+from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
+    REDACTED_TAN,
+    GrzSubmissionMetadata,
+)
 
 TWO_TB = 2 * 1024**4  # 2,199,023,255,552 bytes
 SUBMISSION_ID = "123456789_2024-01-01_abcdef01"
@@ -145,3 +150,121 @@ def test_raises_on_duplicate_tan_g(
     sub2 = db.add_submission(SUBMISSION_ID_2)
     with pytest.raises(DuplicateTanGError):
         set_tan_g(db, sub2, TAN_G_1)
+
+
+def _redacted(metadata: GrzSubmissionMetadata, local_case_id: str) -> GrzSubmissionMetadata:
+    """A copy of *metadata* redacted the way archival redacts it.
+
+    Archival writes the ``REDACTED_LOCAL_CASE_ID`` sentinel; older objects in the
+    archive carry an empty ``localCaseId``, so both spellings are in the archive and
+    both have to be recognised.
+    """
+    raw = json.loads(metadata.model_dump_json(by_alias=True))
+    raw["submission"]["tanG"] = REDACTED_TAN
+    raw["submission"]["localCaseId"] = local_case_id
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+@pytest.mark.parametrize("placeholder", ["", REDACTED_LOCAL_CASE_ID], ids=["empty", "sentinel"])
+def test_restore_redacted_fields_uses_the_stored_row(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, placeholder: str
+) -> None:
+    """Both redaction spellings are restored from the columns populate wrote."""
+    submission = db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "tan_g", TAN_G_1)
+    db.modify_submission(SUBMISSION_ID, "pseudonym", "the-real-case")
+    submission = db.get_submission(SUBMISSION_ID)
+
+    archived = _redacted(metadata, placeholder)
+    unrestored = submission.restore_redacted_fields(archived)
+
+    assert unrestored == frozenset()
+    assert archived.submission.tan_g == TAN_G_1
+    assert archived.submission.local_case_id == "the-real-case"
+
+
+@pytest.mark.parametrize("placeholder", ["", REDACTED_LOCAL_CASE_ID], ids=["empty", "sentinel"])
+def test_restore_redacted_fields_reports_what_it_cannot_restore(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, placeholder: str
+) -> None:
+    """A row with nothing stored leaves the placeholders in place and names the columns."""
+    submission = db.add_submission(SUBMISSION_ID)
+
+    archived = _redacted(metadata, placeholder)
+    unrestored = submission.restore_redacted_fields(archived)
+
+    assert unrestored == frozenset({"tan_g", "pseudonym"})
+    assert archived.submission.tan_g == REDACTED_TAN
+    assert archived.submission.local_case_id == placeholder
+
+
+def test_restore_redacted_fields_leaves_unredacted_values_alone(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+) -> None:
+    """An unredacted copy is authoritative, so it is diffed rather than overwritten."""
+    db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "tan_g", TAN_G_1)
+    db.modify_submission(SUBMISSION_ID, "pseudonym", "stored-case")
+    submission = db.get_submission(SUBMISSION_ID)
+
+    unrestored = submission.restore_redacted_fields(metadata)
+
+    assert unrestored == frozenset()
+    assert metadata.submission.tan_g != TAN_G_1
+    assert metadata.submission.local_case_id != "stored-case"
+
+
+def test_restore_redacted_fields_restores_each_column_independently(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+) -> None:
+    """A stored pseudonym still helps even when the tanG cannot be recovered."""
+    db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "pseudonym", "the-real-case")
+    submission = db.get_submission(SUBMISSION_ID)
+
+    archived = _redacted(metadata, "")
+    unrestored = submission.restore_redacted_fields(archived)
+
+    assert unrestored == frozenset({"tan_g"})
+    assert archived.submission.local_case_id == "the-real-case"
+
+
+def test_the_schema_is_checked_once_per_database(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Asking costs a scan of the migration directory and a connection of its own.
+
+    One pass over a submission opens a session per write, so asking every time paid that over
+    and over for an answer that cannot change under us.
+    """
+    calls = 0
+    original = SubmissionDb._at_latest_schema
+
+    def counted(self: SubmissionDb) -> bool:
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    monkeypatch.setattr(SubmissionDb, "_at_latest_schema", counted)
+    db._schema_confirmed = False  # a freshly constructed instance has not asked yet
+
+    db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "basic_qc_passed", True)
+    db.get_submission(SUBMISSION_ID)
+
+    assert calls == 1
+
+
+def test_a_database_that_is_behind_is_asked_again(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a returned answer is remembered, never a raised one.
+
+    ``db init`` and ``db upgrade`` build this object precisely when the schema is behind, so a
+    remembered failure would outlive the upgrade that fixed it.
+    """
+    behind = True
+    monkeypatch.setattr(SubmissionDb, "_at_latest_schema", lambda self: not behind)
+    db._schema_confirmed = False
+
+    with pytest.raises(OutdatedDatabaseSchemaError):
+        db.get_submission(SUBMISSION_ID)
+
+    behind = False
+    assert db.get_submission(SUBMISSION_ID) is None, "the upgrade must be picked up"
