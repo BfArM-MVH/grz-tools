@@ -25,14 +25,14 @@ def full_config_path(
     from tests.conftest import _grzctl_archives
 
     config_data = {
-        "s3": {
-            "inboxes": {
-                "260914050": {
+        "leistungserbringer": {
+            "260914050": {
+                "inbox_buckets": {
                     "inbox": {
                         "endpoint_url": "http://localhost:9000",
                         "private_key_path": "/dev/null",
                     }
-                }
+                },
             }
         },
         "archives": _grzctl_archives(endpoint_url="http://localhost:9000"),
@@ -176,7 +176,7 @@ def build_args(
     "command_spec",
     [
         {
-            "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--bucket", "inbox"],
+            "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.download.Worker",
             "id_source": "arg",
             "initial_state": None,
@@ -185,7 +185,7 @@ def build_args(
             "skip_populate": True,
         },
         {
-            "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--bucket", "inbox"],
+            "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.download.Worker",
             "id_source": "arg",
             "initial_state": SubmissionStateEnum.UPLOADED,
@@ -228,7 +228,7 @@ def build_args(
             "expected_state": SubmissionStateEnum.ARCHIVED,
         },
         {
-            "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it", "--bucket", "inbox"],
+            "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it", "--inbox", "inbox"],
             "extra_patch": "grzctl.commands.clean._clean_submission_from_bucket",
             "id_source": "arg",
             "initial_state": SubmissionStateEnum.QCED,
@@ -335,7 +335,7 @@ def test_db_wrappers(
             "id_source": "encrypted_submission",
         },
         {
-            "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it", "--bucket", "inbox"],
+            "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it", "--inbox", "inbox"],
             "extra_patch": "grzctl.commands.clean._clean_submission_from_bucket",
             "id_source": "arg",
         },
@@ -544,7 +544,7 @@ def test_dbcontext_error_handling(db_engine, full_config_path, test_metadata, tm
             submission_id,
             "--yes-i-really-mean-it",
             "--update-db",
-            "--bucket",
+            "--inbox",
             "inbox",
         ]
 

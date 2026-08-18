@@ -8,7 +8,7 @@ import yaml
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
 
@@ -25,6 +25,9 @@ class InboxConfig(S3ConnectionBase):
     Configuration for a specific inbox.
     Includes connection details and the private key needed to decrypt its contents.
     """
+
+    bucket: Annotated[str | None, Field(default=None)] = None
+    """S3 bucket name. Defaults to the inbox name key if not set."""
 
     private_key_path: Annotated[str, Field(min_length=1)]
     """Path to the GRZ private key used to decrypt files from this inbox."""
@@ -49,19 +52,14 @@ class InboxTarget(IgnoringBaseModel):
     """Passphrase to the GRZ private key used to decrypt files from this inbox."""
 
 
-class ProcessS3Options(IgnoringBaseModel):
-    """
-    Root S3 configuration for the process command.
-    Enforces that at least one LE and one inbox are defined.
-    """
+class LeistungserbringerEntry(IgnoringBaseModel):
+    """A single Leistungserbringer (submitter) with its inbox configurations."""
 
-    inboxes: Annotated[
-        dict[str, Annotated[dict[str, InboxConfig], Field(min_length=1)]],
-        Field(min_length=1),
-    ]
-    """
-    Mapping: LE-Id -> BucketName -> InboxConfig.
-    """
+    alias: Annotated[str | None, Field(default=None)] = None
+    """Human-friendly alias. Defaults to the LE id (dict key) if not set."""
+
+    inbox_buckets: Annotated[dict[str, InboxConfig], Field(min_length=1)]
+    """Mapping: InboxName -> InboxConfig."""
 
 
 class GrzctlKeyModel(IgnoringBaseModel):
@@ -130,8 +128,11 @@ class DictConfigSettingsSource(PydanticBaseSettingsSource):
 class GrzctlConfig(IgnoringBaseSettings):
     """Unified configuration for all grzctl commands."""
 
-    s3: ProcessS3Options
-    """Configuration for S3 inbox connections."""
+    leistungserbringer: Annotated[dict[str, LeistungserbringerEntry], Field(min_length=1)]
+    """Mapping: LE-Id -> LeistungserbringerEntry."""
+
+    _le_by_id: dict[str, LeistungserbringerEntry] = PrivateAttr(default_factory=dict)
+    _le_by_alias: dict[str, LeistungserbringerEntry] = PrivateAttr(default_factory=dict)
 
     archives: ArchivesConfig
     """Configuration for consented and non-consented archives."""
@@ -147,6 +148,26 @@ class GrzctlConfig(IgnoringBaseSettings):
 
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
+
+    @model_validator(mode="after")
+    def build_le_lookups(self) -> "GrzctlConfig":
+        for le_id, entry in self.leistungserbringer.items():
+            if entry.alias is None:
+                entry.alias = le_id
+            if le_id in self._le_by_id:
+                raise ValueError(f"Duplicate LE id: '{le_id}'")
+            if entry.alias in self._le_by_alias:
+                raise ValueError(f"Duplicate LE alias: '{entry.alias}'")
+            self._le_by_id[le_id] = entry
+            self._le_by_alias[entry.alias] = entry
+        return self
+
+    @staticmethod
+    def _describe_le(le_id: str, entry: LeistungserbringerEntry) -> str:
+        """Return a human-readable description with both id and alias."""
+        if entry.alias == le_id:
+            return f"'{le_id}'"
+        return f"'{le_id}' (alias '{entry.alias}')"
 
     @classmethod
     def settings_customise_sources(
@@ -184,26 +205,29 @@ class GrzctlConfig(IgnoringBaseSettings):
         finally:
             _config_ctx.reset(token)
 
-    def resolve_inbox(self, submitter_id: str, bucket: str) -> InboxTarget:
-        """Retrieve a specific inbox target by exact submitter (LE) ID and bucket name.
+    def resolve_inbox(self, submitter_id: str, inbox_name: str) -> InboxTarget:
+        """Retrieve a specific inbox target by exact submitter (LE) ID or alias and inbox name.
 
         No auto-guessing or fallback search.
         """
-        if submitter_id not in self.s3.inboxes:
-            available_les = ", ".join(self.s3.inboxes.keys())
-            log.error(f"Submitter ID '{submitter_id}' not found in configuration. Available: {available_les}")
+        entry = self._le_by_id.get(submitter_id) or self._le_by_alias.get(submitter_id)
+        if entry is None:
+            available = ", ".join(self._describe_le(le_id, e) for le_id, e in self.leistungserbringer.items())
+            log.error(f"Submitter '{submitter_id}' not found. Available: {available}")
             sys.exit(1)
 
-        submitter_inboxes = self.s3.inboxes[submitter_id]
-        if bucket not in submitter_inboxes:
-            available_buckets = ", ".join(submitter_inboxes.keys())
+        le_id = next(k for k, v in self.leistungserbringer.items() if v is entry)
+        if inbox_name not in entry.inbox_buckets:
+            available = ", ".join(entry.inbox_buckets.keys())
             log.error(
-                f"Bucket '{bucket}' not configured for submitter '{submitter_id}'. Available: {available_buckets}"
+                f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(le_id, entry)}. "
+                f"Available: {available}"
             )
             sys.exit(1)
 
-        inbox_cfg = submitter_inboxes[bucket]
+        inbox_cfg = entry.inbox_buckets[inbox_name]
+        bucket = inbox_cfg.bucket or inbox_name
         return InboxTarget(
-            s3=S3Options(bucket=bucket, **inbox_cfg.model_dump()),
+            s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
             **inbox_cfg.model_dump(include={"private_key_path", "private_key_passphrase"}),
         )

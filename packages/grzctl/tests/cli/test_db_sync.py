@@ -21,16 +21,16 @@ def test_sync_from_inbox(migrated_database_config_path, tmp_path):
     with open(migrated_database_config_path, encoding="utf-8") as f:
         config_data = yaml.safe_load(f)
 
-    config_data["s3"] = {
-        "inboxes": {
-            "123456789": {
+    config_data["leistungserbringer"] = {
+        "123456789": {
+            "inbox_buckets": {
                 "test-bucket": {
                     "endpoint_url": "http://localhost:9000",
                     "access_key": "minioadmin",
                     "secret": "minioadmin",
                     "private_key_path": config_data["db"]["author"]["private_key_path"],
                 }
-            }
+            },
         }
     }
 
@@ -112,9 +112,9 @@ def test_sync_from_inbox(migrated_database_config_path, tmp_path):
                 str(migrated_database_config_path),
                 "db",
                 "sync-from-inbox",
-                "--bucket",
+                "--inbox",
                 "test-bucket",
-                "--submitter",
+                "--submitter-id",
                 "123456789",
             ],
         )

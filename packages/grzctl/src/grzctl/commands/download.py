@@ -10,7 +10,7 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
-from ..commands import grzctl_configuration, inbox_bucket_option
+from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db
-@inbox_bucket_option
+@inbox_option
 @click.option(
     "--populate/--no-populate",
     default=True,
@@ -37,7 +37,7 @@ def download(  # noqa: PLR0913
     threads: int,
     force: bool,
     update_db: bool,
-    inbox_bucket: str,
+    inbox_name: str,
     populate: bool,
     **kwargs,
 ):
@@ -48,7 +48,7 @@ def download(  # noqa: PLR0913
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
 
     log.info("Starting download...")
 

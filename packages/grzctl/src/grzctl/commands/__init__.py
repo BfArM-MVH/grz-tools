@@ -29,18 +29,17 @@ def grzctl_configuration(f):
     return functools.update_wrapper(wrapper, f)
 
 
-inbox_bucket_option = click.option(
+inbox_option = click.option(
     "-b",
-    "--bucket",
-    "--inbox-bucket",
-    "inbox_bucket",
+    "--inbox",
+    "inbox_name",
     required=True,
-    help="Inbox bucket name.",
+    help="Inbox name.",
 )
 
-submitter_option = click.option(
+submitter_id_option = click.option(
     "-s",
-    "--submitter",
+    "--submitter-id",
     "submitter_id",
     required=True,
     help="Submitter (LE) ID.",
@@ -48,7 +47,7 @@ submitter_option = click.option(
 
 
 def inbox_options(func):
-    """Decorator requiring both --submitter and --bucket."""
-    func = inbox_bucket_option(func)
-    func = submitter_option(func)
+    """Decorator requiring both --submitter-id and --inbox."""
+    func = inbox_option(func)
+    func = submitter_id_option(func)
     return func

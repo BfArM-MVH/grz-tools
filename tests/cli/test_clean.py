@@ -54,7 +54,7 @@ def test_clean_and_list(
             "--submission-dir",
             str(working_dir_path),
             "--no-update-db",
-            "--bucket",
+            "--inbox",
             "testing",
         ]
 
@@ -75,7 +75,7 @@ def test_clean_and_list(
             submission_id,
             "--yes-i-really-mean-it",
             "--no-update-db",
-            "--bucket",
+            "--inbox",
             "testing",
         ]
 
@@ -97,9 +97,9 @@ def test_clean_and_list(
             "list",
             "--json",
             "--show-cleaned",
-            "--bucket",
+            "--inbox",
             "testing",
-            "--submitter",
+            "--submitter-id",
             "260914050",
         ]
 

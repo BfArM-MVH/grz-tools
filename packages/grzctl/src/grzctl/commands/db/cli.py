@@ -1470,12 +1470,12 @@ def sync_from_inbox(
     ctx: click.Context,
     configuration: GrzctlConfig,
     submitter_id: str,
-    inbox_bucket: str,
+    inbox_name: str,
     **kwargs,
 ):
     """Synchronize the database with submissions found in the inbox."""
     try:
-        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
+        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     except Exception:
         console_err.print(f"[red]Error resolving S3 configuration for inbox: {traceback.format_exc()}[/red]")
         sys.exit(1)

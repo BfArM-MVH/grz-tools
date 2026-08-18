@@ -7,7 +7,7 @@ from grzctl.models.config import GrzctlConfig
 def _make_grzctl_config(**overrides) -> GrzctlConfig:
     """Build a minimal valid GrzctlConfig for testing derivation functions."""
     defaults = {
-        "s3": {"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
+        "leistungserbringer": {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
         "archives": {
             "consented": {"s3": {"bucket": "consented"}, "public_key_path": "/dev/null"},
             "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": "/dev/null"},

@@ -56,13 +56,13 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
         public_key_file.write(b" alice")
 
     return GrzctlConfig(
-        s3={
-            "inboxes": {
-                "000000000": {
+        leistungserbringer={
+            "000000000": {
+                "inbox_buckets": {
                     "inbox": {
                         "private_key_path": str(private_key_path.resolve()),
                     }
-                }
+                },
             }
         },
         archives=_grzctl_archives(

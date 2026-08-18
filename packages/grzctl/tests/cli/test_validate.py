@@ -11,7 +11,7 @@ def grzctl_config_path(tmp_path):
     import yaml
 
     config = {
-        "s3": {"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
+        "leistungserbringer": {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
         "archives": {
             "consented": {"s3": {"bucket": "consented"}, "public_key_path": "/dev/null"},
             "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": "/dev/null"},

@@ -8,7 +8,7 @@ import grz_common.cli as grzcli
 from grz_common.transfer import init_s3_resource
 from grz_db.models.submission import SubmissionStateEnum
 
-from ..commands import grzctl_configuration, inbox_bucket_option
+from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -20,20 +20,20 @@ log = logging.getLogger(__name__)
 @grzcli.submission_id
 @click.option("--yes-i-really-mean-it", is_flag=True)
 @grzcli.update_db
-@inbox_bucket_option
+@inbox_option
 def clean(
     configuration: GrzctlConfig,
     submission_id: str,
     yes_i_really_mean_it: bool,
     update_db: bool,
-    inbox_bucket: str,
+    inbox_name: str,
     **kwargs,
 ):
     """
     Remove all files of a submission from the S3 inbox.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     bucket_name = s3_options.bucket
 
     if not submission_id:

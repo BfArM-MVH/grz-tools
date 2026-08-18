@@ -341,13 +341,13 @@ def pruefbericht_db_config(tmp_path, migrated_db_connection):
     from tests.conftest import _grzctl_archives, crypt4gh_grz_private_key_file, crypt4gh_grz_public_key_file
 
     config = {
-        "s3": {
-            "inboxes": {
-                "000000000": {
+        "leistungserbringer": {
+            "000000000": {
+                "inbox_buckets": {
                     "inbox": {
                         "private_key_path": "/dev/null",
                     }
-                }
+                },
             }
         },
         "archives": _grzctl_archives(),

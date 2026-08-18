@@ -346,7 +346,7 @@ def encrypt_config_model(keys_config_content):
 def db_config_model(db_config_content, grzctl_keys_config, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **db_config_content,
-        s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
         keys=grzctl_keys_config,
@@ -358,7 +358,7 @@ def db_config_model(db_config_content, grzctl_keys_config, grzctl_identifiers_co
 def migrated_db_config_model(migrated_db_config_content, grzctl_keys_config, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **migrated_db_config_content,
-        s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
         keys=grzctl_keys_config,
@@ -423,7 +423,7 @@ def temp_identifiers_config_file_path(temp_data_dir_path, identifiers_config_mod
 def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_content) -> Path:
     config_file = temp_data_dir_path / "config.pruefbericht.yaml"
     config = _grzctl_model(
-        s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
         db=_GRZCTL_DB_DUMMY,
         pruefbericht=pruefbericht_config_content["pruefbericht"],
     )
@@ -466,7 +466,9 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     }
 
 
-def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
+def _grzctl_config_dict(
+    *, leistungserbringer, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None
+) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
 
     *keys* and *identifiers* default to valid placeholders for tests that don't
@@ -474,7 +476,7 @@ def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, identifier
     from the ``grzctl_keys_config`` / ``grzctl_identifiers_config`` fixtures.
     """
     return {
-        "s3": s3,
+        "leistungserbringer": leistungserbringer,
         "archives": _grzctl_archives(endpoint_url=endpoint_url),
         "db": db if db is not None else _GRZCTL_DB_DUMMY,
         "keys": keys
@@ -490,7 +492,7 @@ def _grzctl_config_dict(*, s3, db=None, keys=None, pruefbericht=None, identifier
 
 def _grzctl_model(
     *,
-    s3,
+    leistungserbringer,
     db=None,
     keys=None,
     pruefbericht=None,
@@ -500,7 +502,7 @@ def _grzctl_model(
     """Build a GrzctlConfig model from the given sections."""
     return grzctl.models.config.GrzctlConfig(
         **_grzctl_config_dict(
-            s3=s3,
+            leistungserbringer=leistungserbringer,
             db=db,
             keys=keys,
             pruefbericht=pruefbericht,
@@ -515,7 +517,7 @@ def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
     """GrzctlConfig-format S3-only config for grzctl CLI tests."""
     config_file = temp_data_dir_path / "config.grzctl_s3.yaml"
     config = _grzctl_model(
-        s3={"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
     )
     with open(config_file, "w") as fd:
         config.to_yaml(fd)
@@ -527,7 +529,7 @@ def temp_grzctl_keys_config_file_path(temp_data_dir_path, keys_config_content) -
     """GrzctlConfig-format keys config for grzctl CLI tests."""
     config_file = temp_data_dir_path / "config.grzctl_keys.yaml"
     config = _grzctl_model(
-        s3={"inboxes": {"000000000": {"inbox": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
         db=_GRZCTL_DB_DUMMY,
         keys=keys_config_content["keys"],
     )

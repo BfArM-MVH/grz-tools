@@ -49,7 +49,7 @@ def test_list(temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, wo
             "--submission-dir",
             str(working_dir_path),
             "--no-update-db",
-            "--bucket",
+            "--inbox",
             "testing",
         ]
 
@@ -68,9 +68,9 @@ def test_list(temp_grzctl_s3_db_config_file_path, remote_bucket_with_version, wo
             "list",
             "--json",
             "--show-cleaned",
-            "--bucket",
+            "--inbox",
             "testing",
-            "--submitter",
+            "--submitter-id",
             "260914050",
         ]
 
@@ -97,7 +97,7 @@ def test_list_with_partial_env(remote_bucket_with_version, working_dir_path, tmp
         "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
     }
     no_db_config = {
-        "s3": {"inboxes": {"260914050": {"testing": {"private_key_path": "/dev/null"}}}},
+        "leistungserbringer": {"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
         "archives": _grzctl_archives(),
         "keys": keys,
         "pruefbericht": {},
@@ -116,9 +116,9 @@ def test_list_with_partial_env(remote_bucket_with_version, working_dir_path, tmp
         "list",
         "--json",
         "--show-cleaned",
-        "--bucket",
+        "--inbox",
         "testing",
-        "--submitter",
+        "--submitter-id",
         "260914050",
     ]
 
@@ -158,7 +158,7 @@ def test_list_with_broken_env(
         "--submission-dir",
         str(working_dir_path),
         "--no-update-db",
-        "--bucket",
+        "--inbox",
         "testing",
     ]
 
@@ -175,9 +175,9 @@ def test_list_with_broken_env(
         "list",
         "--json",
         "--show-cleaned",
-        "--bucket",
+        "--inbox",
         "testing",
-        "--submitter",
+        "--submitter-id",
         "260914050",
     ]
 

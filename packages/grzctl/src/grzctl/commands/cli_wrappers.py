@@ -10,7 +10,7 @@ import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
-from ..commands import grzctl_configuration, inbox_bucket_option
+from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -152,13 +152,13 @@ def encrypt(
 @grzcli.submission_dir
 @grzcli.threads
 @grzctl_configuration
-@inbox_bucket_option
+@inbox_option
 @grzcli.update_db
 def upload(
     configuration: GrzctlConfig,
     submission_dir,
     threads: int,
-    inbox_bucket: str,
+    inbox_name: str,
     update_db: bool,
     **kwargs,
 ):
@@ -176,7 +176,7 @@ def upload(
     submission_id = submission.metadata.content.submission_id
     submitter_id = submission.metadata.content.submission.submitter_id
 
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, bucket=inbox_bucket).s3
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
 
     with DbContext(
         configuration=configuration,
