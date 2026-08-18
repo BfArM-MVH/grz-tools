@@ -543,12 +543,15 @@ def update(  # noqa: C901, PLR0913
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-@submission.command(
-    epilog="Currently available KEYs are: "
-    + ", ".join(sorted(Submission.model_fields.keys() - Submission.immutable_fields))
-)
+# Exactly what SubmissionDb.modify_submission accepts. The epilog below already subtracted the
+# immutable fields while the choices did not, so `id` was offered and then refused. Built from
+# SubmissionBase to match the --allow-overwrite choices, which name the same set.
+_MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields)
+
+
+@submission.command(epilog="Currently available KEYs are: " + ", ".join(_MODIFIABLE_SUBMISSION_KEYS))
 @click.argument("submission_id", type=str)
-@click.argument("key", metavar="KEY", type=click.Choice(Submission.model_fields.keys()))
+@click.argument("key", metavar="KEY", type=click.Choice(_MODIFIABLE_SUBMISSION_KEYS))
 @click.argument("value", metavar="VALUE", type=str)
 @click.pass_context
 def modify(ctx: click.Context, submission_id: str, key: str, value: str):
@@ -1155,6 +1158,13 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
         raise
 
 
+# Metadata re-read from S3 is redacted, so these are never taken from it. The set named
+# "local_case_id", which is not a Submission field at all: the column carrying the submitter's
+# local case ID is "pseudonym". Nothing was ignored under that name, so backfill diffed the
+# redacted placeholder against the stored pseudonym and offered to write it in.
+_BACKFILL_IGNORE_FIELDS = frozenset({"submission_uploaded_date", "tan_g", "pseudonym"})
+
+
 class _BackfillResult(StrEnum):
     UPDATED = "updated"
     UP_TO_DATE = "up_to_date"
@@ -1343,11 +1353,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if force and allow_overwrite:
         raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
 
-    ignore_fields = set(ignore_field) | {
-        "submission_uploaded_date",
-        "tan_g",
-        "local_case_id",
-    }
+    ignore_fields = set(ignore_field) | _BACKFILL_IGNORE_FIELDS
 
     # ── Build S3 clients for both archive targets ────────────────────────────
     archive_targets = [
