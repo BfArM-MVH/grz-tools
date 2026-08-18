@@ -17,7 +17,7 @@ from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, DonorsDiffCollection, SubmissionDiffCollection
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 SUBMISSION_DATE = date(2025, 9, 15)
 
@@ -30,7 +30,7 @@ def _db_ctx(config_path: Path, test_metadata_path: Path, *, register: bool) -> S
     metadata_raw = json.loads(test_metadata_path.read_text())
     metadata = _parse(metadata_raw)
     submission_id = metadata.submission_id
-    config = DbConfig.from_path(config_path)
+    config = GrzctlConfig.from_path(config_path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
     if register:
         db.add_submission(submission_id)

@@ -8,7 +8,6 @@ from typing import Any
 
 import click
 import grz_common.cli as grzcli
-from grz_common.models.s3 import S3Options
 from grz_common.pipeline.processor import SubmissionProcessor
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import SubmissionMetadata
@@ -16,8 +15,9 @@ from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
 from grz_db.models.submission import SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
+from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
-from ..models.config import InboxTarget, ProcessConfig
+from ..models.config import GrzctlConfig
 from ..models.pruefbericht import PruefberichtModel
 from .db.cli import get_submission_db_instance
 from .pruefbericht import _generate_pruefbericht_from_database
@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_id
 @grzcli.output_dir
 @grzcli.threads
@@ -70,7 +70,7 @@ log = logging.getLogger(__name__)
     help="Clean submission from inbox bucket after successful processing.",
 )
 def process(  # noqa: PLR0913
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_id: str,
     output_dir: str,
     threads: int,
@@ -87,9 +87,8 @@ def process(  # noqa: PLR0913
     """
     Process a submission through the streaming pipeline.
     """
-    config = ProcessConfig.model_validate(configuration)
-
-    inbox = _resolve_inbox_target(config, submission_id, inbox_bucket)
+    le_id = submission_id.split("_", maxsplit=1)[0]
+    inbox = configuration.resolve_inbox(submitter_id=le_id, inbox_name=inbox_bucket)
     _, metadata_dir, log_dir = _setup_directories(output_dir)
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
@@ -105,8 +104,8 @@ def process(  # noqa: PLR0913
     submission_metadata = SubmissionMetadata(local_metadata_path)
 
     # register submission in db if not yet registered
-    if update_db and config.db:
-        db_service = get_submission_db_instance(config.db.database_url)
+    if update_db:
+        db_service = get_submission_db_instance(configuration.db.database_url)
         try:
             if not db_service.get_submission(submission_id):
                 _db_submission = db_service.add_submission(submission_id)
@@ -118,7 +117,7 @@ def process(  # noqa: PLR0913
     status_file_path = log_dir / "progress_processing.cjson"
 
     processor = SubmissionProcessor(
-        configuration=config,
+        configuration=configuration,
         inbox=inbox,
         status_file_path=status_file_path,
         threads=threads,
@@ -137,7 +136,6 @@ def process(  # noqa: PLR0913
         processor.run(submission_metadata)
 
     _handle_pruefbericht(
-        config=config,
         configuration=configuration,
         submission_id=submission_id,
         log_dir=log_dir,
@@ -147,32 +145,6 @@ def process(  # noqa: PLR0913
         redact_logs=redact_logs,
         update_db=update_db,
     )
-
-
-def _resolve_inbox_target(config: ProcessConfig, submission_id: str, requested_bucket: str | None) -> InboxTarget:
-    le_id = submission_id.split("_", maxsplit=1)[0]
-
-    if le_id not in config.s3.inboxes:
-        available = ", ".join(config.s3.inboxes.keys())
-        raise click.ClickException(f"Submitter ID '{le_id}' not found in configuration. Available: {available}")
-
-    submitter_inboxes = config.s3.inboxes[le_id]
-
-    if requested_bucket:
-        if requested_bucket not in submitter_inboxes:
-            raise click.ClickException(f"Inbox bucket '{requested_bucket}' not found for '{le_id}'.")
-        bucket_name = requested_bucket
-        inbox_config = submitter_inboxes[requested_bucket]
-    elif len(submitter_inboxes) == 1:
-        bucket_name, inbox_config = next(iter(submitter_inboxes.items()))
-    else:
-        available_buckets = ", ".join(submitter_inboxes.keys())
-        raise click.ClickException(
-            f"Multiple inboxes found for '{le_id}' ({available_buckets}). Please specify --inbox-bucket."
-        )
-
-    s3_options = S3Options(bucket=bucket_name, **inbox_config.model_dump())
-    return InboxTarget(s3=s3_options, private_key_path=inbox_config.private_key_path)
 
 
 def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
@@ -188,8 +160,7 @@ def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
 
 
 def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
-    config: ProcessConfig,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_id: str,
     log_dir: Path,
     submit_pruefbericht: bool,
@@ -238,8 +209,7 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
 
     # submit Prüfbericht if requested
     if submit_pruefbericht:
-        # pruefbericht_config is guaranteed to exist as it's mandatory in ProcessConfig
-        pruefbericht_config: PruefberichtModel = config.pruefbericht
+        pruefbericht_config: PruefberichtModel = configuration.pruefbericht
 
         if (auth_url := pruefbericht_config.authorization_url) is None:
             raise ValueError("pruefbericht.authorization_url is required but not configured")

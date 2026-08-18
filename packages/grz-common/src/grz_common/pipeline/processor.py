@@ -18,7 +18,7 @@ from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
 from grzctl.commands.clean import _clean_submission_from_bucket
 from grzctl.dbcontext import DbContext
-from grzctl.models.config import CleanConfig, InboxTarget, ProcessConfig
+from grzctl.models.config import GrzctlConfig, InboxTarget
 from tqdm.auto import tqdm
 
 from ..models.s3 import S3Options
@@ -91,7 +91,7 @@ class S3ClientCache:
 class RunSetupCoordinator:
     def __init__(
         self,
-        config: ProcessConfig,
+        config: GrzctlConfig,
         consented_pub_key: bytes,
         non_consented_pub_key: bytes,
         s3_client_cache: S3ClientCache,
@@ -102,6 +102,8 @@ class RunSetupCoordinator:
         self._s3_client_cache = s3_client_cache
 
     def _determine_qc_flag(self, submission_id: str) -> bool:
+        if self._config.detailed_qc is None:
+            return False
         db = SubmissionDb(self._config.db.database_url, self._config.db.author)  # type: ignore[arg-type]
         target_percentage = self._config.detailed_qc.target_percentage
         should_qc = (
@@ -451,7 +453,7 @@ class SubmissionProcessor:
 
     def __init__(  # noqa: PLR0913
         self,
-        configuration: ProcessConfig,
+        configuration: GrzctlConfig,
         inbox: InboxTarget,
         status_file_path: Path,
         clean_inbox: bool = True,
@@ -507,7 +509,7 @@ class SubmissionProcessor:
             max_concurrent_uploads=max_concurrent_uploads,
             enable_metrics=enable_metrics,
             background_tee=background_tee,
-            qc_local_storage=self.config.detailed_qc.local_storage,
+            qc_local_storage=self.config.detailed_qc.local_storage if self.config.detailed_qc else "",
         )
 
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata, run_state: SubmissionRunState) -> None:
@@ -525,16 +527,18 @@ class SubmissionProcessor:
             return
 
         with DbContext(
-            self.config.model_dump(by_alias=True),
+            self.config,
             run_state.submission_id,
             start_state=SubmissionStateEnum.CLEANING,
             end_state=SubmissionStateEnum.CLEANED,
             enabled=self._update_db,
         ):
+            bucket_name = self._source_s3_options.bucket
             _clean_submission_from_bucket(
-                self._source_s3_options.bucket,
-                CleanConfig.model_validate({"s3": self._source_s3_options.model_dump(by_alias=True)}),
+                bucket_name,
+                self._source_s3_options,
                 run_state.submission_id,
+                f"inbox '{bucket_name}'",
             )
 
     def _upload_redacted_logs(self, submission_metadata: SubmissionMetadata, run_state: SubmissionRunState) -> None:
@@ -641,7 +645,7 @@ class SubmissionProcessor:
             should_qc = self._setup._determine_qc_flag(submission_run.submission_id)
             submission_run.should_qc = should_qc
 
-            if should_qc:
+            if should_qc and self.config.detailed_qc is not None:
                 log.info(f"Running detailed QC pass for {submission_run.submission_id}...")
                 qc_logger = FileProgressLogger[ProcessingState](self._log_dir / "progress_qc.cjson")
                 self._pipeline_executor.process_submission_files(

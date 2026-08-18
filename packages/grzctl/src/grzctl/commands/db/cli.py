@@ -57,7 +57,8 @@ from pydantic import Field, ValidationError
 from tqdm.auto import tqdm
 
 from ... import get_versions
-from ...models.config import DbConfig, ListConfig
+from ...commands import grzctl_configuration, inbox_options
+from ...models.config import GrzctlConfig
 from .. import limit
 from ..change_request import resolve_and_validate_change_request
 from . import SignatureStatus, _verify_signature
@@ -76,21 +77,18 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group(help="Database operations")
-@grzcli.configuration
+@grzctl_configuration
 @click.pass_context
 def db(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     **kwargs,
 ):
     """Database operations"""
     # set up context object
     ctx.ensure_object(dict)
 
-    config = DbConfig.model_validate(configuration)
-    db_config = config.db
-    if not db_config:
-        raise DatabaseConfigurationError("DB config not found")
+    db_config = configuration.db
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:
@@ -1163,6 +1161,7 @@ class _BackfillResult(StrEnum):
     NOT_FOUND = "not_found"
     WOULD_OVERWRITE = "would_overwrite"
     ERROR = "error"
+    CONSENT_MISMATCH = "consent_mismatch"
 
 
 def _backfill_submission(  # noqa: PLR0911, PLR0913
@@ -1260,7 +1259,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 
 
 @db.command("backfill")
-@grzcli.configuration
+@grzctl_configuration
 @click.option(
     "--dry-run/--no-dry-run",
     default=False,
@@ -1302,9 +1301,9 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(  # noqa: PLR0913
+def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     dry_run: bool,
     force: bool,
     allow_overwrite: tuple[str, ...],
@@ -1324,6 +1323,9 @@ def backfill(  # noqa: PLR0913
     different value is only overwritten with --force, or when --allow-overwrite names it;
     any other overwrite is reported and held back, so a submission is updated in part
     rather than skipped entirely.
+
+    Both the consented and non-consented archive buckets are always scanned.
+    If a submission's metadata.json is found in both, an error is raised.
 
     Candidate selection (mutually exclusive):
 
@@ -1346,11 +1348,16 @@ def backfill(  # noqa: PLR0913
         "tan_g",
         "local_case_id",
     }
-    try:
-        list_config = ListConfig.model_validate(configuration)
-    except Exception:
-        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
-        sys.exit(1)
+
+    # ── Build S3 clients for both archive targets ────────────────────────────
+    archive_targets = [
+        ("consented", configuration.archives.consented.s3.bucket, init_s3_client(configuration.archives.consented.s3)),
+        (
+            "non_consented",
+            configuration.archives.non_consented.s3.bucket,
+            init_s3_client(configuration.archives.non_consented.s3),
+        ),
+    ]
 
     db_service = get_submission_db_instance(ctx.obj["db_url"], author=ctx.obj["author"])
 
@@ -1372,25 +1379,67 @@ def backfill(  # noqa: PLR0913
 
     console_err.print(
         f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
-        f"from bucket '{list_config.s3.bucket}'…[/cyan]"
+        f"across consented and non-consented archives…[/cyan]"
     )
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
-    s3_client = init_s3_client(list_config.s3)
+    consent_mismatches = 0
+    expired_consents = 0
 
     for submission in tqdm(candidates):
-        counts[
-            _backfill_submission(
+        # fetch from archive targets
+        results: dict[str, _BackfillResult] = {}
+        for label, bucket, client in archive_targets:
+            results[label] = _backfill_submission(
                 submission,
-                s3_client,
-                list_config.s3.bucket,
+                client,
+                bucket,
                 db_service,
                 dry_run,
                 force,
                 ignore_fields,
                 frozenset(allow_overwrite),
             )
-        ] += 1
+
+        found_in = [label for label, res in results.items() if res != _BackfillResult.NOT_FOUND]
+
+        if len(found_in) > 1:
+            console_err.print(
+                f"[red]  {submission.id}: ERROR — metadata.json found in both consented and non_consented archives[/red]"
+            )
+            counts[_BackfillResult.ERROR] += 1
+            continue
+
+        if not found_in:
+            counts[_BackfillResult.NOT_FOUND] += 1
+            continue
+
+        actual_archive = found_in[0]  # "consented" or "non_consented"
+        counts[results[actual_archive]] += 1
+
+        # check DB `consented` vs actual archive
+        if submission.consented is not None:
+            expected_archive = "consented" if submission.consented else "non_consented"
+            if actual_archive != expected_archive:
+                consent_mismatches += 1
+                console_err.print(
+                    f"[bold red]  CONSENT MISMATCH: {submission.id} has DB consented={submission.consented} "
+                    f"(expected '{expected_archive}'), but was found in '{actual_archive}' bucket![/bold red]"
+                )
+
+        # check consent expiration (if stored in consented archive)
+        # (submission.submission_metadata is populated after commit, or check parsed metadata)
+        if actual_archive == "consented" and submission.submission_metadata:
+            try:
+                meta = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
+                if not meta.consents_to_research(date=date.today()):
+                    expired_consents += 1
+                    console_err.print(
+                        f"[yellow]  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
+                        f"but research consent has expired as of today ({date.today()}).[/yellow]"
+                    )
+            except ValidationError:
+                log.warning(f"Error validating submission metadata for {submission.id}: {traceback.format_exc()}")
 
     # ── Summary ─────────────────────────────────────────────────────────────
     prefix = "[dry-run] " if dry_run else ""
@@ -1402,34 +1451,47 @@ def backfill(  # noqa: PLR0913
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
+
+    if consent_mismatches or expired_consents:
+        console_err.print(
+            f"\n[bold yellow]Consent issues:\n"
+            f"  Bucket ↔ DB consent mismatches: {consent_mismatches}\n"
+            f"  Expired consents in consented archive: {expired_consents}[/bold yellow]"
+        )
     if counts[_BackfillResult.ERROR]:
         sys.exit(1)
 
 
 @db.command("sync-from-inbox")
-@grzcli.configuration
+@grzctl_configuration
+@inbox_options
 @click.pass_context
 def sync_from_inbox(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
+    submitter_id: str,
+    inbox_name: str,
     **kwargs,
 ):
-    """
-    Synchronize the database with submissions found in the inbox.
-    """
+    """Synchronize the database with submissions found in the inbox."""
     try:
-        list_config = ListConfig.model_validate(configuration)
+        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     except Exception:
-        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
+        console_err.print(
+            f"[red]Error resolving S3 configuration for inbox '{inbox_name}': {traceback.format_exc()}[/red]"
+        )
         sys.exit(1)
 
     db_url = ctx.obj["db_url"]
     author = ctx.obj["author"]
     db_service = get_submission_db_instance(db_url, author=author)
 
+    bucket_name = s3_options.bucket
+    inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
+
     try:
-        console_err.print(f"[cyan]Scanning inbox '{list_config.s3.bucket}'...[/cyan]")
-        s3_submissions = query_submissions(list_config.s3, show_cleaned=False)
+        console_err.print(f"[cyan]Scanning inbox {inbox_desc}...[/cyan]")
+        s3_submissions = query_submissions(s3_options, show_cleaned=False)
 
         console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
         sync_submissions(db_service, s3_submissions, author)

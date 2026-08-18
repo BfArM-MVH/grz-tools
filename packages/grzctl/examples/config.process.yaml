@@ -10,12 +10,13 @@ definitions:
     access_key: ${GRZ_S3__ACCESS_KEY}
     secret: ${GRZ_S3__SECRET}
 
-s3:
-  inboxes:
-    "123456789":
+leistungserbringer:
+  "123456789":
+    inbox_buckets:
       grz-inbox: *default_inbox_connection
 
-    "987654321":
+  "987654321":
+    inbox_buckets:
       some-other-bucket: *default_inbox_connection
 
       bucket-with-different-key:
@@ -60,3 +61,10 @@ db:
     name: steward-name
     private_key_path: /path/to/steward-name.ssh
     private_key_passphrase: ${GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE}
+
+keys:
+  grz_private_key_path: /path/to/grz-private-key.sec
+  grz_public_key_path: /path/to/grz-public-key.pub
+
+identifiers:
+  grz: "my-grz-id"

@@ -15,7 +15,7 @@ def test_db(
     cli = grzctl.cli.build_cli()
     execute = lambda args: runner.invoke(cli, args, catch_exceptions=False)
 
-    args_prefix = ["db", "--config-file", temp_db_config_file_path]
+    args_prefix = ["--config", temp_db_config_file_path, "db"]
     # first initialize an empty DB
     init_args = [*args_prefix, "init"]
     result = execute(init_args)

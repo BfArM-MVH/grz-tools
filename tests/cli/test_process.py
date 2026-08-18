@@ -14,7 +14,7 @@ import click.testing
 import grzctl.cli
 import pytest
 import yaml
-from grzctl.models.config import ProcessConfig
+from grzctl.models.config import GrzctlConfig
 from moto import mock_aws
 
 # Path to test fixtures
@@ -35,9 +35,9 @@ def process_config_content(
     local_storage_dir = tmpdir_factory.mktemp("local_storage")
 
     return {
-        "s3": {
-            "inboxes": {
-                "260914050": {
+        "leistungserbringer": {
+            "260914050": {
+                "inbox_buckets": {
                     "inbox": {
                         "endpoint_url": "https://s3.amazonaws.com",
                         "access_key": "testing",
@@ -95,6 +95,13 @@ def process_config_content(
             "target_percentage": "0.0",
             "local_storage": str(local_storage_dir),
             "auto_run": False,
+        },
+        "keys": {
+            "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
+            "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
+        },
+        "identifiers": {
+            "grz": "test-grz",
         },
     }
 
@@ -358,13 +365,11 @@ class TestGrzctlProcess:
         upload_submission_to_inbox(inbox_b, submission_id)
         config_content = process_config_content.copy()
 
-        base_inbox_config = config_content["s3"]["inboxes"][le_id]["inbox"]
+        base_inbox_config = config_content["leistungserbringer"][le_id]["inbox_buckets"]["inbox"]
 
-        config_content["s3"]["inboxes"] = {
-            le_id: {
-                "inbox-a": base_inbox_config.copy(),
-                "inbox-b": base_inbox_config.copy(),
-            }
+        config_content["leistungserbringer"][le_id]["inbox_buckets"] = {
+            "inbox-a": base_inbox_config.copy(),
+            "inbox-b": base_inbox_config.copy(),
         }
 
         config_file = temp_data_dir_path / "config.multi.yaml"
@@ -672,14 +677,12 @@ class TestConfigValidation:
         le_id = "260914050"
         bucket_name = "grz-inbox-test"
 
-        process_config_content["s3"]["inboxes"] = {
-            le_id: {
-                bucket_name: {
-                    "endpoint_url": "https://s3.amazonaws.com",
-                    "access_key": "testing",
-                    "secret": "testing",
-                    "private_key_path": "/path/to/test.sec",
-                }
+        process_config_content["leistungserbringer"][le_id]["inbox_buckets"] = {
+            bucket_name: {
+                "endpoint_url": "https://s3.amazonaws.com",
+                "access_key": "testing",
+                "secret": "testing",
+                "private_key_path": "/path/to/test.sec",
             }
         }
 
@@ -687,27 +690,26 @@ class TestConfigValidation:
         with open(config_file, "w") as f:
             yaml.dump(process_config_content, f)
 
-        env_var_name = f"GRZ_S3__INBOXES__{le_id}__{bucket_name}__PRIVATE_KEY_PASSPHRASE"
+        env_var_name = f"GRZ_LEISTUNGSERBRINGER__{le_id}__INBOX_BUCKETS__{bucket_name}__PRIVATE_KEY_PASSPHRASE"
         monkeypatch.setenv(env_var_name.upper(), "dotenv-secret-passphrase")
 
         with open(config_file) as f:
             raw_dict = yaml.safe_load(f)
 
-        config = ProcessConfig.model_validate(raw_dict)
-        assert config.s3.inboxes[le_id][bucket_name].private_key_passphrase == "dotenv-secret-passphrase"
+        config = GrzctlConfig.from_configuration(raw_dict)
+        entry = config.leistungserbringer[le_id]
+        assert entry.inbox_buckets[bucket_name].private_key_passphrase == "dotenv-secret-passphrase"
 
     def test_pydantic_json_env_var_merging(self, tmp_path: Path, monkeypatch, process_config_content: dict):
         le_id = "260914050"
         bucket_name = "grz-inbox-test"
 
-        process_config_content["s3"]["inboxes"] = {
-            le_id: {
-                bucket_name: {
-                    "endpoint_url": "https://s3.amazonaws.com",
-                    "access_key": "testing",
-                    "secret": "testing",
-                    "private_key_path": "/path/to/test.sec",
-                }
+        process_config_content["leistungserbringer"][le_id]["inbox_buckets"] = {
+            bucket_name: {
+                "endpoint_url": "https://s3.amazonaws.com",
+                "access_key": "testing",
+                "secret": "testing",
+                "private_key_path": "/path/to/test.sec",
             }
         }
 
@@ -716,10 +718,11 @@ class TestConfigValidation:
             yaml.dump(process_config_content, f)
 
         json_override = {le_id: {bucket_name: {"private_key_passphrase": "json-secret-passphrase"}}}
-        monkeypatch.setenv("GRZ_S3__INBOXES", json.dumps(json_override))
+        monkeypatch.setenv("GRZ_LEISTUNGSERBRINGER", json.dumps(json_override))
 
         with open(config_file) as f:
             raw_dict = yaml.safe_load(f)
 
-        config = ProcessConfig.model_validate(raw_dict)
-        assert config.s3.inboxes[le_id][bucket_name].private_key_passphrase == "json-secret-passphrase"
+        config = GrzctlConfig.from_configuration(raw_dict)
+        entry = config.leistungserbringer[le_id]
+        assert entry.inbox_buckets[bucket_name].private_key_passphrase == "json-secret-passphrase"

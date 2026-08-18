@@ -9,7 +9,7 @@ dependencies = [
     "grz-db",
     "grz-pydantic-models",
     "grz-pydantic-models-testing",
-    "grzctl"
+    "grzctl",
 ]
 
 [tool.uv.workspace]

@@ -27,9 +27,10 @@ class S3ConnectionBase(IgnoringBaseModel):
     Base configuration for S3 connection details.
     """
 
-    endpoint_url: AnyHttpUrl
+    endpoint_url: AnyHttpUrl | None = None
     """
     The URL for the S3 service.
+    If undefined, the default AWS endpoint is used.
     """
 
     access_key: str | None = None

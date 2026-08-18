@@ -100,7 +100,7 @@ def main() -> int:  # noqa: PLR0915
         cli = grzctl.cli.build_cli()
         runner = click.testing.CliRunner()
 
-        common = ["db", "--config-file", str(cfg)]
+        common = ["--config", str(cfg), "db"]
         cr_cmd = [*common, "submission", "change-request", SUB_ID, "Delete"]
 
         _step(f"0. Init throwaway DB at {workspace} and add submission")

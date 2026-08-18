@@ -7,7 +7,7 @@ import json
 from unittest import mock
 
 import click.testing
-import grzctl
+import grzctl.cli
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
 
@@ -15,7 +15,13 @@ from .. import mock_files
 from .common import copy_submission
 
 
-def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, working_dir_path, tmp_path):
+def test_clean_and_list(
+    temp_grzctl_s3_config_file_path,
+    temp_grzctl_s3_db_config_file_path,
+    remote_bucket_with_version,
+    working_dir_path,
+    tmp_path,
+):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         copy_submission(working_dir_path, "files", "encrypted_files", "metadata", source=submission_dir)
@@ -42,11 +48,14 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, wo
     ):
         # upload encrypted submission
         upload_args = [
+            "--config",
+            temp_grzctl_s3_config_file_path,
             "upload",
             "--submission-dir",
             str(working_dir_path),
-            "--config-file",
-            temp_s3_config_file_path,
+            "--no-update-db",
+            "--inbox",
+            "testing",
         ]
 
         runner = click.testing.CliRunner()
@@ -59,13 +68,15 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, wo
         submission_id = result_upload.stdout.strip()
 
         clean_args = [
+            "--config",
+            temp_grzctl_s3_config_file_path,
             "clean",
             "--submission-id",
             submission_id,
-            "--config-file",
-            temp_s3_config_file_path,
             "--yes-i-really-mean-it",
             "--no-update-db",
+            "--inbox",
+            "testing",
         ]
 
         result_clean = runner.invoke(cli, clean_args, catch_exceptions=False)
@@ -80,7 +91,17 @@ def test_clean_and_list(temp_s3_config_file_path, remote_bucket_with_version, wo
         # ensure metadata is empty
         assert remote_bucket_with_version.Object(f"{submission_id}/metadata/metadata.json").content_length == 0
 
-        list_args = ["list", "--config-file", temp_s3_config_file_path, "--json", "--show-cleaned"]
+        list_args = [
+            "--config",
+            temp_grzctl_s3_db_config_file_path,
+            "list",
+            "--json",
+            "--show-cleaned",
+            "--inbox",
+            "testing",
+            "--submitter-id",
+            "260914050",
+        ]
 
         result_list = runner.invoke(cli, list_args, catch_exceptions=False)
 
