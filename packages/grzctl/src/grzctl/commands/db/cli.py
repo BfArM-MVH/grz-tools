@@ -786,7 +786,7 @@ class RecomputeOutcome(NamedTuple):
     meets_thresholds: bool
     """Whether all computed values meet their required BfArM thresholds."""
     metrics_changed: int
-    """Number of per-metric fields that would change."""
+    """Number of per-metric fields that would change (or have been changed, with apply_changes)."""
 
 
 def _recompute_metric[
