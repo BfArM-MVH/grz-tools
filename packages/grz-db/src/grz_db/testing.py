@@ -44,6 +44,7 @@ from grz_db.models.submission import SubmissionDb
 
 __all__ = [
     "db",
+    "db_backend",
     "db_test_connection",
     "migrated_db_connection",
     "postgresql_proc",

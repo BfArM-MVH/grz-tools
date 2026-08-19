@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -38,6 +39,35 @@ from .versioning import Version
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
 REDACTED_TAN = "0" * 64
 REDACTED_LOCAL_CASE_ID = "REDACTED_LOCAL_CASE_ID"
+
+
+def redact_metadata_dict(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Redact a metadata document's sensitive fields in a copy, leaving the argument untouched.
+
+    Replaces ``tanG`` with :data:`REDACTED_TAN`, ``localCaseId`` with
+    :data:`REDACTED_LOCAL_CASE_ID`, and the index donor's pseudonym with ``"index"``.
+    v1.1.1 to v1.1.7 (still supported) told submitters to put the tanG in ``donorPseudonym``;
+    v1.1.8 onward says ``"index"``. So that overwrite can be removing a real tanG.
+
+    Takes a plain dict so archival can apply it to the raw metadata.json it read from disk,
+    keeping the archived record faithful to what the submitter sent, while
+    :meth:`GrzSubmissionMetadata.to_redacted_dict` applies the same rule to a model dump.
+    One list of sensitive fields, two carriers.
+
+    Archived documents may also carry an empty ``localCaseId`` instead of the
+    :data:`REDACTED_LOCAL_CASE_ID` placeholder, so a reader has to treat both as redacted.
+
+    :param metadata: Parsed metadata JSON. Not modified.
+    :returns: A deep copy of ``metadata`` with the sensitive fields redacted.
+    """
+    redacted = copy.deepcopy(metadata)
+    redacted["submission"]["tanG"] = REDACTED_TAN
+    redacted["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
+    for donor in redacted.get("donors", []):
+        if donor.get("relation") == "index":
+            donor["donorPseudonym"] = "index"
+    return redacted
+
 
 log = logging.getLogger(__name__)
 
@@ -1078,12 +1108,14 @@ class LabDatum(StrictBaseModel):
 
 
 class Donor(StrictBaseModel):
+    # v1.1.1 to v1.1.7 (still supported) said "For Index patient use TanG", so a document in
+    # that range may carry the tanG here. v1.1.8 onward says "index".
     donor_pseudonym: str
     """
-    A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing; 
-    the donorPseudonym needs to be identifiable by the Leistungserbringer 
-    in case of changes to the consents by one of the donors. 
-    For Index patient use TanG.
+    A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing;
+    the donorPseudonym needs to be identifiable by the Leistungserbringer
+    in case of changes to the consents by one of the donors.
+    For Index patient use index.
     """
 
     gender: Gender
@@ -1262,30 +1294,26 @@ class GrzSubmissionMetadata(StrictBaseModel):
             patterns.append((self.submission.local_case_id, REDACTED_LOCAL_CASE_ID))
         return patterns
 
+    def get_raw_dict(self) -> dict[str, Any]:
+        """
+        Return this metadata as the submitter sent it: keys and all.
+
+        Uses the schema's aliases and includes only the keys the submitter actually set,
+        so this is the parsed document reproduced, not a canonicalized re-serialization.
+
+        :returns: The submitted metadata document as a dictionary.
+        """
+        return self.model_dump(mode="json", by_alias=True, exclude_unset=True)
+
     def to_redacted_dict(self) -> dict[str, Any]:
         """
         Create a redacted dictionary representation suitable for archiving.
 
-        Redacts:
-        - tanG (replaced with REDACTED_TAN constant)
-        - localCaseId (replaced with REDACTED_LOCAL_CASE_ID constant)
-        - Index donor pseudonym (replaced with "index")
+        Redacts the fields listed in :func:`redact_metadata_dict`.
 
         :returns: Redacted metadata dictionary
         """
-        # get the base dictionary representation
-        metadata_dict = self.model_dump(mode="json", by_alias=True)
-
-        # redact sensitive fields
-        metadata_dict["submission"]["tanG"] = REDACTED_TAN
-        metadata_dict["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
-
-        # redact index donor pseudonym
-        for donor in metadata_dict.get("donors", []):
-            if donor.get("relation") == "index":
-                donor["donorPseudonym"] = "index"
-
-        return metadata_dict
+        return redact_metadata_dict(self.get_raw_dict())
 
     @field_validator("donors", mode="after")
     @classmethod

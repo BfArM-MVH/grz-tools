@@ -543,12 +543,15 @@ def update(  # noqa: C901, PLR0913
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-@submission.command(
-    epilog="Currently available KEYs are: "
-    + ", ".join(sorted(Submission.model_fields.keys() - Submission.immutable_fields))
-)
+# Exactly what SubmissionDb.modify_submission accepts. The epilog and the KEY choices below both
+# build from this, so --help always advertises what the command accepts. Same set as the
+# --allow-overwrite choices.
+_MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields)
+
+
+@submission.command(epilog="Currently available KEYs are: " + ", ".join(_MODIFIABLE_SUBMISSION_KEYS))
 @click.argument("submission_id", type=str)
-@click.argument("key", metavar="KEY", type=click.Choice(Submission.model_fields.keys()))
+@click.argument("key", metavar="KEY", type=click.Choice(_MODIFIABLE_SUBMISSION_KEYS))
 @click.argument("value", metavar="VALUE", type=str)
 @click.pass_context
 def modify(ctx: click.Context, submission_id: str, key: str, value: str):
@@ -1155,6 +1158,12 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
         raise
 
 
+# Archival redacts before writing, so a metadata.json re-read from S3 always carries placeholders
+# for these two and is never authoritative about them. Diffing them would only offer to overwrite
+# a real value with a placeholder.
+_BACKFILL_IGNORE_FIELDS = frozenset({"tan_g", "pseudonym"})
+
+
 class _BackfillResult(StrEnum):
     UPDATED = "updated"
     UP_TO_DATE = "up_to_date"
@@ -1206,18 +1215,17 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     try:
-        # If submission_uploaded_date is not set in the DB, replace it with the one from metadata.json.
-        # This case is expected for submissions that were created before the submission_date field was added.
-        submission_uploaded_date = (
-            current_submission.submission_uploaded_date
-            if current_submission.submission_uploaded_date
-            else metadata.submission.submission_date
-        )
-
+        # Backfill has no authoritative date to offer: the archive does not carry one, and the
+        # submitter's declared submission_date is not when the upload finished, which is what this
+        # column means and what the reporting windows filter on. populate reads the real one from
+        # the S3 object; backfill does not fetch it. Passing None lets diff() supply a value for
+        # construction and then exclude the field, so backfill never writes it. Passing the row's
+        # own value instead would compare a snapshot taken before the run against the row diff()
+        # re-reads, and write the stale one.
         submission_diff, donors_diff = db_service.diff(
             submission_id,
             metadata,
-            submission_uploaded_date=submission_uploaded_date,
+            submission_uploaded_date=None,
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
@@ -1343,11 +1351,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if force and allow_overwrite:
         raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
 
-    ignore_fields = set(ignore_field) | {
-        "submission_uploaded_date",
-        "tan_g",
-        "local_case_id",
-    }
+    ignore_fields = set(ignore_field) | _BACKFILL_IGNORE_FIELDS
 
     # ── Build S3 clients for both archive targets ────────────────────────────
     archive_targets = [
