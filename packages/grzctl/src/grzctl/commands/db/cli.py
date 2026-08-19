@@ -3,7 +3,6 @@
 import csv
 import json
 import logging
-import math
 import sys
 import traceback
 from collections import Counter, namedtuple
@@ -1040,7 +1039,7 @@ def _recompute_result(
         deviation_attr = f"{prefix}_percent_deviation"
         changed = getattr(result, passed_attr) != verdict.passed_qc or (
             verdict.deviation is not None
-            and not math.isclose(getattr(result, deviation_attr), verdict.deviation, abs_tol=DEVIATION_TOLERANCE)
+            and abs(getattr(result, deviation_attr) - verdict.deviation) > DEVIATION_TOLERANCE
         )
         if not changed:
             continue
