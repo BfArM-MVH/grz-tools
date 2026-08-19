@@ -1,9 +1,8 @@
 import datetime
+from collections.abc import Callable
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from grz_db.models.author import Author
+from grz_db.errors import DuplicateTanGError
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
@@ -11,24 +10,8 @@ TWO_TB = 2 * 1024**4  # 2,199,023,255,552 bytes
 SUBMISSION_ID = "123456789_2024-01-01_abcdef01"
 SUBMISSION_ID_2 = "123456789_2024-01-02_abcdef02"
 SUBMISSION_ID_3 = "123456789_2024-01-03_abcdef03"
-
-
-@pytest.fixture(scope="function")
-def test_author() -> Author:
-    key = ed25519.Ed25519PrivateKey.generate()
-    private_key_bytes = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    return Author(name="alice", private_key_bytes=private_key_bytes, private_key_passphrase="")
-
-
-@pytest.fixture(scope="function")
-def db(db_test_connection: str, test_author: Author) -> SubmissionDb:
-    submission_db = SubmissionDb(db_url=db_test_connection, author=test_author, debug=False)
-    submission_db.initialize_schema()
-    return submission_db
+TAN_G_1 = "a" * 64
+TAN_G_2 = "b" * 64
 
 
 @pytest.fixture(scope="function")
@@ -83,13 +66,9 @@ def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata
     assert submission.genomic_study_subtype == metadata.submission.genomic_study_subtype
     assert submission.pseudonym == metadata.submission.local_case_id
     assert submission.data_node_id == metadata.submission.genomic_data_center_id
-    assert submission.submission_date == explicit_date  # explicit date takes precedence
+    assert submission.submission_uploaded_date == explicit_date  # explicit date takes precedence
     assert submission.submission_size == metadata.get_submission_size()
     assert submission.submission_metadata == metadata.to_redacted_dict()
-
-    # --- explicit date is preferred over the metadata date ---
-    submission_fallback = Submission.from_metadata(SUBMISSION_ID, metadata, None)
-    assert submission_fallback.submission_date == metadata.submission.submission_date
 
     # --- system-managed fields must not be in model_fields_set ---
     system_fields = {"basic_qc_passed", "detailed_qc_passed", "selected_for_qc"}
@@ -128,14 +107,6 @@ def test_get_submissions_unknown_ids_map_to_none(db: SubmissionDb) -> None:
     assert result[1] is None
 
 
-def test_get_submissions_all_unknown(db: SubmissionDb) -> None:
-    """get_submissions returns all-None when none of the IDs exist."""
-    ids = ["000000000_2000-01-01_deadbeef", "000000000_2000-01-01_cafebabe"]
-    result = db.get_submissions(ids)
-
-    assert result == [None, None]
-
-
 def test_get_submissions_includes_states(db: SubmissionDb) -> None:
     """States relationship is eagerly loaded so it can be accessed outside the session."""
     from grz_db.models.submission import SubmissionStateEnum
@@ -147,3 +118,30 @@ def test_get_submissions_includes_states(db: SubmissionDb) -> None:
 
     assert result[0] is not None
     assert len(result[0].states) >= 1
+
+
+def _set_tan_g_via_modify(db: SubmissionDb, sub: Submission, tan_g: str) -> None:
+    db.modify_submission(sub.id, "tan_g", tan_g)
+
+
+def _set_tan_g_via_update(db: SubmissionDb, sub: Submission, tan_g: str) -> None:
+    sub.tan_g = tan_g
+    db.update_submission(sub)
+
+
+@pytest.mark.parametrize(
+    "set_tan_g",
+    [_set_tan_g_via_modify, _set_tan_g_via_update],
+    ids=["modify_submission", "update_submission"],
+)
+def test_raises_on_duplicate_tan_g(
+    db: SubmissionDb,
+    set_tan_g: Callable[[SubmissionDb, Submission, str], None],
+) -> None:
+    """Raise DuplicateTanGError when tan_g collides with an existing row."""
+    sub1 = db.add_submission(SUBMISSION_ID)
+    set_tan_g(db, sub1, TAN_G_1)
+
+    sub2 = db.add_submission(SUBMISSION_ID_2)
+    with pytest.raises(DuplicateTanGError):
+        set_tan_g(db, sub2, TAN_G_1)

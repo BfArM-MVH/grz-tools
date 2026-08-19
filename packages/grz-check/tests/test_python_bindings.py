@@ -65,10 +65,12 @@ def test_validate_fastq_gzip_raw_bytes() -> None:
     assert report.num_records == 2
 
 
-def test_validate_fastq_gzip_filelike_raw() -> None:
+def test_validate_fastq_gzip_filelike_raw(tmp_path: Path) -> None:
     """Passing a raw binary file handle to a .gz file — niffler decompresses transparently."""
-    gz_bytes = gzip.compress(FASTQ_BYTES)
-    report = grz_check.validate_fastq(io.BytesIO(gz_bytes))
+    gz = tmp_path / "reads.fastq.gz"
+    gz.write_bytes(gzip.compress(FASTQ_BYTES))
+    with open(gz, "rb") as handle:
+        report = grz_check.validate_fastq(handle)
     assert report.is_valid
     assert report.num_records == 2
 

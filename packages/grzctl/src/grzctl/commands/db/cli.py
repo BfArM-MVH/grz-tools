@@ -1,7 +1,6 @@
 """Command for managing a submission database"""
 
 import csv
-import itertools
 import json
 import logging
 import sys
@@ -54,12 +53,14 @@ from grz_pydantic_models.submission.metadata import (
     SequenceSubtype,
     SequenceType,
 )
-from pydantic import Field
+from pydantic import Field, ValidationError
 from tqdm.auto import tqdm
 
 from ... import get_versions
-from ...models.config import DbConfig, ListConfig
+from ...commands import grzctl_configuration, inbox_options
+from ...models.config import GrzctlConfig
 from .. import limit
+from ..change_request import resolve_and_validate_change_request
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
@@ -76,21 +77,18 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group(help="Database operations")
-@grzcli.configuration
+@grzctl_configuration
 @click.pass_context
 def db(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     **kwargs,
 ):
     """Database operations"""
     # set up context object
     ctx.ensure_object(dict)
 
-    config = DbConfig.model_validate(configuration)
-    db_config = config.db
-    if not db_config:
-        raise DatabaseConfigurationError("DB config not found")
+    db_config = configuration.db
     author_name = db_config.author.name
 
     if path := db_config.author.private_key_path:
@@ -400,7 +398,7 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
 def _build_submission_dict_from(
     log_obj: SubmissionStateLog | ChangeRequestLog | None,
     submission: Submission,
-    signature_status: SignatureStatus,
+    signature_status: SignatureStatus = SignatureStatus.UNKNOWN,
 ) -> dict[str, Any]:
     """Serialize a submission and its latest log entry to a JSON-compatible dict.
 
@@ -408,6 +406,7 @@ def _build_submission_dict_from(
         :class:`~grz_db.models.submission.ChangeRequestLog`, or ``None`` if no log exists yet.
     :param submission: The submission ORM/Pydantic model instance.
     :param signature_status: Verification result for the log entry's author signature.
+        Defaults to :attr:`~SignatureStatus.UNKNOWN` when no verification was performed.
     :returns: A dictionary suitable for JSON serialisation that contains the submission identifiers
         and either a ``latest_state`` or ``latest_change_request`` key depending on *log_obj*.
     :raises TypeError: If *log_obj* is neither ``None`` nor one of the two expected log types.
@@ -698,10 +697,20 @@ def populate(  # noqa: C901, PLR0913
             "or use 'grzctl db submission modify' directly."
         ) from e
 
+    submission_uploaded_date = (
+        submission_date.date() if submission_date is not None else submission.submission_uploaded_date
+    )
+    if submission_date is None:
+        log.warning(
+            "No submission date provided and submission date is missing in the database. "
+            "Will use submission date from metadata.json..."
+        )
+        submission_uploaded_date = metadata.submission.submission_date
+
     submission_diff, donors_diff = db_service.diff(
         submission_id,
         metadata,
-        submission_date,
+        submission_uploaded_date=submission_uploaded_date,
         ignore_fields=set(ignore_field),
     )
 
@@ -894,27 +903,80 @@ def populate_qc(
 @submission.command()
 @click.argument("submission_id", type=str)
 @click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
-@click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
+@click.option("--data", "data_json", type=str, default=None, help='Inline JSON data (e.g., \'{"k":"v"}\').')
+@click.option(
+    "--data-file",
+    "data_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to a JSON or YAML file with the change-request fields (see `grzctl change-request-template`).",
+)
+@click.option(
+    "--raw-content",
+    "raw_content_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Optional path to a binary file (e.g. a .pdf or .png) accompanying the request. "
+        "Type is inferred from the file extension and verified by magic bytes."
+    ),
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Validate inputs and check the submission exists, but do not write the change request.",
+)
 @click.pass_context
-def change_request(ctx: click.Context, submission_id: str, change_str: str, data_json: str | None):
-    """Register a completed change request for the given submission. Optionally accepts additional JSON data to associate with the log entry."""
-    db = ctx.obj["db_url"]
-    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+def change_request(  # noqa: PLR0913
+    ctx: click.Context,
+    submission_id: str,
+    change_str: str,
+    data_json: str | None,
+    data_file: Path | None,
+    raw_content_path: Path | None,
+    dry_run: bool,
+):
+    """Register a completed change request for the given submission.
+
+    The audit fields (requester name, email, requested-at, request content) are required.
+    See ``grzctl change-request-template`` for a fill-in YAML template, and
+    ``packages/grzctl/examples/demo_change_request.py`` for a runnable end-to-end
+    walkthrough including the optional ``--raw-content`` (PDF/PNG) attachment path.
+    """
     try:
         change_request_enum = ChangeRequestEnum(change_str)
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid change request value '{change_str}'.[/red]")
         raise click.Abort() from e
 
-    parsed_data = None
-    if data_json:
-        try:
-            parsed_data = json.loads(data_json)
-        except json.JSONDecodeError as e:
-            console_err.print(f"[red]Error: Invalid JSON string for --data: {data_json}[/red]")
-            raise click.Abort() from e
+    kwargs = resolve_and_validate_change_request(change_request_enum, data_json, data_file, raw_content_path)
+
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+
+    if dry_run:
+        existing = db_service.get_submission(submission_id)
+        if existing is None:
+            console_err.print(
+                f"[red]Dry run: submission '{submission_id}' not found. "
+                f"You might need to add it first: grz-cli db submission add {submission_id}[/red]"
+            )
+            raise click.Abort()
+        console_err.print(
+            f"[yellow]Dry run: would register change request '{change_request_enum.value}' "
+            f"for submission '{submission_id}'. No changes were written.[/yellow]"
+        )
+        console_err.print("[yellow]Validated fields:[/yellow]")
+        preview = {k: v for k, v in kwargs.items() if k != "request_raw_content"}
+        if kwargs["request_raw_content"] is not None:
+            preview["request_raw_content"] = f"<{len(kwargs['request_raw_content'])} bytes>"
+        click.echo(json.dumps(preview, indent=2, ensure_ascii=False, default=str), err=True)
+        return
+
     try:
-        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, parsed_data)
+        new_change_request_log = db_service.add_change_request(submission_id, change_request_enum, **kwargs)
         console_err.print(
             f"[green]Submission '{submission_id}' has undergone a change request of '{new_change_request_log.change.value}'. Log ID: {new_change_request_log.id}[/green]"
         )
@@ -929,6 +991,67 @@ def change_request(ctx: click.Context, submission_id: str, change_str: str, data
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
         raise click.ClickException(f"Failed to update submission state: {e}") from e
+
+
+def _research_consented_now(submission: Submission) -> bool | None:
+    """Research consent for the submission re-evaluated as of now.
+
+    Unlike the persisted ``consented`` field (evaluated at the submission date),
+    this recomputes consent from the stored redacted metadata using the current date.
+
+    :param submission: Submission whose stored metadata to evaluate.
+    :returns: ``True``/``False`` for the consent decision now, or ``None`` when
+        no metadata is stored (e.g. rows migrated without backpopulated metadata)
+        or when the stored metadata cannot be parsed.
+    """
+    if not submission.submission_metadata:
+        return None
+    try:
+        metadata = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
+    except ValidationError:
+        log.debug("Could not parse stored metadata for submission %s to evaluate consent now.", submission.id)
+        return None
+    return metadata.consents_to_research(date=date.today())
+
+
+def _build_attribute_table(submission: Submission, research_consented_now: bool | None) -> rich.table.Table:
+    """Build the attribute table shown by ``submission show``.
+
+    :param submission: Submission to render.
+    :param research_consented_now: Research consent re-evaluated as of now
+        (see :func:`_research_consented_now`), or ``None`` when unavailable.
+    :returns: A populated rich table of submission attributes.
+    """
+    attribute_table = rich.table.Table(box=None)
+    attribute_table.add_column("Attribute", justify="right")
+    attribute_table.add_column("Value")
+    for label, attr_name in (
+        ("tanG", "tan_g"),
+        ("Pseudonym", "pseudonym"),
+        ("Submission Uploaded Date", "submission_uploaded_date"),
+        ("Submission Size", "submission_size"),
+        ("Submission Type", "submission_type"),
+        ("Submitter ID", "submitter_id"),
+        ("Data Node ID", "data_node_id"),
+        ("Disease Type", "disease_type"),
+        ("Genomic Study Type", "genomic_study_type"),
+        ("Genomic Study Subtype", "genomic_study_subtype"),
+        ("Basic QC Passed", "basic_qc_passed"),
+        ("Research consent (at submission)", "consented"),
+        ("Selected For QC", "selected_for_qc"),
+        ("Detailed QC Passed", "detailed_qc_passed"),
+    ):
+        attr = getattr(submission, attr_name)
+        attribute_table.add_row(
+            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
+        )
+        if attr_name == "consented":
+            # Adjacent row: research consent re-evaluated as of now (recomputed from stored metadata).
+            attribute_table.add_row(
+                rich.text.Text("Research consent (now)", style="cyan"),
+                rich.text.Text(str(research_consented_now)) if research_consented_now is not None else _TEXT_MISSING,
+            )
+    return attribute_table
 
 
 @submission.command("show")
@@ -946,8 +1069,11 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         console_err.print(f"[red]Error: Submission with ID '{submission_id}' not found.[/red]")
         raise click.Abort()
 
+    research_consented_now = _research_consented_now(submission)
+
     if output_json:
         submission_dict = submission.model_dump(mode="json")
+        submission_dict["research_consented_now"] = research_consented_now
         submission_dict["states"] = []
 
         for state_log in sorted(submission.states, key=lambda s: s.timestamp):
@@ -967,29 +1093,7 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
         sys.stdout.write("\n")
         return
 
-    attribute_table = rich.table.Table(box=None)
-    attribute_table.add_column("Attribute", justify="right")
-    attribute_table.add_column("Value")
-    for label, attr_name in (
-        ("tanG", "tan_g"),
-        ("Pseudonym", "pseudonym"),
-        ("Submission Date", "submission_date"),
-        ("Submission Size", "submission_size"),
-        ("Submission Type", "submission_type"),
-        ("Submitter ID", "submitter_id"),
-        ("Data Node ID", "data_node_id"),
-        ("Disease Type", "disease_type"),
-        ("Genomic Study Type", "genomic_study_type"),
-        ("Genomic Study Subtype", "genomic_study_subtype"),
-        ("Basic QC Passed", "basic_qc_passed"),
-        ("Consented", "consented"),
-        ("Selected For QC", "selected_for_qc"),
-        ("Detailed QC Passed", "detailed_qc_passed"),
-    ):
-        attr = getattr(submission, attr_name)
-        attribute_table.add_row(
-            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
-        )
+    attribute_table = _build_attribute_table(submission, research_consented_now)
 
     renderables: list[rich.console.RenderableType] = [rich.padding.Padding(attribute_table, (1, 0))]
     if submission.states:
@@ -1057,6 +1161,7 @@ class _BackfillResult(StrEnum):
     NOT_FOUND = "not_found"
     WOULD_OVERWRITE = "would_overwrite"
     ERROR = "error"
+    CONSENT_MISMATCH = "consent_mismatch"
 
 
 def _backfill_submission(  # noqa: PLR0911, PLR0913
@@ -1067,6 +1172,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     dry_run: bool,
     force: bool,
     ignore_fields: set[str],
+    allow_overwrite: frozenset[str] = frozenset(),
 ) -> _BackfillResult:
     """Fetch metadata.json from S3 for one submission and commit a diff to the database.
 
@@ -1100,10 +1206,18 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     try:
+        # If submission_uploaded_date is not set in the DB, replace it with the one from metadata.json.
+        # This case is expected for submissions that were created before the submission_date field was added.
+        submission_uploaded_date = (
+            current_submission.submission_uploaded_date
+            if current_submission.submission_uploaded_date
+            else metadata.submission.submission_date
+        )
+
         submission_diff, donors_diff = db_service.diff(
             submission_id,
             metadata,
-            submission_date=None,
+            submission_uploaded_date=submission_uploaded_date,
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
@@ -1114,17 +1228,24 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
         return _BackfillResult.UP_TO_DATE
 
+    # Filling a field that was NULL destroys nothing, so it is always written. Replacing one that
+    # already has a value needs saying so: --force permits every such overwrite, --allow-overwrite
+    # only the fields it names, and anything else is held back and reported.
+    allowed = {diff.key for diff in submission_diff.pending} if force else allow_overwrite
+    submission_diff, withheld = submission_diff.withhold_destructive(allowed)
+    if withheld:
+        console_err.print(
+            f"[dim]  {submission_id}: not overwriting {', '.join(diff.key for diff in withheld)} "
+            f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
+        )
+    if not submission_diff.has_pending and not donors_diff.has_pending:
+        return _BackfillResult.WOULD_OVERWRITE
+
     if dry_run:
         console_err.print(
             f"[yellow]  [dry-run] {submission_id}: would update fields: {[d.key for d in submission_diff.pending]}[/yellow]"
         )
         return _BackfillResult.UPDATED
-
-    if not force and submission_diff.has_pending_destructive:
-        console_err.print(
-            f"[dim]  {submission_id}: would overwrite {', '.join(i.key for i in itertools.chain(submission_diff.updated, submission_diff.deleted))}, skipping (use --force to overwrite).[/dim]"
-        )
-        return _BackfillResult.WOULD_OVERWRITE
 
     try:
         db_service.commit_changes(submission_id, submission_diff, donors_diff)
@@ -1138,7 +1259,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 
 
 @db.command("backfill")
-@grzcli.configuration
+@grzctl_configuration
 @click.option(
     "--dry-run/--no-dry-run",
     default=False,
@@ -1148,7 +1269,16 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     "--force/--no-force",
     default=False,
     help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
-    "Without this flag, such submissions are reported and skipped.",
+    "Without this flag, such fields are reported and left alone while the rest is still written.",
+)
+@click.option(
+    "--allow-overwrite",
+    "allow_overwrite",
+    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
+    multiple=True,
+    help="Overwrite only these existing non-NULL fields when the metadata.json value differs "
+    "(may be repeated). Other destructive changes are held back and the submission is updated in "
+    "part. Mutually exclusive with --force, which permits every overwrite.",
 )
 @click.option(
     "--submission-id",
@@ -1171,11 +1301,12 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(  # noqa: PLR0913
+def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     dry_run: bool,
     force: bool,
+    allow_overwrite: tuple[str, ...],
     submission_ids: tuple[str, ...],
     start_date: datetime,
     end_date: datetime,
@@ -1188,8 +1319,13 @@ def backfill(  # noqa: PLR0913
     that are actually missing or changed are written, donor records are synchronised,
     and already-up-to-date submissions are silently skipped.
 
-    Existing non-NULL fields whose values differ from metadata.json are not overwritten
-    unless --force is given.
+    A field that is missing in the database is always filled. One that already has a
+    different value is only overwritten with --force, or when --allow-overwrite names it;
+    any other overwrite is reported and held back, so a submission is updated in part
+    rather than skipped entirely.
+
+    Both the consented and non-consented archive buckets are always scanned.
+    If a submission's metadata.json is found in both, an error is raised.
 
     Candidate selection (mutually exclusive):
 
@@ -1204,16 +1340,24 @@ def backfill(  # noqa: PLR0913
     if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
+    if force and allow_overwrite:
+        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
+
     ignore_fields = set(ignore_field) | {
-        "submission_date",
+        "submission_uploaded_date",
         "tan_g",
         "local_case_id",
     }
-    try:
-        list_config = ListConfig.model_validate(configuration)
-    except Exception:
-        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
-        sys.exit(1)
+
+    # ── Build S3 clients for both archive targets ────────────────────────────
+    archive_targets = [
+        ("consented", configuration.archives.consented.s3.bucket, init_s3_client(configuration.archives.consented.s3)),
+        (
+            "non_consented",
+            configuration.archives.non_consented.s3.bucket,
+            init_s3_client(configuration.archives.non_consented.s3),
+        ),
+    ]
 
     db_service = get_submission_db_instance(ctx.obj["db_url"], author=ctx.obj["author"])
 
@@ -1235,24 +1379,67 @@ def backfill(  # noqa: PLR0913
 
     console_err.print(
         f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
-        f"from bucket '{list_config.s3.bucket}'…[/cyan]"
+        f"across consented and non-consented archives…[/cyan]"
     )
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
-    s3_client = init_s3_client(list_config.s3)
+    consent_mismatches = 0
+    expired_consents = 0
 
     for submission in tqdm(candidates):
-        counts[
-            _backfill_submission(
+        # fetch from archive targets
+        results: dict[str, _BackfillResult] = {}
+        for label, bucket, client in archive_targets:
+            results[label] = _backfill_submission(
                 submission,
-                s3_client,
-                list_config.s3.bucket,
+                client,
+                bucket,
                 db_service,
                 dry_run,
                 force,
                 ignore_fields,
+                frozenset(allow_overwrite),
             )
-        ] += 1
+
+        found_in = [label for label, res in results.items() if res != _BackfillResult.NOT_FOUND]
+
+        if len(found_in) > 1:
+            console_err.print(
+                f"[red]  {submission.id}: ERROR — metadata.json found in both consented and non_consented archives[/red]"
+            )
+            counts[_BackfillResult.ERROR] += 1
+            continue
+
+        if not found_in:
+            counts[_BackfillResult.NOT_FOUND] += 1
+            continue
+
+        actual_archive = found_in[0]  # "consented" or "non_consented"
+        counts[results[actual_archive]] += 1
+
+        # check DB `consented` vs actual archive
+        if submission.consented is not None:
+            expected_archive = "consented" if submission.consented else "non_consented"
+            if actual_archive != expected_archive:
+                consent_mismatches += 1
+                console_err.print(
+                    f"[bold red]  CONSENT MISMATCH: {submission.id} has DB consented={submission.consented} "
+                    f"(expected '{expected_archive}'), but was found in '{actual_archive}' bucket![/bold red]"
+                )
+
+        # check consent expiration (if stored in consented archive)
+        # (submission.submission_metadata is populated after commit, or check parsed metadata)
+        if actual_archive == "consented" and submission.submission_metadata:
+            try:
+                meta = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
+                if not meta.consents_to_research(date=date.today()):
+                    expired_consents += 1
+                    console_err.print(
+                        f"[yellow]  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
+                        f"but research consent has expired as of today ({date.today()}).[/yellow]"
+                    )
+            except ValidationError:
+                log.warning(f"Error validating submission metadata for {submission.id}: {traceback.format_exc()}")
 
     # ── Summary ─────────────────────────────────────────────────────────────
     prefix = "[dry-run] " if dry_run else ""
@@ -1264,34 +1451,47 @@ def backfill(  # noqa: PLR0913
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
+
+    if consent_mismatches or expired_consents:
+        console_err.print(
+            f"\n[bold yellow]Consent issues:\n"
+            f"  Bucket ↔ DB consent mismatches: {consent_mismatches}\n"
+            f"  Expired consents in consented archive: {expired_consents}[/bold yellow]"
+        )
     if counts[_BackfillResult.ERROR]:
         sys.exit(1)
 
 
 @db.command("sync-from-inbox")
-@grzcli.configuration
+@grzctl_configuration
+@inbox_options
 @click.pass_context
 def sync_from_inbox(
     ctx: click.Context,
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
+    submitter_id: str,
+    inbox_name: str,
     **kwargs,
 ):
-    """
-    Synchronize the database with submissions found in the inbox.
-    """
+    """Synchronize the database with submissions found in the inbox."""
     try:
-        list_config = ListConfig.model_validate(configuration)
+        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     except Exception:
-        console_err.print(f"[red]Error loading S3 configuration: {traceback.format_exc()}[/red]")
+        console_err.print(
+            f"[red]Error resolving S3 configuration for inbox '{inbox_name}': {traceback.format_exc()}[/red]"
+        )
         sys.exit(1)
 
     db_url = ctx.obj["db_url"]
     author = ctx.obj["author"]
     db_service = get_submission_db_instance(db_url, author=author)
 
+    bucket_name = s3_options.bucket
+    inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
+
     try:
-        console_err.print(f"[cyan]Scanning inbox '{list_config.s3.bucket}'...[/cyan]")
-        s3_submissions = query_submissions(list_config.s3, show_cleaned=False)
+        console_err.print(f"[cyan]Scanning inbox {inbox_desc}...[/cyan]")
+        s3_submissions = query_submissions(s3_options, show_cleaned=False)
 
         console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
         sync_submissions(db_service, s3_submissions, author)

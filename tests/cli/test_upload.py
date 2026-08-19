@@ -1,9 +1,7 @@
 import filecmp
 import os
-import shutil
 from importlib.metadata import version
 from pathlib import Path
-from unittest import mock
 
 import grz_cli.cli
 import grzctl.cli
@@ -12,6 +10,8 @@ from click.testing import CliRunner
 from grz_common.exceptions import IncompleteSubmissionError
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
+
+from .common import SUBMISSION_DIR, copy_submission
 
 
 def are_dir_trees_equal(dir1, dir2):
@@ -43,19 +43,13 @@ def test_upload_download_submission(
     working_dir_path,
     tmpdir_factory,
     remote_bucket_with_version,
-    temp_s3_db_config_file_path,
+    temp_s3_config_file_path,
+    temp_grzctl_s3_db_config_file_path,
     initiated_db_test_connection,  # necessary to initiate DB
 ):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
     env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
 
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(
-        submission_dir / "encrypted_files",
-        working_dir_path / "encrypted_files",
-        dirs_exist_ok=True,
-    )
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "encrypted_files", "metadata")
 
     logs_dir = working_dir_path / "logs"
     logs_dir.mkdir()
@@ -72,64 +66,62 @@ def test_upload_download_submission(
             state=EncryptionState(encryption_successful=True),
         )
 
-    with mock.patch(
-        "grz_common.models.s3.S3Options.__getattr__",
-        lambda self, name: None if name == "endpoint_url" else AttributeError,
-    ):
-        # upload encrypted submission
-        upload_args = [
-            "upload",
-            "--submission-dir",
-            str(working_dir_path),
-            "--config-file",
-            temp_s3_db_config_file_path,
-        ]
+    # upload encrypted submission
+    upload_args = [
+        "upload",
+        "--submission-dir",
+        str(working_dir_path),
+        "--config-file",
+        temp_s3_config_file_path,
+    ]
 
-        runner = CliRunner(env=env)
-        cli = grz_cli.cli.build_cli()
-        result = runner.invoke(cli, upload_args, catch_exceptions=False)
+    runner = CliRunner(env=env)
+    cli = grz_cli.cli.build_cli()
+    result = runner.invoke(cli, upload_args, catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
-        assert len(result.output) != 0, result.stderr
+    assert result.exit_code == 0, result.output
+    assert len(result.output) != 0, result.stderr
 
-        submission_id = result.stdout.strip()
+    submission_id = result.stdout.strip()
 
-        objects_in_bucket = {obj.key: obj for obj in remote_bucket_with_version.objects.all()}
-        assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
+    objects_in_bucket = {obj.key: obj for obj in remote_bucket_with_version.objects.all()}
+    assert len(objects_in_bucket) > 0, "Upload failed: No objects were found in the mock S3 bucket!"
 
-        assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
+    assert objects_in_bucket[f"{submission_id}/version"].get()["Body"].read().decode("utf-8") == version("grz-cli")
 
-        cli = grzctl.cli.build_cli()
+    cli = grzctl.cli.build_cli()
 
-        add_args = [
-            "db",
-            "--config-file",
-            str(temp_s3_db_config_file_path),
-            "submission",
-            "add",
-            submission_id,
-        ]
-        runner.invoke(cli, add_args, catch_exceptions=False)
+    add_args = [
+        "--config",
+        str(temp_grzctl_s3_db_config_file_path),
+        "db",
+        "submission",
+        "add",
+        submission_id,
+    ]
+    runner.invoke(cli, add_args, catch_exceptions=False)
 
-        # download
-        download_dir = tmpdir_factory.mktemp("submission_download")
-        download_dir_path = Path(download_dir.strpath)
+    # download
+    download_dir = tmpdir_factory.mktemp("submission_download")
+    download_dir_path = Path(download_dir.strpath)
 
-        # download encrypted submission
-        download_args = [
-            "download",
-            "--submission-id",
-            submission_id,
-            "--output-dir",
-            str(download_dir_path),
-            "--config-file",
-            str(temp_s3_db_config_file_path),
-            "--no-update-db",
-            "--populate",
-        ]
-        result = runner.invoke(cli, download_args, catch_exceptions=False)
+    # download encrypted submission
+    download_args = [
+        "--config",
+        str(temp_grzctl_s3_db_config_file_path),
+        "download",
+        "--submission-id",
+        submission_id,
+        "--output-dir",
+        str(download_dir_path),
+        "--no-update-db",
+        "--populate",
+        "--inbox",
+        "testing",
+    ]
+    result = runner.invoke(cli, download_args, catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.output
 
     assert are_dir_trees_equal(
         working_dir_path / "encrypted_files",
@@ -143,9 +135,7 @@ def test_upload_download_submission(
 
 def test_upload_aborts_on_incomplete_encryption(working_dir_path, temp_s3_config_file_path, remote_bucket_with_version):
     """Verify that the upload command fails if the encryption log marks a file as not successful."""
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
     (working_dir_path / "encrypted_files").mkdir()
 
     logs_dir = working_dir_path / "logs"
@@ -203,9 +193,7 @@ def test_upload_aborts_if_encryption_log_missing(
     working_dir_path, temp_s3_config_file_path, remote_bucket_with_version
 ):
     """Verify that the upload command fails if the encryption log is missing entirely."""
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
     (working_dir_path / "encrypted_files").mkdir()
     (working_dir_path / "logs").mkdir()
 
@@ -245,12 +233,10 @@ def test_upload_workflow_succeeds_with_symlinks_to_real_test_files(
     End-to-end smoke test for LE submissions where `files/` entries are symlinks
     to real fixture files in tests/.
     """
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
     # Create files/ directory with symlinks to real test fixture files
     (working_dir_path / "files").mkdir(parents=True, exist_ok=True)
-    for source_path in (submission_dir / "files").rglob("*"):
-        relative_path = source_path.relative_to(submission_dir / "files")
+    for source_path in (SUBMISSION_DIR / "files").rglob("*"):
+        relative_path = source_path.relative_to(SUBMISSION_DIR / "files")
         link_path = working_dir_path / "files" / relative_path
 
         if source_path.is_dir():
@@ -264,7 +250,7 @@ def test_upload_workflow_succeeds_with_symlinks_to_real_test_files(
             pytest.skip(f"Symlinks not supported in this environment: {e}")
 
     # Copy metadata (not symlinked since it's not validated by grz-check)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "metadata")
 
     runner = CliRunner()
     cli = grz_cli.cli.build_cli()
@@ -304,20 +290,16 @@ def test_upload_workflow_succeeds_with_symlinks_to_real_test_files(
     assert result.exit_code == 0, result.output
 
     # upload (must not fail due to symlink usage earlier)
-    with mock.patch(
-        "grz_common.models.s3.S3Options.__getattr__",
-        lambda self, name: None if name == "endpoint_url" else AttributeError,
-    ):
-        result = runner.invoke(
-            cli,
-            [
-                "upload",
-                "--submission-dir",
-                str(working_dir_path),
-                *config_args,
-            ],
-            catch_exceptions=False,
-        )
+    result = runner.invoke(
+        cli,
+        [
+            "upload",
+            "--submission-dir",
+            str(working_dir_path),
+            *config_args,
+        ],
+        catch_exceptions=False,
+    )
     assert result.exit_code == 0, result.output
 
     submission_id = result.stdout.strip()

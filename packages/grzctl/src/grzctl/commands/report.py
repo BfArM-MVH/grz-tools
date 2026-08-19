@@ -9,10 +9,8 @@ from collections import defaultdict
 from enum import StrEnum
 from operator import attrgetter
 from pathlib import Path
-from typing import Any
 
 import click
-import grz_common.cli as grzctl
 import sqlalchemy as sa
 from grz_db.models.author import Author
 from grz_db.models.submission import (
@@ -29,7 +27,8 @@ from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, 
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
 
-from ..models.config import ReportConfig
+from ..commands import grzctl_configuration
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
@@ -40,19 +39,17 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group()
-@grzctl.configuration
+@grzctl_configuration
 @click.pass_context
-def report(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
+def report(ctx: click.Context, configuration: GrzctlConfig):
     """
     Generate various reports related to GRZ activities.
     """
-    config = ReportConfig.model_validate(configuration)
-    if not config:
-        raise ValueError("DB config not found")
+    db = configuration.db
 
     ctx.obj = {
-        "db_url": config.db.database_url,
-        "grz_id": config.identifiers.grz,
+        "db_url": db.database_url,
+        "grz_id": configuration.identifiers.grz,
     }
 
 
@@ -127,7 +124,7 @@ def _get_consent_revocations(
     """
     subquery_quarter_submissions = (
         select(Submission)
-        .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+        .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
         .subquery()
     )
     query_quarter_donors = (
@@ -138,7 +135,7 @@ def _get_consent_revocations(
             Donor,
         )
         .join(subquery_quarter_submissions, subquery_quarter_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_quarter_submissions.c.submission_date)
+        .order_by(subquery_quarter_submissions.c.submission_uploaded_date)
     )
     quarter_donors = session.exec(query_quarter_donors).all()
 
@@ -168,7 +165,9 @@ def _get_consent_revocations(
         relation_by_donor[(data_node_id, submitter_id, pseudonym)] = donor.relation
 
     # now query before the current quarter
-    subquery_prior_submissions = select(Submission).where(Submission.submission_date < quarter_start_date).subquery()
+    subquery_prior_submissions = (
+        select(Submission).where(Submission.submission_uploaded_date < quarter_start_date).subquery()
+    )
     query_prior_donors = (
         select(
             subquery_prior_submissions.c.data_node_id,
@@ -177,7 +176,7 @@ def _get_consent_revocations(
             Donor,
         )
         .join(subquery_prior_submissions, subquery_prior_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_prior_submissions.c.submission_date)
+        .order_by(subquery_prior_submissions.c.submission_uploaded_date)
     )
     prior_donors = session.exec(query_prior_donors).all()
 
@@ -234,7 +233,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_end-to-end_tests
         stmt_number_of_end_to_end_tests = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .where(Submission.submission_type == SubmissionType.test)
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
         )
@@ -246,7 +245,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_passed_end-to-end_tests
         stmt_number_of_passed_end_to_end_tests = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .where(Submission.submission_type == SubmissionType.test)
             .filter(Submission.basic_qc_passed)  # type: ignore[arg-type]
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
@@ -260,7 +259,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_submissions_*
         stmt_number_of_submissions = (
             select(Submission.data_node_id, Submission.submitter_id, Submission.genomic_study_type, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .group_by(Submission.data_node_id, Submission.submitter_id, Submission.genomic_study_type)  # type: ignore[arg-type]
         )
         number_of_submissions_by_genomic_study_type = {
@@ -275,7 +274,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_failed_qcs
         stmt_number_of_failed_qcs = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
         )
@@ -292,7 +291,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_deletions
         stmt_number_of_deletions = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .join(
                 select(ChangeRequestLog.submission_id)
                 .where(ChangeRequestLog.change == ChangeRequestEnum.DELETE)
@@ -377,7 +376,7 @@ def _dump_dataset_report(
 
     with database._get_session() as session:
         query_quarter_submissions = (
-            select(Submission).where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            select(Submission).where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
         )
         submissions = session.exec(query_quarter_submissions).all()
 
@@ -490,7 +489,7 @@ def _dump_qc_report(
     with database._get_session() as session:
         query_submissions_that_failed_detailed_qc = (
             select(Submission)
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
         )
         submissions_that_failed_detailed_qc = session.exec(query_submissions_that_failed_detailed_qc).all()
@@ -557,7 +556,7 @@ def _dump_qc_report(
                     quarter,
                     year,
                     submission.submitter_id,
-                    submission.submission_date,
+                    submission.submission_uploaded_date,
                     submission.submission_type,
                     submission.disease_type,
                     submission.genomic_study_type,

@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.1.0...grz-common-v3.0.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grz-pydantic-models:** a consent dateTime stating a time must spell out seconds and separate date from time by T, and a date must be a dashed calendar date, as the FHIR dateTime regex requires. Metadata stating a bound in any other form is now rejected rather than parsed. The four fields hold a FhirDateTime rather than a datetime, keeping the value as submitted and resolving to a moment through .first_moment or .last_moment. A naive datetime handed to one of them in code is refused rather than read as UTC.
+* **grz-pydantic-models:** ResearchConsent.consents_to_research, and with it the consented flag grz-db records for a submission, now returns False for every consent whose status is not active. Metadata that declares a 2025 researchConsent schemaVersion and leaves any provision period open-ended is now rejected rather than accepted.
+
+### Features
+
+* **grz-common:** Log hostname ([#599](https://github.com/BfArM-MVH/grz-tools/issues/599)) ([9e5b74e](https://github.com/BfArM-MVH/grz-tools/commit/9e5b74e9643f9f8f426bdcd2af2aee7fd81c4acc))
+* **grz-common:** report a consent dateTime without a timezone when ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+* **grz-db:** let a submission diff withhold overwrites outside an ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+* **grzctl, grz-db, grz-common:** Metadata schema version check via version.json ([#624](https://github.com/BfArM-MVH/grz-tools/issues/624)) ([c6f1e7c](https://github.com/BfArM-MVH/grz-tools/commit/c6f1e7ce07cd5772beee5551e0b95b02a9f83914))
+* **grzctl:** overwrite selected fields during db backfill ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+
+
+### Bug Fixes
+
+* **grz-common,grz-db:** map duplicate tanG and upload errors correctly   ([#617](https://github.com/BfArM-MVH/grz-tools/issues/617)) ([7c6fe27](https://github.com/BfArM-MVH/grz-tools/commit/7c6fe271a15011a6925a2f2a8a1167f832d78f9c))
+* **grz-common,grz-db:** require grz-pydantic-models 3 ([0d17b7e](https://github.com/BfArM-MVH/grz-tools/commit/0d17b7e81ded026ee41762d02b0f84c4a1b2f9b3))
+* **grz-pydantic-models-testing:** require grz-pydantic-models 3 ([0d17b7e](https://github.com/BfArM-MVH/grz-tools/commit/0d17b7e81ded026ee41762d02b0f84c4a1b2f9b3))
+* **grz-pydantic-models:** grant research consent only while in force ([#642](https://github.com/BfArM-MVH/grz-tools/issues/642)) ([0d17b7e](https://github.com/BfArM-MVH/grz-tools/commit/0d17b7e81ded026ee41762d02b0f84c4a1b2f9b3))
+* **grz-pydantic-models:** read consent dateTimes as FHIR defines them ([#646](https://github.com/BfArM-MVH/grz-tools/issues/646)) ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f)), closes [#645](https://github.com/BfArM-MVH/grz-tools/issues/645)
+* **grzctl:** require grz-db 2.2 ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+
 ## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.0.1...grz-common-v2.1.0) (2026-05-19)
 
 

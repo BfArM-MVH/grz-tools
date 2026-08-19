@@ -82,6 +82,7 @@ def validate(
         encrypted_files_dir=_files_dir.parent / "encrypted_files",
         threads=threads,
     )
+
     worker_inst.validate(identifiers=config.identifiers, force=force, no_mmap=not mmap)
 
     log.info("Validation finished!")

@@ -1,3 +1,4 @@
+import base64
 import calendar
 import datetime
 import logging
@@ -35,7 +36,7 @@ from grz_pydantic_models.submission.metadata import (
     Tan,
 )
 from grz_pydantic_models.submission.metadata.v1 import Donor as MetadataDonor
-from pydantic import ConfigDict, field_serializer, field_validator
+from pydantic import ConfigDict, field_serializer, field_validator, model_validator
 from sqlalchemy import JSON, BigInteger, Column, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
@@ -143,7 +144,7 @@ class SubmissionBase(SQLModel):
     pseudonym: str | None = Field(default=None, index=True)
 
     # fields from Prüfbericht
-    submission_date: datetime.date | None = None
+    submission_uploaded_date: datetime.date | None = None
     submission_type: SubmissionType | None = None
     submitter_id: SubmitterId | None = None
     data_node_id: GenomicDataCenterId | None = None
@@ -206,7 +207,7 @@ class Submission(SubmissionBase, table=True):
             new_value = getattr(other, key)
 
             # Ensure fields are cast to date
-            if key == "submission_date":
+            if key == "submission_uploaded_date":
                 if isinstance(old_value, datetime.datetime):
                     old_value = old_value.date()
                 if isinstance(new_value, datetime.datetime):
@@ -228,7 +229,7 @@ class Submission(SubmissionBase, table=True):
         cls,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_uploaded_date: datetime.date,
     ) -> Self:
         """Construct a Submission populated with values derived from parsed metadata.
 
@@ -241,8 +242,8 @@ class Submission(SubmissionBase, table=True):
         if isinstance(metadata_submission_date, datetime.datetime):
             metadata_submission_date = metadata_submission_date.date()
 
-        if isinstance(submission_date, datetime.datetime):
-            submission_date = submission_date.date()
+        if isinstance(submission_uploaded_date, datetime.datetime):
+            submission_uploaded_date = submission_uploaded_date.date()
 
         return cls.model_validate(
             {
@@ -256,9 +257,9 @@ class Submission(SubmissionBase, table=True):
                 "genomic_study_subtype": metadata.submission.genomic_study_subtype,
                 "pseudonym": metadata.submission.local_case_id,
                 "data_node_id": metadata.submission.genomic_data_center_id,
-                "consented": metadata.consents_to_research(date=datetime.date.today()),
+                "consented": metadata.consents_to_research(date=metadata_submission_date),
                 "submission_size": metadata.get_submission_size(),
-                "submission_date": submission_date if submission_date is not None else metadata_submission_date,
+                "submission_uploaded_date": submission_uploaded_date,
                 "submission_metadata": metadata.to_redacted_dict(),
             }
         )
@@ -362,14 +363,53 @@ class ChangeRequestEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     TRANSFER = "Transfer"
 
 
+class RequestRawContentType(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Type/encoding of the raw (binary) content attached to a change request."""
+
+    PDF = "PDF"
+    PNG = "PNG"
+
+
+_RAW_CONTENT_MAGIC: dict[RequestRawContentType, bytes] = {
+    RequestRawContentType.PDF: b"%PDF-",
+    RequestRawContentType.PNG: b"\x89PNG\r\n\x1a\n",
+}
+
+
+def detect_raw_content_type(content: bytes) -> RequestRawContentType | None:
+    """Identify a raw attachment's type from its magic bytes.
+
+    Content is authoritative — the file extension is intentionally ignored. Returns
+    ``None`` if the bytes match no supported type. This is the same magic-byte table
+    the model uses to verify ``request_raw_content`` against its declared type.
+    """
+    return next((content_type for content_type, magic in _RAW_CONTENT_MAGIC.items() if content.startswith(magic)), None)
+
+
+_TEMPLATE_PLACEHOLDER_MARKER = "<FILL IN"
+
+
 class ChangeRequestLogBase(SQLModel):
     """
     Base model for change request logs.
-    Timestamped.
-    Can optionally have associated JSON data.
+    Timestamped. Carries the audit trail (who requested the change and when)
+    plus the request content as text and/or a binary blob. Optional ``data``
+    JSON is reserved for type-specific extras.
     """
 
     change: ChangeRequestEnum
+    # Audit fields are nullable in the schema so historical rows (predating these
+    # columns) remain valid. Required-ness for new entries is enforced at the
+    # application/CLI layer.
+    requester_name: str | None = None
+    requester_email: str | None = None
+    requested_at: datetime.date | None = None
+    request_email_content: str | None = Field(default=None, sa_column=Column(sa.Text))
+    request_raw_content: bytes | None = Field(default=None, sa_column=Column(sa.LargeBinary))
+    request_raw_content_type: RequestRawContentType | None = Field(
+        default=None,
+        sa_column=Column(Enum(RequestRawContentType, values_callable=lambda e: [x.name for x in e])),
+    )
     data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     timestamp: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
@@ -384,6 +424,48 @@ class ChangeRequestLogBase(SQLModel):
     def serialize_timestamp(self, ts: datetime.datetime) -> str:
         return serialize_datetime_to_iso_z(ts)
 
+    @field_serializer("request_raw_content", when_used="json")
+    def _serialize_raw_content(self, v: bytes | None) -> str | None:
+        return None if v is None else base64.b64encode(v).decode("ascii")
+
+    @field_validator("request_raw_content", mode="before")
+    @classmethod
+    def _decode_raw_content(cls, v: Any) -> Any:
+        # Accept base64 strings (e.g. when reconstructing the payload from a model_dump
+        # round-trip during signature verification) as well as raw bytes (DB / CLI path).
+        if isinstance(v, str):
+            return base64.b64decode(v)
+        return v
+
+    @model_validator(mode="after")
+    def _reject_template_placeholders(self) -> Self:
+        for name in ("requester_name", "requester_email", "request_email_content"):
+            value = getattr(self, name)
+            if isinstance(value, str) and _TEMPLATE_PLACEHOLDER_MARKER in value:
+                raise ValueError(
+                    f"Field '{name}' still contains the template placeholder "
+                    f"'{_TEMPLATE_PLACEHOLDER_MARKER}…>'. Replace it with the actual value."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_raw_content_pair(self) -> Self:
+        # Note: "at least one of email_content / raw_content" is enforced at the CLI layer
+        # so that historical rows (with both NULL) can still be loaded from the DB.
+        if (self.request_raw_content is None) != (self.request_raw_content_type is None):
+            raise ValueError(
+                "'request_raw_content' and 'request_raw_content_type' must be set together (or both omitted)."
+            )
+        if self.request_raw_content is not None and self.request_raw_content_type is not None:
+            expected_magic = _RAW_CONTENT_MAGIC.get(self.request_raw_content_type)
+            if expected_magic is not None and not self.request_raw_content.startswith(expected_magic):
+                raise ValueError(
+                    f"request_raw_content does not start with the expected "
+                    f"{self.request_raw_content_type.value} magic bytes — file content does not "
+                    f"match the declared type."
+                )
+        return self
+
 
 class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
     """
@@ -393,12 +475,25 @@ class ChangeRequestLogPayload(ChangeRequestLogBase, BaseSignablePayload):
     submission_id: str
     author_name: str
 
+    def to_bytes(self) -> bytes:
+        # exclude_none keeps signatures stable across schema additions: rows signed before
+        # the audit columns existed were signed without those keys, so re-verifying them
+        # under the expanded model must also serialize without the (now-NULL) keys.
+        payload_json = self.model_dump_json(by_alias=True, exclude_none=True)
+        return payload_json.encode("utf8")
+
 
 class ChangeRequestLog(ChangeRequestLogBase, VerifiableLog[ChangeRequestLogPayload], table=True):
     """Change-request log table model."""
 
     __tablename__ = "submission_change_requests"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        sa.CheckConstraint(
+            "(request_raw_content IS NULL) = (request_raw_content_type IS NULL)",
+            name="chk_change_request_raw_content_type_paired",
+        ),
+        {"extend_existing": True},
+    )
 
     _payload_model_class: ClassVar = ChangeRequestLogPayload
 
@@ -456,7 +551,15 @@ class Donor(SQLModel, table=True):
         cls,
         submission_id: str,
         donor: MetadataDonor,
+        metadata_submission_date: datetime.date,
     ) -> Self:
+        """Construct a Donor populated from parsed metadata.
+
+        :param submission_id: Submission ID.
+        :param donor: Donor metadata.
+        :param metadata_submission_date: Submission date from metadata.
+            Used to evaluate research consent at the time the submission was created.
+        """
         return cls.model_validate(
             dict(
                 submission_id=submission_id,
@@ -466,7 +569,7 @@ class Donor(SQLModel, table=True):
                 sequence_types={datum.sequence_type for datum in donor.lab_data},
                 sequence_subtypes={datum.sequence_subtype for datum in donor.lab_data},
                 mv_consented=donor.consents_to_mv(),
-                research_consented=donor.consents_to_research(date=datetime.date.today()),
+                research_consented=donor.consents_to_research(date=metadata_submission_date),
                 research_consent_missing_justifications={
                     consent.no_scope_justification
                     for consent in donor.research_consents
@@ -634,6 +737,19 @@ class SubmissionDb:
                 session.rollback()
                 raise
 
+    @staticmethod
+    def _is_tan_g_unique_violation(e: IntegrityError) -> bool:
+        # SQLite
+        if "UNIQUE constraint failed: submissions.tan_g" in str(e):
+            return True
+        # PostgreSQL (psycopg / psycopg2)
+        orig = getattr(e, "orig", None)
+        if orig is not None:
+            diag = getattr(orig, "diag", None)
+            if diag is not None:
+                return getattr(diag, "constraint_name", None) == "ix_submissions_tan_g"
+        return False
+
     def modify_submission(self, submission_id: str, key: str, value: Any) -> Submission:  # noqa: C901
         if key not in SubmissionBase.model_fields:
             raise ValueError(f"Unknown column key '{key}'")
@@ -667,7 +783,7 @@ class SubmissionDb:
                 return submission
             except IntegrityError as e:
                 session.rollback()
-                if "UNIQUE constraint failed: submissions.tanG" in str(e) and key == "tan_g":
+                if self._is_tan_g_unique_violation(e) and key == "tan_g":
                     raise DuplicateTanGError() from e
                 raise
             except Exception:
@@ -698,7 +814,7 @@ class SubmissionDb:
                 return db_submission
             except IntegrityError as e:
                 session.rollback()
-                if "UNIQUE constraint failed: submissions.tanG" in str(e):
+                if self._is_tan_g_unique_violation(e):
                     raise DuplicateTanGError() from e
                 raise
             except Exception:
@@ -727,7 +843,7 @@ class SubmissionDb:
                 .join(QCQueueEntry, QCQueueEntry.submission_id == Submission.id)  # type: ignore[arg-type]
                 .where(Submission.submission_type == SubmissionType.initial)
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
-                .where(Submission.submission_date.between(start_date, end_date))  # type: ignore[union-attr]
+                .where(Submission.submission_uploaded_date.between(start_date, end_date))  # type: ignore[union-attr]
                 .where(Submission.submitter_id == submitter_id)
                 .order_by(QCQueueEntry.basic_qc_passed_at, Submission.id)  # type: ignore[arg-type]
             ).all()
@@ -772,7 +888,7 @@ class SubmissionDb:
 
         block_size = math.floor(1 / target_proportion)
         block_index = absolute_index // block_size
-        submission_quarter, submission_year = date_to_quarter_year(submission.submission_date)  # type: ignore[arg-type]
+        submission_quarter, submission_year = date_to_quarter_year(submission.submission_uploaded_date)  # type: ignore[arg-type]
         seed = f"{submission.submitter_id}-{submission_year}-{submission_quarter}-{block_index}-{salt}"
         rng = random.Random(seed)  # noqa: S311
 
@@ -915,10 +1031,17 @@ class SubmissionDb:
                 session.rollback()
                 raise e
 
-    def add_change_request(
+    def add_change_request(  # noqa: PLR0913
         self,
         submission_id: str,
         change: ChangeRequestEnum,
+        *,
+        requester_name: str,
+        requester_email: str,
+        requested_at: datetime.date,
+        request_email_content: str | None = None,
+        request_raw_content: bytes | None = None,
+        request_raw_content_type: RequestRawContentType | None = None,
         data: dict | None = None,
     ) -> ChangeRequestLog:
         """
@@ -927,7 +1050,13 @@ class SubmissionDb:
         Args:
             submission_id: Submission ID of the submission to register a change request for.
             change: Requested change.
-            data: Optional data to attach to the update.
+            requester_name: Full name of the requester.
+            requester_email: Email address of the requester.
+            requested_at: Date the change was requested.
+            request_email_content: Verbatim text content of the request (optional if raw content given).
+            request_raw_content: Optional binary blob (e.g. PDF bytes).
+            request_raw_content_type: Type of the binary blob; required iff request_raw_content is set.
+            data: Optional type-specific extras.
 
         Returns:
             An instance of ChangeRequestLog.
@@ -940,7 +1069,16 @@ class SubmissionDb:
                 raise ValueError("No author defined")
 
             change_request_log_payload = ChangeRequestLogPayload(
-                submission_id=submission_id, author_name=self._author.name, change=change, data=data
+                submission_id=submission_id,
+                author_name=self._author.name,
+                change=change,
+                requester_name=requester_name,
+                requester_email=requester_email,
+                requested_at=requested_at,
+                request_email_content=request_email_content,
+                request_raw_content=request_raw_content,
+                request_raw_content_type=request_raw_content_type,
+                data=data,
             )
             signature = change_request_log_payload.sign(self._author.private_key())
 
@@ -1025,7 +1163,7 @@ class SubmissionDb:
                     isouter=True,
                 )
                 .order_by(
-                    sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_date)
+                    sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_uploaded_date)
                     .desc()
                     .nulls_first()
                 )
@@ -1109,7 +1247,7 @@ class SubmissionDb:
 
         if submission is None:
             raise SubmissionNotFoundError(submission_id)
-        submission_date = submission.submission_date
+        submission_date = submission.submission_uploaded_date
         if submission_date is None:
             raise SubmissionDateIsNoneError()
         submission_type = submission.submission_type
@@ -1173,14 +1311,14 @@ class SubmissionDb:
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_uploaded_date: datetime.date,
         ignore_fields: set[str] | None = None,
     ) -> SubmissionDiffCollection:
         """Compare a submission's current database state against fresh metadata.
 
         :param submission_id: Submission ID to look up.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
-        :param submission_date: Explicit submission date; falls back to the value in *metadata* when ``None``.
+        :param submission_uploaded_date: Date of submission upload finish
         :param ignore_fields: Field names to skip entirely during the comparison.
         :returns: A :class:`SubmissionDiffCollection` instance summarising all detected differences.
         """
@@ -1191,7 +1329,10 @@ class SubmissionDb:
         if ignore_fields is None:
             ignore_fields = set()
 
-        new_submission = Submission.from_metadata(submission_id, metadata, submission_date)
+        if isinstance(submission_uploaded_date, datetime.datetime):
+            submission_uploaded_date = submission_uploaded_date.date()
+
+        new_submission = Submission.from_metadata(submission_id, metadata, submission_uploaded_date)
 
         return current_submission.diff(new_submission, ignore_fields)
 
@@ -1206,9 +1347,14 @@ class SubmissionDb:
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
         :returns: A fully populated :class:`DonorDiff`.
         """
+        metadata_submission_date = metadata.submission.submission_date
+        if isinstance(metadata_submission_date, datetime.datetime):
+            metadata_submission_date = metadata_submission_date.date()
+
         donors_in_db_submission = {donor.pseudonym: donor for donor in self.get_donors(submission_id=submission_id)}
         donors_in_metadata = {
-            (d := Donor.from_donor_metadata(submission_id, donor)).pseudonym: d for donor in metadata.donors
+            (d := Donor.from_donor_metadata(submission_id, donor, metadata_submission_date)).pseudonym: d
+            for donor in metadata.donors
         }
 
         result = DonorsDiffCollection()
@@ -1226,10 +1372,33 @@ class SubmissionDb:
         self,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
-        submission_date: datetime.date | None,
+        submission_uploaded_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
     ) -> tuple[SubmissionDiffCollection, DonorsDiffCollection]:
-        submission_diff = self._diff_metadata(submission_id, metadata, submission_date, ignore_fields)
+        """
+        Generates differences between the current and previous states of submission metadata
+        and donors data.
+
+        This function compares the provided metadata and donors data with the existing
+        state in the system for a specific submission ID and returns the differences in two
+        separate collections.
+
+        :param submission_id: The unique identifier of the submission to be compared.
+        :param metadata: The metadata of the submission to compare against.
+        :param submission_uploaded_date: The date when the submission process was finished.
+            If None, the field will not be included in the comparison.
+        :param ignore_fields: Optional set of field names to be ignored during the metadata comparison.
+        :returns: A tuple containing the differences in the submission metadata and the corresponding donor entries.
+        """
+        if submission_uploaded_date is None:
+            # set arbitrary date if not provided
+            submission_uploaded_date = metadata.submission.submission_date
+
+            # Add submission date to ignore fields
+            ignore_fields = ignore_fields or set()
+            ignore_fields.add("submission_uploaded_date")
+
+        submission_diff = self._diff_metadata(submission_id, metadata, submission_uploaded_date, ignore_fields)
         donor_diff = self._diff_donors(submission_id, metadata)
         return submission_diff, donor_diff
 

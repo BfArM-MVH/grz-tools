@@ -2,6 +2,8 @@ import datetime
 import enum
 import logging
 
+from grz_pydantic_models.common import as_aware_datetime
+
 log = logging.getLogger(__name__)
 
 
@@ -52,10 +54,4 @@ def serialize_datetime_to_iso_z(dt: datetime.datetime) -> str:
     """
     Serializes a datetime object to a canonical ISO 8601 string format with 'Z' for UTC.
     """
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.UTC)
-
-    if dt.tzinfo != datetime.UTC and dt.utcoffset() != datetime.timedelta(0):
-        dt = dt.astimezone(datetime.UTC)
-
-    return dt.isoformat()
+    return as_aware_datetime(dt).astimezone(datetime.UTC).isoformat().replace("+00:00", "Z")

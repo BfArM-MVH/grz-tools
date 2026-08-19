@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.8.0...grz-cli-v2.0.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** grzctl requires grz-db 3 and grz-cli 2, and so applies the same consent rules when it reads or backfills submission metadata.
+* **grz-cli:** grz-cli requires grz-common 3. Metadata naming a consent dateTime outside the FHIR grammar, or leaving a 2025 researchConsent provision period open-ended, is now rejected rather than accepted.
+
+### Bug Fixes
+
+* **grz-cli:** require grz-common 3 ([#649](https://github.com/BfArM-MVH/grz-tools/issues/649)) ([69b9c17](https://github.com/BfArM-MVH/grz-tools/commit/69b9c171dd1e248bb38bbc6822dc4e7f3857accc))
+* **grzctl:** require grz-db 3 and grz-cli 2 ([69b9c17](https://github.com/BfArM-MVH/grz-tools/commit/69b9c171dd1e248bb38bbc6822dc4e7f3857accc))
+
+## [1.8.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.7.2...grz-cli-v1.8.0) (2026-08-13)
+
+
+### Features
+
+* **grz-db:** ship reusable database fixtures for downstream tests ([#647](https://github.com/BfArM-MVH/grz-tools/issues/647)) ([a72caba](https://github.com/BfArM-MVH/grz-tools/commit/a72caba963512876be92ac4a8469b931fd1c3767))
+* **grzctl, grz-db, grz-common:** Metadata schema version check via version.json ([#624](https://github.com/BfArM-MVH/grz-tools/issues/624)) ([c6f1e7c](https://github.com/BfArM-MVH/grz-tools/commit/c6f1e7ce07cd5772beee5551e0b95b02a9f83914))
+
 ## [1.7.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.7.1...grz-cli-v1.7.2) (2026-06-02)
 
 

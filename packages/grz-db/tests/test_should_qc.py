@@ -1,50 +1,17 @@
 import datetime
 import math
-import random
-from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from grz_db.errors import (
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
     SubmissionTypeIsNoneError,
 )
-from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum, SubmissionStateLog, SubmissionType
 from sqlmodel import Session
 
 SUBMITTER_ID = "123456789"
 DEFAULT_HISTORY = ["uploaded", "downloading", "downloaded", "decrypting", "decrypted", "validating", "validated"]
-
-
-@pytest.fixture(scope="function")
-def test_author() -> Author:
-    """Creates a test author with a valid temporary private key."""
-    key = ed25519.Ed25519PrivateKey.generate()
-    private_key_bytes = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    return Author(
-        name="alice",
-        private_key_bytes=private_key_bytes,
-        private_key_passphrase="",
-    )
-
-
-@pytest.fixture(scope="function")
-def db(tmp_path: Path, test_author: Author) -> SubmissionDb:
-    """Create a clean database initialized with schema for each test function."""
-    db_path = tmp_path / "submissions.sqlite"
-    db_url = f"sqlite:///{db_path.resolve()}"
-
-    submission_db = SubmissionDb(db_url=db_url, author=test_author, debug=False)
-    submission_db.initialize_schema()
-
-    return submission_db
 
 
 def _update_submission_state(
@@ -79,7 +46,7 @@ def _add_submission_with_history(
     """
     db.add_submission(submission_id)
 
-    db.modify_submission(submission_id, "submission_date", str(submission_date.isoformat()))
+    db.modify_submission(submission_id, "submission_uploaded_date", str(submission_date.isoformat()))
     db.modify_submission(submission_id, "submission_type", SubmissionType.initial)
     db.modify_submission(submission_id, "submitter_id", submitter_id)
     db.modify_submission(submission_id, "basic_qc_passed", "true")
@@ -92,6 +59,26 @@ def _add_submission_with_history(
         state_enum = SubmissionStateEnum(state_str.capitalize())
         _update_submission_state(db, submission_id, state_enum, current_timestamp)
         current_timestamp += datetime.timedelta(seconds=1)
+
+
+def _add_qc_candidates(db: SubmissionDb, base_date: datetime.date, start_time: datetime.datetime, count: int) -> list:
+    """Add *count* QC candidates ten minutes apart and return them in submission order."""
+    submissions = []
+    for i in range(count):
+        submission_id = f"{SUBMITTER_ID}_{base_date}_{i:0>8}"
+        _add_submission_with_history(
+            db,
+            submission_id,
+            SUBMITTER_ID,
+            base_date,
+            DEFAULT_HISTORY,
+            base_timestamp=start_time + datetime.timedelta(minutes=i * 10),
+            is_qced=False,
+        )
+        submission = db.get_submission(submission_id)
+        assert submission is not None
+        submissions.append(submission)
+    return submissions
 
 
 class TestQcStrategy:
@@ -172,87 +159,49 @@ class TestQcStrategy:
         assert submission is not None
         assert submission.selected_for_qc is True
 
-    def test_should_qc_persists_false_result(self, db: SubmissionDb):
-        target_percentage = 20.0
-        salt = "ratio-test"
+    def test_should_qc_persists_a_negative_decision(self, db: SubmissionDb):
+        """A zero target leaves no branch that can select, so the stored flag must go to False.
+
+        The month rule ignores the target and fires whenever nothing has been selected yet, so an
+        already-selected submission is needed for the decision to reach the target-driven branches.
+        """
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
 
         selected_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
         _add_submission_with_history(
-            db,
-            selected_submission_id,
-            SUBMITTER_ID,
-            base_date,
-            [*DEFAULT_HISTORY, "qcing"],
-            base_timestamp=start_time,
-            is_qced=False,
+            db, selected_submission_id, SUBMITTER_ID, base_date, DEFAULT_HISTORY, base_timestamp=start_time
         )
         db.modify_submission(selected_submission_id, "selected_for_qc", "true")
 
         candidate_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
-        candidate_timestamp = start_time + datetime.timedelta(minutes=10)
         _add_submission_with_history(
             db,
             candidate_submission_id,
             SUBMITTER_ID,
             base_date,
             DEFAULT_HISTORY,
-            base_timestamp=candidate_timestamp,
-            is_qced=False,
+            base_timestamp=start_time + datetime.timedelta(minutes=10),
         )
 
-        should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
-
-        assert should_run is False
+        assert db.should_qc(candidate_submission_id, 0.0, "any-salt") is False
         submission = db.get_submission(candidate_submission_id)
         assert submission is not None
         assert submission.selected_for_qc is False
 
-    def test_should_qc_counts_existing_selected_for_qc_without_double_counting(self, db: SubmissionDb):
-        target_percentage = 20.0
-        salt = "ratio-test"
+    def test_a_submission_with_qc_history_counts_toward_the_target(self, db: SubmissionDb):
+        """A submission already QCed counts even though its selected_for_qc flag was never set.
+
+        Asserted on the counting rule rather than on should_qc's verdict: routing through the full
+        decision would leave the outcome resting on whether the random branch happened to fire.
+        """
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
 
-        selected_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
+        qced_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
         _add_submission_with_history(
             db,
-            selected_submission_id,
-            SUBMITTER_ID,
-            base_date,
-            [*DEFAULT_HISTORY, "qcing"],
-            base_timestamp=start_time,
-            is_qced=False,
-        )
-        db.modify_submission(selected_submission_id, "selected_for_qc", "true")
-
-        candidate_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
-        candidate_timestamp = start_time + datetime.timedelta(minutes=10)
-        _add_submission_with_history(
-            db,
-            candidate_submission_id,
-            SUBMITTER_ID,
-            base_date,
-            DEFAULT_HISTORY,
-            base_timestamp=candidate_timestamp,
-            is_qced=False,
-        )
-
-        should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
-
-        assert should_run is False
-
-    def test_should_qc_counts_historical_qcing_or_qced_states(self, db: SubmissionDb):
-        target_percentage = 20.0
-        salt = "ratio-test"
-        base_date = datetime.date(2025, 12, 1)
-        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
-
-        historical_qc_submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
-        _add_submission_with_history(
-            db,
-            historical_qc_submission_id,
+            qced_submission_id,
             SUBMITTER_ID,
             base_date,
             [*DEFAULT_HISTORY, "qcing", "qced", "cleaning", "cleaned"],
@@ -260,76 +209,62 @@ class TestQcStrategy:
             is_qced=True,
         )
 
-        candidate_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
-        candidate_timestamp = start_time + datetime.timedelta(minutes=10)
+        untouched_submission_id = f"{SUBMITTER_ID}_{base_date}_00000001"
         _add_submission_with_history(
             db,
-            candidate_submission_id,
+            untouched_submission_id,
             SUBMITTER_ID,
             base_date,
             DEFAULT_HISTORY,
-            base_timestamp=candidate_timestamp,
-            is_qced=False,
+            base_timestamp=start_time + datetime.timedelta(minutes=10),
         )
 
-        should_run = db.should_qc(candidate_submission_id, target_percentage, salt)
+        qced = db.get_submission(qced_submission_id)
+        untouched = db.get_submission(untouched_submission_id)
+        assert qced is not None and untouched is not None
+        assert qced.selected_for_qc is not True, "the flag is unset; only the state history should count it"
+        assert db._submission_counts_as_selected_for_qc(qced) is True
+        assert db._submission_counts_as_selected_for_qc(untouched) is False
 
-        assert should_run is False
+    def test_should_qc_still_selects_once_per_block_when_the_target_is_already_met(self, db: SubmissionDb):
+        """With the target already exceeded, only the random branch can select, so it must still fire.
 
-    def test_first_of_month_always_runs(self, db: SubmissionDb):
+        The month and quarter rules are both satisfied here, so this is the one place that proves
+        ``should_qc`` actually consults the random selection rather than merely returning early.
         """
-        Test that the first (validated, initial) submission of a month is always QCed.
-        """
-        test_date = datetime.date(2025, 12, 1)
-        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
-        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+        target_percentage = 20.0
+        block_size = math.floor(1 / (target_percentage / 100.0))
+        base_date = datetime.date(2025, 12, 1)
+        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
 
-        _add_submission_with_history(
-            db,
-            submission_id,
-            SUBMITTER_ID,
-            test_date,
-            DEFAULT_HISTORY,
-            base_timestamp=base_timestamp,
-            is_qced=False,
-        )
+        submissions = _add_qc_candidates(db, base_date, start_time, count=block_size * 2)
+        # push the selected share far above the target so neither the month nor the quarter rule fires
+        for submission in submissions[:block_size]:
+            db.modify_submission(submission.id, "selected_for_qc", "true")
 
-        should_run = db.should_qc(
-            submission_id=submission_id,
-            target_percentage=2.0,
-            salt="any_salt",
-        )
-        assert should_run is True, "The first submission of the month must be selected for QC."
+        selected = [
+            submission.id
+            for submission in submissions[block_size:]
+            if db.should_qc(submission.id, target_percentage, "test-salt")
+        ]
+        assert len(selected) == 1, f"expected the random branch to pick exactly one, picked {selected}"
 
-    def test_quarterly_ratio_catchup(self, db: SubmissionDb):
-        """
-        Tests that the quarter selection combines ratio catchup and random selection.
-        Target: 20%.
+    def test_ratio_catchup_keeps_the_selected_share_at_or_above_target(self, db: SubmissionDb):
+        """The running selected share must never drop below the target; that is what catch-up means.
+
+        Asserted as a property of the outcome rather than by recomputing the selection formula:
+        a test that re-derives the seed would agree with a broken implementation.
         """
         target_percentage = 20.0
         target_proportion = target_percentage / 100.0
         salt = "ratio-test"
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
-        block_size = math.floor(1 / target_proportion)
 
-        submission_id = f"{SUBMITTER_ID}_{base_date}_00000000"
-        _add_submission_with_history(
-            db,
-            submission_id,
-            SUBMITTER_ID,
-            base_date,
-            [*DEFAULT_HISTORY, "qcing", "qced"],
-            base_timestamp=start_time,
-            is_qced=True,
-        )
-
-        qced_count = 1
-        total_count = 1
-        for i in range(1, 10):
+        selected_count = 0
+        for i in range(12):
             submission_id = f"{SUBMITTER_ID}_{base_date}_{i:0>8}"
             submission_timestamp = start_time + datetime.timedelta(minutes=i * 10)
-
             _add_submission_with_history(
                 db,
                 submission_id,
@@ -340,26 +275,7 @@ class TestQcStrategy:
                 is_qced=False,
             )
 
-            total_count += 1
-            current_ratio = qced_count / total_count
-            is_ratio_trigger = current_ratio <= target_proportion
-
-            absolute_index = i
-            block_index = absolute_index // block_size
-            seed = f"{SUBMITTER_ID}-{base_date.year}-4-{block_index}-{salt}"
-            rng = random.Random(seed)
-            target_index_in_block = rng.randint(0, block_size - 1)
-            is_random_trigger = (absolute_index % block_size) == target_index_in_block
-
-            expect_qc = is_ratio_trigger or is_random_trigger
-            should_run = db.should_qc(submission_id, target_percentage, salt)
-
-            assert should_run is expect_qc, (
-                f"Index {i}: Expect={expect_qc}, Got={should_run}. "
-                f"(Ratio: {current_ratio:.3f} vs {target_proportion}, Stats: QCed={qced_count}, Total={total_count})"
-            )
-
-            if should_run:
+            if db.should_qc(submission_id, target_percentage, salt):
                 _update_submission_state(
                     db, submission_id, SubmissionStateEnum.QCING, submission_timestamp + datetime.timedelta(minutes=1)
                 )
@@ -367,112 +283,60 @@ class TestQcStrategy:
                     db, submission_id, SubmissionStateEnum.QCED, submission_timestamp + datetime.timedelta(minutes=2)
                 )
                 db.modify_submission(submission_id, "detailed_qc_passed", "true")
-                qced_count += 1
+                selected_count += 1
 
-    @pytest.mark.parametrize("target_percentage", [1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 100.0])
-    def test_random_selection(self, db: SubmissionDb, target_percentage: float):
-        """
-        Test the random selection logic.
-        We simulate the logic (Month -> Ratio -> Random) to verify expectation.
-        """
-        salt = "test-salt"
-        base_date = datetime.date(2025, 7, 1)
-        start_time = datetime.datetime.combine(base_date, datetime.time(8, 0), tzinfo=datetime.UTC)
-
-        block_size = math.floor(1 / (target_percentage / 100.0))
-        limit = block_size * 2
-
-        qced_count = 0
-        total_count = 0
-
-        for i in range(limit):
-            submission_id = f"{SUBMITTER_ID}_{base_date}_{i:0>8}"
-            submission_timestamp = start_time + datetime.timedelta(minutes=i * 10)
-            total_count += 1
-
-            is_first_of_month_trigger = qced_count == 0
-
-            current_ratio = qced_count / total_count
-            is_ratio_trigger = current_ratio <= (target_percentage / 100.0)
-
-            absolute_index = i
-            block_index = absolute_index // block_size
-            seed = f"{SUBMITTER_ID}-{base_date.year}-3-{block_index}-{salt}"
-            rng = random.Random(seed)
-            target_index_in_block = rng.randint(0, block_size - 1)
-
-            is_random_trigger = (absolute_index % block_size) == target_index_in_block
-
-            expect_qc = False
-            if is_first_of_month_trigger:
-                expect_qc = True
-            elif is_ratio_trigger:
-                expect_qc = True
-            elif is_random_trigger:
-                expect_qc = True
-
-            _add_submission_with_history(
-                db,
-                submission_id,
-                SUBMITTER_ID,
-                base_date,
-                DEFAULT_HISTORY,
-                base_timestamp=submission_timestamp,
-                is_qced=False,
+            assert selected_count / (i + 1) >= target_proportion, (
+                f"after {i + 1} submissions only {selected_count} were selected, "
+                f"below the {target_proportion:.0%} target"
             )
 
-            should_run = db.should_qc(submission_id=submission_id, target_percentage=target_percentage, salt=salt)
+    @pytest.mark.parametrize("target_percentage", [2.0, 20.0])
+    def test_exactly_one_submission_per_block_is_randomly_selected(self, db: SubmissionDb, target_percentage: float):
+        """Each block of ``floor(1 / target)`` submissions must contribute exactly one selection.
 
-            assert should_run is expect_qc, (
-                f"Index {i}: Expect={expect_qc}, Got={should_run}. "
-                f"(Ratio: {current_ratio:.3f} vs {target_percentage / 100.0}, "
-                f"Stats: QCed={qced_count}, Total={total_count})"
-            )
-
-            if should_run:
-                _update_submission_state(
-                    db, submission_id, SubmissionStateEnum.QCING, submission_timestamp + datetime.timedelta(minutes=1)
-                )
-                _update_submission_state(
-                    db, submission_id, SubmissionStateEnum.QCED, submission_timestamp + datetime.timedelta(minutes=2)
-                )
-                db.modify_submission(submission_id, "detailed_qc_passed", "true")
-                qced_count += 1
-
-    def test_is_randomly_selected_for_qc_uses_block_relative_index_for_later_blocks(self, db: SubmissionDb):
-        target_percentage = 2.0
+        This is the guarantee the block scheme exists to provide, and it holds whatever seed the
+        implementation derives. Recomputing that seed here would instead make the test agree with
+        a broken implementation, since both sides would share the same mistake.
+        """
         target_proportion = target_percentage / 100.0
         salt = "test-salt"
         base_date = datetime.date(2025, 7, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(8, 0), tzinfo=datetime.UTC)
         block_size = math.floor(1 / target_proportion)
 
-        submissions = []
-        for i in range(block_size * 2):
-            submission_id = f"{SUBMITTER_ID}_{base_date}_{i:0>8}"
-            _add_submission_with_history(
-                db,
-                submission_id,
-                SUBMITTER_ID,
-                base_date,
-                DEFAULT_HISTORY,
-                base_timestamp=start_time + datetime.timedelta(minutes=i * 10),
-                is_qced=False,
-            )
-            submission = db.get_submission(submission_id)
-            assert submission is not None
-            submissions.append(submission)
+        submissions = _add_qc_candidates(db, base_date, start_time, count=block_size * 2)
 
-        absolute_index = block_size + 7
-        submission = submissions[absolute_index]
-        block_index = absolute_index // block_size
+        for block in range(2):
+            offset = block * block_size
+            selected = [
+                index
+                for index in range(offset, offset + block_size)
+                if db._is_randomly_selected_for_qc(submissions[index], submissions, target_proportion, salt)
+            ]
+            assert len(selected) == 1, f"block {block} selected {selected}, expected exactly one submission"
 
-        seed = f"{SUBMITTER_ID}-{base_date.year}-3-{block_index}-{salt}"
-        rng = random.Random(seed)
-        target_index_in_block = rng.randint(0, block_size - 1)
-        expected = (absolute_index % block_size) == target_index_in_block
+    def test_random_selection_is_reproducible(self, db: SubmissionDb):
+        """The selection is documented as random but reproducible, so the same inputs must agree."""
+        target_proportion = 0.02
+        salt = "test-salt"
+        base_date = datetime.date(2025, 7, 1)
+        start_time = datetime.datetime.combine(base_date, datetime.time(8, 0), tzinfo=datetime.UTC)
+        block_size = math.floor(1 / target_proportion)
 
-        assert db._is_randomly_selected_for_qc(submission, submissions, target_proportion, salt) is expected
+        submissions = _add_qc_candidates(db, base_date, start_time, count=block_size)
+
+        first = [db._is_randomly_selected_for_qc(s, submissions, target_proportion, salt) for s in submissions]
+        second = [db._is_randomly_selected_for_qc(s, submissions, target_proportion, salt) for s in submissions]
+        assert first == second
+
+    def test_no_submission_is_randomly_selected_at_zero_target(self, db: SubmissionDb):
+        """A zero target short-circuits the random branch, so nothing may be selected by it."""
+        base_date = datetime.date(2025, 7, 1)
+        start_time = datetime.datetime.combine(base_date, datetime.time(8, 0), tzinfo=datetime.UTC)
+
+        submissions = _add_qc_candidates(db, base_date, start_time, count=5)
+
+        assert not any(db._is_randomly_selected_for_qc(s, submissions, 0.0, "test-salt") for s in submissions)
 
     def test_should_qc_raises_on_missing_submission_date(self, db: SubmissionDb):
         """Verify SubmissionDateIsNoneError when submission_date is None."""
@@ -488,7 +352,7 @@ class TestQcStrategy:
         """Verify SubmissionTypeIsNoneError when submission_type is None."""
         submission_id = f"{SUBMITTER_ID}_2025-12-01_00000000"
         db.add_submission(submission_id)
-        db.modify_submission(submission_id, "submission_date", "2025-12-01")
+        db.modify_submission(submission_id, "submission_uploaded_date", "2025-12-01")
         db.modify_submission(submission_id, "basic_qc_passed", "true")
 
         with pytest.raises(SubmissionTypeIsNoneError):

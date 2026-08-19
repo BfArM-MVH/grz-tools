@@ -4,7 +4,6 @@ Tests for the Prüfbericht submission functionality.
 
 import importlib.resources
 import json
-import shutil
 
 import click.testing
 import grzctl.cli
@@ -14,6 +13,7 @@ from grz_pydantic_models.pruefbericht.v0 import LibraryType
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from .. import mock_files
+from .common import copy_submission
 
 TEST_SUBMISSION_ID = "123456789_1970-01-01_00000000"
 
@@ -123,12 +123,12 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
 
         # submit generated Prüfbericht
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
             "--no-update-db",
@@ -160,12 +160,12 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_
 
         # submit generated Prüfbericht with a pre-provided token
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
             "--token",
@@ -201,12 +201,12 @@ def test_valid_submission_with_expired_token(
 
         # (try to) submit generated Prüfbericht with an expired token
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
             "--token",
@@ -222,7 +222,7 @@ def test_generate_pruefbericht_multiple_library_types(temp_pruefbericht_config_f
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
-        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        copy_submission(tmp_path, source=submission_dir)
         with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
             metadata = json.load(metadata_file)
 
@@ -258,7 +258,7 @@ def test_generate_fails_with_invalid_library_type(temp_pruefbericht_config_file_
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
-        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        copy_submission(tmp_path, source=submission_dir)
         with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
             metadata = json.load(metadata_file)
 
@@ -290,7 +290,7 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         # create and modify a temporary copy of the metadata JSON
-        shutil.copytree(submission_dir, tmp_path, dirs_exist_ok=True)
+        copy_submission(tmp_path, source=submission_dir)
         with open(tmp_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
             metadata = json.load(metadata_file)
 
@@ -320,12 +320,12 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
 
         # attempt to submit
         submit_args = [
+            "--config",
+            temp_pruefbericht_config_file_path,
             "pruefbericht",
             "submit",
             "--submission-id",
             TEST_SUBMISSION_ID,
-            "--config-file",
-            temp_pruefbericht_config_file_path,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
         ]
@@ -334,19 +334,36 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
 
 
 @pytest.fixture
-def pruefbericht_db_config(tmp_path):
-    """Create a test database config for pruefbericht tests."""
+def pruefbericht_db_config(tmp_path, migrated_db_connection):
+    """Config file for a database already on the latest schema, one per supported backend."""
     import json
 
-    db_path = tmp_path / "test.db"
-    db_url = f"sqlite:///{db_path}"
+    from tests.conftest import _grzctl_archives, crypt4gh_grz_private_key_file, crypt4gh_grz_public_key_file
 
-    config = {"db": {"database_url": db_url, "author": {"name": "test_author"}}}
+    config = {
+        "leistungserbringer": {
+            "000000000": {
+                "inbox_buckets": {
+                    "inbox": {
+                        "private_key_path": "/dev/null",
+                    }
+                },
+            }
+        },
+        "archives": _grzctl_archives(),
+        "db": {"database_url": migrated_db_connection, "author": {"name": "test_author"}},
+        "keys": {
+            "grz_private_key_path": crypt4gh_grz_private_key_file,
+            "grz_public_key_path": crypt4gh_grz_public_key_file,
+        },
+        "pruefbericht": {},
+        "identifiers": {"grz": "GRZK00007"},
+    }
 
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config))
 
-    return {"db_path": db_path, "db_url": db_url, "config": config, "config_path": config_path}
+    return {"db_url": migrated_db_connection, "config": config, "config_path": config_path}
 
 
 def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht_db_config):
@@ -372,11 +389,10 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
     config_path = pruefbericht_db_config["config_path"]
 
     db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
 
     db.add_submission(TEST_SUBMISSION_ID)
     # Populate submission fields to match the mock data used in other tests
-    db.modify_submission(TEST_SUBMISSION_ID, "submission_date", datetime.date(2024, 7, 15))
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_uploaded_date", datetime.date(2024, 7, 15))
     db.modify_submission(TEST_SUBMISSION_ID, "submission_type", SubmissionType.test)
     db.modify_submission(
         TEST_SUBMISSION_ID, "tan_g", "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
@@ -404,13 +420,13 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         TEST_SUBMISSION_ID,
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)
@@ -435,26 +451,20 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
 
 def test_generate_from_database_missing_submission(pruefbericht_db_config):
     """Test error when submission doesn't exist in database."""
-    from grz_db.models.submission import SubmissionDb
-
-    # Use the fixture
-    db_url = pruefbericht_db_config["db_url"]
+    # the schema is present but empty, so the submission is genuinely absent rather than unreachable
     config_path = pruefbericht_db_config["config_path"]
-
-    db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         "nonexistent_id",
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)
@@ -472,7 +482,6 @@ def test_generate_from_database_missing_fields(pruefbericht_db_config):
     config_path = pruefbericht_db_config["config_path"]
 
     db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
 
     # Add submission without populating required fields
     db.add_submission(TEST_SUBMISSION_ID)
@@ -481,13 +490,13 @@ def test_generate_from_database_missing_fields(pruefbericht_db_config):
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         TEST_SUBMISSION_ID,
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)
@@ -518,11 +527,10 @@ def test_generate_from_database_no_index_donor(pruefbericht_db_config):
     config_path = pruefbericht_db_config["config_path"]
 
     db = SubmissionDb(db_url=db_url, author=None, debug=False)
-    db.initialize_schema()
     db.add_submission(TEST_SUBMISSION_ID)
 
     # Populate all required fields (matching the pattern from test_generate_from_database)
-    db.modify_submission(TEST_SUBMISSION_ID, "submission_date", datetime.date(2024, 7, 15))
+    db.modify_submission(TEST_SUBMISSION_ID, "submission_uploaded_date", datetime.date(2024, 7, 15))
     db.modify_submission(TEST_SUBMISSION_ID, "submission_type", SubmissionType.test)
     db.modify_submission(
         TEST_SUBMISSION_ID, "tan_g", "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000"
@@ -549,13 +557,13 @@ def test_generate_from_database_no_index_donor(pruefbericht_db_config):
     cli = grzctl.cli.build_cli()
 
     args = [
+        "--config",
+        str(config_path),
         "pruefbericht",
         "generate",
         "from-database",
         "--submission-id",
         TEST_SUBMISSION_ID,
-        "--config-file",
-        str(config_path),
     ]
 
     result = runner.invoke(cli, args, catch_exceptions=False)
