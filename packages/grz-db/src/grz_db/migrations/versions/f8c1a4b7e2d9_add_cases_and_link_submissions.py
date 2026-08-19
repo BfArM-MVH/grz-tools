@@ -12,7 +12,12 @@ exists, not the authoritative identity themselves. The partial unique index
 ``ux_cases_submitter_local_case`` keeps the pair unique wherever both halves are present; neither
 is required, since a future flow may resolve a case by ``psn`` alone. Existing submissions are
 grouped by ``(submitter_id, pseudonym)`` (the ``pseudonym`` column holds the submitter-local case
-id) and backfilled into cases. ``submissions.submitter_id`` is kept.
+id) and backfilled into cases. ``submitter_id`` stays on the submission row as well as on the
+case.
+
+Refuses to run when the existing data cannot be grouped: two or more QC-passed ``initial``
+submissions sharing a ``(submitter_id, pseudonym)`` abort the upgrade, naming the groups. Resolve
+those rows first.
 
 Also extends ``failurereasonenum`` with ``duplicate_initial``, recorded on a duplicate initial
 submission: one being validated for a case whose initial submission already passed basic QC.
@@ -30,9 +35,9 @@ down_revision: str | Sequence[str] | None = "c8d4a7f2b1e6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# Mirrors grz_pydantic_models.submission.metadata.REDACTED_LOCAL_CASE_ID; hardcoded so the
-# migration stays frozen. Redaction placeholders (this literal, or the empty string used by
-# older archival code) are not case keys; SubmissionDb applies the same check at runtime.
+# Mirrors grz_pydantic_models.submission.metadata.LOCAL_CASE_ID_PLACEHOLDERS; hardcoded so the
+# migration stays frozen. The archive contains both spellings as redaction placeholders; neither
+# identifies a patient, so neither is a case key. SubmissionDb applies the same check at runtime.
 PSEUDONYM_NON_KEYS = ["", "REDACTED_LOCAL_CASE_ID"]
 
 
