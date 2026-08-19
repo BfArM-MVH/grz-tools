@@ -1161,7 +1161,7 @@ def test_template_with_only_date_filled_in_still_fails(migrated_database_config_
 
 
 def test_change_request_template_for_other_change_types_includes_audit_fields():
-    """Audit fields are universal — every change type prints the same scaffold (with type-specific guidance)."""
+    """Audit fields are universal: every change type prints the same scaffold (with type-specific guidance)."""
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     result = runner.invoke(cli, ["change-request-template", "Modify"])
@@ -1177,14 +1177,14 @@ def test_change_request_validate_accepts_valid_input_without_config(tmp_path: Pa
     data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    # Note: no `db --config-file ...` — the command must work standalone.
+    # Note: no `db --config-file ...`; the command must work standalone.
     result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
     assert result.exit_code == 0, result.stderr
     assert "valid" in result.stderr.lower()
 
 
 def test_change_request_validate_rejects_unedited_template(tmp_path: Path):
-    """Saving the template and validating it unchanged must fail — the safety net still applies offline."""
+    """Saving the template and validating it unchanged must fail: the safety net still applies offline."""
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     template = runner.invoke(cli, ["change-request-template", "Delete"]).stdout
@@ -1316,7 +1316,7 @@ def test_change_request_dry_run_validates_before_db_check(migrated_database_conf
 
 
 def test_change_request_modify_requires_audit_fields_too(migrated_database_config_path: Path, tmp_path: Path):
-    """Audit fields are universal — Modify also requires them via --data/--data-file."""
+    """Audit fields are universal: Modify also requires them via --data/--data-file."""
     args_common = ["--config", migrated_database_config_path, "db"]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()

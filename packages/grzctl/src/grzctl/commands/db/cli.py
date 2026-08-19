@@ -333,7 +333,8 @@ def case_create(ctx: click.Context, submitter_id: str, local_case_id: str, psn: 
 def case_relink(ctx: click.Context, submission_id: str, case_id: int):
     """Relink a submission to a different case for repair.
 
-    A case may still have at most one initial submission that passed basic QC.
+    A case may still have at most one initial submission that passed basic QC. The case
+    being vacated is left as-is and may become empty.
     """
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -911,7 +912,11 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     confirm: bool,
     ignore_field: tuple[str, ...],
 ):
-    """Populate a submission in the database based on the given metadata.json file."""
+    """Populate a submission in the database based on the given metadata.json file.
+
+    Also resolves and links the submission's case; an unresolved link is shown rather
+    than blocking the rest of the diff.
+    """
     log.debug("Ignored fields for populate: %s", ignore_field)
 
     if submission_date is not None:
@@ -1687,7 +1692,7 @@ class _BackfillResult(StrEnum):
     UP_TO_DATE = "up_to_date"
     NOT_FOUND = "not_found"
     WOULD_OVERWRITE = "would_overwrite"
-    # Everything but the case link was written; re-running once the cause is cleared links it.
+    # The case link could not be resolved for this submission. Re-running once the cause is cleared links it.
     LINK_UNRESOLVED = "link_unresolved"
     ERROR = "error"
     CONSENT_MISMATCH = "consent_mismatch"
@@ -1697,8 +1702,9 @@ class _BackfillResult(StrEnum):
 # stored row before diffing (see Submission.restore_redacted_fields) rather than ignored
 # outright: that way an unredacted copy is still checked against the database, and a
 # placeholder never becomes a case key. Whatever cannot be restored is ignored per
-# submission. This constant covers only the upload date, which diff() derives from the
-# metadata's submission_date when the database has none.
+# submission. This constant covers only the upload date: it is computed above and passed
+# to diff() as an explicit parameter, so the generic field diff must not also read it
+# from metadata.
 _BACKFILL_IGNORE_FIELDS = frozenset({"submission_uploaded_date"})
 
 
@@ -1731,7 +1737,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     try:
         raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: S3 error – {exc}[/red]")
+        console_err.print(f"[red]  {submission_id}: S3 error: {exc}[/red]")
         return _BackfillResult.ERROR
 
     if raw_json is None:
@@ -1742,7 +1748,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: failed to parse metadata.json – {exc}[/red]")
+        console_err.print(f"[red]  {submission_id}: failed to parse metadata.json: {exc}[/red]")
         return _BackfillResult.ERROR
 
     # The archived copy is redacted; the stored row holds the submitter's values.
@@ -1764,7 +1770,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: diff failed – {exc}[/red]")
+        console_err.print(f"[red]  {submission_id}: diff failed: {exc}[/red]")
         return _BackfillResult.ERROR
 
     # An unresolvable case link costs the submission its link and nothing else: the reason is
@@ -1773,7 +1779,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     # the cause is cleared.
     link_unresolved = changes.case_link_error is not None
     if link_unresolved:
-        console_err.print(f"[yellow]  {submission_id}: case link unresolved – {changes.case_link_error}[/yellow]")
+        console_err.print(f"[yellow]  {submission_id}: case link unresolved: {changes.case_link_error}[/yellow]")
 
     if not changes.has_pending:
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
@@ -1813,7 +1819,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
         console_err.print(f"[green]  {submission_id}: updated ({', '.join(changes.pending_changes)}).[/green]")
         return _BackfillResult.LINK_UNRESOLVED if link_unresolved else _BackfillResult.UPDATED
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: failed to commit – {exc}[/red]")
+        console_err.print(f"[red]  {submission_id}: failed to commit: {exc}[/red]")
         return _BackfillResult.ERROR
 
 
@@ -1931,7 +1937,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     else:
         candidates = list(db_service.list_processed_between(start_date.date(), end_date.date()))
         console_err.print(
-            f"[cyan]Date window: {start_date.date()} – {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
+            f"[cyan]Date window: {start_date.date()} to {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
         )
 
     counts: Counter[_BackfillResult] = Counter()
@@ -1964,7 +1970,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
 
         if len(found_in) > 1:
             console_err.print(
-                f"[red]  {submission.id}: ERROR — metadata.json found in both consented and non_consented archives[/red]"
+                f"[red]  {submission.id}: ERROR: metadata.json found in both consented and non_consented archives[/red]"
             )
             counts[_BackfillResult.ERROR] += 1
             continue
@@ -2008,7 +2014,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         f"  Up to date: {counts[_BackfillResult.UP_TO_DATE]}\n"
         f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
-        f"  Written without a case link: {counts[_BackfillResult.LINK_UNRESOLVED]}\n"
+        f"  Case link unresolved: {counts[_BackfillResult.LINK_UNRESOLVED]}\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
 
