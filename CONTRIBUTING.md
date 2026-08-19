@@ -38,6 +38,16 @@ uv run tox
 Some packages have their own unit tests.
 Run `uv run tox` while inside a specific package directory to run that package's unit tests.
 
+### Database tests
+
+Database tests should use the fixtures from `grz_db.testing` (`db` is the usual entry point) rather
+than constructing their own engine. These fixtures parametrize each test over both sqlite and
+PostgreSQL, so a test that builds its own engine instead only ever exercises sqlite.
+
+The PostgreSQL half is skipped when `pg_config` is not on your `PATH`, and pytest reports this as
+skips rather than failures. A green run with a large skip count can therefore mean half the database
+tests never executed, so check the skip count rather than only the exit status.
+
 ## Code formatting and linting
 
 This project uses ruff for code formatting and linting.
