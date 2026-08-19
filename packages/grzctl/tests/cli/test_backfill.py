@@ -55,7 +55,7 @@ def s3_client_mock() -> Iterator[Any]:
 def _put_metadata(s3_client: Any, submission_id: str, metadata: GrzSubmissionMetadata) -> None:
     """Write *metadata* unredacted, unlike archival, which redacts first.
 
-    No test here covers the redacted shape backfill actually reads from the archive.
+    For the redacted shape backfill actually reads from the archive, use ``_archived`` instead.
     """
     s3_client.put_object(
         Bucket=BUCKET,
@@ -257,7 +257,7 @@ def test_backfill_submission_force_applies_destructive_changes(
     assert persisted.submission_metadata == metadata.to_redacted_dict()
 
 
-def test_backfill_submission_force_does_not_overwrite_ignore_fields(
+def test_backfill_force_reconciles_against_an_unredacted_copy(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """An unredacted copy is authoritative, so --force reconciles the database against it.
