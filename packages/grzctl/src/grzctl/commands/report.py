@@ -493,9 +493,9 @@ def _dump_qc_report(
         # BfArM requires both to be reported; the latter does not count as a failure.
         submission_ids_with_deviation = select(DetailedQCResult.submission_id).where(
             sa.or_(
-                sa.not_(DetailedQCResult.percent_bases_above_quality_threshold_passed_qc),
-                sa.not_(DetailedQCResult.mean_depth_of_coverage_passed_qc),
-                sa.not_(DetailedQCResult.targeted_regions_above_min_coverage_passed_qc),
+                sa.not_(DetailedQCResult.percent_bases_above_quality_threshold_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.mean_depth_of_coverage_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.targeted_regions_above_min_coverage_passed_qc),  # type: ignore[call-overload]
             )
         )
         query_submissions_to_report = (
