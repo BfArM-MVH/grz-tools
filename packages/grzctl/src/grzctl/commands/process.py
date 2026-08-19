@@ -1,0 +1,257 @@
+"""Command for processing a submission."""
+
+import json
+import logging
+import time
+from pathlib import Path
+from typing import Any
+
+import click
+import grz_common.cli as grzcli
+from grz_common.pipeline.processor import SubmissionProcessor
+from grz_common.workers.download import S3BotoDownloadWorker
+from grz_common.workers.submission import SubmissionMetadata
+from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
+from grz_db.models.submission import SubmissionStateEnum
+from grz_pydantic_models.submission.metadata import REDACTED_TAN
+
+from ..commands import grzctl_configuration
+from ..dbcontext import DbContext
+from ..models.config import GrzctlConfig
+from ..models.pruefbericht import PruefberichtModel
+from .db.cli import get_submission_db_instance
+from .pruefbericht import _generate_pruefbericht_from_database
+from .pruefbericht import _try_submit as _try_submit_pruefbericht
+
+log = logging.getLogger(__name__)
+
+
+@click.command()
+@grzctl_configuration
+@grzcli.submission_id
+@grzcli.output_dir
+@grzcli.threads
+@grzcli.update_db
+@click.option(
+    "--submit-pruefbericht/--no-submit-pruefbericht",
+    default=False,
+    help="Submit Prüfbericht to BfArM after successful processing.",
+)
+@click.option(
+    "--save-pruefbericht",
+    type=click.Path(),
+    default=None,
+    help="Save generated Prüfbericht to the specified path.",
+)
+@click.option(
+    "--redact-pruefbericht/--no-redact-pruefbericht",
+    default=True,
+    help="Whether to redact sensitive information from written Prüfbericht",
+)
+@click.option(
+    "--redact-logs/--no-redact-logs",
+    default=True,
+    help="Redact sensitive information from logs before archiving.",
+)
+@click.option(
+    "--concurrent-uploads",
+    type=int,
+    default=4,
+    help="Maximum concurrent part uploads per file.",
+)
+@click.option(
+    "--inbox-bucket",
+    default=None,
+    help="Inbox bucket name to use. Required when a submitter has multiple inboxes configured.",
+)
+@click.option(
+    "--clean-inbox/--no-clean-inbox",
+    default=True,
+    help="Clean submission from inbox bucket after successful processing.",
+)
+def process(  # noqa: PLR0913
+    configuration: GrzctlConfig,
+    submission_id: str,
+    output_dir: str,
+    threads: int,
+    update_db: bool,
+    submit_pruefbericht: bool,
+    save_pruefbericht: str | None,
+    redact_pruefbericht: bool,
+    redact_logs: bool,
+    concurrent_uploads: int,
+    inbox_bucket: str | None = None,
+    clean_inbox: bool = True,
+    **kwargs: Any,
+):
+    """
+    Process a submission through the streaming pipeline.
+    """
+    le_id = submission_id.split("_", maxsplit=1)[0]
+    inbox = configuration.resolve_inbox(submitter_id=le_id, inbox_name=inbox_bucket)
+    _, metadata_dir, log_dir = _setup_directories(output_dir)
+
+    log.info(f"Starting streaming pipeline for submission: {submission_id}")
+
+    # first, download metadata to understand the submission structure
+    log.info("Downloading metadata...")
+    download_worker = S3BotoDownloadWorker(
+        inbox.s3, status_file_path=log_dir / "progress_download.cjson", threads=threads
+    )
+    download_worker.download_metadata(submission_id, metadata_dir, metadata_file_name="metadata.json")
+    local_metadata_path = metadata_dir / "metadata.json"
+
+    submission_metadata = SubmissionMetadata(local_metadata_path)
+
+    # register submission in db if not yet registered
+    if update_db:
+        db_service = get_submission_db_instance(configuration.db.database_url)
+        try:
+            if not db_service.get_submission(submission_id):
+                _db_submission = db_service.add_submission(submission_id)
+        except (DuplicateSubmissionError, DuplicateTanGError) as e:
+            raise click.Abort() from e
+        except Exception as e:
+            raise click.ClickException(f"Failed to add submission: {e}") from e
+
+    status_file_path = log_dir / "progress_processing.cjson"
+
+    processor = SubmissionProcessor(
+        configuration=configuration,
+        inbox=inbox,
+        status_file_path=status_file_path,
+        threads=threads,
+        max_concurrent_uploads=concurrent_uploads,
+        clean_inbox=clean_inbox,
+        update_db=update_db,
+    )
+
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.PROCESSING,
+        end_state=SubmissionStateEnum.PROCESSED,
+        enabled=update_db,
+    ):
+        processor.run(submission_metadata)
+
+    _handle_pruefbericht(
+        configuration=configuration,
+        submission_id=submission_id,
+        log_dir=log_dir,
+        submit_pruefbericht=submit_pruefbericht,
+        save_pruefbericht=save_pruefbericht,
+        redact_pruefbericht=redact_pruefbericht,
+        redact_logs=redact_logs,
+        update_db=update_db,
+    )
+
+
+def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
+    """Create and return required directories."""
+    base_dir = Path(output_dir)
+    metadata_dir = base_dir / "metadata"
+    log_dir = base_dir / "logs"
+
+    for d in [base_dir, metadata_dir, log_dir]:
+        d.mkdir(mode=0o770, parents=True, exist_ok=True)
+
+    return base_dir, metadata_dir, log_dir
+
+
+def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
+    configuration: GrzctlConfig,
+    submission_id: str,
+    log_dir: Path,
+    submit_pruefbericht: bool,
+    save_pruefbericht: str | None,
+    redact_pruefbericht: bool,
+    redact_logs: bool,
+    update_db: bool,
+    max_retries: int = 10,
+) -> None:
+    """
+    Generate and optionally submit Prüfbericht to BfArM.
+
+    This implements steps 1.8 of the SOP: Prüfbericht generation and submission.
+    """
+    log.info("Generating Prüfbericht...")
+    try:
+        # TODO: check validation status, but should be fine here, otherwise would have errored and bailed out earlier
+        failed = False
+        pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed)
+        log.info("Prüfbericht generated successfully")
+    except Exception as e:
+        log.error(f"Failed to generate Prüfbericht: {e}")
+        if submit_pruefbericht:
+            raise
+        return
+
+    # save Prüfbericht
+    if save_pruefbericht:
+        save_path = Path(save_pruefbericht)
+        pruefbericht_data = pruefbericht.model_dump(by_alias=True, mode="json")
+        # ... with redacted TAN if requested
+        if redact_pruefbericht:
+            pruefbericht_data["SubmittedCase"]["tan"] = REDACTED_TAN
+        with open(save_path, "w") as f:
+            json.dump(pruefbericht_data, f, indent=2)
+        log.info(f"Saved Prüfbericht (with redacted TAN) to: {save_path}")
+
+    # also save a copy to the logs directory (with redacted TAN)
+    pruefbericht_log_path = log_dir / "pruefbericht.json"
+    redacted_for_log = pruefbericht.model_dump(by_alias=True, mode="json")
+    if redact_logs:
+        redacted_for_log["SubmittedCase"]["tan"] = REDACTED_TAN
+    with open(pruefbericht_log_path, "w") as f:
+        json.dump(redacted_for_log, f, indent=2)
+    log.info(f"Saved Prüfbericht copy to logs: {pruefbericht_log_path}")
+
+    # submit Prüfbericht if requested
+    if submit_pruefbericht:
+        pruefbericht_config: PruefberichtModel = configuration.pruefbericht
+
+        if (auth_url := pruefbericht_config.authorization_url) is None:
+            raise ValueError("pruefbericht.authorization_url is required but not configured")
+        if (client_id := pruefbericht_config.client_id) is None:
+            raise ValueError("pruefbericht.client_id is required but not configured")
+        if (client_secret := pruefbericht_config.client_secret) is None:
+            raise ValueError("pruefbericht.client_secret is required but not configured")
+        if (api_base_url := pruefbericht_config.api_base_url) is None:
+            raise ValueError("pruefbericht.api_base_url is required but not configured")
+
+        log.info("Submitting Prüfbericht to BfArM...")
+
+        initial_delay = 30.0
+        backoff_factor = 2.0
+
+        with DbContext(
+            configuration=configuration,
+            submission_id=submission_id,
+            start_state=SubmissionStateEnum.REPORTING,
+            end_state=SubmissionStateEnum.REPORTED,
+            enabled=update_db,
+        ):
+            for attempt in range(1, max_retries + 2):
+                try:
+                    _expiry, _token = _try_submit_pruefbericht(
+                        pruefbericht=pruefbericht,
+                        api_base_url=str(api_base_url),
+                        auth_url=str(auth_url),
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        token="",
+                    )
+                    break
+                except Exception as e:
+                    if attempt > max_retries:
+                        log.error(f"Prüfbericht submission failed after {max_retries} retries.")
+                        raise e
+                    wait_time = initial_delay * (backoff_factor ** (attempt - 1))
+
+                    log.warning(
+                        f"Prüfbericht submission attempt {attempt} failed with error: {e}. Retrying in {wait_time} seconds..."
+                    )
+                    time.sleep(wait_time)
+
+        log.info("Prüfbericht submitted successfully!")

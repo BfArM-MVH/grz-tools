@@ -85,6 +85,25 @@ class ArchiveTarget(IgnoringBaseModel):
     """Path to the public key for re-encryption of files destined for this archive."""
 
 
+class InterrogationConfig(IgnoringBaseModel):
+    """Configuration for the staging interrogation bucket.
+
+    This bucket acts as a staging area: processed files are uploaded here first,
+    then copied to the final archive on success. If processing fails, files are
+    either cleaned up or left here depending on the ``keep_failed`` setting.
+
+    A lifecycle rule is recommended on this bucket to automatically clean up
+    incomplete multipart uploads and orphaned files from failed transfers
+    (e.g. expire incomplete parts after 10 days).
+    """
+
+    s3: S3Options
+    """S3 connection details and bucket for the staging interrogation bucket."""
+
+    keep_failed: bool = False
+    """If true, leaves the failed submission files in the interrogation bucket. Otherwise deletes them."""
+
+
 class ArchivesConfig(IgnoringBaseModel):
     """Configuration for consented and non-consented archives."""
 
@@ -94,11 +113,67 @@ class ArchivesConfig(IgnoringBaseModel):
     non_consented: ArchiveTarget
     """Target definition for non-consented submissions."""
 
+    interrogation: InterrogationConfig
+    """Target definition for the intermediate interrogation bucket."""
+
+    @model_validator(mode="after")
+    def check_endpoints_match(self) -> "ArchivesConfig":
+        consented_endpoint = str(self.consented.s3.endpoint_url) if self.consented.s3.endpoint_url else None
+        non_consented_endpoint = str(self.non_consented.s3.endpoint_url) if self.non_consented.s3.endpoint_url else None
+        interrogation_endpoint = str(self.interrogation.s3.endpoint_url) if self.interrogation.s3.endpoint_url else None
+
+        if interrogation_endpoint != consented_endpoint:
+            log.warning(
+                "Interrogation bucket endpoint (%s) differs from consented archive endpoint (%s). "
+                "Server-side copying might be slow or fail.",
+                interrogation_endpoint,
+                consented_endpoint,
+            )
+
+        if interrogation_endpoint != non_consented_endpoint:
+            log.warning(
+                "Interrogation bucket endpoint (%s) differs from non-consented archive endpoint (%s). "
+                "Server-side copying might be slow or fail.",
+                interrogation_endpoint,
+                non_consented_endpoint,
+            )
+
+        return self
+
     @model_validator(mode="after")
     def check_buckets_are_unique(self) -> "ArchivesConfig":
-        if self.consented.s3.bucket == self.non_consented.s3.bucket:
-            raise ValueError("consented and non-consented buckets must be distinct.")
+        buckets = {self.consented.s3.bucket, self.non_consented.s3.bucket, self.interrogation.s3.bucket}
+        if len(buckets) != 3:
+            raise ValueError("consented, non-consented and interrogation buckets must be distinct.")
         return self
+
+
+class DetailedQcModel(IgnoringBaseSettings):
+    local_storage: Annotated[str, Field(min_length=1)]
+    """Path to local storage for detailed QC staging."""
+
+    salt: str
+    """Salt to use for deterministic determination of submissions selected for detailed QC."""
+
+    target_percentage: Annotated[float, Field(ge=0.0, le=100.0)] = 2.0
+    """Target percentage of submissions selected for detailed QC per month."""
+
+    shell_command: Annotated[str, Field(min_length=1)] = (
+        "nextflow run main.nf -profile docker "
+        "--submission_basepath '{submission_basepath}' "
+        "--outdir '{output_basepath}/grzqc_output' "
+        "-work-dir '{output_basepath}/work'"
+    )
+    """Shell command template for invoking the GRZ QC workflow.
+
+    Available placeholders:
+      - {submission_basepath}: path to decrypted files (local_storage/submission_id)
+      - {output_basepath}: output directory for QC results (defaults to submission_basepath/qc)
+      - {submission_id}: the raw submission ID
+    """
+
+    auto_run: bool = False
+    """If true, automatically run the QC shell command after the QC pass completes."""
 
 
 class DictConfigSettingsSource(PydanticBaseSettingsSource):
@@ -148,6 +223,9 @@ class GrzctlConfig(IgnoringBaseSettings):
 
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
+
+    detailed_qc: DetailedQcModel
+    """Configuration for detailed QC selection and staging."""
 
     @model_validator(mode="after")
     def build_le_lookups(self) -> "GrzctlConfig":
@@ -205,10 +283,12 @@ class GrzctlConfig(IgnoringBaseSettings):
         finally:
             _config_ctx.reset(token)
 
-    def resolve_inbox(self, submitter_id: str, inbox_name: str) -> InboxTarget:
-        """Retrieve a specific inbox target by exact submitter (LE) ID and inbox name.
+    def resolve_inbox(self, submitter_id: str, inbox_name: str | None = None) -> InboxTarget:
+        """Retrieve a specific inbox target by submitter (LE) ID and optional inbox name.
 
-        No auto-guessing, fallback, or alias lookup.
+        If ``inbox_name`` is not provided and the submitter has exactly one inbox,
+        that inbox is used.  Raises ``click.ClickException`` on lookup failure so
+        CLI commands get a user-friendly message.
         """
         entry = self._le_by_id.get(submitter_id)
         if entry is None:
@@ -216,16 +296,27 @@ class GrzctlConfig(IgnoringBaseSettings):
             log.error(f"Submitter '{submitter_id}' not found. Available: {available}")
             sys.exit(1)
 
-        if inbox_name not in entry.inbox_buckets:
-            available = ", ".join(entry.inbox_buckets.keys())
+        if inbox_name is not None:
+            if inbox_name not in entry.inbox_buckets:
+                available = ", ".join(entry.inbox_buckets.keys())
+                log.error(
+                    f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(submitter_id, entry)}. "
+                    f"Available: {available}"
+                )
+                sys.exit(1)
+            bucket_name = inbox_name
+        elif len(entry.inbox_buckets) == 1:
+            bucket_name = next(iter(entry.inbox_buckets))
+        else:
+            available_buckets = ", ".join(entry.inbox_buckets.keys())
             log.error(
-                f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(submitter_id, entry)}. "
-                f"Available: {available}"
+                f"Multiple inboxes found for {self._describe_le(submitter_id, entry)} "
+                f"({available_buckets}). Please specify --inbox."
             )
             sys.exit(1)
 
-        inbox_cfg = entry.inbox_buckets[inbox_name]
-        bucket = inbox_cfg.bucket or inbox_name
+        inbox_cfg = entry.inbox_buckets[bucket_name]
+        bucket = inbox_cfg.bucket or bucket_name
         return InboxTarget(
             s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
             **inbox_cfg.model_dump(include={"private_key_path", "private_key_passphrase"}),

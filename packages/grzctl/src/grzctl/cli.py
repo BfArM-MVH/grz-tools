@@ -23,6 +23,7 @@ from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.list_submissions import list_submissions
+from .commands.process import process
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
 from .models.config import GrzctlConfig
@@ -100,6 +101,7 @@ def build_cli():
     cli.add_command(download)
     cli.add_command(decrypt)
     cli.add_command(archive)
+    cli.add_command(process)
     cli.add_command(clean)
     cli.add_command(consent)
     cli.add_command(pruefbericht)

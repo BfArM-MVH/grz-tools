@@ -77,6 +77,7 @@ class OutdatedDatabaseSchemaError(Exception):
 class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Submission state enum."""
 
+    PROCESSING = "Processing"
     UPLOADING = "Uploading"
     UPLOADED = "Uploaded"
     DOWNLOADING = "Downloading"
@@ -95,6 +96,7 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     QCED = "QCed"
     CLEANING = "Cleaning"
     CLEANED = "Cleaned"
+    PROCESSED = "Processed"
     FINISHED = "Finished"
     ERROR = "Error"
 

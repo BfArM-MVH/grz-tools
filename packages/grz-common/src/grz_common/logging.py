@@ -8,8 +8,16 @@ from __future__ import annotations
 
 import logging
 import socket
+import sys
 from os import PathLike
 from pathlib import Path
+
+try:
+    from tqdm.auto import tqdm
+
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +48,21 @@ def build_logging_format(hostname: str | None) -> str:
 HOSTNAME: str | None = get_hostname()
 LOGGING_FORMAT = build_logging_format(HOSTNAME)
 LOGGING_DATEFMT = "%Y-%m-%d %I:%M %p"
+
+
+class TqdmLoggingHandler(logging.Handler):
+    """
+    A logging handler that outputs to stderr via tqdm.write().
+    This ensures log messages don't interfere with tqdm progress bars.
+    """
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.write(msg, file=sys.stderr)
+            self.flush()
+        except Exception:
+            self.handleError(record)
 
 
 class AlembicInfoNoiseFilter(logging.Filter):
@@ -87,10 +110,23 @@ def add_filelogger(file_path: str | PathLike, level: str = "INFO", logger_name: 
 
 
 def setup_cli_logging(log_file: str | None, log_level: str):
-    # set the root log level since this is the CLI
-    logging.getLogger().setLevel(log_level.upper())
+    """
+    Setup logging for the CLI.
+    Uses TqdmLoggingHandler if available to play nicely with progress bars.
+    """
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level.upper())
 
-    logging.basicConfig(level=log_level.upper(), format=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT)
+    formatter = logging.Formatter(fmt=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT)
+
+    # Remove existing handlers to avoid duplication (e.g. default handlers)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    console_handler = TqdmLoggingHandler() if HAS_TQDM else logging.StreamHandler(sys.stderr)
+
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
 
     if log_file:
         # add file handler to root logger
