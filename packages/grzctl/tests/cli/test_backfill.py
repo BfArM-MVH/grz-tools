@@ -52,11 +52,14 @@ def s3_client_mock() -> Iterator[Any]:
 
 
 def _put_metadata(s3_client: Any, submission_id: str, metadata: GrzSubmissionMetadata) -> None:
-    """Write *metadata* to S3 the way archival writes it: what was submitted, nothing added."""
+    """Write *metadata* unredacted, unlike archival, which redacts first.
+
+    No test here covers the redacted shape backfill actually reads from the archive.
+    """
     s3_client.put_object(
         Bucket=BUCKET,
         Key=f"{submission_id}/metadata/metadata.json",
-        Body=metadata.model_dump_json(by_alias=True, exclude_unset=True).encode("utf-8"),
+        Body=json.dumps(metadata.get_raw_dict()).encode("utf-8"),
     )
 
 
@@ -394,14 +397,10 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
 
 
 def test_backfill_ignores_only_fields_that_exist() -> None:
-    """A key that names no column ignores nothing.
+    """Every name in ``_BACKFILL_IGNORE_FIELDS`` must be an actual Submission column.
 
-    The set named "local_case_id", which is not a Submission field; the column holding the
-    submitter's local case ID is "pseudonym". Archived metadata.json always carries a redacted
-    localCaseId, so backfill diffed the placeholder against the stored pseudonym: withheld as
-    destructive where a value was already there, written straight in where the column was NULL.
-
-    These tests did not catch it because they passed their own ignore set rather than the one
-    the command builds.
+    A name that matches no column silently ignores nothing (set difference against a
+    non-member is a no-op), so a typo here would only surface once it let backfill overwrite
+    a field it was meant to skip; this asserts it directly instead.
     """
     assert _BACKFILL_IGNORE_FIELDS <= SubmissionBase.model_fields.keys()

@@ -1772,11 +1772,11 @@ def test_model_round_trips_the_submitted_document(example: str) -> None:
 
     metadata = GrzSubmissionMetadata.model_validate(raw)
 
-    assert metadata.model_dump(mode="json", by_alias=True, exclude_unset=True) == raw
+    assert metadata.get_raw_dict() == raw
 
 
 def test_redaction_names_every_field_it_replaces() -> None:
-    """Archival wrote an empty localCaseId where the model wrote the named placeholder."""
+    """redact_metadata_dict replaces tanG, localCaseId, and the index donor's pseudonym on a raw dict."""
     raw = json.loads(_metadata_raw("wgs_tumor_germline", "1.3.0"))
 
     redacted = redact_metadata_dict(raw)
@@ -1787,10 +1787,10 @@ def test_redaction_names_every_field_it_replaces() -> None:
 
 
 def test_both_carriers_of_the_redaction_rule_agree() -> None:
-    """The raw metadata.json archival redacts and the model dump must come out the same.
-
-    These were separate copies of one rule and had already drifted on localCaseId, which is
-    why both spellings are in the archive.
+    """redact_metadata_dict on the raw dict and GrzSubmissionMetadata.to_redacted_dict on the
+    parsed model must redact the same document identically, since both are built from the one
+    rule in :func:`redact_metadata_dict` (see its docstring for why the archive may still hold
+    either spelling of a redacted localCaseId).
     """
     raw = json.loads(_metadata_raw("wgs_tumor_germline", "1.3.0"))
     metadata = GrzSubmissionMetadata.model_validate(copy.deepcopy(raw))
