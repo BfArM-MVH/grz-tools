@@ -101,7 +101,7 @@ def process_config_content(
             "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
         },
         "identifiers": {
-            "grz": "test-grz",
+            "grz": "GRZT00000",
         },
     }
 
@@ -155,7 +155,7 @@ def initialized_db(temp_process_config_file_path):
 
     result = runner.invoke(
         cli,
-        ["db", "--config-file", str(temp_process_config_file_path), "init"],
+        ["--config", str(temp_process_config_file_path), "db", "init"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, f"DB init failed: {result.output}"
@@ -218,9 +218,9 @@ class TestGrzctlProcess:
 
         # Run grzctl process
         args = [
-            "process",
-            "--config-file",
+            "--config",
             str(temp_process_config_file_path),
+            "process",
             "--submission-id",
             submission_id,
             "--output-dir",
@@ -268,9 +268,9 @@ class TestGrzctlProcess:
         custom_log.write_text(f"tan={tan}\nlocalCaseId={local_case_id}\n", encoding="utf-8")
 
         args = [
-            "process",
-            "--config-file",
+            "--config",
             str(temp_process_config_file_path),
+            "process",
             "--submission-id",
             submission_id,
             "--output-dir",
@@ -311,9 +311,9 @@ class TestGrzctlProcess:
 
         # Run grzctl process
         args = [
-            "process",
-            "--config-file",
+            "--config",
             str(temp_process_config_file_path),
+            "process",
             "--submission-id",
             submission_id,
             "--output-dir",
@@ -380,9 +380,9 @@ class TestGrzctlProcess:
 
         # Run grzctl process with --inbox-bucket inbox-b
         args = [
-            "process",
-            "--config-file",
+            "--config",
             str(config_file),
+            "process",
             "--submission-id",
             submission_id,
             "--output-dir",
@@ -406,9 +406,9 @@ class TestGrzctlProcess:
 
         # Test failure if --inbox-bucket is missing when multiple are available
         args_no_bucket = [
-            "process",
-            "--config-file",
+            "--config",
             str(config_file),
+            "process",
             "--submission-id",
             submission_id,
             "--output-dir",
@@ -461,7 +461,7 @@ class TestProcessVsManualWorkflow:
 
         result = runner.invoke(
             cli,
-            ["decrypt", "--submission-dir", str(working_dir), "--config-file", config_file, "--no-update-db"],
+            ["--config", config_file, "decrypt", "--submission-dir", str(working_dir), "--no-update-db"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, f"Decrypt failed: {result.output}"
@@ -471,6 +471,7 @@ class TestProcessVsManualWorkflow:
         s3_buckets,
         temp_process_config_file_path,
         temp_keys_config_file_path,
+        temp_grzctl_keys_config_file_path,
         initialized_db,
         working_dir_process,
         working_dir_manual,
@@ -486,9 +487,9 @@ class TestProcessVsManualWorkflow:
 
         # === Run grzctl process ===
         args = [
-            "process",
-            "--config-file",
+            "--config",
             str(temp_process_config_file_path),
+            "process",
             "--submission-id",
             submission_id,
             "--output-dir",
@@ -505,7 +506,7 @@ class TestProcessVsManualWorkflow:
 
         # === Run manual workflow ===
         self._setup_manual_submission_dir(working_dir_manual)
-        self._run_manual_decrypt(working_dir_manual, str(temp_keys_config_file_path))
+        self._run_manual_decrypt(working_dir_manual, str(temp_grzctl_keys_config_file_path))
 
         # === Compare decrypted content checksums ===
         # Get checksums from files decrypted by grzctl process
@@ -561,9 +562,9 @@ class TestProcessValidationFailure:
 
         # Run grzctl process
         args = [
-            "process",
-            "--config-file",
+            "--config",
             str(temp_process_config_file_path),
+            "process",
             "--submission-id",
             submission_id,
             "--output-dir",
@@ -717,7 +718,19 @@ class TestConfigValidation:
         with open(config_file, "w") as f:
             yaml.dump(process_config_content, f)
 
-        json_override = {le_id: {bucket_name: {"private_key_passphrase": "json-secret-passphrase"}}}
+        json_override = {
+            le_id: {
+                "inbox_buckets": {
+                    bucket_name: {
+                        "endpoint_url": "https://s3.amazonaws.com",
+                        "access_key": "testing",
+                        "secret": "testing",
+                        "private_key_path": "/path/to/test.sec",
+                        "private_key_passphrase": "json-secret-passphrase",
+                    }
+                }
+            }
+        }
         monkeypatch.setenv("GRZ_LEISTUNGSERBRINGER", json.dumps(json_override))
 
         with open(config_file) as f:

@@ -224,8 +224,8 @@ class GrzctlConfig(IgnoringBaseSettings):
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
 
-    detailed_qc: DetailedQcModel | None = None
-    """Configuration for detailed QC selection and staging (optional)."""
+    detailed_qc: DetailedQcModel
+    """Configuration for detailed QC selection and staging."""
 
     @model_validator(mode="after")
     def build_le_lookups(self) -> "GrzctlConfig":

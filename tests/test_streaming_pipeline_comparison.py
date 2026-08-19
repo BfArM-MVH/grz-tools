@@ -89,11 +89,11 @@ class TestManualCliVsStreamingPipeline:
         result = runner.invoke(
             cli,
             [
+                "--config",
+                config_file,
                 "decrypt",
                 "--submission-dir",
                 str(working_dir),
-                "--config-file",
-                config_file,
                 "--no-update-db",
             ],
             catch_exceptions=False,
@@ -165,7 +165,7 @@ class TestManualCliVsStreamingPipeline:
         self,
         working_dir_manual,
         working_dir_streaming,
-        temp_keys_config_file_path,
+        temp_grzctl_keys_config_file_path,
         crypt4gh_grz_private_key_file_path,
     ):
         """
@@ -180,7 +180,7 @@ class TestManualCliVsStreamingPipeline:
         self._setup_submission_dir(working_dir_streaming)
 
         # === Manual CLI Decrypt (grzctl decrypt) ===
-        self._run_cli_decrypt(working_dir_manual, temp_keys_config_file_path)
+        self._run_cli_decrypt(working_dir_manual, str(temp_grzctl_keys_config_file_path))
 
         # === Streaming Decrypt (using Crypt4GHDecryptor directly) ===
         grz_private_key = get_private_key(crypt4gh_grz_private_key_file_path)
@@ -215,6 +215,7 @@ class TestManualCliVsStreamingPipeline:
         working_dir_manual,
         working_dir_streaming,
         temp_keys_config_file_path,
+        temp_grzctl_keys_config_file_path,
         temp_identifiers_config_file_path,
         crypt4gh_grz_private_key_file_path,
     ):
@@ -236,7 +237,7 @@ class TestManualCliVsStreamingPipeline:
 
         # === Manual CLI Workflow ===
         # Step 1: Decrypt
-        self._run_cli_decrypt(working_dir_manual, temp_keys_config_file_path)
+        self._run_cli_decrypt(working_dir_manual, str(temp_grzctl_keys_config_file_path))
 
         # Step 2: Validate (using grz-cli validate)
         self._run_cli_validate(working_dir_manual, temp_identifiers_config_file_path)

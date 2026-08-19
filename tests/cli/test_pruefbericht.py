@@ -358,6 +358,7 @@ def pruefbericht_db_config(tmp_path, migrated_db_connection):
         },
         "pruefbericht": {},
         "identifiers": {"grz": "GRZK00007"},
+        "detailed_qc": {"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0},
     }
 
     config_path = tmp_path / "config.json"

@@ -102,8 +102,6 @@ class RunSetupCoordinator:
         self._s3_client_cache = s3_client_cache
 
     def _determine_qc_flag(self, submission_id: str) -> bool:
-        if self._config.detailed_qc is None:
-            return False
         db = SubmissionDb(self._config.db.database_url, self._config.db.author)  # type: ignore[arg-type]
         target_percentage = self._config.detailed_qc.target_percentage
         should_qc = (
@@ -509,7 +507,7 @@ class SubmissionProcessor:
             max_concurrent_uploads=max_concurrent_uploads,
             enable_metrics=enable_metrics,
             background_tee=background_tee,
-            qc_local_storage=self.config.detailed_qc.local_storage if self.config.detailed_qc else "",
+            qc_local_storage=self.config.detailed_qc.local_storage,
         )
 
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata, run_state: SubmissionRunState) -> None:
@@ -645,7 +643,7 @@ class SubmissionProcessor:
             should_qc = self._setup._determine_qc_flag(submission_run.submission_id)
             submission_run.should_qc = should_qc
 
-            if should_qc and self.config.detailed_qc is not None:
+            if should_qc:
                 log.info(f"Running detailed QC pass for {submission_run.submission_id}...")
                 qc_logger = FileProgressLogger[ProcessingState](self._log_dir / "progress_qc.cjson")
                 self._pipeline_executor.process_submission_files(

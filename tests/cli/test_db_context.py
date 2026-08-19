@@ -37,6 +37,7 @@ def full_config_path(
         },
         "archives": _grzctl_archives(endpoint_url="http://localhost:9000"),
         "identifiers": {"grz": "GRZK00007"},
+        "detailed_qc": {"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0},
     }
     config_data.update(migrated_db_config_content)
     config_data.update(keys_config_content)
