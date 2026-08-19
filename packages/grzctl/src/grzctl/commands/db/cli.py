@@ -1419,16 +1419,6 @@ class _BackfillResult(StrEnum):
     CONSENT_MISMATCH = "consent_mismatch"
 
 
-# Metadata re-read from S3 is redacted, so tan_g and the pseudonym are restored from the
-# stored row before diffing (see Submission.restore_redacted_fields) rather than ignored
-# outright: that way an unredacted copy is still checked against the database, and a
-# placeholder never becomes a case key. Whatever cannot be restored is ignored per
-# submission. This constant covers only the upload date: it is computed above and passed
-# to diff() as an explicit parameter, so the generic field diff must not also read it
-# from metadata.
-_BACKFILL_IGNORE_FIELDS = frozenset({"submission_uploaded_date"})
-
-
 def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
     current_submission: Submission,
     s3_client: Any,
@@ -1633,7 +1623,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if force and allow_overwrite:
         raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
 
-    ignore_fields = set(ignore_field) | _BACKFILL_IGNORE_FIELDS
+    ignore_fields = set(ignore_field)
 
     # ── Build S3 clients for both archive targets ────────────────────────────
     archive_targets = [
