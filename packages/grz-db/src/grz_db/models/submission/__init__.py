@@ -179,8 +179,8 @@ class SubmissionBase(SQLModel):
     )
 
 
-# The submitter's local case ID is stored in the pseudonym column; the other redacted
-# metadata field is named the same on both sides.
+# The submitter's local case ID is stored in the pseudonym column; ``tan_g``, the other
+# redacted field, is named the same on both sides.
 _METADATA_FIELD_TO_COLUMN = {"local_case_id": "pseudonym"}
 
 
@@ -201,7 +201,9 @@ class Submission(SubmissionBase, table=True):
         return v
 
     # additionally constrained by the partial unique index ux_submissions_one_initial_per_case
-    # (created in the cases migration): at most one QC-passed 'initial' submission per case
+    # (created in the cases migration): at most one QC-passed 'initial' submission per case.
+    # NULL means not case-tracked (a 'test' submission) or not yet resolved; the partial
+    # unique index leaves NULLs unconstrained.
     case_id: int | None = Field(default=None, foreign_key="cases.id", index=True)
 
     states: list["SubmissionStateLog"] = Relationship(back_populates="submission")
@@ -307,7 +309,7 @@ class Case(SQLModel, table=True):
 
     Groups the submissions for one patient. The authoritative identity is
     ``psn`` (the RKI pseudonym), unique once assigned. ``submitter_id`` and ``local_case_id`` are
-    lookup keys used to resolve the case before a ``psn`` exists, not the authoritative identity
+    resolution keys used to locate the case before a ``psn`` exists, not the authoritative identity
     themselves. The partial unique index ``ux_cases_submitter_local_case`` keeps the pair unique
     wherever both halves are present; neither is required, since a future flow may resolve a case
     by ``psn`` alone (with ``local_case_id`` absent).
@@ -402,13 +404,17 @@ class CaseResolver(Protocol):
     Different resolvers key on different identifiers, so the resolution rule can evolve
     (currently ``(submitter_id, local_case_id)``; later the RKI ``psn``) without a schema change:
     both keys are already columns on :class:`Case`. The seam is not the whole of such a switch,
-    though. Only :meth:`SubmissionDb.assign_case` and :meth:`SubmissionDb.resolve_case` take a
-    resolver; :meth:`SubmissionDb.diff` resolves through :data:`DEFAULT_CASE_RESOLVER`, so
+    though. Three methods take a resolver, :meth:`SubmissionDb.assign_case`,
+    :meth:`SubmissionDb.resolve_case` and :meth:`SubmissionDb.assert_no_duplicate_initial`, and
+    the last short-circuits on the default resolver's key before it consults the one it was
+    given; :meth:`SubmissionDb.diff` resolves through :data:`DEFAULT_CASE_RESOLVER`, so
     metadata-driven linking would want one threaded through there and a ``psn`` on
     :class:`CaseLinkDiff`.
 
     Implementations raise :class:`AmbiguousCaseError` rather than guess when their key matches
-    more than one case.
+    more than one case. They must not write: resolution runs inside :meth:`SubmissionDb.diff`,
+    which reports rather than changes. Returning ``None`` is an instruction, not an absence of
+    one: :meth:`SubmissionDb.assign_case` creates a case from the identifiers it was passed.
     """
 
     def find_case(
@@ -578,7 +584,7 @@ _RAW_CONTENT_MAGIC: dict[RequestRawContentType, bytes] = {
 def detect_raw_content_type(content: bytes) -> RequestRawContentType | None:
     """Identify a raw attachment's type from its magic bytes.
 
-    Content is authoritative — the file extension is intentionally ignored. Returns
+    Content is authoritative: the file extension is intentionally ignored. Returns
     ``None`` if the bytes match no supported type. This is the same magic-byte table
     the model uses to verify ``request_raw_content`` against its declared type.
     """
@@ -660,7 +666,7 @@ class ChangeRequestLogBase(SQLModel):
             if expected_magic is not None and not self.request_raw_content.startswith(expected_magic):
                 raise ValueError(
                     f"request_raw_content does not start with the expected "
-                    f"{self.request_raw_content_type.value} magic bytes — file content does not "
+                    f"{self.request_raw_content_type.value} magic bytes: file content does not "
                     f"match the declared type."
                 )
         return self
@@ -865,11 +871,13 @@ class SubmissionDb:
         only ever flushes, which is also what puts it in front of the indices while the
         handler that can name what they rejected is still in scope.
 
-        Instances stay usable after the commit, since nothing here is filled in by the
-        database itself.
+        ``expire_on_commit=False`` keeps returned instances readable after the commit: the
+        flush has already fetched what the database assigns, such as autoincrement primary
+        keys, and nothing is computed later.
 
         :param session: A session to join, or ``None`` to open one.
-        :raises OutdatedDatabaseSchemaError: if the database is not at the latest revision.
+        :raises OutdatedDatabaseSchemaError: if a session is opened here and the database is
+            not at the latest revision. A joined session is not re-checked.
         """
         if session is not None:
             yield session
@@ -895,7 +903,7 @@ class SubmissionDb:
         """Confirm, once, that the database is at the revision this code expects.
 
         Asking costs a scan of the migration directory and a connection of its own, and one
-        pass over a submission opens a session per write, so the answer is kept. Nothing makes
+        pass over a submission opens several sessions, so the answer is kept. Nothing makes
         it stale in a way that helps: migrating is an operator action, downgrades are not
         supported.
 
@@ -1016,7 +1024,7 @@ class SubmissionDb:
         is queried again to name it in the message.
 
         :param session: The session whose transaction was rolled back.
-        :param case_id: The case the rejected write targeted, read before the commit. A unique
+        :param case_id: The case the rejected write targeted, read before the flush. A unique
             index leaves NULLs unconstrained, so a rejected write always names a case.
         """
         qc_passed_initial = self._qc_passed_initial_of(session, case_id) if case_id is not None else None
@@ -1455,7 +1463,8 @@ class SubmissionDb:
         :param local_case_id: Submitter-local case identifier resolution key.
         :param psn: RKI pseudonym; must be unique across cases when set.
         :returns: The newly created :class:`Case`, with its database-assigned ``id`` populated.
-        :raises DuplicateCaseError: if a case already has this ``(submitter_id, local_case_id)``.
+        :raises DuplicateCaseError: if another case already holds this ``(submitter_id,
+            local_case_id)``. Only enforced where both halves are present.
         :raises DuplicatePsnError: if ``psn`` is already assigned to another case.
         """
         with self.transaction() as session:
@@ -1481,7 +1490,7 @@ class SubmissionDb:
         :raises ValueError: if ``key`` is not a column of ``cases`` or is read-only.
         :raises CaseNotFoundError: if no case has the given ``case_id``.
         :raises DuplicateCaseError: if the change would give two cases the same
-            ``(submitter_id, local_case_id)``.
+            ``(submitter_id, local_case_id)``. Only enforced where both halves are present.
         :raises DuplicatePsnError: if ``key`` is ``"psn"`` and ``value`` is
             already assigned to another case.
         """
@@ -1525,7 +1534,8 @@ class SubmissionDb:
         """Link (or relink) a submission to an existing case.
 
         A case may have at most one ``initial`` submission that passed basic QC. A partial unique
-        index enforces this at commit time, so a link that would break it raises instead.
+        index enforces this; the flush inside the conflict handler is where a link that would
+        break it is rejected.
 
         :param submission_id: ID of the submission to link.
         :param case_id: Primary key of the target case.
@@ -1533,7 +1543,8 @@ class SubmissionDb:
         :raises SubmissionNotFoundError: if no submission has the given
             ``submission_id``.
         :raises SubmissionTypeInvalidForCaseError: if the submission is a ``test``
-            submission, which is never case-tracked.
+            submission, which is never case-tracked, or if it has not been populated yet
+            and so carries no type.
         :raises CaseNotFoundError: if no case has the given ``case_id``.
         :raises DuplicateInitialSubmissionError: if linking would give the case a second
             QC-passed ``initial`` submission.
@@ -1629,13 +1640,12 @@ class SubmissionDb:
 
         The *resolver* strategy decides how an existing case is located (default:
         ``(submitter_id, local_case_id)``). Competing initial submissions may share a case while
-        pending basic QC, since the data alone cannot tell a re-upload from a duplicate; only one
-        of them may ever pass basic QC. A non-initial submission may also open a brand-new case:
-        a patient's ``initial`` submission may never reach this GRZ, and refusing to link a
-        ``followup`` in that situation would keep a real, BfArM-reported submission out of the
-        case record.
-        ``test`` submissions are never case-tracked and are rejected. Re-running for an
-        already-linked submission makes no further change (safe to repeat).
+        pending basic QC, since the data alone cannot tell a re-upload from a duplicate. Any type
+        but ``test`` may open a case; see :meth:`_find_case_for_link` for why. ``test``
+        submissions are never case-tracked and are rejected.
+
+        Repeating the call with the same identifiers makes no further change; the resolver has
+        to find the same case, so a call whose key is incomplete creates a new one each time.
 
         :param submission_id: ID of the submission to assign.
         :param submitter_id: Submitter identifier passed to the resolver and
@@ -1644,9 +1654,7 @@ class SubmissionDb:
             resolver and stored on a newly created case.
         :param psn: RKI pseudonym passed to the resolver and stored on a newly
             created case.
-        :param submission_type: Type of the submission. Any type may open a case,
-            since a patient's first submission to reach this GRZ need not be the
-            ``initial`` one; only ``test`` is rejected (never case-tracked).
+        :param submission_type: Type of the submission. Only ``test`` is rejected.
         :param resolver: Strategy used to locate an existing case; defaults to
             :data:`DEFAULT_CASE_RESOLVER` (:class:`SubmitterLocalCaseResolver`).
         :returns: The resolved or newly created :class:`Case` the submission is
@@ -1713,17 +1721,12 @@ class SubmissionDb:
     ) -> "Case | None":
         """Preview the case :meth:`assign_case` would link, without writing.
 
-        Runs the same lookup and validation as :meth:`assign_case` but leaves
-        the database unchanged.
-
         :param submission_id: ID of the submission to resolve a case for.
         :param submitter_id: Submitter identifier passed to the resolver.
         :param local_case_id: Submitter-local case identifier passed to the
             resolver.
         :param psn: RKI pseudonym passed to the resolver.
-        :param submission_type: Type of the submission. Any type may open a case,
-            since a patient's first submission to reach this GRZ need not be the
-            ``initial`` one; only ``test`` is rejected (never case-tracked).
+        :param submission_type: Type of the submission. Only ``test`` is rejected.
         :param resolver: Strategy used to locate an existing case; defaults to
             :data:`DEFAULT_CASE_RESOLVER` (:class:`SubmitterLocalCaseResolver`).
         :returns: The existing :class:`Case` the submission would be linked to,
@@ -1770,8 +1773,8 @@ class SubmissionDb:
         makes the answer one answer: asked separately, a competing initial can pass basic QC in
         between and this would report a submission as clear that the index is about to reject.
 
-        Answering costs two queries, so callers that are going to write anyway should let the
-        index speak rather than ask twice.
+        Answering costs three queries, so callers that are going to write anyway should let the
+        index speak instead.
 
         :param submission_id: ID of the submission about to be validated. A case whose QC-passed
             initial submission *is* this one is not a duplicate.
@@ -2115,12 +2118,12 @@ class SubmissionDb:
             If None, the field will not be included in the comparison.
         :param ignore_fields: Optional set of field names to be ignored during the metadata
             comparison. ``"case_id"`` skips case-link resolution.
-        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
         :returns: A :class:`SubmissionChangeSet` with all detected differences. A case that
             cannot be resolved is reported in
             :attr:`SubmissionChangeSet.case_link_error` rather than raised, since it says
             nothing about the other diffs; :meth:`resolve_case` still raises for a caller
             that asked about the case alone.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
         """
         if submission_uploaded_date is None:
             # set arbitrary date if not provided
@@ -2131,9 +2134,9 @@ class SubmissionDb:
             ignore_fields.add("submission_uploaded_date")
 
         # One transaction for the whole change set: the three parts describe one submission at
-        # one moment, and computing them against separate snapshots let them disagree. Reading
-        # the row here also means resolution and the field diff share it. ``get_submission``
-        # would eagerly load the state log, which nothing in a diff reads.
+        # one moment, and computing them against separate snapshots would let them disagree.
+        # Reading the row here also means resolution and the field diff share it.
+        # ``get_submission`` would eagerly load the state log, which nothing in a diff reads.
         with self.transaction() as session:
             current_submission = session.get(Submission, submission_id)
             if current_submission is None:
@@ -2157,10 +2160,9 @@ class SubmissionDb:
     def commit_changes(self, submission_id: str, changes: SubmissionChangeSet) -> None:
         """Write all pending changes of a change set to the database, as one transaction.
 
-        A change set is one answer to one metadata file, so it is applied whole or not at all.
-        Writing it piecemeal left a rejected write with the earlier parts already stored, and
-        the operator was told only about the failure: re-running then previewed a different
-        starting state than the one just shown.
+        A change set is one answer to one metadata file, so it is applied whole or not at all:
+        writing it piecemeal would leave a rejected write with the earlier parts stored, and
+        re-running would then preview a different starting state than the one just shown.
 
         A pending case link in :attr:`SubmissionChangeSet.case_link` is applied via
         :meth:`assign_case`, creating the case first if none exists yet. It goes first, so

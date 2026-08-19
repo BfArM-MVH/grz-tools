@@ -230,10 +230,10 @@ def test_restore_redacted_fields_restores_each_column_independently(
 
 
 def test_the_schema_is_checked_once_per_database(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Asking costs a scan of the migration directory and a connection of its own.
-
-    One pass over a submission opens a session per write, so asking every time paid that over
-    and over for an answer that cannot change under us.
+    """The schema check scans the migration directory and opens a connection of its own, and
+    each write opens its own session, so caching the answer on the instance is what keeps
+    that cost from being paid on every write. The answer cannot change while the process is
+    running, so the cache cannot go stale.
     """
     calls = 0
     original = SubmissionDb._at_latest_schema

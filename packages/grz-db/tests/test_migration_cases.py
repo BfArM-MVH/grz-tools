@@ -2,7 +2,9 @@
 
 Seeds submissions at the revision just before the cases migration, upgrades, and asserts that the
 backfill groups by ``(submitter_id, pseudonym)``, stores the keys on the case, links submissions,
-keeps distinct submitters apart, and leaves unkeyable rows unlinked.
+keeps distinct submitters apart, and leaves unkeyable rows unlinked. Also asserts that the
+migration fails fast when two QC-passed 'initial' submissions share a key, and that it extends
+the PostgreSQL ``failurereasonenum`` type with ``duplicate_initial``.
 """
 
 import pytest
