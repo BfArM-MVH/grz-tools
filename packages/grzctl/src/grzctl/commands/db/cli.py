@@ -806,8 +806,10 @@ def _recompute_metric[
     :param required: threshold required by BfArM (0 for non-index donors)
     """
     meets_threshold = measured >= required
-    if not provided or not measured:
-        # no provided value (or computed value of zero): deviation is undefined
+    # A provided value of zero is treated like a missing one, mirroring the QC workflow
+    # (whose Nextflow module omits zero-valued provided metrics entirely); a computed value
+    # of zero leaves the relative deviation undefined.
+    if provided is None or provided == 0 or measured == 0:
         return MetricVerdict(meets_threshold, None, meets_threshold)
     deviation = (measured - provided) / measured * 100
     return MetricVerdict(meets_threshold, deviation, meets_threshold and abs(deviation) <= PCT_DEV_CUTOFF)
