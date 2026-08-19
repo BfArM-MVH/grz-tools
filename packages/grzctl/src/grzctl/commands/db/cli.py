@@ -3,6 +3,7 @@
 import csv
 import json
 import logging
+import math
 import sys
 import traceback
 from collections import Counter, namedtuple
@@ -759,6 +760,11 @@ class QCStatus(StrEnum):
 # Keep in sync with PCT_DEV_CUTOFF in GRZ_QC_Workflow's compare_threshold.py
 PCT_DEV_CUTOFF = 10
 
+# Absolute tolerance (in percentage points) below which a stored and a recomputed percent
+# deviation are considered equal, so that float noise (e.g. from CSV round-trips) does not
+# count as a change.
+DEVIATION_TOLERANCE = 1e-6
+
 # Metric-tagged values for the three detailed QC metrics: mean depth of coverage in fold
 # coverage, percent of bases above the quality threshold in percent (0-100), and targeted
 # regions above minimum coverage as a proportion (0-1). ``_recompute_metric`` requires all
@@ -1033,7 +1039,8 @@ def _recompute_result(
         passed_attr = f"{prefix}_passed_qc"
         deviation_attr = f"{prefix}_percent_deviation"
         changed = getattr(result, passed_attr) != verdict.passed_qc or (
-            verdict.deviation is not None and abs(getattr(result, deviation_attr) - verdict.deviation) > 1e-6
+            verdict.deviation is not None
+            and not math.isclose(getattr(result, deviation_attr), verdict.deviation, abs_tol=DEVIATION_TOLERANCE)
         )
         if not changed:
             continue
