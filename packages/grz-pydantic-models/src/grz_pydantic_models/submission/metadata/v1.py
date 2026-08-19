@@ -39,8 +39,8 @@ from .versioning import Version
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
 REDACTED_TAN = "0" * 64
 REDACTED_LOCAL_CASE_ID = "REDACTED_LOCAL_CASE_ID"
-# Archival wrote an empty string before REDACTED_LOCAL_CASE_ID was introduced, so both
-# spellings are in the archive and neither identifies a patient.
+# The archive contains both an empty string and REDACTED_LOCAL_CASE_ID as redaction
+# placeholders; neither spelling identifies a patient.
 LOCAL_CASE_ID_PLACEHOLDERS = ("", REDACTED_LOCAL_CASE_ID)
 
 
