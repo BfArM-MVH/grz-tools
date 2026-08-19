@@ -46,14 +46,18 @@ from grz_db.models.submission import (
     SubmissionStateLog,
 )
 from grz_pydantic_models.common import StrictBaseModel
+from grz_pydantic_models.dates import quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
     GenomicStudySubtype,
     GrzSubmissionMetadata,
     LibraryType,
+    MissingThresholdsException,
+    Relation,
     SequenceSubtype,
     SequenceType,
 )
 from pydantic import Field, ValidationError
+from sqlmodel import select
 from tqdm.auto import tqdm
 
 from ... import get_versions
@@ -746,8 +750,29 @@ def populate(  # noqa: C901, PLR0913
 class QCStatus(StrEnum):
     PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
+    DEVIATION = "DEVIATION"
+    # Superseded by DEVIATION in GRZ_QC_Workflow >= 4.0.0; kept to parse reports from older versions.
     TOO_LOW = "TOO LOW"
     THRESHOLD_NOT_MET = "THRESHOLD NOT MET"
+
+
+# Keep in sync with PCT_DEV_CUTOFF in GRZ_QC_Workflow's compare_threshold.py
+PCT_DEV_CUTOFF = 10
+
+
+def _recompute_metric(measured: float, provided: float | None, required: float) -> tuple[bool, float | None, bool]:
+    """Re-evaluate a single detailed QC metric under the GRZ_QC_Workflow >= 4.0.0 rules.
+
+    :param measured: value computed by the QC pipeline (stored in the database)
+    :param provided: value provided by the Leistungserbringer in the submission metadata
+    :param required: threshold required by BfArM (0 for non-index donors)
+    :return: tuple of (computed value meets the required threshold, percent deviation of the
+        provided value from the computed value, per-metric passed_qc flag)
+    """
+    meets_threshold = measured >= required
+    deviation = None if not provided or not measured else (measured - provided) / measured * 100
+    flagged = deviation is not None and abs(deviation) > PCT_DEV_CUTOFF
+    return meets_threshold, deviation, meets_threshold and not flagged
 
 
 class QCReportRow(StrictBaseModel):
@@ -898,6 +923,188 @@ def populate_qc(
     ):
         for result in results:
             db_service.add_detailed_qc_result(result)
+
+
+def _metadata_lab_data(metadata: GrzSubmissionMetadata) -> dict[str, tuple[Any, Any]]:
+    """Map lab datum IDs to (required thresholds, provided sequence data) from the metadata.
+
+    Derives the lab datum IDs the same way GRZ_QC_Workflow's metadata_to_samplesheet.py
+    does. Only index donors have required thresholds; for all other donors the thresholds
+    are ``None`` (mirroring metadata_to_samplesheet.py, which sets their requirements to 0).
+    """
+    lab_data = {}
+    for donor_index, donor in enumerate(metadata.donors):
+        for lab_datum_index, lab_datum in enumerate(donor.lab_data):
+            if lab_datum.sequence_data is None:
+                continue
+            lab_datum_id = f"{donor.relation}{donor_index}_{lab_datum.sequence_subtype}{lab_datum_index}"
+            try:
+                thresholds = metadata.determine_thresholds_for(donor, lab_datum)
+            except MissingThresholdsException:
+                thresholds = None
+            if donor.relation != Relation.index_:
+                thresholds = None
+            lab_data[lab_datum_id] = (thresholds, lab_datum.sequence_data)
+    return lab_data
+
+
+def _recompute_result(
+    result: DetailedQCResult, thresholds: Any, sequence_data: Any, apply_changes: bool
+) -> tuple[bool, int]:
+    """Recompute the three metrics of one detailed QC result row.
+
+    Mutates the row in place when ``apply_changes`` is set (the enclosing session tracks the
+    changes). Returns whether all computed values meet their required thresholds and how
+    many metric fields would change.
+    """
+    meets_all_thresholds = True
+    metrics_changed = 0
+    metrics = (
+        (
+            result.mean_depth_of_coverage,
+            sequence_data.mean_depth_of_coverage,
+            thresholds.mean_depth_of_coverage if thresholds else 0,
+            "mean_depth_of_coverage",
+        ),
+        (
+            result.percent_bases_above_quality_threshold_percent,
+            sequence_data.percent_bases_above_quality_threshold.percent,
+            thresholds.percent_bases_above_quality_threshold.percent_bases_above if thresholds else 0,
+            "percent_bases_above_quality_threshold",
+        ),
+        (
+            result.targeted_regions_above_min_coverage,
+            sequence_data.targeted_regions_above_min_coverage,
+            thresholds.targeted_regions_above_min_coverage.fraction_above if thresholds else 0,
+            "targeted_regions_above_min_coverage",
+        ),
+    )
+    for measured, provided, required, prefix in metrics:
+        meets_threshold, deviation, passed = _recompute_metric(measured, provided, required)
+        meets_all_thresholds &= meets_threshold
+        passed_attr = f"{prefix}_passed_qc"
+        deviation_attr = f"{prefix}_percent_deviation"
+        changed = getattr(result, passed_attr) != passed or (
+            deviation is not None and abs(getattr(result, deviation_attr) - deviation) > 1e-6
+        )
+        if not changed:
+            continue
+        metrics_changed += 1
+        if apply_changes:
+            setattr(result, passed_attr, passed)
+            if deviation is not None:
+                setattr(result, deviation_attr, deviation)
+    return meets_all_thresholds, metrics_changed
+
+
+def _recompute_submission(session, submission: Submission, apply_changes: bool) -> tuple[bool, int] | None:
+    """Recompute the detailed QC results of one submission.
+
+    Returns whether all computed values meet their required thresholds and how many metric
+    fields would change, or ``None`` if the submission has no recomputable QC results.
+    """
+    results = session.exec(select(DetailedQCResult).where(DetailedQCResult.submission_id == submission.id)).all()
+    if not results:
+        return None
+    if not submission.submission_metadata:
+        console_err.print(f"[yellow]Skipping {submission.id}: no submission metadata stored.[/yellow]")
+        return None
+    metadata = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
+    lab_data = _metadata_lab_data(metadata)
+
+    # only the most recent QC run per lab datum decides
+    latest_results: dict[str, DetailedQCResult] = {}
+    for result in results:
+        current = latest_results.get(result.lab_datum_id)
+        if current is None or result.timestamp > current.timestamp:
+            latest_results[result.lab_datum_id] = result
+
+    unmatched = set(latest_results) - set(lab_data)
+    if unmatched:
+        console_err.print(
+            f"[yellow]Skipping {submission.id}: QC results {sorted(unmatched)} cannot be matched "
+            f"to the submission metadata.[/yellow]"
+        )
+        return None
+
+    submission_meets_thresholds = True
+    metrics_updated = 0
+    for result in latest_results.values():
+        thresholds, sequence_data = lab_data[result.lab_datum_id]
+        meets_all_thresholds, metrics_changed = _recompute_result(result, thresholds, sequence_data, apply_changes)
+        submission_meets_thresholds &= meets_all_thresholds
+        metrics_updated += metrics_changed
+    return submission_meets_thresholds, metrics_updated
+
+
+@submission.command(name="recompute-qc")
+@click.option("--year", "year", type=click.IntRange(min=2025), required=True, help="Year of the quarter to recompute.")
+@click.option("--quarter", "quarter", type=click.IntRange(min=1, max=4), required=True, help="Quarter to recompute.")
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    default=False,
+    help="Write the recomputed verdicts to the database. Without this flag, only report what would change.",
+)
+@click.pass_context
+def recompute_qc(ctx: click.Context, year: int, quarter: int, apply_changes: bool):
+    """Recompute detailed QC verdicts under the current rules (GRZ_QC_Workflow >= 4.0.0).
+
+    Re-evaluates the stored detailed QC results of all submissions uploaded in the given
+    quarter: a metric fails only if the value computed by the pipeline is below the required
+    BfArM threshold, and a deviation of more than 10% between the computed and provided
+    values (in either direction, relative to the computed value) is flagged without failing
+    quality control. Use this to backfill verdicts produced by older workflow versions
+    before generating the quarterly report.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
+
+    table = rich.table.Table(
+        "Submission ID",
+        "Detailed QC Passed",
+        "Metrics Updated",
+        title=f"Recomputed Detailed QC Verdicts Q{quarter}/{year}",
+    )
+    verdict_changes: dict[str, bool] = {}
+    total_metrics_updated = 0
+    with db_service._get_session() as session:
+        submissions = session.exec(
+            select(Submission).where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+        ).all()
+        for submission in sorted(submissions, key=lambda s: s.id):
+            outcome = _recompute_submission(session, submission, apply_changes)
+            if outcome is None:
+                continue
+            submission_meets_thresholds, metrics_updated = outcome
+
+            if submission.detailed_qc_passed is not submission_meets_thresholds:
+                verdict_changes[submission.id] = submission_meets_thresholds
+            total_metrics_updated += metrics_updated
+            if metrics_updated or submission.id in verdict_changes:
+                old_verdict = {True: "yes", False: "no", None: "unset"}[submission.detailed_qc_passed]
+                new_verdict = "yes" if submission_meets_thresholds else "no"
+                table.add_row(
+                    submission.id,
+                    old_verdict if old_verdict == new_verdict else f"{old_verdict} -> {new_verdict}",
+                    str(metrics_updated),
+                )
+        if apply_changes:
+            session.commit()
+
+    console.print(table)
+    if apply_changes:
+        # modify_submission logs the change with the configured author
+        for submission_id, passed in verdict_changes.items():
+            db_service.modify_submission(submission_id, "detailed_qc_passed", passed)
+        console.print(f"Updated {total_metrics_updated} metric(s) and {len(verdict_changes)} verdict(s).")
+    else:
+        console.print(
+            f"Would update {total_metrics_updated} metric(s) and {len(verdict_changes)} verdict(s). "
+            "Run with --apply to write these changes."
+        )
 
 
 @submission.command()

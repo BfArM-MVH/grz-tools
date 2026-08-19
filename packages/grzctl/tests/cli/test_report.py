@@ -484,3 +484,110 @@ def test_quarterly_migrated_database(migrated_database_config_path: Path, tmp_pa
         qc_reader = csv.reader(qc_file, delimiter="\t")
         # header + no detailed QC failures
         assert len(list(qc_reader)) == 1
+
+
+def test_quarterly_qc_includes_passing_submission_with_deviation(migrated_database_config_path: Path, tmp_path: Path):
+    """A submission that passes detailed QC but deviates by more than 10% from the
+    provided values on a metric must still appear in the quarterly QC report,
+    without being counted as a failed QC (BfArM section B).
+    """
+    env = {
+        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+    }
+
+    runner = CliRunner(env=env)
+    cli = grzctl.cli.build_cli()
+
+    metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
+    metadata = GrzSubmissionMetadata.model_validate(metadata_raw)
+    result_add = runner.invoke(
+        cli, ["--config", migrated_database_config_path, "db", "submission", "add", metadata.submission_id]
+    )
+    assert result_add.exit_code == 0, result_add.output
+    metadata_path = tmp_path / "submission.metadata.json"
+    with open(metadata_path, mode="w", encoding="utf-8") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+    result_populate = runner.invoke(
+        cli,
+        [
+            "--config",
+            migrated_database_config_path,
+            "db",
+            "submission",
+            "populate",
+            "--no-confirm",
+            metadata.submission_id,
+            str(metadata_path),
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.output
+    for field, value in (("basic_qc_passed", "yes"), ("detailed_qc_passed", "yes")):
+        result_modify = runner.invoke(
+            cli,
+            [
+                "--config",
+                migrated_database_config_path,
+                "db",
+                "submission",
+                "modify",
+                metadata.submission_id,
+                field,
+                value,
+            ],
+        )
+        assert result_modify.exit_code == 0, result_modify.output
+
+    # detailed QC passed, but the computed germline depth deviates -42% from the provided value
+    report_csv_path = tmp_path / "submission.report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,35.0,60.0,30.0,-42.0,DEVIATION,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            index0_somatic0,index,Blut DNA Tumor,wes,somatic,tumor+germline,PASS,110.0,112.0,100.0,-1.8,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,100,1.0,0.8,0.0,PASS
+            """)
+        )
+    result_qc_populate = runner.invoke(
+        cli,
+        [
+            "--config",
+            migrated_database_config_path,
+            "db",
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v4.0.0",
+        ],
+    )
+    assert result_qc_populate.exit_code == 0, result_qc_populate.output
+
+    with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
+        result_report = runner.invoke(
+            cli,
+            ["--config", migrated_database_config_path, "report", "quarterly", "--year", "2025", "--quarter", "3"],
+            catch_exceptions=False,
+        )
+        assert result_report.exit_code == 0, result_report.output
+
+    # the submission appears in the QC report despite having passed detailed QC
+    qc_output_path = Path(report_tmp_dir) / "3-Detailprüfung_GRZX00000_3_2025.tsv"
+    with open(qc_output_path, newline="", encoding="utf-8") as qc_file:
+        qc_reader = csv.reader(qc_file, delimiter="\t")
+        # sort by sequence subtype: germline before somatic
+        rows = sorted(list(qc_reader)[1:], key=itemgetter(11))
+    assert len(rows) == 2
+    germline_row, somatic_row = rows
+    # the deviating metric is reported as not passed, with its deviation
+    assert germline_row[18] == "no"
+    assert float(germline_row[19]) == pytest.approx(-42.0)
+    assert somatic_row[18] == "yes"
+
+    # ...but it is not counted as a failed QC in the overview
+    overview_output_path = Path(report_tmp_dir) / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"
+    with open(overview_output_path, newline="", encoding="utf-8") as overview_file:
+        overview_rows = list(csv.reader(overview_file, delimiter="\t"))[1:]
+    assert len(overview_rows) == 1
+    assert overview_rows[0][10] == "0"  # number_of_failed_qcs
