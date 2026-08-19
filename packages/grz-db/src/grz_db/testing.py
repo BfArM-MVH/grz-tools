@@ -1,5 +1,10 @@
 """Pytest fixtures for provisioning :class:`~grz_db.models.submission.SubmissionDb` databases.
 
+Database tests should obtain their database through these fixtures, typically ``db`` (or
+``migrated_db_connection`` for a lower-level connection), rather than constructing their own
+engine. ``db_backend`` parametrizes over both sqlite and PostgreSQL, so a test built on ``db``
+runs against both backends; a test that builds its own engine instead only ever covers sqlite.
+
 Requires the ``testing`` extra. Import the fixtures into a ``conftest.py``::
 
     from grz_db.testing import (  # noqa: F401
