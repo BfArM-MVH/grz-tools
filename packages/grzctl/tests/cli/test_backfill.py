@@ -16,15 +16,14 @@ from typing import Any
 import boto3
 import pytest
 import sqlalchemy
-from grz_db.models.submission import Submission, SubmissionBase, SubmissionDb
+from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.commands.db.cli import _BACKFILL_IGNORE_FIELDS, _backfill_submission, _BackfillResult
+from grzctl.commands.db.cli import _backfill_submission, _BackfillResult
 from moto import mock_aws
 
 BUCKET = "test-backfill-bucket"
 REGION = "us-east-1"
-IGNORE_FIELDS = _BACKFILL_IGNORE_FIELDS
 DIFFERENT_TAN_G = "b" * 64
 DIFFERENT_PSEUDONYM = "different-pseudonym"
 DIFFERENT_DATE = datetime.date(1999, 1, 1)
@@ -87,7 +86,7 @@ def test_backfill_submission_happy_path(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UPDATED
@@ -109,7 +108,7 @@ def test_backfill_submission_returns_not_found_when_metadata_missing_in_s3(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.NOT_FOUND
@@ -136,7 +135,7 @@ def test_backfill_submission_records_error_on_invalid_json(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.ERROR
@@ -159,7 +158,7 @@ def test_backfill_submission_returns_up_to_date_when_no_pending_diff(
         db_service=db,
         dry_run=False,
         force=True,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UP_TO_DATE
@@ -187,7 +186,7 @@ def test_backfill_submission_holds_back_a_destructive_change_without_force(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UPDATED
@@ -211,7 +210,7 @@ def test_backfill_submission_returns_would_overwrite_when_only_overwrites_are_pe
         db_service=db,
         dry_run=False,
         force=True,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
     current = db.get_submission(submission_id)
     current.submission_size = 1
@@ -224,7 +223,7 @@ def test_backfill_submission_returns_would_overwrite_when_only_overwrites_are_pe
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.WOULD_OVERWRITE
@@ -248,7 +247,7 @@ def test_backfill_submission_force_applies_destructive_changes(
         db_service=db,
         dry_run=False,
         force=True,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UPDATED
@@ -282,7 +281,7 @@ def test_backfill_force_reconciles_against_an_unredacted_copy(
         db_service=db,
         dry_run=False,
         force=True,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UPDATED
@@ -318,7 +317,7 @@ def test_backfill_leaves_a_missing_upload_date_alone(
         db_service=db,
         dry_run=False,
         force=True,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UPDATED
@@ -384,7 +383,7 @@ def test_backfill_submission_reads_a_consent_datetime_without_a_timezone(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UPDATED
@@ -415,7 +414,7 @@ def test_backfill_submission_allow_overwrite_writes_only_the_named_field(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
         allow_overwrite=frozenset({"submission_metadata"}),
     )
 
@@ -441,7 +440,7 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
         db_service=db,
         dry_run=False,
         force=True,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     current = db.get_submission(submission_id)
@@ -455,7 +454,7 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
         allow_overwrite=frozenset({"submission_metadata"}),
     )
 
@@ -507,7 +506,7 @@ def test_backfill_submission_links_case_by_default(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS | {"case_id"},
+        ignore_fields={"case_id"},
     )
     assert result == _BackfillResult.UP_TO_DATE
     assert db.get_submission(sid).case_id is None
@@ -519,7 +518,7 @@ def test_backfill_submission_links_case_by_default(
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
     assert result == _BackfillResult.UPDATED
     linked = db.get_submission(sid)
@@ -549,7 +548,7 @@ def _run_backfill(db: SubmissionDb, s3_client: Any, current: Submission) -> _Bac
         db_service=db,
         dry_run=False,
         force=False,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
 
@@ -662,13 +661,3 @@ def test_backfill_links_once_the_ambiguity_is_gone(
 
     assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillResult.UPDATED
     assert db.get_submission(sid).case_id is not None
-
-
-def test_backfill_ignores_only_fields_that_exist() -> None:
-    """Every name in ``_BACKFILL_IGNORE_FIELDS`` must be an actual Submission column.
-
-    A name that matches no column silently ignores nothing (set difference against a
-    non-member is a no-op), so a typo here would only surface once it let backfill overwrite
-    a field it was meant to skip; this asserts it directly instead.
-    """
-    assert _BACKFILL_IGNORE_FIELDS <= SubmissionBase.model_fields.keys()
