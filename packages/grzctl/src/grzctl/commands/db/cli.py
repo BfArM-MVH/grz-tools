@@ -543,9 +543,9 @@ def update(  # noqa: C901, PLR0913
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-# Exactly what SubmissionDb.modify_submission accepts. The epilog below already subtracted the
-# immutable fields while the choices did not, so `id` was offered and then refused. Built from
-# SubmissionBase to match the --allow-overwrite choices, which name the same set.
+# Exactly what SubmissionDb.modify_submission accepts. The epilog and the KEY choices below both
+# build from this, so --help always advertises what the command accepts. Same set as the
+# --allow-overwrite choices.
 _MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields)
 
 
@@ -1158,10 +1158,9 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
         raise
 
 
-# Metadata re-read from S3 is redacted, so these are never taken from it. The set named
-# "local_case_id", which is not a Submission field at all: the column carrying the submitter's
-# local case ID is "pseudonym". Nothing was ignored under that name, so backfill diffed the
-# redacted placeholder against the stored pseudonym and offered to write it in.
+# tan_g and pseudonym: metadata re-read from S3 is redacted, so diffing it would only offer to
+# overwrite real values with placeholders. submission_uploaded_date: computed above and passed to
+# db_service.diff() directly, so the generic field diff must not also read it from metadata.
 _BACKFILL_IGNORE_FIELDS = frozenset({"submission_uploaded_date", "tan_g", "pseudonym"})
 
 
