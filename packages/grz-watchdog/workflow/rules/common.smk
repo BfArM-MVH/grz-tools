@@ -8,46 +8,22 @@ from os import PathLike
 from typing import Literal
 
 import humanfriendly
-import yaml
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from snakemake.iocontainers import InputFiles, Wildcards
 from snakemake.io import ancient
 
-cfg_path = lambda dpath: lambda wildcards: (
-    lookup(dpath=dpath, within=config)(wildcards)
-    if "{" in dpath
-    else lookup(dpath=dpath, within=config)
-)
-
-ALL_INBOX_PAIRS = [
-    (submitter, inbox)
-    for submitter, entry in config["leistungserbringer"].items()
-    for inbox in entry["inbox_buckets"].keys()
-]
-
-_grzctl_config_cache = None
-
-
-def read_grzctl_config():
-    """Read and cache the unified grzctl config file."""
-    global _grzctl_config_cache  # noqa: PLW0603
-    if _grzctl_config_cache is None:
-        config_path = config["grzctl_config"]
-        with open(config_path) as f:
-            _grzctl_config_cache = yaml.safe_load(f)
-    return _grzctl_config_cache
-
 
 def get_inbox_s3_details(submitter_id, inbox):
-    """Get S3 details for a specific inbox from the unified grzctl config."""
-    grzctl_cfg = read_grzctl_config()
-    entry = grzctl_cfg["leistungserbringer"][str(submitter_id)]
-    bucket_cfg = entry["inbox_buckets"][inbox]
-    endpoint_url = bucket_cfg["endpoint_url"].rstrip("/")
-    bucket = bucket_cfg.get("bucket", inbox)
-    access_key = bucket_cfg.get("access_key", "")
-    secret = bucket_cfg.get("secret", "")
+    """Get S3 details for a specific inbox from the parsed grzctl config."""
+    entry = _grzctl_cfg.leistungserbringer[str(submitter_id)]
+    bucket_cfg = entry.inbox_buckets[inbox]
+    endpoint_url = (
+        str(bucket_cfg.endpoint_url).rstrip("/") if bucket_cfg.endpoint_url else ""
+    )
+    bucket = bucket_cfg.bucket or inbox
+    access_key = bucket_cfg.access_key or ""
+    secret = bucket_cfg.secret or ""
     return endpoint_url, bucket, access_key, secret
 
 
@@ -226,7 +202,7 @@ def get_final_submission_target(wildcards: Wildcards):
 
     strategy = config["qc"]["selection_strategy"]
     run_qc = should_run_qc(
-        grzctl_config_path=cfg_path("grzctl_config")(wildcards),
+        grzctl_config_path=GRZCTL_CONFIG_PATH,
         submission_id=wildcards.submission_id,
         target_percentage=strategy["target_percentage"],
         salt=strategy["salt"],
@@ -251,7 +227,7 @@ def get_successful_finalize_inputs(wildcards: Wildcards):
         "pruefbericht_answer": rules.submit_pruefbericht.output.answer,
         "pruefbericht": rules.generate_pruefbericht.output.pruefbericht,
         "clean_results": rules.clean.output.clean_results,
-        "grzctl_config_path": cfg_path("grzctl_config")(wildcards),
+        "grzctl_config_path": GRZCTL_CONFIG_PATH,
     }
 
     archive_marker_path = rules.archive.output.marker.format(**wildcards)
@@ -294,7 +270,7 @@ def get_successful_finalize_inputs(wildcards: Wildcards):
 def get_failed_finalize_inputs(wildcards: Wildcards):
     """Input function for the failure endpoint to conditionally add cleanup."""
     inputs = {
-        "grzctl_config_path": cfg_path("grzctl_config")(wildcards),
+        "grzctl_config_path": GRZCTL_CONFIG_PATH,
         "validation_errors": rules.validate.output.validation_errors,
     }
     if config.get("on-failed-validation", "do-nothing") == "cleanup":

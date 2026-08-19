@@ -17,8 +17,7 @@ if "daemon" in sys.argv:
 def _run_grzctl_db_command(*args):
     """Helper to run grzctl db commands from monitoring thread"""
     try:
-        grzctl_config_path = config["grzctl_config"]
-        full_cmd = ["grzctl", "--config", grzctl_config_path, "db", *args]
+        full_cmd = ["grzctl", "--config", GRZCTL_CONFIG_PATH, "db", *args]
         result = subprocess.run(
             full_cmd, check=True, text=True, capture_output=True, timeout=120
         )
@@ -41,8 +40,7 @@ def monitor_and_queue_submissions(shutdown_event):
     to find new submissions and puts the respective target paths onto snakemake queue.
     """
     interval = int(config["monitor"]["interval"])
-    leistungserbringer = config["leistungserbringer"]
-    grzctl_config_path = config["grzctl_config"]
+    leistungserbringer = _grzctl_cfg.leistungserbringer
     already_queued = set()
 
     daemon_logger.info(
@@ -68,13 +66,13 @@ def monitor_and_queue_submissions(shutdown_event):
             # scan all inboxes
             all_s3_submissions = []
             for submitter, entry in leistungserbringer.items():
-                for inbox_name in entry.get("inbox_buckets", {}).keys():
+                for inbox_name in entry.inbox_buckets.keys():
                     try:
                         result = subprocess.run(
                             [
                                 "grzctl",
                                 "--config",
-                                grzctl_config_path,
+                                GRZCTL_CONFIG_PATH,
                                 "list",
                                 "--inbox",
                                 inbox_name,

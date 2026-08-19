@@ -78,6 +78,7 @@ test = [
 
 [dependency-groups]
 dev = [
+    "snakefmt>=2.0.3",
     "textual-dev",
     "tox",
     "tox-uv",

@@ -1,6 +1,9 @@
 import threading
 from operator import itemgetter
+from pathlib import Path
 
+import yaml
+from grzctl.models.config import GrzctlConfig
 from snakemake.utils import min_version, validate
 
 min_version("9.13.2")
@@ -14,10 +17,15 @@ configfile: "config/config.yaml"
 
 validate(config, schema="schemas/config.schema.yaml")
 
+GRZCTL_CONFIG_PATH = config["grzctl_config"]
+_grzctl_cfg = GrzctlConfig.model_validate(
+    yaml.safe_load(Path(GRZCTL_CONFIG_PATH).read_text())
+)
+
 ALL_INBOX_PAIRS = [
     (submitter, inbox)
-    for submitter, entry in config["leistungserbringer"].items()
-    for inbox in entry["inbox_buckets"].keys()
+    for submitter, entry in _grzctl_cfg.leistungserbringer.items()
+    for inbox in entry.inbox_buckets.keys()
 ]
 
 
