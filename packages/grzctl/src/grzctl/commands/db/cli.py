@@ -9,7 +9,7 @@ from collections import Counter, namedtuple
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import botocore.exceptions
 import click
@@ -760,7 +760,27 @@ class QCStatus(StrEnum):
 PCT_DEV_CUTOFF = 10
 
 
-def _recompute_metric(measured: float, provided: float | None, required: float) -> tuple[bool, float | None, bool]:
+class MetricVerdict(NamedTuple):
+    """Verdict of one recomputed detailed QC metric."""
+
+    meets_threshold: bool
+    """Whether the computed value meets the required BfArM threshold."""
+    deviation: float | None
+    """Percent deviation of the provided value from the computed value, if computable."""
+    passed_qc: bool
+    """Per-metric passed_qc flag (meets the threshold and deviates at most PCT_DEV_CUTOFF percent)."""
+
+
+class RecomputeOutcome(NamedTuple):
+    """Outcome of recomputing the detailed QC metrics of a result row or a submission."""
+
+    meets_thresholds: bool
+    """Whether all computed values meet their required BfArM thresholds."""
+    metrics_changed: int
+    """Number of per-metric fields that would change."""
+
+
+def _recompute_metric(measured: float, provided: float | None, required: float) -> MetricVerdict:
     """Re-evaluate a single detailed QC metric under the GRZ_QC_Workflow >= 4.0.0 rules.
 
     ``measured``, ``provided``, and ``required`` must share the same unit (the metric's
@@ -772,15 +792,13 @@ def _recompute_metric(measured: float, provided: float | None, required: float) 
     :param measured: value computed by the QC pipeline (stored in the database)
     :param provided: value provided by the Leistungserbringer in the submission metadata
     :param required: threshold required by BfArM (0 for non-index donors)
-    :return: tuple of (computed value meets the required threshold, percent deviation of the
-        provided value from the computed value, per-metric passed_qc flag)
     """
     meets_threshold = measured >= required
     if not provided or not measured:
         # no provided value (or computed value of zero): deviation is undefined
-        return meets_threshold, None, meets_threshold
+        return MetricVerdict(meets_threshold, None, meets_threshold)
     deviation = (measured - provided) / measured * 100
-    return meets_threshold, deviation, meets_threshold and abs(deviation) <= PCT_DEV_CUTOFF
+    return MetricVerdict(meets_threshold, deviation, meets_threshold and abs(deviation) <= PCT_DEV_CUTOFF)
 
 
 class QCReportRow(StrictBaseModel):
@@ -958,12 +976,11 @@ def _metadata_lab_data(metadata: GrzSubmissionMetadata) -> dict[str, tuple[Any, 
 
 def _recompute_result(
     result: DetailedQCResult, thresholds: Any, sequence_data: Any, apply_changes: bool
-) -> tuple[bool, int]:
+) -> RecomputeOutcome:
     """Recompute the three metrics of one detailed QC result row.
 
     Mutates the row in place when ``apply_changes`` is set (the enclosing session tracks the
-    changes). Returns whether all computed values meet their required thresholds and how
-    many metric fields would change.
+    changes).
     """
     meets_all_thresholds = True
     metrics_changed = 0
@@ -988,28 +1005,27 @@ def _recompute_result(
         ),
     )
     for measured, provided, required, prefix in metrics:
-        meets_threshold, deviation, passed = _recompute_metric(measured, provided, required)
-        meets_all_thresholds &= meets_threshold
+        verdict = _recompute_metric(measured, provided, required)
+        meets_all_thresholds &= verdict.meets_threshold
         passed_attr = f"{prefix}_passed_qc"
         deviation_attr = f"{prefix}_percent_deviation"
-        changed = getattr(result, passed_attr) != passed or (
-            deviation is not None and abs(getattr(result, deviation_attr) - deviation) > 1e-6
+        changed = getattr(result, passed_attr) != verdict.passed_qc or (
+            verdict.deviation is not None and abs(getattr(result, deviation_attr) - verdict.deviation) > 1e-6
         )
         if not changed:
             continue
         metrics_changed += 1
         if apply_changes:
-            setattr(result, passed_attr, passed)
-            if deviation is not None:
-                setattr(result, deviation_attr, deviation)
-    return meets_all_thresholds, metrics_changed
+            setattr(result, passed_attr, verdict.passed_qc)
+            if verdict.deviation is not None:
+                setattr(result, deviation_attr, verdict.deviation)
+    return RecomputeOutcome(meets_all_thresholds, metrics_changed)
 
 
-def _recompute_submission(session, submission: Submission, apply_changes: bool) -> tuple[bool, int] | None:
+def _recompute_submission(session, submission: Submission, apply_changes: bool) -> RecomputeOutcome | None:
     """Recompute the detailed QC results of one submission.
 
-    Returns whether all computed values meet their required thresholds and how many metric
-    fields would change, or ``None`` if the submission has no recomputable QC results.
+    Returns ``None`` if the submission has no recomputable QC results.
     """
     results = session.exec(select(DetailedQCResult).where(DetailedQCResult.submission_id == submission.id)).all()
     if not results:
@@ -1039,10 +1055,10 @@ def _recompute_submission(session, submission: Submission, apply_changes: bool) 
     metrics_updated = 0
     for result in latest_results.values():
         thresholds, sequence_data = lab_data[result.lab_datum_id]
-        meets_all_thresholds, metrics_changed = _recompute_result(result, thresholds, sequence_data, apply_changes)
-        submission_meets_thresholds &= meets_all_thresholds
-        metrics_updated += metrics_changed
-    return submission_meets_thresholds, metrics_updated
+        outcome = _recompute_result(result, thresholds, sequence_data, apply_changes)
+        submission_meets_thresholds &= outcome.meets_thresholds
+        metrics_updated += outcome.metrics_changed
+    return RecomputeOutcome(submission_meets_thresholds, metrics_updated)
 
 
 @submission.command(name="recompute-qc")
@@ -1086,18 +1102,17 @@ def recompute_qc(ctx: click.Context, year: int, quarter: int, apply_changes: boo
             outcome = _recompute_submission(session, submission, apply_changes)
             if outcome is None:
                 continue
-            submission_meets_thresholds, metrics_updated = outcome
 
-            if submission.detailed_qc_passed is not submission_meets_thresholds:
-                verdict_changes[submission.id] = submission_meets_thresholds
-            total_metrics_updated += metrics_updated
-            if metrics_updated or submission.id in verdict_changes:
+            if submission.detailed_qc_passed is not outcome.meets_thresholds:
+                verdict_changes[submission.id] = outcome.meets_thresholds
+            total_metrics_updated += outcome.metrics_changed
+            if outcome.metrics_changed or submission.id in verdict_changes:
                 old_verdict = {True: "yes", False: "no", None: "unset"}[submission.detailed_qc_passed]
-                new_verdict = "yes" if submission_meets_thresholds else "no"
+                new_verdict = "yes" if outcome.meets_thresholds else "no"
                 table.add_row(
                     submission.id,
                     old_verdict if old_verdict == new_verdict else f"{old_verdict} -> {new_verdict}",
-                    str(metrics_updated),
+                    str(outcome.metrics_changed),
                 )
         if apply_changes:
             session.commit()
