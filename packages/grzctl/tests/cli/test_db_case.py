@@ -339,8 +339,9 @@ def test_case_json_survives_a_coloured_environment(migrated_database_config_path
 
     rich decides on ANSI colour when a Console is built, which for the CLI modules happens at
     import, and it honours ``FORCE_COLOR`` even when stdout is a pipe. This runs out of process
-    because the test suite pins ``TTY_COMPATIBLE=0`` at import for every in-process test, which
-    is exactly what hid this the first time: the colourised output only ever reached users.
+    because the test suite pins ``TTY_COMPATIBLE=0`` at import for every in-process test: an
+    in-process run would inherit that pin and never see escapes a real user's shell can
+    produce.
     """
     cli = grzctl.cli.build_cli()
     assert _create_case(cli, migrated_database_config_path, "111111111", "case-colour").exit_code == 0

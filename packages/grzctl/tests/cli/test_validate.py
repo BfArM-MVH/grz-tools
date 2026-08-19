@@ -123,7 +123,7 @@ def _set_up_case_with_qc_passed_initial(tmp_path, migrated_database_config_path,
 
 def _assert_duplicate_failed_basic_qc(competing: SimpleNamespace) -> None:
     """The duplicate initial submission must carry ``basic_qc_passed=False`` and an ERROR log
-    naming the case's QC-passed initial submission.
+    naming the case's QC-passed initial submission, which itself must be left unaffected.
     """
     result = competing.db("submission", "show", competing.duplicate_id, "--json")
     assert result.exit_code == 0, result.output
@@ -170,8 +170,8 @@ def test_validate_rejects_duplicate_initial_before_validating(
 def test_validate_records_duplicate_initial_detected_during_validation(
     tmp_path, monkeypatch, migrated_database_config_path, test_metadata_path
 ):
-    """The write-time check catches a competing initial submission that passed basic QC
-    while this submission was being validated.
+    """The write-time check catches a competing initial submission that already passed basic
+    QC, once a blind pre-check has missed it.
 
     The pre-check is forced inconclusive, so the duplicate rejection is triggered instead by
     the write-time update, which records basic QC as failed the same way the pre-check would
