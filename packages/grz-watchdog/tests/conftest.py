@@ -173,14 +173,14 @@ def container_test_env(test_environment, setup_mc_alias, request):
         run_in_container(*PIXI_RUN_PREFIX, "mkdir", "-p", "/workdir/results")
 
         print("Initializing a fresh database for the test...")
-        db_config_path_in_container = "/workdir/config/configs/db.yaml"
+        grzctl_config_path_in_container = "/workdir/config/configs/grzctl.yaml"
         try:
             run_in_container(
                 *PIXI_RUN_PREFIX,
                 "grzctl",
+                "--config",
+                grzctl_config_path_in_container,
                 "db",
-                "--config-file",
-                db_config_path_in_container,
                 "init",
             )
             print("Database initialization command completed successfully.")
@@ -480,7 +480,7 @@ class BaseTest:
         """Verifies the final state of a submission in the database."""
         print(f"Verifying database state for {submission_id}…")
         result = run_in_container(
-            *PIXI_RUN_PREFIX, "grzctl", "db", "--config-file", "/config/configs/db.yaml", "list", "--json"
+            *PIXI_RUN_PREFIX, "grzctl", "--config", "/config/configs/grzctl.yaml", "db", "list", "--json"
         )
         submissions = json.loads(result.stdout)
         target = next((s for s in submissions if s.get("id") == submission_id), None)

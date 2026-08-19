@@ -44,12 +44,12 @@ def run_grzctl_command(cmd, check=True):
         raise e
 
 
-def scan_inbox_and_augment(inbox_config, submitter_id, inbox):
+def scan_inbox_and_augment(grzctl_config, submitter_id, inbox):
     """
     Scans a single inbox using 'grzctl list' and augments submission data with its origin (submitter_id, inbox).
     """
     result = run_grzctl_command(
-        ["list", "--config-file", inbox_config, "--json", "--show-cleaned", "--limit", "1000000"]
+        ["--config", grzctl_config, "list", "--inbox", inbox, "--json", "--show-cleaned", "--limit", "1000000"]
     )
     submissions = json.loads(result.stdout)
     for submission in submissions:
@@ -57,11 +57,11 @@ def scan_inbox_and_augment(inbox_config, submitter_id, inbox):
     return submissions
 
 
-def get_db_states(db_config_path):
+def get_db_states(grzctl_config):
     """
     Fetches all submissions from the db and returns their latest states and timestamps.
     """
-    result = run_grzctl_command(["db", "--config-file", db_config_path, "list", "--json", "--limit", "1000000"])
+    result = run_grzctl_command(["--config", grzctl_config, "db", "list", "--json", "--limit", "1000000"])
     if not result.stdout:
         return {}
 
@@ -75,10 +75,10 @@ def get_db_states(db_config_path):
     return db_states
 
 
-def add_submission_to_db(db_config_path, submission_id):
+def add_submission_to_db(grzctl_config, submission_id):
     """Runs 'grzctl db submission add {submission_id}'."""
     try:
-        run_grzctl_command(["db", "--config-file", db_config_path, "submission", "add", submission_id])
+        run_grzctl_command(["--config", grzctl_config, "db", "submission", "add", submission_id])
     except subprocess.CalledProcessError as e:
         error_print(f"An unexpected error occurred for {submission_id}:")
         error_print(e.stderr)
@@ -89,10 +89,10 @@ def add_submission_to_db(db_config_path, submission_id):
             error_print(e.stderr)
 
 
-def update_submission_state_in_db(db_config_path, submission_id, state):
+def update_submission_state_in_db(grzctl_config, submission_id, state):
     """Runs 'grzctl db submission update {submission_id} {state}'."""
     try:
-        run_grzctl_command(["db", "--config-file", db_config_path, "submission", "update", submission_id, state])
+        run_grzctl_command(["--config", grzctl_config, "db", "submission", "update", submission_id, state])
     except subprocess.CalledProcessError as e:
         if "Submission is currently in an 'Error' state" in e.stderr:
             error_print(f"The state for {submission_id} cannot be updated from 'Error' in non-interactive mode.")

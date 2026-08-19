@@ -17,8 +17,8 @@ if "daemon" in sys.argv:
 def _run_grzctl_db_command(*args):
     """Helper to run grzctl db commands from monitoring thread"""
     try:
-        db_config_path = config["config_paths"]["db"]
-        full_cmd = ["grzctl", "db", "--config-file", db_config_path, *args]
+        grzctl_config_path = config["grzctl_config"]
+        full_cmd = ["grzctl", "--config", grzctl_config_path, "db", *args]
         result = subprocess.run(
             full_cmd, check=True, text=True, capture_output=True, timeout=120
         )
@@ -41,7 +41,8 @@ def monitor_and_queue_submissions(shutdown_event):
     to find new submissions and puts the respective target paths onto snakemake queue.
     """
     interval = int(config["monitor"]["interval"])
-    inbox_configs = config["config_paths"]["inbox"]
+    leistungserbringer = config["leistungserbringer"]
+    grzctl_config_path = config["grzctl_config"]
     already_queued = set()
 
     daemon_logger.info(
@@ -66,15 +67,17 @@ def monitor_and_queue_submissions(shutdown_event):
 
             # scan all inboxes
             all_s3_submissions = []
-            for submitter, inboxes in inbox_configs.items():
-                for inbox, config_path in inboxes.items():
+            for submitter, entry in leistungserbringer.items():
+                for inbox_name in entry.get("inbox_buckets", {}).keys():
                     try:
                         result = subprocess.run(
                             [
                                 "grzctl",
+                                "--config",
+                                grzctl_config_path,
                                 "list",
-                                "--config-file",
-                                config_path,
+                                "--inbox",
+                                inbox_name,
                                 "--json",
                                 "--show-cleaned",
                             ],
@@ -87,14 +90,14 @@ def monitor_and_queue_submissions(shutdown_event):
                         for submission in submissions:
                             submission["origin"] = {
                                 "submitter_id": submitter,
-                                "inbox": inbox,
+                                "inbox": inbox_name,
                             }
                         all_s3_submissions.extend(submissions)
                     except Exception as e:
                         daemon_logger.error(
                             "Failed to scan the inbox for submitter '%s', inbox '%s': %s",
                             submitter,
-                            inbox,
+                            inbox_name,
                             e,
                         )
 

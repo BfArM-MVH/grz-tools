@@ -10,7 +10,7 @@ _error_handler() {
 	echo "$error_message" >&2
 	echo "$error_message" >>"${log_stderr}"
 
-	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
+	grzctl --config "${grzctl_config}" db submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
 }
 
 trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
@@ -24,7 +24,7 @@ if [ -n "${snakemake_params[grz_private_key_passphrase]:-}" ]; then
 fi
 
 submission_id="${snakemake_wildcards[submission_id]}"
-db_config="${snakemake_input[db_config_path]}"
+grzctl_config="${snakemake_input[grzctl_config_path]}"
 report_csv="${snakemake_params[report_csv]}"
 qc_workflow_version="${snakemake_params[qc_workflow_version]}"
 log_stdout="${snakemake_log[stdout]}"
@@ -33,5 +33,5 @@ log_stderr="${snakemake_log[stderr]}"
 index_detailed_qc_status=$(awk -F, '$2 == "index"' <"${report_csv}" | python3 -c 'import csv,sys; print("\n".join(row[6] for row in csv.reader(sys.stdin)))' | sort -u)
 qc_status=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'true'; else echo 'false'; fi)
 
-grzctl db --config-file "${db_config}" submission modify "${submission_id}" detailed_qc_passed "${qc_status}" >"$log_stdout" 2>"$log_stderr"
-grzctl db --config-file "${db_config}" submission populate-qc --no-confirm "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"
+grzctl --config "${grzctl_config}" db submission modify "${submission_id}" detailed_qc_passed "${qc_status}" >"$log_stdout" 2>"$log_stderr"
+grzctl --config "${grzctl_config}" db submission populate-qc --no-confirm "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"

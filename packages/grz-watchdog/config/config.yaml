@@ -25,15 +25,7 @@ handlers:
   on-success: "echo 'Successfully finished grz-watchdog run.'"
 
 
-config_paths:
-  inbox:
-    "123456789":
-      test1: "config/configs/inbox.test1.yaml"
-  archive:
-    consented: "config/configs/consented.yaml"
-    nonconsented: "config/configs/nonconsented.yaml"
-  db: "config/configs/db.yaml"
-  pruefbericht: "config/configs/pruefbericht.yaml"
+grzctl_config: "config/configs/grzctl.yaml"
 
 qc:
   revision: "v1.2.0"

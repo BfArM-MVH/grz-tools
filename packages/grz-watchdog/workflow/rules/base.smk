@@ -7,7 +7,7 @@ rule init_db:
     Initialize the submission database if it doesn't yet exist.
     """
     input:
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         marker=touch("<results>/db/init.marker"),
     log:
@@ -25,7 +25,7 @@ rule scan_inbox:
     Scan an inbox for new submissions.
     """
     input:
-        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         submissions=temp("<results>/scan_inbox/{submitter_id}/{inbox}/submissions.json"),
     log:
@@ -71,8 +71,7 @@ rule sync_db_from_inbox:
     Runs once per inbox per workflow cycle (temp output is cleaned up on completion).
     """
     input:
-        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
         db_initialized=ancient(rules.init_db.output.marker),
     output:
         marker=touch(
@@ -99,7 +98,7 @@ checkpoint select_submissions:
             submitter=map(itemgetter(0), ALL_INBOX_PAIRS),
             inbox=map(itemgetter(1), ALL_INBOX_PAIRS),
         ),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         submissions_batch=temp("<results>/select_submissions/pending_batch.txt"),
     log:
@@ -125,8 +124,7 @@ rule metadata:
     Useful for estimating resource usage.
     """
     input:
-        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         metadata=temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json"
@@ -155,9 +153,8 @@ rule download:
     """
     input:
         db_synced_marker=rules.sync_db_from_inbox.output.marker,
-        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
+        grzctl_config_path=cfg_path("grzctl_config"),
         metadata=rules.metadata.output.metadata,
-        db_config_path=cfg_path("config_paths/db"),
     output:
         base_dir=temp(
             directory("<results>/{submitter_id}/{inbox}/{submission_id}/downloaded")
@@ -200,8 +197,7 @@ rule decrypt:
         metadata_dir=rules.download.output.metadata_dir,
         download_progress_log=rules.download.output.progress_log,
         metadata=rules.metadata.output.metadata,
-        inbox_config_path=cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         base_dir=temp(
             directory("<results>/{submitter_id}/{inbox}/{submission_id}/decrypted")
@@ -251,11 +247,7 @@ checkpoint validate:
             "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
             rules.decrypt.output.progress_log,
         ),
-        inbox_config_path=anchor(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/validation_flag",
-            cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
-        ),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         checksum_log=temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/progress_logs/progress_checksum_validation.cjson"
@@ -330,9 +322,7 @@ rule re_encrypt:
             rules.validate.output.seq_data_log,
         ),
         consent_flag=rules.consent.output.consent_flag,
-        consented_config_path=cfg_path("config_paths/archive/consented"),
-        nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         encrypted_files_dir=temp(
             directory(
@@ -375,9 +365,7 @@ rule archive:
             rules.validate.output.seq_data_log,
             rules.re_encrypt.output.encryption_log,
         ],
-        consented_config_path=cfg_path("config_paths/archive/consented"),
-        nonconsented_config_path=cfg_path("config_paths/archive/nonconsented"),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         marker=touch("<results>/{submitter_id}/{inbox}/{submission_id}/archived"),
     log:
@@ -402,7 +390,7 @@ rule generate_pruefbericht:
         timestamp=rules.metadata.output.timestamp,
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         pruefbericht="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht.json",
     log:
@@ -419,8 +407,7 @@ rule submit_pruefbericht:
     """
     input:
         pruefbericht=rules.generate_pruefbericht.output.pruefbericht,
-        pruefbericht_config_path=cfg_path("config_paths/pruefbericht"),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         answer="<results>/{submitter_id}/{inbox}/{submission_id}/pruefbericht_answer",
     log:
@@ -538,7 +525,7 @@ rule qc:
             "<results>/{submitter_id}/{inbox}/{submission_id}/qc/success.marker",
             rules.validate.output.validation_flag,
         ),
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
         workflow_dir=ancient(rules.setup_qc_workflow.output.workflow_dir),
         pipeline=ancient(rules.setup_qc_workflow.output.pipeline),
         reference_path=get_qc_workflow_references_directory(),
@@ -580,7 +567,7 @@ rule process_qc_results:
     input:
         qc_results=rules.qc.output.out_dir,
         qc_done=rules.qc.output.marker,
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         marker=touch(
             "<results>/{submitter_id}/{inbox}/{submission_id}/qc/processed.marker"
@@ -604,9 +591,9 @@ rule clean:
     submission_id multiple times.
     """
     input:
-        db_config_path=anchor(
+        grzctl_config_path=anchor(
             "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
-            cfg_path("config_paths/db"),
+            cfg_path("grzctl_config"),
         ),
         ready_marker=payload(
             "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
@@ -623,10 +610,6 @@ rule clean:
         consent_flag=payload(
             "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
             rules.consent.output.consent_flag,
-        ),
-        inbox_config_path=anchor(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
-            cfg_path("config_paths/inbox/{submitter_id}/{inbox}"),
         ),
     output:
         clean_results="<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
@@ -664,7 +647,7 @@ rule finalize_fail:
         """
         (
         echo "Submission {wildcards.submission_id} failed validation."
-        grzctl db --config-file {input.db_config_path} submission update --ignore-error-state {wildcards.submission_id} error --data '{{"reason": "validation failed"}}'
+        grzctl --config {input.grzctl_config_path} db submission update --ignore-error-state {wildcards.submission_id} error --data '{{"reason": "validation failed"}}'
         echo "Submission {wildcards.submission_id} processing finished due to validation failure." > {output.target}
         ) > {log.stdout} 2> {log.stderr}
         """
@@ -697,7 +680,7 @@ rule finalize_success:
                 echo "Submission {wildcards.submission_id} failed to finalize ({wildcards.qc_status})." > {output.target}
                 exit 1
             fi
-            grzctl db --config-file {input.db_config_path} submission update {wildcards.submission_id} finished
+            grzctl --config {input.grzctl_config_path} db submission update {wildcards.submission_id} finished
         ) > {log.stdout} 2> {log.stderr}
         """
 
@@ -705,7 +688,7 @@ rule finalize_success:
 rule process_submission:
     input:
         get_final_submission_target,
-        db_config_path=cfg_path("config_paths/db"),
+        grzctl_config_path=cfg_path("grzctl_config"),
     output:
         touch("<results>/{submitter_id}/{inbox}/{submission_id}/processed"),
     priority: 3

@@ -10,7 +10,9 @@ if [ -n "${snakemake_params[s3_secret]:-}" ]; then
 fi
 
 submission_id="${snakemake_wildcards[submission_id]}"
-db_config="${snakemake_input[db_config_path]}"
+submitter_id="${snakemake_wildcards[submitter_id]}"
+inbox="${snakemake_wildcards[inbox]}"
+grzctl_config="${snakemake_input[grzctl_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 output_metadata_dir="${snakemake_output[metadata_dir]}"
@@ -21,9 +23,8 @@ mkdir -p "${progress_logs_dir}"
 
 # grzctl download handles DB state transitions (DOWNLOADING → DOWNLOADED) and
 # submission metadata population via DbContext (--update-db is the default).
-grzctl download \
-	--config-file "${snakemake_input[inbox_config_path]}" \
-	--config-file "${db_config}" \
+grzctl --config "${grzctl_config}" download \
+	--inbox "${inbox}" \
 	--submission-id "${submission_id}" \
 	--metadata-dir "${output_metadata_dir}" \
 	--encrypted-files-dir "${output_encrypted_files_dir}" \

@@ -8,13 +8,13 @@ sys.path.append(os.path.dirname(__file__))
 import shared
 
 
-def select_submissions(inbox_scans, db_config_path, limit):
+def select_submissions(inbox_scans, grzctl_config, limit):
     all_s3_submissions = []
     for inbox_scan in inbox_scans:
         with open(inbox_scan) as f:
             all_s3_submissions.extend(json.load(f))
 
-    db_states = shared.get_db_states(db_config_path)
+    db_states = shared.get_db_states(grzctl_config)
 
     pending_submissions = []
     for submission in all_s3_submissions:
@@ -48,14 +48,14 @@ def select_submissions(inbox_scans, db_config_path, limit):
 
 
 inbox_scans = snakemake.input.scans
-db_config_path = snakemake.input.db_config_path
+grzctl_config = snakemake.input.grzctl_config_path
 output_batch_file = snakemake.output.submissions_batch
 limit = snakemake.params.batch_limit
 stdout_log_path = snakemake.log.stdout
 stderr_log_path = snakemake.log.stderr
 
 with redirect_stdout(open(stdout_log_path, "w")), redirect_stderr(open(stderr_log_path, "w")):
-    selected_submissions = select_submissions(inbox_scans, db_config_path, limit)
+    selected_submissions = select_submissions(inbox_scans, grzctl_config, limit)
     print(f"Selected {len(selected_submissions)} submissions for processing.")
     with open(output_batch_file, "w") as f:
         if not selected_submissions:

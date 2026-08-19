@@ -74,40 +74,9 @@ properties:
         type: string
       on-success:
         type: string
-  config_paths:
-    type: object
-    properties:
-      inbox:
-        type: object
-        description: "Configuration paths for inbox."
-        patternProperties:
-          "^[0-9]+$":
-            type: object
-            patternProperties:
-              "^.*$":
-                type: string
-      archive:
-        type: object
-        description: "Configuration paths for archive."
-        properties:
-          consented:
-            type: string
-          nonconsented:
-            type: string
-        required:
-          - consented
-          - nonconsented
-      db:
-        type: string
-        description: "Configuration path for the database."
-      pruefbericht:
-        type: string
-        description: "Configuration path for the pruefbericht."
-    required:
-      - inbox
-      - archive
-      - db
-      - pruefbericht
+  grzctl_config:
+    type: string
+    description: "Path to the unified grzctl configuration file."
   qc:
     type: object
     properties:
@@ -171,6 +140,6 @@ required:
   - estimates
   - on-failed-validation
   - auto-cleanup
-  - config_paths
+  - grzctl_config
   - qc
 additionalProperties: false

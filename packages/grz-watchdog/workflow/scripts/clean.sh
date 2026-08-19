@@ -11,14 +11,15 @@ _error_handler() {
 	echo "$error_message" >>"${log_stderr}"
 
 	# If the script fails, we should still record an error state in the DB
-	grzctl db --config-file "${db_config}" submission update "${submission_id}" error --data '{"reason": "cleanup script failed"}' >>"${log_stdout}" 2>>"${log_stderr}"
+	grzctl --config "${grzctl_config}" db submission update "${submission_id}" error --data '{"reason": "cleanup script failed"}' >>"${log_stdout}" 2>>"${log_stderr}"
 }
 
 trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
 
 submission_id="${snakemake_wildcards[submission_id]}"
-inbox_config="${snakemake_input[inbox_config_path]}"
-db_config="${snakemake_input[db_config_path]}"
+submitter_id="${snakemake_wildcards[submitter_id]}"
+inbox="${snakemake_wildcards[inbox]}"
+grzctl_config="${snakemake_input[grzctl_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 mode="${snakemake_params[mode]}"
@@ -35,15 +36,15 @@ echo "Auto-cleanup mode: '${mode}'" >>"$log_stdout"
 details=""
 if [[ "$mode" == "inbox" ]]; then
 	echo "Cleaning S3 inbox..." >>"$log_stdout"
-	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaning >"$log_stdout" 2>"$log_stderr"
-	grzctl clean --config-file "${inbox_config}" --config-file "${db_config}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"${log_stderr}"
+	grzctl --config "${grzctl_config}" db submission update --ignore-error-state "${submission_id}" cleaning >"$log_stdout" 2>"$log_stderr"
+	grzctl --config "${grzctl_config}" clean --inbox "${inbox}" --submission-id "${submission_id}" --yes-i-really-mean-it >>"$log_stdout" 2>>"${log_stderr}"
 	details='"inbox"'
 fi
 
 json_data="{\"targets\": [${details}]}"
 
 if [[ "$mode" != "none" ]]; then
-	grzctl db --config-file "${db_config}" submission update --ignore-error-state "${submission_id}" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
+	grzctl --config "${grzctl_config}" db submission update --ignore-error-state "${submission_id}" cleaned --data "$json_data" >>"$log_stdout" 2>>"$log_stderr"
 fi
 
 echo 'true' >"${snakemake_output[clean_results]}"

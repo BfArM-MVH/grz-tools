@@ -16,8 +16,8 @@ validate(config, schema="schemas/config.schema.yaml")
 
 ALL_INBOX_PAIRS = [
     (submitter, inbox)
-    for submitter, inboxes in config["config_paths"]["inbox"].items()
-    for inbox in inboxes.keys()
+    for submitter, entry in config["leistungserbringer"].items()
+    for inbox in entry["inbox_buckets"].keys()
 ]
 
 

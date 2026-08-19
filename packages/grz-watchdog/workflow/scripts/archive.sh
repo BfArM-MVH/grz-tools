@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-db_config="${snakemake_input[db_config_path]}"
+grzctl_config="${snakemake_input[grzctl_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
 metadata_file_path="${snakemake_input[metadata]}"
 re_encrypted_files_dir="${snakemake_input[re_encrypted_files_dir]}"
 consent_flag_path="${snakemake_input[consent_flag]}"
-consented_config_path="${snakemake_input[consented_config_path]}"
-nonconsented_config_path="${snakemake_input[nonconsented_config_path]}"
 
 read -r -a progress_logs_to_archive <<<"${snakemake_input[progress_logs_to_archive]}"
 
@@ -41,19 +39,17 @@ echo "Redaction complete." >>"$log_stdout"
 
 CONSENT=$(cat "${consent_flag_path}")
 if [[ "$CONSENT" == "true" ]]; then
-	CONFIG_FILE="${consented_config_path}"
+	ARCHIVE_FLAG="--consented"
 else
-	CONFIG_FILE="${nonconsented_config_path}"
+	ARCHIVE_FLAG="--non-consented"
 fi
 
-echo "Consent: $CONSENT. Using config file for archiving: $CONFIG_FILE" >>"$log_stdout"
+echo "Consent: $CONSENT. Using archive flag: $ARCHIVE_FLAG" >>"$log_stdout"
 
 # grzctl archive handles DB state transitions (ARCHIVING → ARCHIVED) via DbContext.
-grzctl archive \
-	--config-file "$CONFIG_FILE" \
-	--config-file "${db_config}" \
+grzctl --config "${grzctl_config}" archive \
+	${ARCHIVE_FLAG} \
 	--metadata-dir "${redacted_metadata_dir}" \
 	--logs-dir "${redacted_logs_dir}" \
 	--encrypted-files-dir "${re_encrypted_files_dir}" \
 	>>"$log_stdout" 2>>"$log_stderr"
-

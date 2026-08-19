@@ -22,9 +22,33 @@ cfg_path = lambda dpath: lambda wildcards: (
 
 ALL_INBOX_PAIRS = [
     (submitter, inbox)
-    for submitter, inboxes in config["config_paths"]["inbox"].items()
-    for inbox in inboxes.keys()
+    for submitter, entry in config["leistungserbringer"].items()
+    for inbox in entry["inbox_buckets"].keys()
 ]
+
+_grzctl_config_cache = None
+
+
+def read_grzctl_config():
+    """Read and cache the unified grzctl config file."""
+    global _grzctl_config_cache  # noqa: PLW0603
+    if _grzctl_config_cache is None:
+        config_path = config["grzctl_config"]
+        with open(config_path) as f:
+            _grzctl_config_cache = yaml.safe_load(f)
+    return _grzctl_config_cache
+
+
+def get_inbox_s3_details(submitter_id, inbox):
+    """Get S3 details for a specific inbox from the unified grzctl config."""
+    grzctl_cfg = read_grzctl_config()
+    entry = grzctl_cfg["leistungserbringer"][str(submitter_id)]
+    bucket_cfg = entry["inbox_buckets"][inbox]
+    endpoint_url = bucket_cfg["endpoint_url"].rstrip("/")
+    bucket = bucket_cfg.get("bucket", inbox)
+    access_key = bucket_cfg.get("access_key", "")
+    secret = bucket_cfg.get("secret", "")
+    return endpoint_url, bucket, access_key, secret
 
 
 def cleanup_stale_temp_outputs():
@@ -32,7 +56,7 @@ def cleanup_stale_temp_outputs():
     For use with the `onerror` hook: Make sure to remove relevant temp files (scan_inbox and sync_database outputs),
     so subsequent runs are forced to re-run scan_inbox and sync_database (if they need their outputs).
 
-    For example, this covers the following case, where:
+    For example, this covers the following case where:
      - invalid submission A is processed, the workflow fails, is terminated (but the temp files aren't removed automatically)
      - a subsequent valid submission B is processed, which needs to re-run scan_inbox and sync_database, otherwise submission B can't be found because the old scan_inbox / sync_database outputs may only include submission A.
     """
@@ -102,7 +126,7 @@ def get_cleanup_prerequisite(wildcards: Wildcards):
 
 
 def should_run_qc(
-    db_config_path: str, submission_id: str, target_percentage: float, salt: str
+    grzctl_config_path: str, submission_id: str, target_percentage: float, salt: str
 ) -> bool:
     """
     Determines if a validated submission should undergo QC.
@@ -111,8 +135,8 @@ def should_run_qc(
 
     cmd = [
         "grzctl",
-        "--config-file",
-        db_config_path,
+        "--config",
+        grzctl_config_path,
         "db",
         "should-qc",
         "--target-percentage",
@@ -202,7 +226,7 @@ def get_final_submission_target(wildcards: Wildcards):
 
     strategy = config["qc"]["selection_strategy"]
     run_qc = should_run_qc(
-        db_config_path=cfg_path("config_paths/db")(wildcards),
+        grzctl_config_path=cfg_path("grzctl_config")(wildcards),
         submission_id=wildcards.submission_id,
         target_percentage=strategy["target_percentage"],
         salt=strategy["salt"],
@@ -227,7 +251,7 @@ def get_successful_finalize_inputs(wildcards: Wildcards):
         "pruefbericht_answer": rules.submit_pruefbericht.output.answer,
         "pruefbericht": rules.generate_pruefbericht.output.pruefbericht,
         "clean_results": rules.clean.output.clean_results,
-        "db_config_path": cfg_path("config_paths/db")(wildcards),
+        "grzctl_config_path": cfg_path("grzctl_config")(wildcards),
     }
 
     archive_marker_path = rules.archive.output.marker.format(**wildcards)
@@ -270,7 +294,7 @@ def get_successful_finalize_inputs(wildcards: Wildcards):
 def get_failed_finalize_inputs(wildcards: Wildcards):
     """Input function for the failure endpoint to conditionally add cleanup."""
     inputs = {
-        "db_config_path": cfg_path("config_paths/db")(wildcards),
+        "grzctl_config_path": cfg_path("grzctl_config")(wildcards),
         "validation_errors": rules.validate.output.validation_errors,
     }
     if config.get("on-failed-validation", "do-nothing") == "cleanup":
@@ -283,28 +307,22 @@ def get_failed_finalize_inputs(wildcards: Wildcards):
 
 def get_endpoint_url(wildcards: Wildcards, input: InputFiles) -> str:
     """
-    Get the endpoint URL from the inbox config file.
-
-    Args:
-        wildcards: Unused
-        input: InputFiles with attribute `inbox_config_path` pointing to the inbox config file.
-
-    Returns:
-        A string with describing an endpoint URL, e.g.
-        "https://localhost:port".
+    Get the endpoint URL for the inbox from the unified grzctl config.
     """
-    with open(input.inbox_config_path) as f:
-        endpoint_url = yaml.safe_load(f)["s3"]["endpoint_url"].rstrip("/")
-        return endpoint_url
+    submitter_id = wildcards.submitter_id
+    inbox = wildcards.inbox
+    endpoint_url, _, _, _ = get_inbox_s3_details(submitter_id, inbox)
+    return endpoint_url
 
 
 def get_s3_bucket(wildcards: Wildcards, input: InputFiles) -> str:
     """
-    Get the S3 bucket name from the inbox config file.
+    Get the S3 bucket name for the inbox from the unified grzctl config.
     """
-    with open(input.inbox_config_path) as f:
-        bucket = yaml.safe_load(f)["s3"]["bucket"]
-        return bucket
+    submitter_id = wildcards.submitter_id
+    inbox = wildcards.inbox
+    _, bucket, _, _ = get_inbox_s3_details(submitter_id, inbox)
+    return bucket
 
 
 def get_s3_metadata_key(wildcards: Wildcards) -> str:
@@ -316,7 +334,7 @@ def get_s3_metadata_key(wildcards: Wildcards) -> str:
 
     Returns:
         A string with the S3 key pointing to the metadata.json file,
-        i.e., "{inbox}/{submission_id}/metadata/metadata.json"
+        i.e., "{submission_id}/metadata/metadata.json"
     """
     return f"{wildcards.submission_id}/metadata/metadata.json"
 
@@ -328,11 +346,11 @@ def register_s3_access_key(
     Export the S3 access key in the environment as AWS_ACCESS_KEY_ID.
 
     Try looking up environment variable `GRZ_S3__ACCESS_KEY` first,
-    then look up the access key in the inbox config file.
+    then look up the access key from the unified grzctl config.
 
     Args:
-        wildcards: Unused
-        input: InputFiles with attribute `inbox_config_path` pointing to the inbox config file.
+        wildcards: Wildcards with submitter_id and inbox attributes.
+        input: Unused.
 
     Returns:
         "success" if the access key was registered, else raises ValueError.
@@ -344,12 +362,11 @@ def register_s3_access_key(
         os.environ["AWS_ACCESS_KEY_ID"] = access_key
         return "success"
 
-    with open(input.inbox_config_path) as f:
-        access_key = yaml.safe_load(f).get("s3", {}).get("access_key", "")
-        if not access_key:
-            raise ValueError("No S3 access_key found.")
-        os.environ["AWS_ACCESS_KEY_ID"] = access_key
-        return "success"
+    _, _, access_key, _ = get_inbox_s3_details(wildcards.submitter_id, wildcards.inbox)
+    if not access_key:
+        raise ValueError("No S3 access_key found.")
+    os.environ["AWS_ACCESS_KEY_ID"] = access_key
+    return "success"
 
 
 def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["success"]:
@@ -357,11 +374,11 @@ def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["succ
     Export the S3 secret in the environment as AWS_SECRET_ACCESS_KEY.
 
     Try looking up environment variable `GRZ_S3__SECRET` first,
-    then look up the secret in the inbox config file.
+    then look up the secret from the unified grzctl config.
 
     Args:
-        wildcards: Unused
-        input: InputFiles with attribute `inbox_config_path` pointing to the inbox config file.
+        wildcards: Wildcards with submitter_id and inbox attributes.
+        input: Unused.
 
     Returns:
         "success" if the access key was registered, else raises ValueError.
@@ -373,12 +390,11 @@ def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["succ
         os.environ["AWS_SECRET_ACCESS_KEY"] = secret
         return "success"
 
-    with open(input.inbox_config_path) as f:
-        secret = yaml.safe_load(f).get("s3", {}).get("secret", "")
-        if not secret:
-            raise ValueError("No S3 secret found.")
-        os.environ["AWS_SECRET_ACCESS_KEY"] = secret
-        return "success"
+    _, _, _, secret = get_inbox_s3_details(wildcards.submitter_id, wildcards.inbox)
+    if not secret:
+        raise ValueError("No S3 secret found.")
+    os.environ["AWS_SECRET_ACCESS_KEY"] = secret
+    return "success"
 
 
 def get_qc_workflow_revision(wildcards: Wildcards) -> str:
