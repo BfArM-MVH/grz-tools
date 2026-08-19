@@ -389,15 +389,6 @@ def _rejected_by(e: IntegrityError) -> "_Index | None":
     )
 
 
-def _case_key_or_none(local_case_id: str | None) -> str | None:
-    """Return *local_case_id* when it can key a case, else ``None``.
-
-    Keying a case on a redaction placeholder would merge every redacted submission of a
-    submitter into a single case (see :func:`is_redacted_local_case_id`).
-    """
-    return None if is_redacted_local_case_id(local_case_id) else local_case_id
-
-
 class CaseResolver(Protocol):
     """Strategy for locating the case a submission belongs to.
 
@@ -405,14 +396,14 @@ class CaseResolver(Protocol):
     (currently ``(submitter_id, local_case_id)``; later the RKI ``psn``) without a schema change:
     both keys are already columns on :class:`Case`. The seam is not the whole of such a switch,
     though. Three methods take a resolver, :meth:`SubmissionDb.assign_case`,
-    :meth:`SubmissionDb.resolve_case` and :meth:`SubmissionDb.assert_no_duplicate_initial`, and
-    the last short-circuits on the default resolver's key before it consults the one it was
-    given; :meth:`SubmissionDb.diff` resolves through :data:`DEFAULT_CASE_RESOLVER`, so
-    metadata-driven linking would want one threaded through there and a ``psn`` on
-    :class:`CaseLinkDiff`.
+    :meth:`SubmissionDb.resolve_case` and :meth:`SubmissionDb.assert_no_duplicate_initial`, but
+    :meth:`SubmissionDb.diff` resolves through :data:`DEFAULT_CASE_RESOLVER`, so metadata-driven
+    linking would want one threaded through there and a ``psn`` on :class:`CaseLinkDiff`.
 
     Implementations raise :class:`AmbiguousCaseError` rather than guess when their key matches
-    more than one case. They must not write: resolution runs inside :meth:`SubmissionDb.diff`,
+    more than one case, and decide for themselves when their key cannot answer at all, returning
+    ``None``: callers do not pre-screen the identifiers, since only the resolver knows which of
+    them it reads. They must not write: resolution runs inside :meth:`SubmissionDb.diff`,
     which reports rather than changes. Returning ``None`` is an instruction, not an absence of
     one: :meth:`SubmissionDb.assign_case` creates a case from the identifiers it was passed.
     """
@@ -430,6 +421,9 @@ class CaseResolver(Protocol):
 class SubmitterLocalCaseResolver:
     """Resolve a case by ``(submitter_id, local_case_id)``. The current default.
 
+    A redaction placeholder is not a key (see :func:`is_redacted_local_case_id`), so a submission
+    carrying one matches no case rather than every other redacted submission of that submitter.
+
     ``ux_cases_submitter_local_case`` makes the pair unique wherever both halves are present, so
     a second match means that index is not in place. Picking one of the matches would link a
     submission to another patient's case without saying so, and nothing in the key tells the
@@ -439,7 +433,7 @@ class SubmitterLocalCaseResolver:
     def find_case(
         self, session: Session, *, submitter_id: str | None, local_case_id: str | None, psn: str | None
     ) -> "Case | None":
-        if not submitter_id or not local_case_id:
+        if not submitter_id or is_redacted_local_case_id(local_case_id):
             return None
         matches = session.exec(
             select(Case).where(Case.submitter_id == submitter_id, Case.local_case_id == local_case_id)
@@ -452,10 +446,10 @@ class SubmitterLocalCaseResolver:
 class PsnResolver:
     """Resolve a case by RKI pseudonym. For future PSN-based linking.
 
-    Usable today by passing it to :meth:`SubmissionDb.assign_case` or
-    :meth:`SubmissionDb.resolve_case`, but not reached from ``diff``/``commit_changes``, and
-    nothing could feed it there yet: a psn comes from the tanG trade, not from the submitter's
-    metadata.
+    Usable today by passing it to :meth:`SubmissionDb.assign_case`,
+    :meth:`SubmissionDb.resolve_case` or :meth:`SubmissionDb.assert_no_duplicate_initial`, but not
+    reached from ``diff``/``commit_changes``, and nothing could feed it there yet: a psn comes from
+    the tanG trade, not from the submitter's metadata.
     """
 
     def find_case(
@@ -1779,8 +1773,8 @@ class SubmissionDb:
         :param submission_id: ID of the submission about to be validated. A case whose QC-passed
             initial submission *is* this one is not a duplicate.
         :param submitter_id: Submitter identifier passed to the resolver.
-        :param local_case_id: Submitter-local case identifier passed to the resolver. A redaction
-            placeholder cannot key a case (see :func:`_case_key_or_none`), so it is left alone.
+        :param local_case_id: Submitter-local case identifier passed to the resolver, which
+            decides whether it can key a case.
         :param psn: RKI pseudonym passed to the resolver.
         :param submission_type: Type of the submission. Only ``initial`` can break this rule.
         :param resolver: Strategy used to locate the case; defaults to
@@ -1790,7 +1784,7 @@ class SubmissionDb:
         :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
         :raises AmbiguousCaseError: if the resolution key matches more than one case.
         """
-        if submission_type != SubmissionType.initial or _case_key_or_none(local_case_id) is None:
+        if submission_type != SubmissionType.initial:
             return
 
         with self.transaction() as session:
@@ -2022,7 +2016,7 @@ class SubmissionDb:
 
         Case resolution is skipped when ``"case_id"`` is ignored, for ``test`` submissions
         (never case-tracked), and when ``local_case_id`` is still a redaction placeholder
-        (see :func:`_case_key_or_none`); call :meth:`Submission.restore_redacted_fields` first when
+        (see :func:`is_redacted_local_case_id`); call :meth:`Submission.restore_redacted_fields` first when
         *metadata* was read back from an archive bucket.
 
         :param session: The transaction :meth:`diff` runs in.
@@ -2035,7 +2029,7 @@ class SubmissionDb:
         if (
             "case_id" in ignore_fields
             or metadata.submission.submission_type == SubmissionType.test
-            or _case_key_or_none(metadata.submission.local_case_id) is None
+            or is_redacted_local_case_id(metadata.submission.local_case_id)
         ):
             return None
 
