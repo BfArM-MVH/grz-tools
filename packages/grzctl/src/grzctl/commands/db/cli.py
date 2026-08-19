@@ -763,6 +763,12 @@ PCT_DEV_CUTOFF = 10
 def _recompute_metric(measured: float, provided: float | None, required: float) -> tuple[bool, float | None, bool]:
     """Re-evaluate a single detailed QC metric under the GRZ_QC_Workflow >= 4.0.0 rules.
 
+    ``measured``, ``provided``, and ``required`` must share the same unit (the metric's
+    native unit, e.g. fold coverage, percent, or fraction); the relative deviation is then
+    unit-independent. The returned deviation is expressed in percent (e.g. ``-42.0`` for
+    -42%), matching the ``*_percent_deviation`` columns and ``PCT_DEV_CUTOFF``. It is signed
+    (negative when the provided value exceeds the computed one) and not bounded to [0, 100].
+
     :param measured: value computed by the QC pipeline (stored in the database)
     :param provided: value provided by the Leistungserbringer in the submission metadata
     :param required: threshold required by BfArM (0 for non-index donors)
