@@ -9,7 +9,7 @@ from collections import Counter, namedtuple
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, NewType
 
 import botocore.exceptions
 import click
@@ -759,6 +759,15 @@ class QCStatus(StrEnum):
 # Keep in sync with PCT_DEV_CUTOFF in GRZ_QC_Workflow's compare_threshold.py
 PCT_DEV_CUTOFF = 10
 
+# Metric-tagged values for the three detailed QC metrics: mean depth of coverage in fold
+# coverage, percent of bases above the quality threshold in percent (0-100), and targeted
+# regions above minimum coverage as a proportion (0-1). ``_recompute_metric`` requires all
+# of its arguments to come from the same metric; its constrained type parameter makes
+# mixing metrics (and thus units) within a single call a type error.
+MeanDepthOfCoverage = NewType("MeanDepthOfCoverage", float)
+PercentBasesAboveQualityThreshold = NewType("PercentBasesAboveQualityThreshold", float)
+TargetedRegionsAboveMinCoverage = NewType("TargetedRegionsAboveMinCoverage", float)
+
 
 class MetricVerdict(NamedTuple):
     """Verdict of one recomputed detailed QC metric."""
@@ -780,14 +789,17 @@ class RecomputeOutcome(NamedTuple):
     """Number of per-metric fields that would change."""
 
 
-def _recompute_metric(measured: float, provided: float | None, required: float) -> MetricVerdict:
+def _recompute_metric[
+    MetricValue: (MeanDepthOfCoverage, PercentBasesAboveQualityThreshold, TargetedRegionsAboveMinCoverage)
+](measured: MetricValue, provided: MetricValue | None, required: MetricValue) -> MetricVerdict:
     """Re-evaluate a single detailed QC metric under the GRZ_QC_Workflow >= 4.0.0 rules.
 
-    ``measured``, ``provided``, and ``required`` must share the same unit (the metric's
-    native unit, e.g. fold coverage, percent, or fraction); the relative deviation is then
-    unit-independent. The returned deviation is expressed in percent (e.g. ``-42.0`` for
-    -42%), matching the ``*_percent_deviation`` columns and ``PCT_DEV_CUTOFF``. It is signed
-    (negative when the provided value exceeds the computed one) and not bounded to [0, 100].
+    ``measured``, ``provided``, and ``required`` must belong to the same metric (and thus
+    share its unit), enforced through the metric-tagged ``MetricValue`` types; the relative
+    deviation is then unit-independent.
+    The returned deviation is expressed in percent (e.g. ``-42.0`` for -42%), matching the
+    ``*_percent_deviation`` columns and ``PCT_DEV_CUTOFF``. It is signed (negative when the
+    provided value exceeds the computed one) and not bounded to [0, 100].
 
     :param measured: value computed by the QC pipeline (stored in the database)
     :param provided: value provided by the Leistungserbringer in the submission metadata
@@ -984,28 +996,37 @@ def _recompute_result(
     """
     meets_all_thresholds = True
     metrics_changed = 0
-    metrics = (
+    verdicts = (
         (
-            result.mean_depth_of_coverage,
-            sequence_data.mean_depth_of_coverage,
-            thresholds.mean_depth_of_coverage if thresholds else 0,
             "mean_depth_of_coverage",
+            _recompute_metric(
+                MeanDepthOfCoverage(result.mean_depth_of_coverage),
+                MeanDepthOfCoverage(sequence_data.mean_depth_of_coverage),
+                MeanDepthOfCoverage(thresholds.mean_depth_of_coverage) if thresholds else MeanDepthOfCoverage(0),
+            ),
         ),
         (
-            result.percent_bases_above_quality_threshold_percent,
-            sequence_data.percent_bases_above_quality_threshold.percent,
-            thresholds.percent_bases_above_quality_threshold.percent_bases_above if thresholds else 0,
             "percent_bases_above_quality_threshold",
+            _recompute_metric(
+                PercentBasesAboveQualityThreshold(result.percent_bases_above_quality_threshold_percent),
+                PercentBasesAboveQualityThreshold(sequence_data.percent_bases_above_quality_threshold.percent),
+                PercentBasesAboveQualityThreshold(thresholds.percent_bases_above_quality_threshold.percent_bases_above)
+                if thresholds
+                else PercentBasesAboveQualityThreshold(0),
+            ),
         ),
         (
-            result.targeted_regions_above_min_coverage,
-            sequence_data.targeted_regions_above_min_coverage,
-            thresholds.targeted_regions_above_min_coverage.fraction_above if thresholds else 0,
             "targeted_regions_above_min_coverage",
+            _recompute_metric(
+                TargetedRegionsAboveMinCoverage(result.targeted_regions_above_min_coverage),
+                TargetedRegionsAboveMinCoverage(sequence_data.targeted_regions_above_min_coverage),
+                TargetedRegionsAboveMinCoverage(thresholds.targeted_regions_above_min_coverage.fraction_above)
+                if thresholds
+                else TargetedRegionsAboveMinCoverage(0),
+            ),
         ),
     )
-    for measured, provided, required, prefix in metrics:
-        verdict = _recompute_metric(measured, provided, required)
+    for prefix, verdict in verdicts:
         meets_all_thresholds &= verdict.meets_threshold
         passed_attr = f"{prefix}_passed_qc"
         deviation_attr = f"{prefix}_percent_deviation"
