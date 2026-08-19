@@ -547,12 +547,9 @@ def _counting_reads(engine: sqlalchemy.Engine) -> Iterator[dict[str, int]]:
 
 
 def test_diff_reads_one_snapshot(db: SubmissionDb, metadata: GrzSubmissionMetadata):
-    """A change set answers for one submission at one moment, so it reads one.
-
-    Fields, donors and the case link were each resolved in a transaction of their own, which
-    let a write committed in between leave the three parts of one answer describing three
-    different states of the same submission. Reading the row once is that same fix seen from
-    the other side: a transaction of its own would have to fetch the row again.
+    """A change set must answer for one submission at one moment: it opens one transaction and
+    reads the submission row once, so a write committed mid-diff cannot leave fields, donors
+    and the case link describing three different snapshots.
     """
     initial_metadata = _with_submission_type(metadata, "initial")
     submission_id = initial_metadata.submission_id
@@ -876,7 +873,9 @@ def test_concurrent_assign_case_settles_on_one_case(db: SubmissionDb, migrated_d
 def test_assign_case_joins_a_case_that_appeared_mid_flight(
     db: SubmissionDb, migrated_db_connection, test_author, monkeypatch: pytest.MonkeyPatch
 ):
-    """The threaded test above cannot guarantee the two actually interleave, so force it."""
+    """``test_concurrent_assign_case_settles_on_one_case`` cannot guarantee the two actually
+    interleave, so force it.
+    """
     sid = _sid(SUBMITTER_A, "0000000a")
     _add(db, sid, SubmissionType.initial)
     other = SubmissionDb(db_url=migrated_db_connection, author=test_author, debug=False)
@@ -926,10 +925,9 @@ def test_every_unique_index_is_classified(db: SubmissionDb):
 
 
 def test_a_rejected_change_set_writes_nothing(db: SubmissionDb, metadata: GrzSubmissionMetadata):
-    """A change set is one answer to one metadata file, so it is applied whole or not at all.
-
-    The link used to be committed before the fields, so a rejected field left the submission
-    linked, and the next preview started from somewhere the operator had never seen.
+    """A change set is one answer to one metadata file, so it is applied whole or not at all:
+    the case link and every field write share one transaction, and a rejection undoes all of
+    it.
     """
     initial_metadata = _with_submission_type(metadata, "initial")
     submitter = initial_metadata.submission.submitter_id
@@ -1100,8 +1098,8 @@ def test_assert_no_duplicate_initial_names_the_submission_holding_the_slot(db: S
 def test_assert_no_duplicate_initial_does_not_swallow_a_resolution_failure(db: SubmissionDb, metadata):
     """Answering "not a duplicate" when the question could not be answered is how one gets through.
 
-    Nothing downstream treats an unresolvable case as an error any more, so a swallow here
-    would be the last chance to notice.
+    Nothing downstream treats an unresolvable case as an error, so a swallow here would be
+    the last chance to notice.
     """
     initial_metadata = _with_submission_type(metadata, "initial")
     submitter = initial_metadata.submission.submitter_id

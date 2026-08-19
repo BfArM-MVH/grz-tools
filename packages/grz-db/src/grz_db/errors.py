@@ -74,7 +74,7 @@ class DuplicatePsnError(CaseError):
     """Exception for when a case with the given RKI pseudonym already exists."""
 
     def __init__(self, psn: str):
-        super().__init__(f"A case with pseudonym '{psn}' already exists")
+        super().__init__(f"A case with RKI pseudonym '{psn}' already exists")
 
 
 class DuplicateCaseError(CaseError):
@@ -92,16 +92,16 @@ class CaseHasLinkedSubmissionsError(CaseError):
 
 
 class SubmissionTypeInvalidForCaseError(SubmissionError):
-    """Exception for when a submission's type is incompatible with its case state."""
+    """Exception for when a submission's type does not permit the case link being attempted."""
 
 
 class DuplicateInitialSubmissionError(SubmissionTypeInvalidForCaseError):
     """Exception for when a case would end up with a second initial submission that passed basic QC."""
 
     def __init__(self, case_id: int | None, winning_submission_id: str | None = None):
-        qc_passed = f" '{winning_submission_id}'" if winning_submission_id else ""
+        holder = f" ({winning_submission_id})" if winning_submission_id else ""
         super().__init__(
-            f"Case {case_id} already has an initial submission that passed basic QC{qc_passed}; "
+            f"Case {case_id} already has an initial submission that passed basic QC{holder}; "
             "at most one initial submission per case may pass basic QC."
         )
 

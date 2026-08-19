@@ -96,7 +96,8 @@ class CaseLinkDiff:
         will create a new case.
     :param submitter_id: Submitter identifier used to resolve the case.
     :param local_case_id: Submitter-local case identifier used to resolve the case.
-    :param submission_type: Type of the submission, validated against the case.
+    :param submission_type: Type of the submission. Checked for case-trackability (``test`` is
+        rejected), not against the case.
     """
 
     before: int | None
@@ -119,7 +120,7 @@ class CaseLinkDiff:
 class SubmissionDiffCollection:
     """Holds the result of diffing submission-level metadata against the database.
 
-    Fields are categorised the same way as :class:`DonorDiff`:
+    Fields are categorised the same way as :class:`DonorsDiffCollection`:
 
     :param added: Fields that were ``None`` in the database and now have a value.
     :param updated: Fields whose non-null database value differs from the new value.
