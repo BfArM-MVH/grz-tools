@@ -770,9 +770,11 @@ def _recompute_metric(measured: float, provided: float | None, required: float) 
         provided value from the computed value, per-metric passed_qc flag)
     """
     meets_threshold = measured >= required
-    deviation = None if not provided or not measured else (measured - provided) / measured * 100
-    flagged = deviation is not None and abs(deviation) > PCT_DEV_CUTOFF
-    return meets_threshold, deviation, meets_threshold and not flagged
+    if not provided or not measured:
+        # no provided value (or computed value of zero): deviation is undefined
+        return meets_threshold, None, meets_threshold
+    deviation = (measured - provided) / measured * 100
+    return meets_threshold, deviation, meets_threshold and abs(deviation) <= PCT_DEV_CUTOFF
 
 
 class QCReportRow(StrictBaseModel):
