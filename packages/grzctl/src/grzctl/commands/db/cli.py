@@ -1158,10 +1158,10 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
         raise
 
 
-# tan_g and pseudonym: metadata re-read from S3 is redacted, so diffing it would only offer to
-# overwrite real values with placeholders. submission_uploaded_date: computed above and passed to
-# db_service.diff() directly, so the generic field diff must not also read it from metadata.
-_BACKFILL_IGNORE_FIELDS = frozenset({"submission_uploaded_date", "tan_g", "pseudonym"})
+# Archival redacts before writing, so a metadata.json re-read from S3 always carries placeholders
+# for these two and is never authoritative about them. Diffing them would only offer to overwrite
+# a real value with a placeholder.
+_BACKFILL_IGNORE_FIELDS = frozenset({"tan_g", "pseudonym"})
 
 
 class _BackfillResult(StrEnum):
@@ -1215,18 +1215,17 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         return _BackfillResult.ERROR
 
     try:
-        # If submission_uploaded_date is not set in the DB, replace it with the one from metadata.json.
-        # This case is expected for submissions that were created before the submission_date field was added.
-        submission_uploaded_date = (
-            current_submission.submission_uploaded_date
-            if current_submission.submission_uploaded_date
-            else metadata.submission.submission_date
-        )
-
+        # Backfill has no authoritative date to offer: the archive does not carry one, and the
+        # submitter's declared submission_date is not when the upload finished, which is what this
+        # column means and what the reporting windows filter on. populate reads the real one from
+        # the S3 object; backfill does not fetch it. Passing None lets diff() supply a value for
+        # construction and then exclude the field, so backfill never writes it. Passing the row's
+        # own value instead would compare a snapshot taken before the run against the row diff()
+        # re-reads, and write the stale one.
         submission_diff, donors_diff = db_service.diff(
             submission_id,
             metadata,
-            submission_uploaded_date=submission_uploaded_date,
+            submission_uploaded_date=None,
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
