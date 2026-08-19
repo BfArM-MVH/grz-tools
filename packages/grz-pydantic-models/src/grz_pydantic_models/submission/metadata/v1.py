@@ -1332,12 +1332,11 @@ class GrzSubmissionMetadata(StrictBaseModel):
         placeholders, not what was submitted.
 
         Redaction replaces a third field, the index donor's pseudonym, which this
-        deliberately leaves alone. Every accepted schema version already prescribes the
-        literal ``"index"`` there, so redacting it only bites on a document from v1.1.x or
-        earlier, whose description read "For Index patient use TanG" and which therefore
-        carries the tanG in that field. Restoring it would change nothing observable, since
-        every consumer that keeps a copy stores ``"index"`` for the index donor, and there
-        would be nothing to restore it from once a tanG is traded for a PSN.
+        deliberately leaves alone. v1.1.1 to v1.1.7 (still supported) told submitters to put
+        the tanG in ``donorPseudonym``; v1.1.8 onward says ``"index"``. Restoring it would
+        change nothing observable for a document from v1.1.8 onward, since every consumer
+        that keeps a copy stores ``"index"`` for the index donor there, and there would be
+        nothing to restore it from once a tanG is traded for a PSN.
 
         A field holding something other than a placeholder is left alone and stays
         authoritative, so an unredacted copy is never overwritten.
