@@ -261,7 +261,7 @@ def test_backfill_force_reconciles_against_an_unredacted_copy(
 ) -> None:
     """An unredacted copy is authoritative, so --force reconciles the database against it.
 
-    Only the upload date stays hard-ignored, since metadata.json does not carry one.
+    The upload date is the exception: metadata.json does not carry one, so diff() excludes it.
     """
     current = db.add_submission(submission_id)
     current.submission_uploaded_date = DIFFERENT_DATE
@@ -351,7 +351,7 @@ def test_backfill_does_not_write_an_upload_date_from_a_stale_snapshot(
         db_service=db,
         dry_run=False,
         force=True,
-        ignore_fields=IGNORE_FIELDS,
+        ignore_fields=set(),
     )
 
     assert result == _BackfillResult.UPDATED
