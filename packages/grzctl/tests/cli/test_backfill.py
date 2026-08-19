@@ -1,4 +1,4 @@
-# Backfill unit tests — see .vbw-planning/phases/02-implement-grzctl-db-backfill-command/02-02-PLAN.md
+# Backfill unit tests, see .vbw-planning/phases/02-implement-grzctl-db-backfill-command/02-02-PLAN.md
 """Unit tests for `_backfill_submission`.
 
 The tests target `_backfill_submission` directly with a real SubmissionDb on every supported
@@ -604,7 +604,8 @@ def _second_case_for_the_same_key(db: SubmissionDb, submitter_id: str, local_cas
     """Give one key a second case, which ``ux_cases_submitter_local_case`` forbids.
 
     Only reachable by writing around the application, which is exactly the state backfill's
-    unresolvable-link handling exists to survive.
+    unresolvable-link handling exists to survive: the index is dropped first so the row can
+    be inserted at all.
     """
     with db.transaction() as session:
         session.execute(sqlalchemy.text("DROP INDEX ux_cases_submitter_local_case"))
@@ -645,7 +646,7 @@ def test_backfill_writes_everything_but_the_link_when_the_case_key_is_ambiguous(
 def test_backfill_links_once_the_ambiguity_is_gone(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata
 ) -> None:
-    """Re-running after an operator merges the duplicates completes the link."""
+    """Re-running after an operator deletes the spurious duplicate case completes the link."""
     submitter = metadata.submission.submitter_id
     kept = db.create_case(submitter, "patient-A")
     _second_case_for_the_same_key(db, submitter, "patient-A")
