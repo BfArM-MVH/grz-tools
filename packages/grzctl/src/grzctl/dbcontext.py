@@ -10,7 +10,7 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
-from grz_db.errors import DuplicateTanGError, SubmissionNotFoundError
+from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
@@ -212,6 +212,7 @@ class DbContext:
             NetworkError: FailureReasonEnum.NETWORK_ERROR,
             UploadError: FailureReasonEnum.UPLOAD_ERROR,
             DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
+            DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
         }
         for exc_class, failure_reason in exception_map.items():
