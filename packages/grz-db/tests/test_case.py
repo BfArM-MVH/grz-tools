@@ -1051,21 +1051,56 @@ def test_assign_case_names_the_psn_that_rejected_the_case_it_opened(db: Submissi
     assert db.get_submission(sid).case_id is None, "and must not leave the submission linked"
 
 
-def test_assert_no_duplicate_initial_leaves_a_redacted_case_key_alone(db: SubmissionDb, metadata):
-    """A redaction placeholder cannot key a case, so the question is never put to the database."""
+def test_assert_no_duplicate_initial_never_keys_on_a_redaction_placeholder(db: SubmissionDb, metadata):
+    """A redaction placeholder keys no case, so it cannot collapse two submissions onto one.
+
+    The placeholder-keyed case is written directly, which no application path does, so a resolver
+    that stopped rejecting placeholders would match it here and report a duplicate.
+    """
     initial_metadata = _with_submission_type(metadata, "initial")
-    submission_id = initial_metadata.submission_id
-    _add(db, submission_id, SubmissionType.initial)
+    submitter = initial_metadata.submission.submitter_id
 
-    with _counting_reads(db.engine) as counts:
+    stray = db.create_case(submitter_id=submitter, local_case_id=REDACTED_LOCAL_CASE_ID)
+    holder = _sid(submitter, "0000ee01")
+    _add(db, holder, SubmissionType.initial)
+    db.set_submission_case(holder, stray.id)
+    _record_basic_qc(db, holder, True)
+
+    rival = _sid(submitter, "0000ee02")
+    _add(db, rival, SubmissionType.initial)
+
+    db.assert_no_duplicate_initial(
+        rival,
+        submitter_id=submitter,
+        local_case_id=REDACTED_LOCAL_CASE_ID,
+        submission_type=SubmissionType.initial,
+    )
+
+
+def test_assert_no_duplicate_initial_consults_the_resolver_it_was_given(db: SubmissionDb, metadata):
+    """An injected resolver answers here, on identifiers the default resolver cannot key.
+
+    ``local_case_id`` is absent, so the default resolver has nothing to match; only the injected
+    one can see the case. Screening on the default key before consulting the resolver would
+    report this rival as clear.
+    """
+    initial_metadata = _with_submission_type(metadata, "initial")
+    submitter = initial_metadata.submission.submitter_id
+
+    case = db.create_case(submitter_id=submitter, local_case_id="caseZ", psn="RKI-PSN-9")
+    holder = _sid(submitter, "0000ff01")
+    _add(db, holder, SubmissionType.initial)
+    db.set_submission_case(holder, case.id)
+    _record_basic_qc(db, holder, True)
+
+    rival = _sid(submitter, "0000ff02")
+    _add(db, rival, SubmissionType.initial)
+
+    with pytest.raises(DuplicateInitialSubmissionError) as excinfo:
         db.assert_no_duplicate_initial(
-            submission_id,
-            submitter_id=initial_metadata.submission.submitter_id,
-            local_case_id=REDACTED_LOCAL_CASE_ID,
-            submission_type=SubmissionType.initial,
+            rival, psn="RKI-PSN-9", submission_type=SubmissionType.initial, resolver=PsnResolver()
         )
-
-    assert counts["transactions"] == 0, "the guard must fire before the database is touched"
+    assert holder in str(excinfo.value)
 
 
 def test_assert_no_duplicate_initial_names_the_submission_holding_the_slot(db: SubmissionDb, metadata):
