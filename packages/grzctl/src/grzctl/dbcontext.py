@@ -10,6 +10,7 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
+from grz_common.workers.download import DownloadError
 from grz_db.errors import DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
@@ -203,7 +204,14 @@ class DbContext:
     def _map_exception_to_failure_reason(
         self, exc_type: type[BaseException], exc_val: BaseException | None
     ) -> FailureReasonEnum:
-        """Maps an exception to the closest FailureReasonEnum value."""
+        """Maps an exception to the closest FailureReasonEnum value.
+
+        A wrapped exception keeps its reason: metadata that violates the schema, for example,
+        arrives as a ``SystemExit`` raised from a ``ValidationError``. The outermost exception
+        wins, then each ``__cause__`` in turn. Only ``__cause__`` is followed, since
+        ``__context__`` merely records what was in flight at the time and would attribute
+        unrelated failures.
+        """
         exception_map: dict[type[BaseException], FailureReasonEnum] = {
             FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
             ValidationError: FailureReasonEnum.VALIDATION_ERROR,
@@ -211,12 +219,18 @@ class DbContext:
             EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
             NetworkError: FailureReasonEnum.NETWORK_ERROR,
             UploadError: FailureReasonEnum.UPLOAD_ERROR,
+            DownloadError: FailureReasonEnum.DOWNLOAD_ERROR,
             DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
         }
-        for exc_class, failure_reason in exception_map.items():
-            if isinstance(exc_val, exc_class):
-                return failure_reason
+        seen: set[int] = set()
+        exc: BaseException | None = exc_val
+        while exc is not None and id(exc) not in seen:
+            seen.add(id(exc))
+            for exc_class, failure_reason in exception_map.items():
+                if isinstance(exc, exc_class):
+                    return failure_reason
+            exc = exc.__cause__
         return FailureReasonEnum.UNKNOWN
 
     def _check_prerequisites(self):
