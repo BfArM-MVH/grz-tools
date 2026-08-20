@@ -1,6 +1,5 @@
 import threading
 from operator import itemgetter
-from pathlib import Path
 
 import yaml
 from grzctl.models.config import GrzctlConfig
@@ -18,9 +17,7 @@ configfile: "config/config.yaml"
 validate(config, schema="schemas/config.schema.yaml")
 
 GRZCTL_CONFIG_PATH = config["grzctl_config"]
-_grzctl_cfg = GrzctlConfig.model_validate(
-    yaml.safe_load(Path(GRZCTL_CONFIG_PATH).read_text())
-)
+_grzctl_cfg = GrzctlConfig.from_path(GRZCTL_CONFIG_PATH)
 
 ALL_INBOX_PAIRS = [
     (submitter, inbox)
