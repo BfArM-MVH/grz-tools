@@ -8,7 +8,7 @@ metadata_file_path="${snakemake_input[metadata]}"
 metadata_dir="$(dirname "$metadata_file_path")"
 files_dir="${snakemake_input[files_dir]}"
 progress_logs_dir="$(dirname "${snakemake_output[checksum_log]}")"
-mkdir -p "${progress_logs_dir}"
+mkdir -p "${metadata_dir}" "${files_dir}" "${progress_logs_dir}"
 
 validation_flag="${snakemake_output[validation_flag]}"
 validation_errors="${snakemake_output[validation_errors]}"

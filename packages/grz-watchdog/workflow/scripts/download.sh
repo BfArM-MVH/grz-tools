@@ -16,10 +16,9 @@ grzctl_config="${snakemake_input[grzctl_config_path]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 output_metadata_dir="${snakemake_output[metadata_dir]}"
-mkdir -p "${output_metadata_dir}"
 output_encrypted_files_dir="${snakemake_output[encrypted_files_dir]}"
 progress_logs_dir="$(dirname "${snakemake_output[progress_log]}")"
-mkdir -p "${progress_logs_dir}"
+mkdir -p "${output_metadata_dir}" "${output_encrypted_files_dir}" "${progress_logs_dir}"
 
 # grzctl download handles DB state transitions (DOWNLOADING → DOWNLOADED) and
 # submission metadata population via DbContext (--update-db is the default).

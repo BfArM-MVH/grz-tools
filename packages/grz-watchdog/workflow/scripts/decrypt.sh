@@ -13,8 +13,8 @@ metadata_file_path="${snakemake_input[metadata]}"
 metadata_dir="$(dirname "${metadata_file_path}")"
 encrypted_files_dir="${snakemake_input[encrypted_files_dir]}"
 output_files_dir="${snakemake_output[files_dir]}"
-mkdir -p "${output_files_dir}"
 progress_logs_dir="$(dirname "${snakemake_output[progress_log]}")"
+mkdir -p "${metadata_dir}" "${encrypted_files_dir}" "${output_files_dir}" "${progress_logs_dir}"
 
 # grzctl decrypt handles DB state transitions (DECRYPTING → DECRYPTED) via DbContext.
 grzctl --config "${grzctl_config}" decrypt \
