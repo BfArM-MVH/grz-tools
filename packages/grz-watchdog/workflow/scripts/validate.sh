@@ -2,6 +2,7 @@
 set -euo pipefail
 
 submission_id="${snakemake_wildcards[submission_id]}"
+submitter_id="${snakemake_wildcards[submitter_id]}"
 grzctl_config="${snakemake_input[grzctl_config_path]}"
 
 metadata_file_path="${snakemake_input[metadata]}"
@@ -20,6 +21,7 @@ log_stderr="${snakemake_log[stderr]}"
 # We expect `grzctl validate` to return a non-zero code on validation failure,
 # which is not a script error. So we handle its exit code manually instead of relying on `set -e`.
 if grzctl --config "${grzctl_config}" validate \
+	--submitter-id "${submitter_id}" \
 	--metadata-dir "${metadata_dir}" \
 	--files-dir "${files_dir}" \
 	--logs-dir "${progress_logs_dir}" \

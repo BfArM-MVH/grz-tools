@@ -1,11 +1,9 @@
-"""grzctl-specific wrappers for grz-cli commands that use the unified config."""
+"""grzctl-specific commands for submission processing with DB state transitions."""
 
 import logging
 from pathlib import Path
 
 import click
-import grz_cli.commands.encrypt as encrypt_module
-import grz_cli.commands.validate as validate_module
 import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
@@ -17,31 +15,6 @@ from ..models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 
-def derive_validate_config(config: GrzctlConfig) -> dict:
-    """Build the config dict expected by grz-cli's ``validate`` command.
-
-    ``ValidateConfig`` only needs ``identifiers`` (specifically ``identifiers.grz``).
-    """
-    return {"identifiers": config.identifiers.model_dump(mode="json", exclude_none=True)}
-
-
-def derive_encrypt_config(config: GrzctlConfig) -> dict:
-    """Build the config dict expected by grz-cli's ``encrypt`` command.
-
-    ``EncryptConfig`` needs ``keys`` with ``grz_public_key_path`` (required,
-    exactly one of ``grz_public_key`` or ``grz_public_key_path`` must be set)
-    and optionally ``submitter_private_key_path`` and ``grz_private_key_path``.
-    """
-    keys_dump: dict = {}
-    if config.keys.grz_public_key_path is not None:
-        keys_dump["grz_public_key_path"] = config.keys.grz_public_key_path
-    if config.keys.submitter_private_key_path is not None:
-        keys_dump["submitter_private_key_path"] = config.keys.submitter_private_key_path
-    if config.keys.grz_private_key_path is not None:
-        keys_dump["grz_private_key_path"] = config.keys.grz_private_key_path
-    return {"keys": keys_dump}
-
-
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
@@ -50,6 +23,14 @@ def derive_encrypt_config(config: GrzctlConfig) -> dict:
 @grzcli.logs_dir
 @grzcli.force
 @grzcli.threads
+@click.option(
+    "--submitter-id",
+    "submitter_id",
+    required=True,
+    type=str,
+    metavar="STRING",
+    help="Expected Leistungserbringer (LE) identifier for metadata validation.",
+)
 @click.option(
     "--mmap/--no-mmap",
     "mmap",
@@ -66,11 +47,12 @@ def validate(  # noqa: PLR0913
     logs_dir,
     force,
     threads,
+    submitter_id,
     mmap,
     update_db,
     **kwargs,
 ):
-    """Validate the submission (wrapper with DB updates)."""
+    """Validate the submission (standalone with DB updates)."""
     bundled_mode = submission_dir is not None
     granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, logs_dir]))
 
@@ -84,7 +66,7 @@ def validate(  # noqa: PLR0913
     _files_dir = Path(submission_dir) / "files" if bundled_mode else Path(files_dir)
     _logs_dir = Path(submission_dir) / "logs" if bundled_mode else Path(logs_dir)
     _encrypted_files_dir = (
-        Path(submission_dir) / "encrypted_files" if bundled_mode else Path(files_dir).parent / "encrypted_files"
+        Path(submission_dir) / "encrypted_files" if bundled_mode else _metadata_dir.parent / "encrypted_files"
     )
 
     worker_inst = Worker(
@@ -97,6 +79,8 @@ def validate(  # noqa: PLR0913
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
 
+    identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
+
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,
@@ -104,16 +88,7 @@ def validate(  # noqa: PLR0913
         end_state=SubmissionStateEnum.VALIDATED,
         enabled=update_db,
     ) as dbcontext_inst:
-        validate_module.validate.callback(  # type: ignore[misc]
-            configuration=derive_validate_config(configuration),
-            submission_dir=submission_dir,
-            metadata_dir=metadata_dir,
-            files_dir=files_dir,
-            logs_dir=logs_dir,
-            force=force,
-            threads=threads,
-            mmap=mmap,
-        )
+        worker_inst.validate(identifiers=identifiers, force=force, no_mmap=not mmap)
 
         if update_db:
             _ = dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", "true")
@@ -133,6 +108,12 @@ def validate(  # noqa: PLR0913
     default=True,
     help="Check validation logs before encrypting.",
 )
+@click.option(
+    "--consented/--non-consented",
+    "consented",
+    required=True,
+    help="Target archive type: consented or non-consented.",
+)
 @grzcli.update_db
 def encrypt(  # noqa: PLR0913
     configuration: GrzctlConfig,
@@ -143,10 +124,11 @@ def encrypt(  # noqa: PLR0913
     logs_dir,
     force,
     check_validation_logs,
+    consented,
     update_db,
     **kwargs,
 ):
-    """Encrypt a submission (wrapper with DB updates)."""
+    """Encrypt a submission (standalone with DB updates)."""
     bundled_mode = submission_dir is not None
     granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir]))
 
@@ -172,6 +154,8 @@ def encrypt(  # noqa: PLR0913
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
 
+    archive_target = configuration.archives.consented if consented else configuration.archives.non_consented
+
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,
@@ -179,16 +163,11 @@ def encrypt(  # noqa: PLR0913
         end_state=SubmissionStateEnum.ENCRYPTED,
         enabled=update_db,
     ):
-        encrypt_module.encrypt.callback(  # type: ignore[misc]
-            configuration=derive_encrypt_config(configuration),
-            submission_dir=submission_dir if bundled_mode else None,
-            metadata_dir=metadata_dir,
-            files_dir=files_dir,
-            output_encrypted_files_dir=output_encrypted_files_dir,
-            logs_dir=logs_dir,
+        worker_inst.encrypt(
+            recipient_public_key_path=archive_target.public_key_path,
+            submitter_private_key_path=configuration.keys.submitter_private_key_path,
             force=force,
             check_validation_logs=check_validation_logs,
-            **kwargs,
         )
 
 
