@@ -45,6 +45,9 @@ def derive_encrypt_config(config: GrzctlConfig) -> dict:
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.files_dir
+@grzcli.logs_dir
 @grzcli.force
 @grzcli.threads
 @click.option(
@@ -58,6 +61,9 @@ def derive_encrypt_config(config: GrzctlConfig) -> dict:
 def validate(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_dir,
+    metadata_dir,
+    files_dir,
+    logs_dir,
     force,
     threads,
     mmap,
@@ -65,15 +71,34 @@ def validate(  # noqa: PLR0913
     **kwargs,
 ):
     """Validate the submission (wrapper with DB updates)."""
-    submission_dir = Path(submission_dir)
+    bundled_mode = submission_dir is not None
+    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, logs_dir]))
+
+    if bundled_mode and granular_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
+
+    if bundled_mode:
+        _submission_dir = Path(submission_dir)
+    elif granular_mode:
+        required = {
+            "--metadata-dir": metadata_dir,
+            "--files-dir": files_dir,
+            "--logs-dir": logs_dir,
+        }
+        missing = [name for name, path in required.items() if path is None]
+        if missing:
+            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
+        _submission_dir = Path(metadata_dir).parent
+    else:
+        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 
     submission_id = ""
     if update_db:
         worker_inst = Worker(
-            metadata_dir=submission_dir / "metadata",
-            files_dir=submission_dir / "files",
-            log_dir=submission_dir / "logs",
-            encrypted_files_dir=submission_dir / "encrypted_files",
+            metadata_dir=_submission_dir / "metadata",
+            files_dir=_submission_dir / "files",
+            log_dir=_submission_dir / "logs",
+            encrypted_files_dir=_submission_dir / "encrypted_files",
             threads=threads,
         )
         submission = worker_inst.parse_submission()
@@ -88,7 +113,7 @@ def validate(  # noqa: PLR0913
     ) as dbcontext_inst:
         validate_module.validate.callback(  # type: ignore[misc]
             configuration=derive_validate_config(configuration),
-            submission_dir=submission_dir,
+            submission_dir=_submission_dir,
             force=force,
             threads=threads,
             mmap=mmap,
@@ -102,6 +127,10 @@ def validate(  # noqa: PLR0913
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.files_dir
+@grzcli.output_encrypted_files_dir
+@grzcli.logs_dir
 @grzcli.force
 @click.option(
     "--check-validation-logs/--no-check-validation-logs",
@@ -110,24 +139,48 @@ def validate(  # noqa: PLR0913
     help="Check validation logs before encrypting.",
 )
 @grzcli.update_db
-def encrypt(
+def encrypt(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_dir,
+    metadata_dir,
+    files_dir,
+    output_encrypted_files_dir,
+    logs_dir,
     force,
     check_validation_logs,
     update_db,
     **kwargs,
 ):
     """Encrypt a submission (wrapper with DB updates)."""
-    submission_dir = Path(submission_dir)
+    bundled_mode = submission_dir is not None
+    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir]))
+
+    if bundled_mode and granular_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
+
+    if bundled_mode:
+        _submission_dir = Path(submission_dir)
+    elif granular_mode:
+        required = {
+            "--metadata-dir": metadata_dir,
+            "--files-dir": files_dir,
+            "--output-encrypted-files-dir": output_encrypted_files_dir,
+            "--logs-dir": logs_dir,
+        }
+        missing = [name for name, path in required.items() if path is None]
+        if missing:
+            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
+        _submission_dir = Path(metadata_dir).parent
+    else:
+        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 
     submission_id = "unknown"
     if update_db:
         worker_inst = Worker(
-            metadata_dir=submission_dir / "metadata",
-            files_dir=submission_dir / "files",
-            log_dir=submission_dir / "logs",
-            encrypted_files_dir=submission_dir / "encrypted_files",
+            metadata_dir=_submission_dir / "metadata",
+            files_dir=_submission_dir / "files",
+            log_dir=_submission_dir / "logs",
+            encrypted_files_dir=_submission_dir / "encrypted_files",
         )
         submission = worker_inst.parse_submission()
         submission_id = submission.metadata.content.submission_id
@@ -141,7 +194,11 @@ def encrypt(
     ):
         encrypt_module.encrypt.callback(  # type: ignore[misc]
             configuration=derive_encrypt_config(configuration),
-            submission_dir=submission_dir,
+            submission_dir=_submission_dir if bundled_mode else None,
+            metadata_dir=metadata_dir,
+            files_dir=files_dir,
+            output_encrypted_files_dir=output_encrypted_files_dir,
+            logs_dir=logs_dir,
             force=force,
             check_validation_logs=check_validation_logs,
             **kwargs,
