@@ -40,7 +40,7 @@ botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")
 
 
 class DownloadError(Exception):
-    """Exception raised when an upload fails"""
+    """Exception raised when a download fails"""
 
     pass
 
