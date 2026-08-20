@@ -79,6 +79,42 @@ class TestMapExceptionToFailureReason:
         result = db_context._map_exception_to_failure_reason(type(None), None)
         assert result == FailureReasonEnum.UNKNOWN
 
+    def test_wrapped_exception_keeps_its_reason(self, db_context: DbContext):
+        """Metadata that violates the schema reaches the recorder as SystemExit raised from a
+        ValidationError, which is how a real download failure loses its reason.
+        """
+        from pydantic import BaseModel
+
+        class _Dummy(BaseModel):
+            x: int
+
+        # Mirrors how grz_common parses metadata: the ValidationError is re-raised as SystemExit.
+        with pytest.raises(SystemExit) as raised:
+            try:
+                _Dummy(x="not_an_int")  # type: ignore
+            except ValidationError as validation_error:
+                raise SystemExit(validation_error) from validation_error
+
+        wrapped = raised.value
+        result = db_context._map_exception_to_failure_reason(type(wrapped), wrapped)
+        assert result == FailureReasonEnum.VALIDATION_ERROR
+
+    def test_outermost_mapped_exception_wins(self, db_context: DbContext):
+        """A wrapper that has a reason of its own keeps it rather than reporting its cause's."""
+        upload_error = UploadError("upload failed")
+        upload_error.__cause__ = NetworkError("connection reset")
+
+        result = db_context._map_exception_to_failure_reason(type(upload_error), upload_error)
+        assert result == FailureReasonEnum.UPLOAD_ERROR
+
+    def test_self_referential_cause_terminates(self, db_context: DbContext):
+        """A cause chain that loops back on itself must not spin forever."""
+        exc = RuntimeError("outer")
+        exc.__cause__ = exc
+
+        result = db_context._map_exception_to_failure_reason(type(exc), exc)
+        assert result == FailureReasonEnum.UNKNOWN
+
     def test_all_enum_values_are_covered(self, db_context: DbContext):
         """Ensures every FailureReasonEnum value except UNKNOWN is reachable via a mapped exception."""
         from pydantic import BaseModel
