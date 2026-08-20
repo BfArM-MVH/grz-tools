@@ -77,32 +77,25 @@ def validate(  # noqa: PLR0913
     if bundled_mode and granular_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
 
-    if bundled_mode:
-        _submission_dir = Path(submission_dir)
-    elif granular_mode:
-        required = {
-            "--metadata-dir": metadata_dir,
-            "--files-dir": files_dir,
-            "--logs-dir": logs_dir,
-        }
-        missing = [name for name, path in required.items() if path is None]
-        if missing:
-            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
-        _submission_dir = Path(metadata_dir).parent
-    else:
+    if not bundled_mode and not granular_mode:
         raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 
-    submission_id = ""
-    if update_db:
-        worker_inst = Worker(
-            metadata_dir=_submission_dir / "metadata",
-            files_dir=_submission_dir / "files",
-            log_dir=_submission_dir / "logs",
-            encrypted_files_dir=_submission_dir / "encrypted_files",
-            threads=threads,
-        )
-        submission = worker_inst.parse_submission()
-        submission_id = submission.metadata.content.submission_id
+    _metadata_dir = Path(submission_dir) / "metadata" if bundled_mode else Path(metadata_dir)
+    _files_dir = Path(submission_dir) / "files" if bundled_mode else Path(files_dir)
+    _logs_dir = Path(submission_dir) / "logs" if bundled_mode else Path(logs_dir)
+    _encrypted_files_dir = (
+        Path(submission_dir) / "encrypted_files" if bundled_mode else Path(files_dir).parent / "encrypted_files"
+    )
+
+    worker_inst = Worker(
+        metadata_dir=_metadata_dir,
+        files_dir=_files_dir,
+        log_dir=_logs_dir,
+        encrypted_files_dir=_encrypted_files_dir,
+        threads=threads,
+    )
+    submission = worker_inst.parse_submission()
+    submission_id = submission.metadata.content.submission_id
 
     with DbContext(
         configuration=configuration,
@@ -113,11 +106,13 @@ def validate(  # noqa: PLR0913
     ) as dbcontext_inst:
         validate_module.validate.callback(  # type: ignore[misc]
             configuration=derive_validate_config(configuration),
-            submission_dir=_submission_dir,
+            submission_dir=submission_dir,
+            metadata_dir=metadata_dir,
+            files_dir=files_dir,
+            logs_dir=logs_dir,
             force=force,
             threads=threads,
             mmap=mmap,
-            **kwargs,
         )
 
         if update_db:
@@ -158,32 +153,24 @@ def encrypt(  # noqa: PLR0913
     if bundled_mode and granular_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
 
-    if bundled_mode:
-        _submission_dir = Path(submission_dir)
-    elif granular_mode:
-        required = {
-            "--metadata-dir": metadata_dir,
-            "--files-dir": files_dir,
-            "--output-encrypted-files-dir": output_encrypted_files_dir,
-            "--logs-dir": logs_dir,
-        }
-        missing = [name for name, path in required.items() if path is None]
-        if missing:
-            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
-        _submission_dir = Path(metadata_dir).parent
-    else:
+    if not bundled_mode and not granular_mode:
         raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
 
-    submission_id = "unknown"
-    if update_db:
-        worker_inst = Worker(
-            metadata_dir=_submission_dir / "metadata",
-            files_dir=_submission_dir / "files",
-            log_dir=_submission_dir / "logs",
-            encrypted_files_dir=_submission_dir / "encrypted_files",
-        )
-        submission = worker_inst.parse_submission()
-        submission_id = submission.metadata.content.submission_id
+    _metadata_dir = Path(submission_dir) / "metadata" if bundled_mode else Path(metadata_dir)
+    _files_dir = Path(submission_dir) / "files" if bundled_mode else Path(files_dir)
+    _logs_dir = Path(submission_dir) / "logs" if bundled_mode else Path(logs_dir)
+    _encrypted_files_dir = (
+        Path(submission_dir) / "encrypted_files" if bundled_mode else Path(output_encrypted_files_dir)
+    )
+
+    worker_inst = Worker(
+        metadata_dir=_metadata_dir,
+        files_dir=_files_dir,
+        log_dir=_logs_dir,
+        encrypted_files_dir=_encrypted_files_dir,
+    )
+    submission = worker_inst.parse_submission()
+    submission_id = submission.metadata.content.submission_id
 
     with DbContext(
         configuration=configuration,
@@ -194,7 +181,7 @@ def encrypt(  # noqa: PLR0913
     ):
         encrypt_module.encrypt.callback(  # type: ignore[misc]
             configuration=derive_encrypt_config(configuration),
-            submission_dir=_submission_dir if bundled_mode else None,
+            submission_dir=submission_dir if bundled_mode else None,
             metadata_dir=metadata_dir,
             files_dir=files_dir,
             output_encrypted_files_dir=output_encrypted_files_dir,
