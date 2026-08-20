@@ -10,6 +10,7 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
+from grz_common.workers.download import DownloadError
 from grz_db.errors import DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
@@ -218,6 +219,7 @@ class DbContext:
             EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
             NetworkError: FailureReasonEnum.NETWORK_ERROR,
             UploadError: FailureReasonEnum.UPLOAD_ERROR,
+            DownloadError: FailureReasonEnum.DOWNLOAD_ERROR,
             DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
         }

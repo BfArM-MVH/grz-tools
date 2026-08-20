@@ -9,6 +9,7 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
+from grz_common.workers.download import DownloadError
 from grz_db.errors import DuplicateTanGError
 from grz_db.models.submission import FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext
@@ -51,6 +52,7 @@ class TestMapExceptionToFailureReason:
             (EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
             (NetworkError("failed"), FailureReasonEnum.NETWORK_ERROR),
             (UploadError("failed"), FailureReasonEnum.UPLOAD_ERROR),
+            (DownloadError("failed"), FailureReasonEnum.DOWNLOAD_ERROR),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
             (IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
             (RuntimeError("unexpected"), FailureReasonEnum.UNKNOWN),
@@ -139,6 +141,7 @@ class TestMapExceptionToFailureReason:
                 EncryptionError(),
                 NetworkError(),
                 UploadError(),
+                DownloadError(),
                 DuplicateTanGError(),
                 IncompleteSubmissionError(),
                 validation_exc,
