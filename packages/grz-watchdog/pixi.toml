@@ -17,7 +17,7 @@ test = { cmd = "pytest", depends-on = ["setup"] }
 
 [dependencies]
 snakemake = ">=9.13.2,<10"
-snakefmt = ">=1,<2"
+snakefmt = ">=2,<3"
 #snakemake-storage-plugin-s3 = ">=0.3.6,<0.4"
 #snakemake-executor-plugin-slurm = ">=1.8.0,<2"
 conda = ">=25.9.0,<26"
