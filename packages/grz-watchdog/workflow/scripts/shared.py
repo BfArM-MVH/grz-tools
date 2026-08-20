@@ -49,7 +49,19 @@ def scan_inbox_and_augment(grzctl_config, submitter_id, inbox):
     Scans a single inbox using 'grzctl list' and augments submission data with its origin (submitter_id, inbox).
     """
     result = run_grzctl_command(
-        ["--config", grzctl_config, "list", "--inbox", inbox, "--json", "--show-cleaned", "--limit", "1000000"]
+        [
+            "--config",
+            grzctl_config,
+            "list",
+            "--submitter-id",
+            submitter_id,
+            "--inbox",
+            inbox,
+            "--json",
+            "--show-cleaned",
+            "--limit",
+            "1000000",
+        ]
     )
     submissions = json.loads(result.stdout)
     for submission in submissions:
