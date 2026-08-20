@@ -35,6 +35,7 @@ jobs:
             grz-db
             grz-tools
             grz-check
+            grz-watchdog
             repo
             release
             deps

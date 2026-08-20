@@ -4,7 +4,7 @@ from pydantic import ValidationError
 
 
 def test_file_paths():
-    with pytest.raises(ValidationError, match="File paths must be normalized"):
+    with pytest.raises(ValidationError, match=r"File paths must be normalized"):
         File(
             filePath="../test.bed",
             fileType=FileType.bed,
@@ -12,7 +12,7 @@ def test_file_paths():
             fileSizeInBytes=0,
         )
 
-    with pytest.raises(ValidationError, match="File paths must be normalized"):
+    with pytest.raises(ValidationError, match=r"File paths must be normalized"):
         File(
             filePath="files/./test.bed",
             fileType=FileType.bed,
@@ -20,7 +20,7 @@ def test_file_paths():
             fileSizeInBytes=0,
         )
 
-    with pytest.raises(ValidationError, match="File paths must be relative"):
+    with pytest.raises(ValidationError, match=r"File paths must be relative"):
         File(
             filePath="/data/sensitive/target.bed",
             fileType=FileType.bed,
