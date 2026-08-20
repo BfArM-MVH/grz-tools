@@ -74,6 +74,8 @@ def monitor_and_queue_submissions(shutdown_event):
                                 "--config",
                                 GRZCTL_CONFIG_PATH,
                                 "list",
+                                "--submitter-id",
+                                submitter,
                                 "--inbox",
                                 inbox_name,
                                 "--json",
