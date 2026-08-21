@@ -48,16 +48,20 @@ from grz_db.models.submission import (
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.dates import quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
+    Donor,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
+    LabDatum,
     LibraryType,
     MissingThresholdsException,
     Relation,
+    SequenceData,
     SequenceSubtype,
     SequenceType,
 )
+from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import Field, ValidationError
-from sqlmodel import select
+from sqlmodel import Session, select
 from tqdm.auto import tqdm
 
 from ... import get_versions
@@ -797,6 +801,7 @@ def _recompute_metric(measured: float, provided: float | None, required: float) 
     :param measured: value computed by the QC pipeline (stored in the database)
     :param provided: value provided by the Leistungserbringer in the submission metadata
     :param required: threshold required by BfArM (0 for non-index donors)
+    :return: verdict with the threshold check, the deviation, and the per-metric passed_qc flag
     """
     meets_threshold = measured >= required
     # A provided value of zero is treated like a missing one, mirroring the QC workflow
@@ -958,19 +963,39 @@ def populate_qc(
             db_service.add_detailed_qc_result(result)
 
 
-def _metadata_lab_data(metadata: GrzSubmissionMetadata) -> dict[str, tuple[Any, Any]]:
+def _lab_datum_id(donor_index: int, donor: Donor, lab_datum_index: int, lab_datum: LabDatum) -> str:
+    """Derive the lab datum ID under which the QC workflow reports a lab datum.
+
+    Must match the sample ID scheme of GRZ_QC_Workflow's metadata_to_samplesheet.py
+    (``{relation}{donor_index}_{sequence_subtype}{lab_datum_index}``), which ends up as
+    ``DetailedQCResult.lab_datum_id`` via populate-qc. It is the only unambiguous link
+    between a stored QC result and its lab datum in the submission metadata.
+
+    :param donor_index: position of the donor in the submission metadata
+    :param donor: the donor
+    :param lab_datum_index: position of the lab datum within the donor's lab data
+    :param lab_datum: the lab datum
+    :return: the lab datum ID, e.g. ``index0_germline0``
+    """
+    return f"{donor.relation}{donor_index}_{lab_datum.sequence_subtype}{lab_datum_index}"
+
+
+def _metadata_lab_data(metadata: GrzSubmissionMetadata) -> dict[str, tuple[Thresholds | None, SequenceData]]:
     """Map lab datum IDs to (required thresholds, provided sequence data) from the metadata.
 
-    Derives the lab datum IDs the same way GRZ_QC_Workflow's metadata_to_samplesheet.py
-    does. Only index donors have required thresholds; for all other donors the thresholds
-    are ``None`` (mirroring metadata_to_samplesheet.py, which sets their requirements to 0).
+    Only index donors have required thresholds; for all other donors the thresholds are
+    ``None`` (mirroring metadata_to_samplesheet.py, which sets their requirements to 0).
+
+    :param metadata: the submission metadata stored in the database
+    :return: mapping of lab datum ID to (required thresholds or ``None``, provided sequence
+        data) for every lab datum with sequence data
     """
     lab_data = {}
     for donor_index, donor in enumerate(metadata.donors):
         for lab_datum_index, lab_datum in enumerate(donor.lab_data):
             if lab_datum.sequence_data is None:
                 continue
-            lab_datum_id = f"{donor.relation}{donor_index}_{lab_datum.sequence_subtype}{lab_datum_index}"
+            lab_datum_id = _lab_datum_id(donor_index, donor, lab_datum_index, lab_datum)
             try:
                 thresholds = metadata.determine_thresholds_for(donor, lab_datum)
             except MissingThresholdsException:
@@ -982,12 +1007,19 @@ def _metadata_lab_data(metadata: GrzSubmissionMetadata) -> dict[str, tuple[Any, 
 
 
 def _recompute_result(
-    result: DetailedQCResult, thresholds: Any, sequence_data: Any, apply_changes: bool
+    result: DetailedQCResult, thresholds: Thresholds | None, sequence_data: SequenceData, apply_changes: bool
 ) -> RecomputeOutcome:
     """Recompute the three metrics of one detailed QC result row.
 
     Mutates the row in place when ``apply_changes`` is set (the enclosing session tracks the
     changes).
+
+    :param result: the stored detailed QC result row
+    :param thresholds: thresholds required by BfArM, or ``None`` for non-index donors
+    :param sequence_data: sequence data of the lab datum as provided in the submission metadata
+    :param apply_changes: whether to write the recomputed values to the row
+    :return: whether all computed values meet their thresholds and how many metric fields
+        differ from the recomputed values
     """
     meets_all_thresholds = True
     metrics_changed = 0
@@ -1035,10 +1067,14 @@ def _recompute_result(
     return RecomputeOutcome(meets_all_thresholds, metrics_changed)
 
 
-def _recompute_submission(session, submission: Submission, apply_changes: bool) -> RecomputeOutcome | None:
+def _recompute_submission(session: Session, submission: Submission, apply_changes: bool) -> RecomputeOutcome | None:
     """Recompute the detailed QC results of one submission.
 
-    Returns ``None`` if the submission has no recomputable QC results.
+    :param session: open database session the submission and its results are loaded in
+    :param submission: the submission to recompute
+    :param apply_changes: whether to write the recomputed values to the result rows
+    :return: the combined outcome over the most recent QC result of each lab datum, or
+        ``None`` if the submission has no QC results or they cannot be matched to its metadata
     """
     results = session.exec(select(DetailedQCResult).where(DetailedQCResult.submission_id == submission.id)).all()
     if not results:
