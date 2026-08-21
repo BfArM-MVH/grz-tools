@@ -1023,6 +1023,9 @@ def _recompute_result(
     """
     meets_all_thresholds = True
     metrics_changed = 0
+    # One (prefix, verdict) pair per metric.
+    # prefix: name prefix of the row's `<prefix>_passed_qc` and `<prefix>_percent_deviation` columns.
+    # verdict: the MetricVerdict recomputed for that metric.
     verdicts = (
         (
             "mean_depth_of_coverage",
