@@ -30,6 +30,8 @@ from grz_pydantic_models.submission.metadata import (
 )
 from grz_pydantic_models.submission.metadata.v1 import (
     PROFILES_REQUIRING_PERIOD_END,
+    REDACTED_LOCAL_CASE_ID,
+    REDACTED_TAN,
     RESEARCH_CONSENT_PACKAGE_PROFILES,
     RESEARCH_CONSENT_SCHEMA_VERSIONS,
     File,
@@ -38,6 +40,7 @@ from grz_pydantic_models.submission.metadata.v1 import (
     LibraryType,
     ResearchConsent,
     ResearchConsentCodes,
+    redact_metadata_dict,
 )
 from grz_pydantic_models_testing import example_metadata, example_research_consent, example_terminology
 from packaging.version import Version
@@ -1745,3 +1748,51 @@ def test_no_scope_justification_standard_passes_after_cutoff(version: str, justi
             consent.pop("scope", None)
 
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+ALL_EXAMPLES = sorted(
+    f"{dataset.name}/{path.name}"
+    for dataset in importlib.resources.files(example_metadata).iterdir()
+    if dataset.is_dir() and not dataset.name.startswith("__")
+    for path in dataset.iterdir()
+    if path.name.endswith(".json")
+)
+
+
+@pytest.mark.parametrize("example", ALL_EXAMPLES)
+def test_model_round_trips_the_submitted_document(example: str) -> None:
+    """Parsing and dumping must not change a submitted document.
+
+    Archival records what the submitter sent, so a field this package does not model may
+    not be dropped on the way through, and one the submitter omitted may not appear.
+    Losing either would make ``to_redacted_dict`` unfit to stand in for the document.
+    """
+    dataset, name = example.split("/")
+    raw = json.loads(importlib.resources.files(example_metadata).joinpath(dataset, name).read_text())
+
+    metadata = GrzSubmissionMetadata.model_validate(raw)
+
+    assert metadata.get_raw_dict() == raw
+
+
+def test_redaction_names_every_field_it_replaces() -> None:
+    """redact_metadata_dict replaces tanG, localCaseId, and the index donor's pseudonym on a raw dict."""
+    raw = json.loads(_metadata_raw("wgs_tumor_germline", "1.3.0"))
+
+    redacted = redact_metadata_dict(raw)
+
+    assert redacted["submission"]["tanG"] == REDACTED_TAN
+    assert redacted["submission"]["localCaseId"] == REDACTED_LOCAL_CASE_ID
+    assert all(donor["donorPseudonym"] == "index" for donor in redacted["donors"] if donor["relation"] == "index")
+
+
+def test_both_carriers_of_the_redaction_rule_agree() -> None:
+    """redact_metadata_dict on the raw dict and GrzSubmissionMetadata.to_redacted_dict on the
+    parsed model must redact the same document identically, since both are built from the one
+    rule in :func:`redact_metadata_dict` (see its docstring for why the archive may still hold
+    either spelling of a redacted localCaseId).
+    """
+    raw = json.loads(_metadata_raw("wgs_tumor_germline", "1.3.0"))
+    metadata = GrzSubmissionMetadata.model_validate(copy.deepcopy(raw))
+
+    assert redact_metadata_dict(raw) == metadata.to_redacted_dict()
