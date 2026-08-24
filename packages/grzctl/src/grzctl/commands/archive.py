@@ -26,8 +26,8 @@ log = logging.getLogger(__name__)
 @click.option(
     "--consented/--non-consented",
     "consented",
-    default=True,
-    help="Whether to archive as consented (default) or non-consented.",
+    required=True,
+    help="Whether to archive as consented or non-consented.",
 )
 def archive(  # noqa: PLR0913
     configuration: GrzctlConfig,

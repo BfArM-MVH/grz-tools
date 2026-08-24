@@ -38,6 +38,7 @@ def test_archive(temp_grzctl_s3_config_file_path, remote_bucket_with_version, wo
             "archive",
             "--submission-dir",
             str(working_dir_path),
+            "--consented",
             "--no-update-db",
         ]
 

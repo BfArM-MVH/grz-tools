@@ -1,7 +1,8 @@
-"""Tests for the grzctl ``validate`` wrapper command."""
+"""Tests for the grzctl ``validate`` command."""
+
+from unittest.mock import patch
 
 import click.testing
-import grz_cli.commands.validate as grz_cli_validate
 import grzctl.cli
 import pytest
 
@@ -28,39 +29,45 @@ def grzctl_config_path(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("flag", "expected"),
+    ("flag", "expected_no_mmap"),
     [
-        ("--mmap", True),
-        ("--no-mmap", False),
-        (None, False),  # default is no-mmap
+        ("--mmap", False),
+        ("--no-mmap", True),
+        (None, True),  # default is no-mmap
     ],
 )
-def test_validate_forwards_mmap_to_inner_callback(tmp_path, monkeypatch, flag, expected, grzctl_config_path):
-    """The grzctl ``validate`` wrapper must forward the ``mmap`` flag to the inner
-    grz-cli ``validate`` callback under the parameter name it actually expects
-    (``mmap``), not ``no_mmap``.
+def test_validate_forwards_mmap_to_worker(tmp_path, flag, expected_no_mmap, grzctl_config_path):
+    """The grzctl ``validate`` command must forward the ``--mmap/--no-mmap`` flag to
+    ``Worker.validate`` (as the inverted ``no_mmap`` keyword).
 
-    Regression test for ``TypeError: validate() missing 1 required positional
-    argument: 'mmap'``: the wrapper invokes the inner callback directly (bypassing
-    Click's option parsing), so a wrong keyword name silently lands in ``**kwargs``
-    and leaves the required ``mmap`` parameter unbound.
+    Regression test for a previous wrapper implementation which invoked grz-cli's
+    inner callback directly and silently dropped misnamed keywords into ``**kwargs``.
     """
-    received: dict[str, object] = {}
+    submission_dir = tmp_path / "submission"
+    for sub in ("metadata", "files", "logs"):
+        (submission_dir / sub).mkdir(parents=True)
 
-    def fake_callback(*, configuration, submission_dir, force, threads, mmap, **kwargs):
-        # Mirror the real inner callback's signature so that passing a wrong keyword
-        # (e.g. ``no_mmap``) reproduces the same TypeError observed in production.
-        received["mmap"] = mmap
+    with patch("grzctl.commands.validate.Worker") as mock_worker_cls:
+        mock_worker = mock_worker_cls.return_value
+        mock_worker.parse_submission.return_value.metadata.content.submission_id = "S1"
 
-    monkeypatch.setattr(grz_cli_validate.validate, "callback", fake_callback)
+        args = [
+            "--config",
+            str(grzctl_config_path),
+            "validate",
+            "--submission-dir",
+            str(submission_dir),
+            "--submitter-id",
+            "000000000",
+            "--no-update-db",
+        ]
+        if flag is not None:
+            args.append(flag)
 
-    args = ["--config", str(grzctl_config_path), "validate", "--submission-dir", str(tmp_path), "--no-update-db"]
-    if flag is not None:
-        args.append(flag)
+        runner = click.testing.CliRunner()
+        cli = grzctl.cli.build_cli()
+        result = runner.invoke(cli, args)
 
-    runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
-    result = runner.invoke(cli, args)
-
-    assert result.exit_code == 0, result.output
-    assert received["mmap"] is expected
+        assert result.exit_code == 0, result.output
+        mock_worker.validate.assert_called_once()
+        assert mock_worker.validate.call_args.kwargs["no_mmap"] is expected_no_mmap

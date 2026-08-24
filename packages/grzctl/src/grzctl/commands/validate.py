@@ -1,4 +1,4 @@
-"""Command for encrypting a submission."""
+"""Command for validating a submission."""
 
 import logging
 from pathlib import Path
@@ -20,38 +20,41 @@ log = logging.getLogger(__name__)
 @grzcli.submission_dir
 @grzcli.metadata_dir
 @grzcli.files_dir
-@grzcli.output_encrypted_files_dir
 @grzcli.logs_dir
 @grzcli.force
+@grzcli.threads
 @click.option(
-    "--check-validation-logs/--no-check-validation-logs",
-    "check_validation_logs",
-    default=True,
-    help="Check validation logs before encrypting.",
+    "--submitter-id",
+    "submitter_id",
+    required=True,
+    type=str,
+    metavar="STRING",
+    help="Expected Leistungserbringer (LE) identifier for metadata validation.",
 )
 @click.option(
-    "--consented/--non-consented",
-    "consented",
-    required=True,
-    help="Target archive type: consented or non-consented.",
+    "--mmap/--no-mmap",
+    "mmap",
+    default=False,
+    hidden=True,
+    help="Whether to use mmap.",
 )
 @grzcli.update_db
-def encrypt(  # noqa: PLR0913
+def validate(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_dir,
     metadata_dir,
     files_dir,
-    output_encrypted_files_dir,
     logs_dir,
     force,
-    check_validation_logs,
-    consented,
+    threads,
+    submitter_id,
+    mmap,
     update_db,
     **kwargs,
 ):
-    """Encrypt a submission (standalone with DB updates)."""
+    """Validate the submission (standalone with DB updates)."""
     bundled_mode = submission_dir is not None
-    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir]))
+    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, logs_dir]))
 
     if bundled_mode and granular_mode:
         raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
@@ -63,7 +66,7 @@ def encrypt(  # noqa: PLR0913
     _files_dir = Path(submission_dir) / "files" if bundled_mode else Path(files_dir)
     _logs_dir = Path(submission_dir) / "logs" if bundled_mode else Path(logs_dir)
     _encrypted_files_dir = (
-        Path(submission_dir) / "encrypted_files" if bundled_mode else Path(output_encrypted_files_dir)
+        Path(submission_dir) / "encrypted_files" if bundled_mode else _metadata_dir.parent / "encrypted_files"
     )
 
     worker_inst = Worker(
@@ -71,22 +74,21 @@ def encrypt(  # noqa: PLR0913
         files_dir=_files_dir,
         log_dir=_logs_dir,
         encrypted_files_dir=_encrypted_files_dir,
+        threads=threads,
     )
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
 
-    archive_target = configuration.archives.consented if consented else configuration.archives.non_consented
+    identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
 
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,
-        start_state=SubmissionStateEnum.ENCRYPTING,
-        end_state=SubmissionStateEnum.ENCRYPTED,
+        start_state=SubmissionStateEnum.VALIDATING,
+        end_state=SubmissionStateEnum.VALIDATED,
         enabled=update_db,
-    ):
-        worker_inst.encrypt(
-            recipient_public_key_path=archive_target.public_key_path,
-            submitter_private_key_path=configuration.keys.submitter_private_key_path,
-            force=force,
-            check_validation_logs=check_validation_logs,
-        )
+    ) as dbcontext_inst:
+        worker_inst.validate(identifiers=identifiers, force=force, no_mmap=not mmap)
+
+        if update_db:
+            _ = dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", "true")
