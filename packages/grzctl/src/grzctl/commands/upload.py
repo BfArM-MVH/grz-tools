@@ -1,6 +1,5 @@
-"""Command for archiving a submission."""
+"""Command for uploading a submission."""
 
-import logging
 from pathlib import Path
 
 import click
@@ -8,39 +7,26 @@ import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
-from ..commands import grzctl_configuration
+from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
-log = logging.getLogger(__name__)
-
 
 @click.command()
-@grzctl_configuration
 @grzcli.submission_dir
 @grzcli.threads
+@grzctl_configuration
+@inbox_option
 @grzcli.update_db
-@click.option(
-    "--consented/--non-consented",
-    "consented",
-    required=True,
-    help="Whether to archive as consented or non-consented.",
-)
-def archive(
+def upload(
     configuration: GrzctlConfig,
     submission_dir,
-    threads,
-    update_db,
-    consented,
+    threads: int,
+    inbox_name: str,
+    update_db: bool,
     **kwargs,
 ):
-    """
-    Archive a submission within a GRZ/GDC.
-    """
-    archive_s3 = configuration.archives.consented.s3 if consented else configuration.archives.non_consented.s3
-
-    log.info("Starting archival...")
-
+    """Upload a submission to a GRZ/GDC (wrapper with DB updates)."""
     submission_dir = Path(submission_dir)
 
     worker_inst = Worker(
@@ -50,14 +36,18 @@ def archive(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-    submission_id = worker_inst.parse_encrypted_submission().submission_id
+    submission = worker_inst.parse_submission()
+    submission_id = submission.metadata.content.submission_id
+    submitter_id = submission.metadata.content.submission.submitter_id
+
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,
-        start_state=SubmissionStateEnum.ARCHIVING,
-        end_state=SubmissionStateEnum.ARCHIVED,
+        start_state=SubmissionStateEnum.UPLOADING,
+        end_state=SubmissionStateEnum.UPLOADED,
         enabled=update_db,
     ):
-        worker_inst.archive(archive_s3)
-
-    log.info("Archival finished!")
+        uploaded_id = worker_inst.upload(s3_options)
+        click.echo(uploaded_id)

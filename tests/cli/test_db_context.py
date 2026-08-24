@@ -14,6 +14,9 @@ from grzctl.models.config import GrzctlConfig
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+CONSENTED_PUBLIC_KEY_PATH = "/keys/consented.pub"
+NON_CONSENTED_PUBLIC_KEY_PATH = "/keys/non_consented.pub"
+
 
 @pytest.fixture
 def full_config_path(
@@ -23,6 +26,12 @@ def full_config_path(
     pruefbericht_config_content,
 ):
     from tests.conftest import _grzctl_archives
+
+    archives = _grzctl_archives(endpoint_url="http://localhost:9000")
+    # Use distinct public keys per archive so tests can assert that the consent
+    # flag actually selects the intended archive target.
+    archives["consented"]["public_key_path"] = CONSENTED_PUBLIC_KEY_PATH
+    archives["non_consented"]["public_key_path"] = NON_CONSENTED_PUBLIC_KEY_PATH
 
     config_data = {
         "leistungserbringer": {
@@ -35,7 +44,7 @@ def full_config_path(
                 },
             }
         },
-        "archives": _grzctl_archives(endpoint_url="http://localhost:9000"),
+        "archives": archives,
         "identifiers": {"grz": "GRZK00007"},
     }
     config_data.update(migrated_db_config_content)
@@ -163,6 +172,8 @@ def build_args(
             args.append(str(output_dir))
         elif arg == "SUBMISSION_ID":
             args.append(submission_id)
+        elif arg == "SUBMITTER_ID":
+            args.append(submission_id[:9])
         else:
             args.append(arg)
     if config_path:
@@ -202,25 +213,39 @@ def build_args(
             "expected_state": SubmissionStateEnum.DECRYPTED,
         },
         {
-            "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
-            "extra_patch": "grzctl.commands.cli_wrappers.validate_module.validate.callback",
+            "cmd": ["validate", "--submitter-id", "SUBMITTER_ID", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.validate.Worker",
             "id_source": "submission",
             "initial_state": SubmissionStateEnum.DECRYPTED,
             "intermediate_state": SubmissionStateEnum.VALIDATING,
             "expected_state": SubmissionStateEnum.VALIDATED,
         },
         {
-            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
-            "extra_patch": "grzctl.commands.cli_wrappers.encrypt_module.encrypt.callback",
+            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR", "--consented"],
+            "worker_patch": "grzctl.commands.encrypt.Worker",
             "id_source": "submission",
             "initial_state": SubmissionStateEnum.VALIDATED,
             "intermediate_state": SubmissionStateEnum.ENCRYPTING,
             "expected_state": SubmissionStateEnum.ENCRYPTED,
         },
         {
-            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR"],
+            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR", "--non-consented"],
+            "worker_patch": "grzctl.commands.encrypt.Worker",
+            "id_source": "submission",
+            "initial_state": SubmissionStateEnum.VALIDATED,
+            "intermediate_state": SubmissionStateEnum.ENCRYPTING,
+            "expected_state": SubmissionStateEnum.ENCRYPTED,
+        },
+        {
+            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR", "--consented"],
+            "worker_patch": "grzctl.commands.archive.Worker",
+            "id_source": "encrypted_submission",
+            "initial_state": SubmissionStateEnum.ENCRYPTED,
+            "intermediate_state": SubmissionStateEnum.ARCHIVING,
+            "expected_state": SubmissionStateEnum.ARCHIVED,
+        },
+        {
+            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR", "--non-consented"],
             "worker_patch": "grzctl.commands.archive.Worker",
             "id_source": "encrypted_submission",
             "initial_state": SubmissionStateEnum.ENCRYPTED,
@@ -301,6 +326,17 @@ def test_db_wrappers(
             method_name = command_spec["cmd"][0]
             getattr(mock_worker, method_name).assert_called_once()
 
+            if method_name == "encrypt":
+                expected_key = CONSENTED_PUBLIC_KEY_PATH if "--consented" in args else NON_CONSENTED_PUBLIC_KEY_PATH
+                assert mock_worker.encrypt.call_args.kwargs["recipient_public_key_path"] == expected_key, (
+                    "encrypt must use the public key of the archive targeted by the consent flag"
+                )
+            elif method_name == "archive":
+                expected_bucket = "consented" if "--consented" in args else "non_consented"
+                assert mock_worker.archive.call_args.args[0].bucket == expected_bucket, (
+                    "archive must use the S3 bucket targeted by the consent flag"
+                )
+
         history = get_state_history(db_engine, submission_id)
         assert len(history) >= 2, f"History too short: {history}"
         assert history[-1] == command_spec["expected_state"]
@@ -318,19 +354,17 @@ def test_db_wrappers(
             "id_source": "encrypted_submission",
         },
         {
-            "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
-            "extra_patch": "grzctl.commands.cli_wrappers.validate_module.validate.callback",
+            "cmd": ["validate", "--submitter-id", "SUBMITTER_ID", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.validate.Worker",
             "id_source": "submission",
         },
         {
-            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
-            "extra_patch": "grzctl.commands.cli_wrappers.encrypt_module.encrypt.callback",
+            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR", "--consented"],
+            "worker_patch": "grzctl.commands.encrypt.Worker",
             "id_source": "submission",
         },
         {
-            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR"],
+            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR", "--consented"],
             "worker_patch": "grzctl.commands.archive.Worker",
             "id_source": "encrypted_submission",
         },
@@ -396,25 +430,23 @@ def test_db_wrappers_submission_not_in_db(
             "expected_state": SubmissionStateEnum.DECRYPTED,
         },
         {
-            "cmd": ["validate", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
-            "extra_patch": "grzctl.commands.cli_wrappers.validate_module.validate.callback",
+            "cmd": ["validate", "--submitter-id", "SUBMITTER_ID", "--submission-dir", "SUBMISSION_DIR"],
+            "worker_patch": "grzctl.commands.validate.Worker",
             "id_source": "submission",
             "wrong_state": SubmissionStateEnum.ENCRYPTED,  # expected: DECRYPTED
             "intermediate_state": SubmissionStateEnum.VALIDATING,
             "expected_state": SubmissionStateEnum.VALIDATED,
         },
         {
-            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR"],
-            "worker_patch": "grzctl.commands.cli_wrappers.Worker",
-            "extra_patch": "grzctl.commands.cli_wrappers.encrypt_module.encrypt.callback",
+            "cmd": ["encrypt", "--submission-dir", "SUBMISSION_DIR", "--consented"],
+            "worker_patch": "grzctl.commands.encrypt.Worker",
             "id_source": "submission",
             "wrong_state": SubmissionStateEnum.DOWNLOADED,  # expected: VALIDATED
             "intermediate_state": SubmissionStateEnum.ENCRYPTING,
             "expected_state": SubmissionStateEnum.ENCRYPTED,
         },
         {
-            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR"],
+            "cmd": ["archive", "--submission-dir", "SUBMISSION_DIR", "--consented"],
             "worker_patch": "grzctl.commands.archive.Worker",
             "id_source": "encrypted_submission",
             "wrong_state": SubmissionStateEnum.DOWNLOADED,  # expected: ENCRYPTED
@@ -586,18 +618,22 @@ def test_validation_basic_qc_passed_update(
         initial_state=SubmissionStateEnum.DECRYPTED,
     )
 
-    # Mock the validate.callback
+    # Mock Worker.validate to simulate validation success/failure
     with (
-        patch("grzctl.commands.cli_wrappers.validate_module.validate.callback") as mock_validate_callback,
+        patch("grzctl.commands.validate.Worker") as mock_worker_cls,
     ):
+        mock_worker = mock_worker_cls.return_value
+        mock_worker.parse_submission.return_value.metadata.content.submission_id = submission_id
         # Fail validation on purpose for negative case
         if not valid_metadata:
-            mock_validate_callback.side_effect = Exception("validation failed")
+            mock_worker.validate.side_effect = Exception("validation failed")
 
         validate_args = [
             "--config",
             str(full_config_path),
             "validate",
+            "--submitter-id",
+            submission_id[:9],
             "--submission-dir",
             str(submission_dir),
             "--update-db",
