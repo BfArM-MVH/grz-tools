@@ -487,25 +487,41 @@ def _dump_qc_report(
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     with database._get_session() as session:
-        query_submissions_that_failed_detailed_qc = (
+        # The quarterly QC report lists submissions that failed the detailed QC (a computed
+        # metric below the required threshold) as well as submissions that passed but carry a
+        # deviation of more than 10% between the computed and provided values on any metric.
+        # BfArM requires both to be reported; the latter does not count as a failure.
+        submission_ids_with_deviation = select(DetailedQCResult.submission_id).where(
+            sa.or_(
+                sa.not_(DetailedQCResult.percent_bases_above_quality_threshold_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.mean_depth_of_coverage_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.targeted_regions_above_min_coverage_passed_qc),  # type: ignore[call-overload]
+            )
+        )
+        query_submissions_to_report = (
             select(Submission)
             .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
-            .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
+            .filter(
+                sa.or_(
+                    sa.not_(Submission.detailed_qc_passed),  # type: ignore[call-overload]
+                    Submission.id.in_(submission_ids_with_deviation),  # type: ignore[attr-defined]
+                )
+            )
         )
-        submissions_that_failed_detailed_qc = session.exec(query_submissions_that_failed_detailed_qc).all()
+        submissions_to_report = session.exec(query_submissions_to_report).all()
 
-        subquery_submissions_that_failed_detailed_qc = query_submissions_that_failed_detailed_qc.subquery()
-        query_reports_of_failed_submissions = select(DetailedQCResult).join(
-            subquery_submissions_that_failed_detailed_qc,
-            subquery_submissions_that_failed_detailed_qc.c.id == DetailedQCResult.submission_id,
+        subquery_submissions_to_report = query_submissions_to_report.subquery()
+        query_reports_to_include = select(DetailedQCResult).join(
+            subquery_submissions_to_report,
+            subquery_submissions_to_report.c.id == DetailedQCResult.submission_id,
         )
-        reports_of_failed_submissions = session.exec(query_reports_of_failed_submissions).all()
+        reports_to_include = session.exec(query_reports_to_include).all()
 
-        subquery_reports_of_failed_submissions = query_reports_of_failed_submissions.subquery()
+        subquery_reports_to_include = query_reports_to_include.subquery()
         query_relevant_donors = select(Donor).join(
-            subquery_reports_of_failed_submissions,
-            (subquery_reports_of_failed_submissions.c.submission_id == Donor.submission_id)  # type: ignore[arg-type]
-            & (subquery_reports_of_failed_submissions.c.pseudonym == Donor.pseudonym),
+            subquery_reports_to_include,
+            (subquery_reports_to_include.c.submission_id == Donor.submission_id)  # type: ignore[arg-type]
+            & (subquery_reports_to_include.c.pseudonym == Donor.pseudonym),
         )
         relevant_donors = session.exec(query_relevant_donors).all()
 
@@ -513,7 +529,7 @@ def _dump_qc_report(
     # and Donor store index pseudonym as "index", since the submission table
     # has the index pseudonym
     idpseudo2relation = {(donor.submission_id, donor.pseudonym): donor.relation for donor in relevant_donors}
-    id2submission = {submission.id: submission for submission in submissions_that_failed_detailed_qc}
+    id2submission = {submission.id: submission for submission in submissions_to_report}
     with open(output_path, mode="w", encoding="utf-8", newline="") as output_file:
         writer = csv.writer(output_file, delimiter="\t")
         # header
@@ -547,7 +563,7 @@ def _dump_qc_report(
             + (["submission_id"] if with_submission_ids else [])
         )
 
-        for report in reports_of_failed_submissions:
+        for report in reports_to_include:
             submission = id2submission[report.submission_id]
             relation = Relation(idpseudo2relation[(report.submission_id, report.pseudonym)])
             writer.writerow(
