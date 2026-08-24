@@ -20,30 +20,42 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
           ref: ${{ github.ref }} # Checkout the specific tag
 
       - name: Extract package name from tag
         id: extract_package_info
+        # Tag-derived values are passed through env, never interpolated into the
+        # script body: a tag matching the trigger glob may still contain shell
+        # metacharacters, and this job holds id-token: write.
+        env:
+          TAG_NAME: ${{ github.ref_name }} # e.g., grz-cli-v1.2.3
+          RUN_ID: ${{ github.run_id }}
         run: |
-          TAG_NAME="${{ github.ref_name }}" # e.g., grz-cli-v1.2.3
-          PKG_NAME=$(echo "$TAG_NAME" | sed -E 's/-v[0-9]+\.[0-9]+\.[0-9]+.*//')
-          echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
-          echo "artifact_name=${PKG_NAME}-build-${{ github.run_id }}" >> $GITHUB_OUTPUT
+          PKG_NAME=$(printf '%s' "$TAG_NAME" | sed -E 's/-v[0-9]+\.[0-9]+\.[0-9]+.*//')
+          # Fail closed rather than pass an unexpected name on to the build.
+          if ! printf '%s' "$PKG_NAME" | grep -qE '^[a-z0-9][a-z0-9-]*$'; then
+            echo "Refusing to build: '$PKG_NAME' (from tag '$TAG_NAME') is not a plain package name." >&2
+            exit 1
+          fi
+          echo "name=$PKG_NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=${PKG_NAME}-build-${RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "Extracted package name: $PKG_NAME from tag $TAG_NAME"
 
       - name: Update Environment URL
         id: update_env_url
         # Only run if PKG_NAME was successfully extracted
         if: steps.extract_package_info.outputs.name != ''
+        env:
+          PKG_NAME: ${{ steps.extract_package_info.outputs.name }}
         run: |
-          echo "PYPI_PACKAGE_URL=https://pypi.org/p/${{ steps.extract_package_info.outputs.name }}" >> $GITHUB_OUTPUT
-          echo "PyPI Environment URL will be set to: https://pypi.org/p/${{ steps.extract_package_info.outputs.name }}"
+          echo "PYPI_PACKAGE_URL=https://pypi.org/p/${PKG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "PyPI Environment URL will be set to: https://pypi.org/p/${PKG_NAME}"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version-file: "pyproject.toml"
           enable-cache: true
@@ -54,18 +66,20 @@ jobs:
       - name: Build package ${{ steps.extract_package_info.outputs.name }}
         id: build_step
         if: steps.extract_package_info.outputs.name != '' # Ensure PKG_NAME is not empty
+        env:
+          PKG_NAME: ${{ steps.extract_package_info.outputs.name }}
         run: |
-          echo "Building package: ${{ steps.extract_package_info.outputs.name }}"
+          echo "Building package: $PKG_NAME"
           OUTPUT_DIR="dist_for_upload"
-          mkdir -p $OUTPUT_DIR
-          uv build --sdist --wheel --project "packages/${{ steps.extract_package_info.outputs.name }}" --out-dir $OUTPUT_DIR
+          mkdir -p "$OUTPUT_DIR"
+          uv build --sdist --wheel --project "packages/$PKG_NAME" --out-dir "$OUTPUT_DIR"
 
           echo "Contents of $OUTPUT_DIR:"
-          ls -l $OUTPUT_DIR
-          echo "dist_path=$OUTPUT_DIR" >> $GITHUB_OUTPUT
+          ls -l "$OUTPUT_DIR"
+          echo "dist_path=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Publish ${{ steps.extract_package_info.outputs.name }} to PyPI
         if: steps.build_step.outputs.dist_path != '' && steps.extract_package_info.outputs.name != ''
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages_dir: ${{ steps.build_step.outputs.dist_path }}
