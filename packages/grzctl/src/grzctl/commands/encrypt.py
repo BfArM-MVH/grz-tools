@@ -25,19 +25,12 @@ log = logging.getLogger(__name__)
     default=True,
     help="Check validation logs before encrypting.",
 )
-@click.option(
-    "--consented/--non-consented",
-    "consented",
-    required=True,
-    help="Target archive type: consented or non-consented.",
-)
 @grzcli.update_db
-def encrypt(  # noqa: PLR0913
+def encrypt(
     configuration: GrzctlConfig,
     submission_dir,
     force,
     check_validation_logs,
-    consented,
     update_db,
     **kwargs,
 ):
@@ -53,6 +46,9 @@ def encrypt(  # noqa: PLR0913
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
 
+    submission_date = submission.metadata.content.submission.submission_date
+    consented = submission.metadata.content.consents_to_research(submission_date)
+
     archive_target = configuration.archives.consented if consented else configuration.archives.non_consented
 
     with DbContext(
@@ -64,7 +60,7 @@ def encrypt(  # noqa: PLR0913
     ):
         worker_inst.encrypt(
             recipient_public_key_path=archive_target.public_key_path,
-            submitter_private_key_path=configuration.keys.submitter_private_key_path,
+            submitter_private_key_path=configuration.keys.grz_private_key_path,
             force=force,
             check_validation_logs=check_validation_logs,
         )
