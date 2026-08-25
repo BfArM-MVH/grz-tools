@@ -17,14 +17,16 @@ from .commands.archive import archive
 from .commands.change_request import change_request_validate
 from .commands.change_request_template import change_request_template
 from .commands.clean import clean
-from .commands.cli_wrappers import encrypt, upload, validate
 from .commands.consent import consent
 from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
+from .commands.encrypt import encrypt
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
+from .commands.upload import upload
+from .commands.validate import validate
 from .models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)

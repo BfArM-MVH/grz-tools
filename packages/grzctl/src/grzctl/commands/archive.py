@@ -20,25 +20,16 @@ log = logging.getLogger(__name__)
 @grzcli.submission_dir
 @grzcli.threads
 @grzcli.update_db
-@click.option(
-    "--consented/--non-consented",
-    "consented",
-    default=True,
-    help="Whether to archive as consented (default) or non-consented.",
-)
 def archive(
     configuration: GrzctlConfig,
     submission_dir,
     threads,
     update_db,
-    consented,
     **kwargs,
 ):
     """
     Archive a submission within a GRZ/GDC.
     """
-    archive_s3 = configuration.archives.consented.s3 if consented else configuration.archives.non_consented.s3
-
     log.info("Starting archival...")
 
     submission_dir = Path(submission_dir)
@@ -50,7 +41,14 @@ def archive(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-    submission_id = worker_inst.parse_encrypted_submission().submission_id
+    encrypted_submission = worker_inst.parse_encrypted_submission()
+    submission_id = encrypted_submission.submission_id
+
+    submission_date = encrypted_submission.metadata.content.submission.submission_date
+    consented = encrypted_submission.metadata.content.consents_to_research(submission_date)
+
+    archive_s3 = configuration.archives.consented.s3 if consented else configuration.archives.non_consented.s3
+
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,

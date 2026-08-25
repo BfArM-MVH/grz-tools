@@ -1,4 +1,4 @@
-"""Command for encrypting a submission."""
+"""Command for validating a submission."""
 
 import logging
 from pathlib import Path
@@ -19,22 +19,34 @@ log = logging.getLogger(__name__)
 @grzctl_configuration
 @grzcli.submission_dir
 @grzcli.force
+@grzcli.threads
 @click.option(
-    "--check-validation-logs/--no-check-validation-logs",
-    "check_validation_logs",
-    default=True,
-    help="Check validation logs before encrypting.",
+    "--submitter-id",
+    "submitter_id",
+    required=True,
+    type=str,
+    metavar="STRING",
+    help="Expected Leistungserbringer (LE) identifier for metadata validation.",
+)
+@click.option(
+    "--mmap/--no-mmap",
+    "mmap",
+    default=False,
+    hidden=True,
+    help="Whether to use mmap.",
 )
 @grzcli.update_db
-def encrypt(
+def validate(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_dir,
     force,
-    check_validation_logs,
+    threads,
+    submitter_id,
+    mmap,
     update_db,
     **kwargs,
 ):
-    """Encrypt a submission (standalone with DB updates)."""
+    """Validate the submission (standalone with DB updates)."""
     submission_dir = Path(submission_dir)
 
     worker_inst = Worker(
@@ -42,25 +54,21 @@ def encrypt(
         files_dir=submission_dir / "files",
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
+        threads=threads,
     )
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
 
-    submission_date = submission.metadata.content.submission.submission_date
-    consented = submission.metadata.content.consents_to_research(submission_date)
-
-    archive_target = configuration.archives.consented if consented else configuration.archives.non_consented
+    identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
 
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,
-        start_state=SubmissionStateEnum.ENCRYPTING,
-        end_state=SubmissionStateEnum.ENCRYPTED,
+        start_state=SubmissionStateEnum.VALIDATING,
+        end_state=SubmissionStateEnum.VALIDATED,
         enabled=update_db,
-    ):
-        worker_inst.encrypt(
-            recipient_public_key_path=archive_target.public_key_path,
-            submitter_private_key_path=configuration.keys.grz_private_key_path,
-            force=force,
-            check_validation_logs=check_validation_logs,
-        )
+    ) as dbcontext_inst:
+        worker_inst.validate(identifiers=identifiers, force=force, no_mmap=not mmap)
+
+        if update_db:
+            _ = dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", "true")
