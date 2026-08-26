@@ -229,7 +229,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     node_submitter_id_combos: set[tuple[str | None, str | None]] = set()
-    with database._get_session() as session:
+    with database.transaction() as session:
         # number_of_end-to-end_tests
         stmt_number_of_end_to_end_tests = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
@@ -374,7 +374,7 @@ def _dump_dataset_report(
 ) -> None:
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
-    with database._get_session() as session:
+    with database.transaction() as session:
         query_quarter_submissions = (
             select(Submission).where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
         )
@@ -486,7 +486,7 @@ def _dump_qc_report(
 ) -> None:
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
-    with database._get_session() as session:
+    with database.transaction() as session:
         query_submissions_that_failed_detailed_qc = (
             select(Submission)
             .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]

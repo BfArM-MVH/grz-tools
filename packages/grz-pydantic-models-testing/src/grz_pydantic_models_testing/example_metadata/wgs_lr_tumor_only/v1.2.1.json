@@ -16,7 +16,7 @@
   },
   "donors": [
     {
-      "donorPseudonym": "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234",
+      "donorPseudonym": "index",
       "gender": "other",
       "relation": "index",
       "mvConsent": {

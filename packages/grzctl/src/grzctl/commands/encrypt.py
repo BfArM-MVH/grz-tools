@@ -18,10 +18,6 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
-@grzcli.metadata_dir
-@grzcli.files_dir
-@grzcli.output_encrypted_files_dir
-@grzcli.logs_dir
 @grzcli.force
 @click.option(
     "--check-validation-logs/--no-check-validation-logs",
@@ -29,51 +25,29 @@ log = logging.getLogger(__name__)
     default=True,
     help="Check validation logs before encrypting.",
 )
-@click.option(
-    "--consented/--non-consented",
-    "consented",
-    required=True,
-    help="Target archive type: consented or non-consented.",
-)
 @grzcli.update_db
-def encrypt(  # noqa: PLR0913
+def encrypt(
     configuration: GrzctlConfig,
     submission_dir,
-    metadata_dir,
-    files_dir,
-    output_encrypted_files_dir,
-    logs_dir,
     force,
     check_validation_logs,
-    consented,
     update_db,
     **kwargs,
 ):
     """Encrypt a submission (standalone with DB updates)."""
-    bundled_mode = submission_dir is not None
-    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir]))
-
-    if bundled_mode and granular_mode:
-        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
-
-    if not bundled_mode and not granular_mode:
-        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
-
-    _metadata_dir = Path(submission_dir) / "metadata" if bundled_mode else Path(metadata_dir)
-    _files_dir = Path(submission_dir) / "files" if bundled_mode else Path(files_dir)
-    _logs_dir = Path(submission_dir) / "logs" if bundled_mode else Path(logs_dir)
-    _encrypted_files_dir = (
-        Path(submission_dir) / "encrypted_files" if bundled_mode else Path(output_encrypted_files_dir)
-    )
+    submission_dir = Path(submission_dir)
 
     worker_inst = Worker(
-        metadata_dir=_metadata_dir,
-        files_dir=_files_dir,
-        log_dir=_logs_dir,
-        encrypted_files_dir=_encrypted_files_dir,
+        metadata_dir=submission_dir / "metadata",
+        files_dir=submission_dir / "files",
+        log_dir=submission_dir / "logs",
+        encrypted_files_dir=submission_dir / "encrypted_files",
     )
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
+
+    submission_date = submission.metadata.content.submission.submission_date
+    consented = submission.metadata.content.consents_to_research(submission_date)
 
     archive_target = configuration.archives.consented if consented else configuration.archives.non_consented
 
@@ -86,7 +60,7 @@ def encrypt(  # noqa: PLR0913
     ):
         worker_inst.encrypt(
             recipient_public_key_path=archive_target.public_key_path,
-            submitter_private_key_path=configuration.keys.submitter_private_key_path,
+            submitter_private_key_path=configuration.keys.grz_private_key_path,
             force=force,
             check_validation_logs=check_validation_logs,
         )

@@ -24,7 +24,7 @@ dependencies = [
     "pydantic >=2.12,<3",
     "pydantic-settings >=2.11.0,<3",
     "platformdirs >=4.3.6,<5",
-    "grz-pydantic-models >=3,<4",
+    "grz-pydantic-models >=3.1,<4",
     "grz-check >=0.3.1",
 ]
 classifiers = [

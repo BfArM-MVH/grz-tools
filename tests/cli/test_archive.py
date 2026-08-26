@@ -8,7 +8,11 @@ import json
 import boto3
 import click.testing
 import grzctl.cli
-from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
+    REDACTED_TAN,
+    GrzSubmissionMetadata,
+)
 
 from .. import mock_files
 from .common import copy_submission
@@ -63,7 +67,7 @@ def test_archive(temp_grzctl_s3_config_file_path, remote_bucket_with_version, wo
         assert metadata.submission.tan_g == REDACTED_TAN
 
         # ensure local case ID is redacted
-        assert not metadata.submission.local_case_id
+        assert metadata.submission.local_case_id == REDACTED_LOCAL_CASE_ID
 
         # ensure index patient donor pseudonym is redacted
         assert metadata.index_donor.donor_pseudonym == "index"

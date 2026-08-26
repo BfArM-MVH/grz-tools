@@ -18,9 +18,6 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
-@grzcli.metadata_dir
-@grzcli.files_dir
-@grzcli.logs_dir
 @grzcli.force
 @grzcli.threads
 @click.option(
@@ -42,9 +39,6 @@ log = logging.getLogger(__name__)
 def validate(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_dir,
-    metadata_dir,
-    files_dir,
-    logs_dir,
     force,
     threads,
     submitter_id,
@@ -53,27 +47,13 @@ def validate(  # noqa: PLR0913
     **kwargs,
 ):
     """Validate the submission (standalone with DB updates)."""
-    bundled_mode = submission_dir is not None
-    granular_mode = any(map(lambda v: v is not None, [metadata_dir, files_dir, logs_dir]))
-
-    if bundled_mode and granular_mode:
-        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
-
-    if not bundled_mode and not granular_mode:
-        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
-
-    _metadata_dir = Path(submission_dir) / "metadata" if bundled_mode else Path(metadata_dir)
-    _files_dir = Path(submission_dir) / "files" if bundled_mode else Path(files_dir)
-    _logs_dir = Path(submission_dir) / "logs" if bundled_mode else Path(logs_dir)
-    _encrypted_files_dir = (
-        Path(submission_dir) / "encrypted_files" if bundled_mode else _metadata_dir.parent / "encrypted_files"
-    )
+    submission_dir = Path(submission_dir)
 
     worker_inst = Worker(
-        metadata_dir=_metadata_dir,
-        files_dir=_files_dir,
-        log_dir=_logs_dir,
-        encrypted_files_dir=_encrypted_files_dir,
+        metadata_dir=submission_dir / "metadata",
+        files_dir=submission_dir / "files",
+        log_dir=submission_dir / "logs",
+        encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
     submission = worker_inst.parse_submission()
