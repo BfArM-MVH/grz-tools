@@ -18,6 +18,10 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.files_dir
+@grzcli.output_encrypted_files_dir
+@grzcli.logs_dir
 @grzcli.force
 @click.option(
     "--check-validation-logs/--no-check-validation-logs",
@@ -26,22 +30,54 @@ log = logging.getLogger(__name__)
     help="Check validation logs before encrypting.",
 )
 @grzcli.update_db
-def encrypt(
+def encrypt(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_dir,
+    metadata_dir,
+    files_dir,
+    output_encrypted_files_dir,
+    logs_dir,
     force,
     check_validation_logs,
     update_db,
     **kwargs,
 ):
     """Encrypt a submission (standalone with DB updates)."""
-    submission_dir = Path(submission_dir)
+    bundled_mode = submission_dir is not None
+    granular_mode = any(v is not None for v in [metadata_dir, files_dir, output_encrypted_files_dir, logs_dir])
+
+    if bundled_mode and granular_mode:
+        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
+
+    if not bundled_mode and not granular_mode:
+        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
+
+    if bundled_mode:
+        base = Path(submission_dir)
+        _metadata_dir = base / "metadata"
+        _files_dir = base / "files"
+        _logs_dir = base / "logs"
+        _encrypted_files_dir = base / "encrypted_files"
+    else:
+        required = {
+            "--metadata-dir": metadata_dir,
+            "--files-dir": files_dir,
+            "--output-encrypted-files-dir": output_encrypted_files_dir,
+            "--logs-dir": logs_dir,
+        }
+        missing = [name for name, path in required.items() if path is None]
+        if missing:
+            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
+        _metadata_dir = Path(metadata_dir)
+        _files_dir = Path(files_dir)
+        _logs_dir = Path(logs_dir)
+        _encrypted_files_dir = Path(output_encrypted_files_dir)
 
     worker_inst = Worker(
-        metadata_dir=submission_dir / "metadata",
-        files_dir=submission_dir / "files",
-        log_dir=submission_dir / "logs",
-        encrypted_files_dir=submission_dir / "encrypted_files",
+        metadata_dir=_metadata_dir,
+        files_dir=_files_dir,
+        log_dir=_logs_dir,
+        encrypted_files_dir=_encrypted_files_dir,
     )
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id

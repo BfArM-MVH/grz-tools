@@ -7,7 +7,6 @@ log_stderr="${snakemake_log[stderr]}"
 
 metadata_file_path="${snakemake_input[metadata]}"
 re_encrypted_files_dir="${snakemake_input[re_encrypted_files_dir]}"
-consent_flag_path="${snakemake_input[consent_flag]}"
 
 read -r -a progress_logs_to_archive <<<"${snakemake_input[progress_logs_to_archive]}"
 
@@ -37,18 +36,8 @@ if [ -n "$localCaseId" ] && [ "$localCaseId" != "null" ]; then
 fi
 echo "Redaction complete." >>"$log_stdout"
 
-CONSENT=$(cat "${consent_flag_path}")
-if [[ "$CONSENT" == "true" ]]; then
-	ARCHIVE_FLAG="--consented"
-else
-	ARCHIVE_FLAG="--non-consented"
-fi
-
-echo "Consent: $CONSENT. Using archive flag: $ARCHIVE_FLAG" >>"$log_stdout"
-
-# grzctl archive handles DB state transitions (ARCHIVING → ARCHIVED) via DbContext.
+# grzctl archive derives consent from metadata and handles DB state transitions (ARCHIVING → ARCHIVED) via DbContext.
 grzctl --config "${grzctl_config}" archive \
-	${ARCHIVE_FLAG} \
 	--metadata-dir "${redacted_metadata_dir}" \
 	--logs-dir "${redacted_logs_dir}" \
 	--encrypted-files-dir "${re_encrypted_files_dir}" \

@@ -273,29 +273,10 @@ checkpoint validate:
         "../scripts/validate.sh"
 
 
-rule consent:
-    """
-    Check if a submission is research consented.
-    """
-    input:
-        metadata=anchor(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag",
-            rules.metadata.output.metadata,
-        ),
-    output:
-        consent_flag="<results>/{submitter_id}/{inbox}/{submission_id}/consent_flag",
-    log:
-        stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stdout.log",
-        stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/consent.stderr.log",
-    priority: 1
-    script:
-        "../scripts/consent.sh"
-
-
 rule re_encrypt:
     """
-    Re-encrypt a submission using the target public key (depending on whether research consent was given).
-
+    Re-encrypt a submission using the target public key.
+    Consent is derived from the submission metadata by grzctl encrypt.
     """
     input:
         metadata=anchor(
@@ -326,7 +307,6 @@ rule re_encrypt:
             "<results>/{submitter_id}/{inbox}/{submission_id}/re-encrypted/encrypted_files",
             rules.validate.output.seq_data_log,
         ),
-        consent_flag=rules.consent.output.consent_flag,
         grzctl_config_path=GRZCTL_CONFIG_PATH,
     output:
         encrypted_files_dir=temp(
@@ -351,8 +331,8 @@ rule re_encrypt:
 
 rule archive:
     """
-    Archive a submission to the target s3 bucket (depending on whether research consent was given).
-
+    Archive a submission to the target s3 bucket.
+    Consent is derived from the submission metadata by grzctl archive.
     """
     input:
         metadata=anchor(
@@ -363,7 +343,6 @@ rule archive:
             "<results>/{submitter_id}/{inbox}/{submission_id}/archived",
             rules.re_encrypt.output.encrypted_files_dir,
         ),
-        consent_flag=rules.consent.output.consent_flag,
         progress_logs_to_archive=[
             rules.download.output.progress_log,
             rules.decrypt.output.progress_log,
@@ -612,10 +591,6 @@ rule clean:
         validation_errors=payload(
             "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
             rules.validate.output.validation_errors,
-        ),
-        consent_flag=payload(
-            "<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",
-            rules.consent.output.consent_flag,
         ),
     output:
         clean_results="<results>/{submitter_id}/{inbox}/{submission_id}/clean/{qc_status}",

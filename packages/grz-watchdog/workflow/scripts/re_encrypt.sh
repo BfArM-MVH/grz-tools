@@ -12,18 +12,10 @@ output_encrypted_files_dir="${snakemake_output[encrypted_files_dir]}"
 progress_logs_dir="$(dirname "${snakemake_output[encryption_log]}")"
 mkdir -p "${metadata_dir}" "${unencrypted_files_dir}" "${output_encrypted_files_dir}" "${progress_logs_dir}"
 
-CONSENT=$(cat "${snakemake_input[consent_flag]}")
-if [[ "$CONSENT" == "true" ]]; then
-	ARCHIVE_FLAG="--consented"
-else
-	ARCHIVE_FLAG="--non-consented"
-fi
+echo "Re-encrypting submission..." >"$log_stdout" 2>"$log_stderr"
 
-echo "Consent: $CONSENT. Using archive flag: $ARCHIVE_FLAG" >"$log_stdout" 2>"$log_stderr"
-
-# grzctl encrypt handles DB state transitions (ENCRYPTING → ENCRYPTED) via DbContext.
+# grzctl encrypt derives consent from metadata and handles DB state transitions (ENCRYPTING → ENCRYPTED) via DbContext.
 grzctl --config "${grzctl_config}" encrypt \
-	${ARCHIVE_FLAG} \
 	--metadata-dir "${metadata_dir}" \
 	--files-dir "${unencrypted_files_dir}" \
 	--output-encrypted-files-dir "${output_encrypted_files_dir}" \
