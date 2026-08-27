@@ -430,11 +430,14 @@ class CaseResolver(Protocol):
 
     Different resolvers key on different identifiers, so the resolution rule can evolve
     (currently ``(submitter_id, local_case_id)``; later the RKI ``psn``) without a schema change:
-    both keys are already columns on :class:`Case`. The seam is not the whole of such a switch,
-    though. Three methods take a resolver, :meth:`SubmissionDb.assign_case`,
-    :meth:`SubmissionDb.resolve_case` and :meth:`SubmissionDb.assert_no_duplicate_initial`, but
-    :meth:`SubmissionDb.diff` resolves through :data:`DEFAULT_CASE_RESOLVER`, so metadata-driven
-    linking would want one threaded through there and a ``psn`` on :class:`CaseLinkDiff`.
+    both keys are already columns on :class:`Case`.
+
+    Which one is in use is a property of the deployment rather than of a call, so it is given to
+    :class:`SubmissionDb` once, as ``case_resolver``, and every method resolves through that. No
+    method takes one per call: two of them, :meth:`SubmissionDb.diff` and
+    :meth:`SubmissionDb.commit_changes`, resolve separately over one change set, and being handed
+    different ones would write a link other than the one previewed. Resolving with another
+    strategy means building a :class:`SubmissionDb` that has it.
 
     Implementations raise :class:`AmbiguousCaseError` rather than guess when their key matches
     more than one case, and decide for themselves when their key cannot answer at all, returning
@@ -493,10 +496,11 @@ class SubmitterLocalCaseResolver:
 class PsnResolver:
     """Resolve a case by RKI pseudonym. For future PSN-based linking.
 
-    Usable today by passing it to :meth:`SubmissionDb.assign_case`,
-    :meth:`SubmissionDb.resolve_case` or :meth:`SubmissionDb.assert_no_duplicate_initial`, but not
-    reached from ``diff``/``commit_changes``, and nothing could feed it there yet: a psn comes from
-    the tanG trade, not from the submitter's metadata.
+    Reached from every method that resolves, ``diff`` and ``populate`` included, by building a
+    :class:`SubmissionDb` with ``case_resolver=PsnResolver()`` and passing a ``psn`` per
+    submission. Nothing in a submitter's metadata can supply that psn, it being assigned in the
+    tanG trade, so the metadata-driven path keeps :data:`DEFAULT_CASE_RESOLVER` and a psn-driven
+    caller has to hold the psn itself.
     """
 
     def find_case(
@@ -890,17 +894,30 @@ class SubmissionDb:
     API entrypoint for managing submissions.
     """
 
-    def __init__(self, db_url: str, author: Author | None, debug: bool = False):
+    def __init__(
+        self,
+        db_url: str,
+        author: Author | None,
+        debug: bool = False,
+        *,
+        case_resolver: CaseResolver = DEFAULT_CASE_RESOLVER,
+    ):
         """
         Initializes the SubmissionDb.
 
         Args:
             db_url: Database URL.
             debug: Whether to echo SQL statements.
+            case_resolver: Strategy every method here resolves a case with unless handed another.
+                Which one is right is a property of the deployment rather than of a call: today
+                the submitter's ``(submitter_id, local_case_id)``, later the RKI ``psn``. Held
+                here so :meth:`diff` and :meth:`commit_changes` cannot be given different ones
+                and write a link other than the one previewed.
         """
         self.engine = create_engine(db_url, echo=debug)
         self._author = author
         self._schema_confirmed = False
+        self._case_resolver = case_resolver
 
     @contextmanager
     def transaction(self, session: Session | None = None) -> Generator[Session, Any, None]:
@@ -1667,7 +1684,6 @@ class SubmissionDb:
         local_case_id: str | None,
         psn: str | None,
         submission_type: SubmissionType,
-        resolver: CaseResolver,
     ) -> tuple[Submission, "Case | None"]:
         """Locate the case a submission may link to and validate the link. Performs no writes.
 
@@ -1691,7 +1707,9 @@ class SubmissionDb:
         # out of the record. Competing initial submissions coexist here too; the partial unique
         # index is the sole case invariant, bounding how many may *pass* basic QC (see
         # ``ux_submissions_one_initial_per_case``, classified by :func:`_rejected_by`).
-        return submission, resolver.find_case(session, submitter_id=submitter_id, local_case_id=local_case_id, psn=psn)
+        return submission, self._case_resolver.find_case(
+            session, submitter_id=submitter_id, local_case_id=local_case_id, psn=psn
+        )
 
     def assign_case(  # noqa: PLR0913
         self,
@@ -1701,7 +1719,6 @@ class SubmissionDb:
         local_case_id: str | None = None,
         psn: str | None = None,
         submission_type: SubmissionType,
-        resolver: CaseResolver | None = None,
         session: Session | None = None,
     ) -> Case:
         """Resolve or create the case for a submission and link it.
@@ -1709,7 +1726,7 @@ class SubmissionDb:
         A case may have at most one ``initial`` submission that passed basic QC. Once one passes,
         no other ``initial`` submission of that case may pass.
 
-        The *resolver* strategy decides how an existing case is located (default:
+        The case is located with this :class:`SubmissionDb`'s ``case_resolver`` (by default
         ``(submitter_id, local_case_id)``). Competing initial submissions may share a case while
         pending basic QC, since the data alone cannot tell a re-upload from a duplicate. Any type
         but ``test`` may open a case; see :meth:`_find_case_for_link` for why. ``test``
@@ -1726,8 +1743,6 @@ class SubmissionDb:
         :param psn: RKI pseudonym passed to the resolver and stored on a newly
             created case.
         :param submission_type: Type of the submission. Only ``test`` is rejected.
-        :param resolver: Strategy used to locate an existing case; defaults to
-            :data:`DEFAULT_CASE_RESOLVER` (:class:`SubmitterLocalCaseResolver`).
         :returns: The resolved or newly created :class:`Case` the submission is
             now linked to.
         :raises SubmissionNotFoundError: if no submission has the given
@@ -1738,7 +1753,6 @@ class SubmissionDb:
             second QC-passed initial submission.
         :raises AmbiguousCaseError: if the resolution key matches more than one case.
         """
-        resolver = resolver or DEFAULT_CASE_RESOLVER
         with self.transaction(session) as active_session:
             submission, case = self._find_case_for_link(
                 active_session,
@@ -1747,7 +1761,6 @@ class SubmissionDb:
                 local_case_id=local_case_id,
                 psn=psn,
                 submission_type=submission_type,
-                resolver=resolver,
             )
             if case is None:
                 # The insert reaches the database at the flush, so that is inside the block: it
@@ -1763,7 +1776,7 @@ class SubmissionDb:
                     # letting it surface would fail a submission that did nothing wrong. A caller's
                     # transaction loses nothing to the rollback, since the link below is the first
                     # thing this applies.
-                    case = resolver.find_case(
+                    case = self._case_resolver.find_case(
                         active_session, submitter_id=submitter_id, local_case_id=local_case_id, psn=psn
                     )
                     if case is None:  # pragma: no cover - the row that rejected our insert must exist
@@ -1787,7 +1800,6 @@ class SubmissionDb:
         local_case_id: str | None = None,
         psn: str | None = None,
         submission_type: SubmissionType,
-        resolver: CaseResolver | None = None,
         session: Session | None = None,
     ) -> "Case | None":
         """Preview the case :meth:`assign_case` would link, without writing.
@@ -1798,8 +1810,6 @@ class SubmissionDb:
             resolver.
         :param psn: RKI pseudonym passed to the resolver.
         :param submission_type: Type of the submission. Only ``test`` is rejected.
-        :param resolver: Strategy used to locate an existing case; defaults to
-            :data:`DEFAULT_CASE_RESOLVER` (:class:`SubmitterLocalCaseResolver`).
         :returns: The existing :class:`Case` the submission would be linked to,
             or ``None`` if :meth:`assign_case` would create a new case.
         :raises SubmissionNotFoundError: if no submission has the given
@@ -1808,7 +1818,6 @@ class SubmissionDb:
             submission, which is never case-tracked.
         :raises AmbiguousCaseError: if the resolution key matches more than one case.
         """
-        resolver = resolver or DEFAULT_CASE_RESOLVER
         with self.transaction(session) as active_session:
             _submission, case = self._find_case_for_link(
                 active_session,
@@ -1817,11 +1826,10 @@ class SubmissionDb:
                 local_case_id=local_case_id,
                 psn=psn,
                 submission_type=submission_type,
-                resolver=resolver,
             )
             return case
 
-    def assert_no_duplicate_initial(  # noqa: PLR0913
+    def assert_no_duplicate_initial(
         self,
         submission_id: str,
         *,
@@ -1829,7 +1837,6 @@ class SubmissionDb:
         local_case_id: str | None = None,
         psn: str | None = None,
         submission_type: SubmissionType,
-        resolver: CaseResolver | None = None,
     ) -> None:
         """Ask, before writing anything, whether this would be a case's second QC-passed initial.
 
@@ -1854,8 +1861,6 @@ class SubmissionDb:
             decides whether it can key a case.
         :param psn: RKI pseudonym passed to the resolver.
         :param submission_type: Type of the submission. Only ``initial`` can break this rule.
-        :param resolver: Strategy used to locate the case; defaults to
-            :data:`DEFAULT_CASE_RESOLVER`.
         :raises DuplicateInitialSubmissionError: if the case already has a different ``initial``
             submission that passed basic QC.
         :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
@@ -1871,7 +1876,6 @@ class SubmissionDb:
                 local_case_id=local_case_id,
                 psn=psn,
                 submission_type=submission_type,
-                resolver=resolver,
                 session=session,
             )
             if case is None or case.id is None:
@@ -2088,6 +2092,7 @@ class SubmissionDb:
         current_submission: Submission,
         metadata: GrzSubmissionMetadata,
         ignore_fields: set[str],
+        psn: str | None = None,
     ) -> CaseLinkDiff | None:
         """Resolve whether committing *metadata* would change the submission's case link.
 
@@ -2106,6 +2111,8 @@ class SubmissionDb:
         :param current_submission: The submission's row, as :meth:`diff` read it.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
         :param ignore_fields: Field names skipped during the comparison.
+        :param psn: RKI pseudonym to resolve with, for a caller that knows one. No psn is
+            derivable from *metadata*, so this is the only way one reaches resolution here.
         :returns: A :class:`CaseLinkDiff` if the case assignment would change, else ``None``.
         :raises AmbiguousCaseError: if the metadata's case key matches more than one case.
         """
@@ -2122,6 +2129,7 @@ class SubmissionDb:
             current_submission.id,
             submitter_id=metadata.submission.submitter_id,
             local_case_id=metadata.submission.local_case_id,
+            psn=psn,
             submission_type=metadata.submission.submission_type,
             session=session,
         )
@@ -2141,6 +2149,7 @@ class SubmissionDb:
             submitter_id=metadata.submission.submitter_id,
             local_case_id=metadata.submission.local_case_id,
             submission_type=metadata.submission.submission_type,
+            psn=psn,
         )
 
     def _diff_donors(
@@ -2185,6 +2194,7 @@ class SubmissionDb:
         metadata: GrzSubmissionMetadata,
         submission_uploaded_date: datetime.date | None,
         ignore_fields: set[str] | None = None,
+        psn: str | None = None,
     ) -> SubmissionChangeSet:
         """
         Collects everything that committing *metadata* would change for a submission.
@@ -2202,6 +2212,12 @@ class SubmissionDb:
             If None, the field will not be included in the comparison.
         :param ignore_fields: Optional set of field names to be ignored during the metadata
             comparison. ``"case_id"`` skips case-link resolution.
+        :param psn: RKI pseudonym to resolve the case with. Nothing in *metadata* carries one, a
+            psn being assigned in the tanG trade rather than sent by the submitter, so a caller
+            that has one has to pass it. Whether it is read at all is the resolver's call:
+            :class:`SubmitterLocalCaseResolver`, the default, ignores it, while
+            :class:`PsnResolver` keys on it. Either way it is recorded on
+            :attr:`SubmissionChangeSet.case_link` and applied by :meth:`commit_changes`.
         :returns: A :class:`SubmissionChangeSet` with all detected differences. A case that
             cannot be resolved is reported in
             :attr:`SubmissionChangeSet.case_link_error` rather than raised, since it says
@@ -2228,7 +2244,7 @@ class SubmissionDb:
 
             try:
                 case_link, case_link_error = (
-                    self._diff_case_link(session, current_submission, metadata, ignore_fields or set()),
+                    self._diff_case_link(session, current_submission, metadata, ignore_fields or set(), psn=psn),
                     None,
                 )
             except AmbiguousCaseError as exc:
@@ -2262,6 +2278,7 @@ class SubmissionDb:
                     submission_id,
                     submitter_id=link.submitter_id,
                     local_case_id=link.local_case_id,
+                    psn=link.psn,
                     submission_type=link.submission_type,
                     session=session,
                 )
@@ -2291,11 +2308,12 @@ class SubmissionDb:
         if (link := changes.case_link) is not None:
             target = f"existing case {link.after}" if link.after is not None else "a new case"
             logger.info(
-                "%s - Linking to %s (submitter '%s', local case '%s')",
+                "%s - Linking to %s (submitter '%s', local case '%s', psn '%s')",
                 sid,
                 target,
                 link.submitter_id,
                 link.local_case_id,
+                link.psn,
             )
 
         donors = changes.donors
@@ -2351,6 +2369,7 @@ class SubmissionDb:
         force: bool = False,
         on_missing: Literal["create", "error"] = "error",
         ignore_fields: set[str] | None = None,
+        psn: str | None = None,
     ) -> None:
         """Reconcile DB state for ``submission_id`` with ``metadata``.
 
@@ -2373,6 +2392,7 @@ class SubmissionDb:
             so ``force`` does not need to be set.
         :param ignore_fields: Field keys to skip during diff and redaction
             validation. See :meth:`assert_metadata_not_redacted`.
+        :param psn: RKI pseudonym to resolve the case with; see :meth:`diff`.
         :raises SubmissionNotFoundError: if the submission row is absent and
             ``on_missing`` is ``"error"``.
         :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
@@ -2390,7 +2410,7 @@ class SubmissionDb:
 
         self.assert_metadata_not_redacted(metadata, submission_id, ignore_fields)
 
-        changes = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields)
+        changes = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields, psn=psn)
 
         if not force and changes.has_pending_destructive:
             raise RuntimeError(
