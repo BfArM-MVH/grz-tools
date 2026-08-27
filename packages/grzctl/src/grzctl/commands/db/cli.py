@@ -337,6 +337,25 @@ def case_relink(ctx: click.Context, submission_id: str, case_id: int):
         _abort(e)
 
 
+@case.command("unlink")
+@_submission_id_argument
+@click.pass_context
+def case_unlink(ctx: click.Context, submission_id: str):
+    """Unlink a submission from its case, leaving it linked to none.
+
+    The counterpart to `relink`, which can only move a submission between cases. The case
+    being vacated is left as-is and may become empty. Unlinking an already unlinked
+    submission changes nothing.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.clear_submission_case(submission_id)
+        console_err.print(f"[green]Unlinked submission '{submission_id}' from its case[/green]")
+    except SubmissionNotFoundError as e:
+        _abort(e)
+
+
 @case.command("delete")
 @_case_id_argument
 @click.pass_context
@@ -770,7 +789,8 @@ _MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - Submis
 @submission.command(
     epilog="Currently available KEYs are: "
     + ", ".join(_MODIFIABLE_SUBMISSION_KEYS)
-    + ". A submission's case is not a column: use 'db case relink' to change it."
+    + ". A submission's case is not a column: use 'db case relink' to change it, "
+    + "or 'db case unlink' to remove it."
 )
 @_submission_id_argument
 @click.argument("key", metavar="KEY", type=click.Choice(_MODIFIABLE_SUBMISSION_KEYS))

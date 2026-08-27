@@ -1578,6 +1578,9 @@ class SubmissionDb:
         index enforces this; the flush inside the conflict handler is where a link that would
         break it is rejected.
 
+        Only moves a submission between cases, since every case is some case. Use
+        :meth:`clear_submission_case` to leave it linked to none.
+
         :param submission_id: ID of the submission to link.
         :param case_id: Primary key of the target case.
         :returns: The updated :class:`Submission`, reloaded from the database.
@@ -1602,6 +1605,33 @@ class SubmissionDb:
             session.add(submission)
             with self._translating_conflicts(session, case_id=case_id):
                 session.flush()
+            return submission
+
+    def clear_submission_case(self, submission_id: str) -> Submission:
+        """Unlink a submission from its case, setting ``case_id`` back to NULL.
+
+        The counterpart to :meth:`set_submission_case`, and the only route back to NULL, since
+        relinking can only move a submission from one case to another. Resolution never removes a
+        link either: it finds a case or leaves the submission alone. So a submission linked to the
+        wrong case can only be freed here.
+
+        The case being vacated is left as-is and may become empty; :meth:`delete_case` removes it.
+        Unlinking a submission that is already unlinked changes nothing and is not an error.
+
+        No conflict handling: dropping a row out of a partial unique index cannot violate it. It
+        can free a case's one-initial slot, which is the point when the wrong submission took it.
+
+        :param submission_id: ID of the submission to unlink.
+        :returns: The updated :class:`Submission`, now carrying no case.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        """
+        with self.transaction() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            submission.case_id = None
+            session.add(submission)
+            session.flush()
             return submission
 
     @staticmethod

@@ -17,6 +17,7 @@ from grz_db.errors import (
     DuplicateCaseError,
     DuplicateInitialSubmissionError,
     DuplicatePsnError,
+    SubmissionNotFoundError,
     SubmissionTypeInvalidForCaseError,
 )
 from grz_db.models.submission import PsnResolver, SubmissionDb, SubmissionType, _Index, _rejected_by
@@ -475,6 +476,55 @@ def test_relink_rejects_second_qc_passed_initial(db: SubmissionDb):
     db.set_submission_case(sid_c, case_a_id)
     assert db.get_submission(sid_c).case_id == case_a_id
     assert db.get_initial_submission(case_b.id).id == sid_b
+
+
+def test_unlink_leaves_the_case_behind(db: SubmissionDb):
+    """Unlinking frees the submission, not the case: the case stays, possibly empty."""
+    sid = _sid(SUBMITTER_A, "0000001a")
+    _add(db, sid, SubmissionType.initial)
+    case = db.assign_case(sid, submitter_id=SUBMITTER_A, local_case_id="caseX", submission_type=SubmissionType.initial)
+
+    unlinked = db.clear_submission_case(sid)
+    assert unlinked.case_id is None
+    assert case.id is not None
+    assert db.get_case(case.id) is not None
+    assert db.list_submissions_for_case(case.id) == []
+
+
+def test_unlink_frees_the_one_initial_slot(db: SubmissionDb):
+    """The repair this exists for: the wrong initial submission took a case's one QC-passed slot.
+
+    Relinking cannot fix that, since it can only move the wrong submission to some other case.
+    Unlinking it lets the right one take the slot.
+    """
+    wrong, right = _sid(SUBMITTER_A, "0000002a"), _sid(SUBMITTER_A, "0000002b")
+    _add(db, wrong, SubmissionType.initial)
+    case = db.assign_case(
+        wrong, submitter_id=SUBMITTER_A, local_case_id="caseX", submission_type=SubmissionType.initial
+    )
+    _record_basic_qc(db, wrong, True)
+
+    _add(db, right, SubmissionType.initial)
+    assert case.id is not None
+    db.set_submission_case(right, case.id)
+    with pytest.raises(DuplicateInitialSubmissionError):
+        _record_basic_qc(db, right, True)
+
+    db.clear_submission_case(wrong)
+    _record_basic_qc(db, right, True)
+    holder = db.get_initial_submission(case.id)
+    assert holder is not None and holder.id == right
+
+
+def test_unlink_is_a_no_op_on_an_unlinked_submission(db: SubmissionDb):
+    sid = _sid(SUBMITTER_A, "0000003a")
+    _add(db, sid, SubmissionType.initial)
+    assert db.clear_submission_case(sid).case_id is None
+
+
+def test_unlink_rejects_an_unknown_submission(db: SubmissionDb):
+    with pytest.raises(SubmissionNotFoundError):
+        db.clear_submission_case(_sid(SUBMITTER_A, "0000004a"))
 
 
 def test_resolve_case_previews_without_linking(db: SubmissionDb):
