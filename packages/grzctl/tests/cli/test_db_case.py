@@ -303,6 +303,39 @@ def test_case_relink(migrated_database_config_path: Path):
     assert all("basic_qc_passed" in s for s in shown["submissions"])
 
 
+def test_case_unlink(migrated_database_config_path: Path):
+    """A submission can be unlinked from its case, which relink cannot do."""
+    cli = grzctl.cli.build_cli()
+
+    submission_id = "123456789_2025-01-01_0000000b"
+    result_add = _invoke(cli, migrated_database_config_path, "submission", "add", submission_id)
+    assert result_add.exit_code == 0, result_add.stderr
+    result_type = _invoke(
+        cli, migrated_database_config_path, "submission", "modify", submission_id, "submission_type", "initial"
+    )
+    assert result_type.exit_code == 0, result_type.stderr
+
+    result_create = _create_case(cli, migrated_database_config_path, "123456789", "unlink-me")
+    assert result_create.exit_code == 0, result_create.stderr
+    case_id = _list_cases(cli, migrated_database_config_path)[0]["id"]
+    result_link = _invoke(cli, migrated_database_config_path, "case", "relink", submission_id, str(case_id))
+    assert result_link.exit_code == 0, result_link.stderr
+
+    result_unlink = _invoke(cli, migrated_database_config_path, "case", "unlink", submission_id)
+    assert result_unlink.exit_code == 0, result_unlink.stderr
+
+    # the case survives, now holding nothing
+    result_show = _invoke(cli, migrated_database_config_path, "case", "show", str(case_id), "--json")
+    assert result_show.exit_code == 0, result_show.stderr
+    assert json.loads(result_show.stdout)["submissions"] == []
+
+
+def test_case_unlink_unknown_submission_exits_nonzero(migrated_database_config_path: Path):
+    cli = grzctl.cli.build_cli()
+    result = _invoke(cli, migrated_database_config_path, "case", "unlink", "123456789_2025-01-01_0000000c")
+    assert result.exit_code != 0
+
+
 def test_populate_declined_confirmation_creates_no_case(
     migrated_database_config_path: Path, test_metadata_path: Path, tmp_path: Path
 ):
