@@ -19,7 +19,7 @@ import sqlalchemy
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.commands.db.cli import _backfill_submission, _BackfillResult
+from grzctl.commands.db.cli import _backfill_submission, _BackfillOutcome, _BackfillResult
 from moto import mock_aws
 
 BUCKET = "test-backfill-bucket"
@@ -89,7 +89,7 @@ def test_backfill_submission_happy_path(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == metadata.get_submission_size()
     assert persisted.submission_metadata == metadata.to_redacted_dict()
@@ -111,7 +111,7 @@ def test_backfill_submission_returns_not_found_when_metadata_missing_in_s3(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.NOT_FOUND
+    assert result.status == _BackfillResult.NOT_FOUND
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size is None
     assert persisted.submission_metadata is None
@@ -138,7 +138,7 @@ def test_backfill_submission_records_error_on_invalid_json(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.ERROR
+    assert result.status == _BackfillResult.ERROR
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size is None
     assert persisted.submission_metadata is None
@@ -161,7 +161,7 @@ def test_backfill_submission_returns_up_to_date_when_no_pending_diff(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UP_TO_DATE
+    assert result.status == _BackfillResult.UP_TO_DATE
 
 
 def test_backfill_submission_holds_back_a_destructive_change_without_force(
@@ -189,7 +189,7 @@ def test_backfill_submission_holds_back_a_destructive_change_without_force(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == 1, "an existing value must not be overwritten"
     assert persisted.submission_metadata == metadata.to_redacted_dict(), "a NULL field must still be filled"
@@ -226,7 +226,7 @@ def test_backfill_submission_returns_would_overwrite_when_only_overwrites_are_pe
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.WOULD_OVERWRITE
+    assert result.status == _BackfillResult.WOULD_OVERWRITE
     assert db.get_submission(submission_id).submission_size == 1
 
 
@@ -250,7 +250,7 @@ def test_backfill_submission_force_applies_destructive_changes(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == metadata.get_submission_size()
     assert persisted.submission_metadata == metadata.to_redacted_dict()
@@ -284,7 +284,7 @@ def test_backfill_force_reconciles_against_an_unredacted_copy(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_uploaded_date == DIFFERENT_DATE
     assert persisted.tan_g == metadata.submission.tan_g
@@ -320,7 +320,7 @@ def test_backfill_leaves_a_missing_upload_date_alone(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     assert db.get_submission(submission_id).submission_uploaded_date is None
 
 
@@ -354,7 +354,7 @@ def test_backfill_does_not_write_an_upload_date_from_a_stale_snapshot(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     assert db.get_submission(submission_id).submission_uploaded_date is None
 
 
@@ -386,7 +386,7 @@ def test_backfill_submission_reads_a_consent_datetime_without_a_timezone(
         ignore_fields=set(),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     stored = db.get_submission(submission_id).submission_metadata
     stored_scope = stored["donors"][0]["researchConsents"][0]["scope"]
     assert stored_scope["dateTime"] == "2020-09-01T14:37:22", "the submitted value must be stored as written"
@@ -418,7 +418,7 @@ def test_backfill_submission_allow_overwrite_writes_only_the_named_field(
         allow_overwrite=frozenset({"submission_metadata"}),
     )
 
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_metadata == metadata.to_redacted_dict(), "the named field must be refreshed"
     assert persisted.submission_size == 1, "an overwrite outside --allow-overwrite must be held back"
@@ -458,7 +458,7 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
         allow_overwrite=frozenset({"submission_metadata"}),
     )
 
-    assert result == _BackfillResult.WOULD_OVERWRITE
+    assert result.status == _BackfillResult.WOULD_OVERWRITE
     assert db.get_submission(submission_id).submission_size == 1
 
 
@@ -472,7 +472,7 @@ def test_backfill_never_overwrites_stored_values_with_placeholders(
     current = db.get_submission(submission_id)
     _put_metadata(s3_client_mock, submission_id, _archived(metadata))
 
-    assert _run_backfill(db, s3_client_mock, current) == _BackfillResult.UPDATED
+    assert _run_backfill(db, s3_client_mock, current).status == _BackfillResult.UPDATED
 
     persisted = db.get_submission(submission_id)
     assert persisted.tan_g == DIFFERENT_TAN_G
@@ -508,7 +508,7 @@ def test_backfill_submission_links_case_by_default(
         force=False,
         ignore_fields={"case_id"},
     )
-    assert result == _BackfillResult.UP_TO_DATE
+    assert result.status == _BackfillResult.UP_TO_DATE
     assert db.get_submission(sid).case_id is None
 
     result = _backfill_submission(
@@ -520,7 +520,7 @@ def test_backfill_submission_links_case_by_default(
         force=False,
         ignore_fields=set(),
     )
-    assert result == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.UPDATED
     linked = db.get_submission(sid)
     assert linked.case_id is not None
     # this copy is unredacted, so it is authoritative and fills the NULL pseudonym too
@@ -540,7 +540,7 @@ def _archived(metadata: GrzSubmissionMetadata) -> GrzSubmissionMetadata:
     return GrzSubmissionMetadata.model_validate(raw)
 
 
-def _run_backfill(db: SubmissionDb, s3_client: Any, current: Submission) -> _BackfillResult:
+def _run_backfill(db: SubmissionDb, s3_client: Any, current: Submission) -> _BackfillOutcome:
     return _backfill_submission(
         current_submission=current,
         s3_client=s3_client,
@@ -571,7 +571,7 @@ def test_backfill_keys_cases_on_the_stored_pseudonym(
         rows.append(db.get_submission(sid))
 
     for row in rows:
-        assert _run_backfill(db, s3_client_mock, row) == _BackfillResult.UPDATED
+        assert _run_backfill(db, s3_client_mock, row).status == _BackfillResult.UPDATED
 
     assert {(case.submitter_id, case.local_case_id) for case, _count in db.list_cases()} == {
         (submitter, "patient-A"),
@@ -589,7 +589,7 @@ def test_backfill_without_a_stored_pseudonym_skips_the_case_link(
     current = db.add_submission(submission_id)
     _put_metadata(s3_client_mock, submission_id, _archived(metadata))
 
-    assert _run_backfill(db, s3_client_mock, current) == _BackfillResult.UPDATED
+    assert _run_backfill(db, s3_client_mock, current).status == _BackfillResult.UPDATED
 
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == metadata.get_submission_size()
@@ -633,7 +633,9 @@ def test_backfill_writes_everything_but_the_link_when_the_case_key_is_ambiguous(
     current = db.get_submission(sid)
     _put_metadata(s3_client_mock, sid, _archived(metadata))
 
-    assert _run_backfill(db, s3_client_mock, current) == _BackfillResult.LINK_UNRESOLVED
+    # the outcome says what was written; the unresolved link is reported alongside it, not
+    # instead of it, or a submission that was updated would be counted as one that was not
+    assert _run_backfill(db, s3_client_mock, current) == _BackfillOutcome(_BackfillResult.UPDATED, True)
 
     persisted = db.get_submission(sid)
     assert persisted.case_id is None
@@ -655,9 +657,9 @@ def test_backfill_links_once_the_ambiguity_is_gone(
     db.add_submission(sid)
     db.modify_submission(sid, "pseudonym", "patient-A")
     _put_metadata(s3_client_mock, sid, _archived(metadata))
-    assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillResult.LINK_UNRESOLVED
+    assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillOutcome(_BackfillResult.UPDATED, True)
 
     db.delete_case(spare.id)
 
-    assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillResult.UPDATED
+    assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillOutcome(_BackfillResult.UPDATED)
     assert db.get_submission(sid).case_id is not None

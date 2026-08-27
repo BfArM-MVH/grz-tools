@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NamedTuple, NoReturn
 
 import botocore.exceptions
 import click
@@ -1433,10 +1433,25 @@ class _BackfillResult(StrEnum):
     UP_TO_DATE = "up_to_date"
     NOT_FOUND = "not_found"
     WOULD_OVERWRITE = "would_overwrite"
-    # The case link could not be resolved for this submission. Re-running once the cause is cleared links it.
-    LINK_UNRESOLVED = "link_unresolved"
     ERROR = "error"
     CONSENT_MISMATCH = "consent_mismatch"
+
+
+class _BackfillOutcome(NamedTuple):
+    """What one submission's backfill did, and whether its case link is still missing.
+
+    The two are independent: a submission whose case key could not be resolved is still
+    written, since the reason is rarely about that submission and the rest of the metadata is
+    what the Prüfbericht is built from. Reporting the unresolved link *instead* of the outcome
+    would count such a submission as not updated when it was.
+
+    :param status: What happened to the submission's fields, donors and case link.
+    :param link_unresolved: Whether the case could not be resolved. Re-running once the cause
+        is cleared links it.
+    """
+
+    status: _BackfillResult
+    link_unresolved: bool = False
 
 
 def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
@@ -1448,7 +1463,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
     force: bool,
     ignore_fields: set[str],
     allow_overwrite: frozenset[str] = frozenset(),
-) -> _BackfillResult:
+) -> _BackfillOutcome:
     """Fetch metadata.json from S3 for one submission and commit a diff to the database.
 
     Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
@@ -1469,18 +1484,18 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
         raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: S3 error: {exc}[/red]")
-        return _BackfillResult.ERROR
+        return _BackfillOutcome(_BackfillResult.ERROR)
 
     if raw_json is None:
         # this is expected for submissions residing in the other consent bucket, so we do not explicitly log that here
         # but still report them in the final stats
-        return _BackfillResult.NOT_FOUND
+        return _BackfillOutcome(_BackfillResult.NOT_FOUND)
 
     try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: failed to parse metadata.json: {exc}[/red]")
-        return _BackfillResult.ERROR
+        return _BackfillOutcome(_BackfillResult.ERROR)
 
     # The archived copy is redacted; the stored row holds the submitter's values.
     still_redacted = current_submission.restore_redacted_fields(metadata)
@@ -1502,7 +1517,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
         )
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: diff failed: {exc}[/red]")
-        return _BackfillResult.ERROR
+        return _BackfillOutcome(_BackfillResult.ERROR)
 
     # An unresolvable case link costs the submission its link and nothing else: the reason is
     # rarely about this submission, an ambiguous key needs an operator to merge the cases first,
@@ -1514,7 +1529,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
 
     if not changes.has_pending:
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
-        return _BackfillResult.LINK_UNRESOLVED if link_unresolved else _BackfillResult.UP_TO_DATE
+        return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved)
 
     # Filling a field that was NULL destroys nothing, so it is always written. Replacing one that
     # already has a value needs saying so: --force permits every such overwrite, --allow-overwrite
@@ -1534,24 +1549,24 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
             f"[dim]  {submission_id}: would overwrite the case link (case {changes.case_link.before}), "
             "skipping (use --force to overwrite).[/dim]"
         )
-        return _BackfillResult.WOULD_OVERWRITE
+        return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
 
     if not changes.has_pending:
-        return _BackfillResult.WOULD_OVERWRITE
+        return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
 
     if dry_run:
         console_err.print(
             f"[yellow]  [dry-run] {submission_id}: would update: {', '.join(changes.pending_changes)}[/yellow]"
         )
-        return _BackfillResult.LINK_UNRESOLVED if link_unresolved else _BackfillResult.UPDATED
+        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved)
 
     try:
         db_service.commit_changes(submission_id, changes)
         console_err.print(f"[green]  {submission_id}: updated ({', '.join(changes.pending_changes)}).[/green]")
-        return _BackfillResult.LINK_UNRESOLVED if link_unresolved else _BackfillResult.UPDATED
+        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved)
     except Exception as exc:
         console_err.print(f"[red]  {submission_id}: failed to commit: {exc}[/red]")
-        return _BackfillResult.ERROR
+        return _BackfillOutcome(_BackfillResult.ERROR)
 
 
 @db.command("backfill")
@@ -1681,10 +1696,11 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
     consent_mismatches = 0
     expired_consents = 0
+    links_unresolved = 0
 
     for submission in tqdm(candidates):
         # fetch from archive targets
-        results: dict[str, _BackfillResult] = {}
+        results: dict[str, _BackfillOutcome] = {}
         for label, bucket, client in archive_targets:
             results[label] = _backfill_submission(
                 submission,
@@ -1697,7 +1713,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 frozenset(allow_overwrite),
             )
 
-        found_in = [label for label, res in results.items() if res != _BackfillResult.NOT_FOUND]
+        found_in = [label for label, res in results.items() if res.status != _BackfillResult.NOT_FOUND]
 
         if len(found_in) > 1:
             console_err.print(
@@ -1711,7 +1727,8 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
             continue
 
         actual_archive = found_in[0]  # "consented" or "non_consented"
-        counts[results[actual_archive]] += 1
+        counts[results[actual_archive].status] += 1
+        links_unresolved += results[actual_archive].link_unresolved
 
         # check DB `consented` vs actual archive
         if submission.consented is not None:
@@ -1745,7 +1762,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
         f"  Up to date: {counts[_BackfillResult.UP_TO_DATE]}\n"
         f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
-        f"  Case link unresolved: {counts[_BackfillResult.LINK_UNRESOLVED]}\n"
+        f"  Case link unresolved: {links_unresolved} (also counted above)\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
 
