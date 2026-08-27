@@ -98,6 +98,10 @@ class CaseLinkDiff:
     :param local_case_id: Submitter-local case identifier used to resolve the case.
     :param submission_type: Type of the submission. Checked for case-trackability (``test`` is
         rejected), not against the case.
+    :param psn: RKI pseudonym used to resolve the case, when the caller knows one. Carried so
+        that :meth:`SubmissionDb.commit_changes` can store it on a case it creates, and so a
+        ``PsnResolver`` reaches the same value the diff resolved with. Defaults to ``None``,
+        since no psn is derivable from a submitter's metadata.
     """
 
     before: int | None
@@ -105,6 +109,7 @@ class CaseLinkDiff:
     submitter_id: str | None
     local_case_id: str | None
     submission_type: SubmissionType
+    psn: str | None = None
 
     @property
     def state(self) -> DiffState:

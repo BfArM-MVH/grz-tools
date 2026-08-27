@@ -415,13 +415,14 @@ def test_two_submitters_same_local_case_id_are_distinct_cases(db: SubmissionDb):
     assert case_a.id != case_b.id
 
 
-def test_assign_case_with_psn_resolver_links_by_pseudonym(db: SubmissionDb):
+def test_assign_case_with_psn_resolver_links_by_pseudonym(db: SubmissionDb, migrated_db_connection, test_author):
     """The pluggable resolver can locate a case by psn (the future PSN-based flow)."""
+    psn_db = SubmissionDb(db_url=migrated_db_connection, author=test_author, case_resolver=PsnResolver())
     pre = db.create_case(submitter_id=SUBMITTER_A, local_case_id="caseX", psn="PSN-1")
     sid = _sid(SUBMITTER_A, "0000000a")
     _add(db, sid, SubmissionType.initial)
 
-    linked = db.assign_case(sid, psn="PSN-1", submission_type=SubmissionType.initial, resolver=PsnResolver())
+    linked = psn_db.assign_case(sid, psn="PSN-1", submission_type=SubmissionType.initial)
 
     assert linked.id == pre.id
     assert db.get_submission(sid).case_id == pre.id
@@ -616,6 +617,50 @@ def test_diff_reads_one_snapshot(db: SubmissionDb, metadata: GrzSubmissionMetada
     assert changes.case_link is not None, "case resolution must have run, or this pins nothing"
     assert changes.donors.added, "donor resolution must have run, or this pins nothing"
     assert counts == {"transactions": 1, "submission_reads": 2}
+
+
+def test_diff_resolves_by_psn_when_given_one(
+    db: SubmissionDb, migrated_db_connection, test_author, metadata: GrzSubmissionMetadata
+):
+    """The whole seam, end to end: a psn-keyed deployment links through diff and commit_changes.
+
+    The resolver is the deployment's, set once on the SubmissionDb, so diff and commit_changes
+    cannot be given different ones. Only the psn is per submission, nothing in the metadata
+    carrying one. The submitter's local case ID names a different case here, which must not be
+    the one chosen.
+    """
+    psn_db = SubmissionDb(db_url=migrated_db_connection, author=test_author, case_resolver=PsnResolver())
+    initial_metadata = _with_submission_type(metadata, "initial")
+    decoy = db.create_case(initial_metadata.submission.submitter_id, initial_metadata.submission.local_case_id)
+    wanted = db.create_case(SUBMITTER_B, "by-psn", psn="PSN-0001")
+
+    submission_id = initial_metadata.submission_id
+    db.add_submission(submission_id)
+    changes = psn_db.diff(submission_id, initial_metadata, submission_uploaded_date=None, psn="PSN-0001")
+    assert changes.case_link is not None
+    assert changes.case_link.after == wanted.id != decoy.id
+    assert changes.case_link.psn == "PSN-0001"
+
+    psn_db.commit_changes(submission_id, changes)
+    submission = db.get_submission(submission_id)
+    assert submission is not None and submission.case_id == wanted.id
+
+
+def test_diff_records_the_psn_on_a_case_it_opens(db: SubmissionDb, metadata: GrzSubmissionMetadata):
+    """A psn passed to diff reaches the case commit_changes creates, not just its resolution."""
+    initial_metadata = _with_submission_type(metadata, "initial")
+    submission_id = initial_metadata.submission_id
+    db.add_submission(submission_id)
+
+    changes = db.diff(submission_id, initial_metadata, submission_uploaded_date=None, psn="PSN-0002")
+    # the default resolver reads the local case ID and ignores the psn, so this opens a case
+    assert changes.case_link is not None and changes.case_link.after is None
+
+    db.commit_changes(submission_id, changes)
+    submission = db.get_submission(submission_id)
+    assert submission is not None and submission.case_id is not None
+    opened = db.get_case(submission.case_id)
+    assert opened is not None and opened.psn == "PSN-0002"
 
 
 def test_diff_reports_relink_to_existing_case(db: SubmissionDb, metadata: GrzSubmissionMetadata):
@@ -1245,13 +1290,16 @@ def test_assert_no_duplicate_initial_never_keys_on_a_redaction_placeholder(db: S
     )
 
 
-def test_assert_no_duplicate_initial_consults_the_resolver_it_was_given(db: SubmissionDb, metadata):
-    """An injected resolver answers here, on identifiers the default resolver cannot key.
+def test_assert_no_duplicate_initial_consults_the_configured_resolver(
+    db: SubmissionDb, migrated_db_connection, test_author, metadata
+):
+    """The db's own resolver answers here, on identifiers the default resolver cannot key.
 
-    ``local_case_id`` is absent, so the default resolver has nothing to match; only the injected
-    one can see the case. Screening on the default key before consulting the resolver would
-    report this rival as clear.
+    ``local_case_id`` is absent, so the default resolver has nothing to match; only a psn-keyed
+    one can see the case. Screening on the default key before consulting the configured resolver
+    would report this rival as clear.
     """
+    psn_db = SubmissionDb(db_url=migrated_db_connection, author=test_author, case_resolver=PsnResolver())
     initial_metadata = _with_submission_type(metadata, "initial")
     submitter = initial_metadata.submission.submitter_id
 
@@ -1265,9 +1313,7 @@ def test_assert_no_duplicate_initial_consults_the_resolver_it_was_given(db: Subm
     _add(db, rival, SubmissionType.initial)
 
     with pytest.raises(DuplicateInitialSubmissionError) as excinfo:
-        db.assert_no_duplicate_initial(
-            rival, psn="RKI-PSN-9", submission_type=SubmissionType.initial, resolver=PsnResolver()
-        )
+        psn_db.assert_no_duplicate_initial(rival, psn="RKI-PSN-9", submission_type=SubmissionType.initial)
     assert holder in str(excinfo.value)
 
 
