@@ -550,6 +550,11 @@ def test_diff_reads_one_snapshot(db: SubmissionDb, metadata: GrzSubmissionMetada
     """A change set must answer for one submission at one moment: it opens one transaction and
     reads the submission row once, so a write committed mid-diff cannot leave fields, donors
     and the case link describing three different snapshots.
+
+    Two reads of the submissions table rather than one: the row itself, plus the aggregate
+    behind :func:`case_key_denotes_one_patient`, which decides whether this key may open a case
+    at all. That one counts rows instead of fetching the submission again, so the snapshot the
+    change set is built from is still a single read.
     """
     initial_metadata = _with_submission_type(metadata, "initial")
     submission_id = initial_metadata.submission_id
@@ -560,7 +565,7 @@ def test_diff_reads_one_snapshot(db: SubmissionDb, metadata: GrzSubmissionMetada
 
     assert changes.case_link is not None, "case resolution must have run, or this pins nothing"
     assert changes.donors.added, "donor resolution must have run, or this pins nothing"
-    assert counts == {"transactions": 1, "submission_reads": 1}
+    assert counts == {"transactions": 1, "submission_reads": 2}
 
 
 def test_diff_reports_relink_to_existing_case(db: SubmissionDb, metadata: GrzSubmissionMetadata):
@@ -751,6 +756,119 @@ def test_resolver_ignores_an_empty_case_key(db: SubmissionDb):
 
     assert (
         db.resolve_case(sid, submitter_id=SUBMITTER_A, local_case_id="", submission_type=SubmissionType.initial) is None
+    )
+
+
+def _reuse_key_across_patients(
+    db: SubmissionDb, submitter_id: str, local_case_id: str, suffixes: tuple[str, str]
+) -> None:
+    """Leave two QC-passed initial submissions sharing one key, which is what marks it reused.
+
+    The state the cases migration leaves behind for a submitter that reused one local case ID:
+    both rows unlinked, and both having passed basic QC on their own merits, since nothing was
+    grouping them at the time.
+    """
+    for suffix in suffixes:
+        sid = _sid(submitter_id, suffix)
+        _add(db, sid, SubmissionType.initial)
+        db.modify_submission(sid, "submitter_id", submitter_id)
+        db.modify_submission(sid, "pseudonym", local_case_id)
+        _record_basic_qc(db, sid, True)
+
+
+def test_resolver_refuses_a_key_reused_across_patients(db: SubmissionDb):
+    """A key carrying two QC-passed initial submissions denotes two patients, so it names no case.
+
+    The case exists here, so this pins a refusal rather than a mere absence of a match: without
+    the guard the newcomer would be linked to whichever patient reached the key first.
+    """
+    db.create_case(SUBMITTER_A, "ready")
+    _reuse_key_across_patients(db, SUBMITTER_A, "ready", ("000000e1", "000000e2"))
+
+    newcomer = _sid(SUBMITTER_A, "000000e3")
+    _add(db, newcomer, SubmissionType.initial)
+    assert (
+        db.resolve_case(
+            newcomer, submitter_id=SUBMITTER_A, local_case_id="ready", submission_type=SubmissionType.initial
+        )
+        is None
+    )
+
+
+def test_a_retry_that_failed_basic_qc_does_not_make_a_key_untrusted(db: SubmissionDb):
+    """One patient may have several initial submissions; only one of them passes basic QC.
+
+    Counting every initial submission instead would read a submitter who fixed a failed upload as
+    one who reused the key, and leave a perfectly good case unlinked.
+    """
+    case = db.create_case(SUBMITTER_A, "caseX")
+    for suffix, qc_passed in (("000000f1", False), ("000000f2", True)):
+        sid = _sid(SUBMITTER_A, suffix)
+        _add(db, sid, SubmissionType.initial)
+        db.modify_submission(sid, "submitter_id", SUBMITTER_A)
+        db.modify_submission(sid, "pseudonym", "caseX")
+        _record_basic_qc(db, sid, qc_passed)
+
+    followup = _sid(SUBMITTER_A, "000000f3")
+    _add(db, followup, SubmissionType.followup)
+    resolved = db.resolve_case(
+        followup, submitter_id=SUBMITTER_A, local_case_id="caseX", submission_type=SubmissionType.followup
+    )
+    assert resolved is not None and resolved.id == case.id
+
+
+def test_diff_leaves_a_key_reused_across_patients_unlinked(db: SubmissionDb, metadata: GrzSubmissionMetadata):
+    """Populate must neither link to a case on such a key nor create one from it.
+
+    Reporting "no match" instead would have ``commit_changes`` mint a case from the very key that
+    names no patient, which is the shape this guard exists to avoid.
+    """
+    initial_metadata = _with_submission_type(metadata, "initial")
+    _reuse_key_across_patients(
+        db,
+        initial_metadata.submission.submitter_id,
+        initial_metadata.submission.local_case_id,
+        ("000000e4", "000000e5"),
+    )
+
+    submission_id = initial_metadata.submission_id
+    db.add_submission(submission_id)
+    changes = db.diff(submission_id, initial_metadata, submission_uploaded_date=None)
+    assert changes.case_link is None and changes.case_link_error is None
+
+    db.commit_changes(submission_id, changes)
+    submission = db.get_submission(submission_id)
+    assert submission is not None and submission.case_id is None
+    assert db.list_cases() == []
+
+
+def test_no_duplicate_initial_is_reported_for_a_key_reused_across_patients(db: SubmissionDb):
+    """The rejection this guard prevents: one patient failing basic QC for an unrelated one's sake.
+
+    ``assert_no_duplicate_initial`` resolves through the same resolver, so a key that names no
+    case cannot answer the duplicate question either.
+    """
+    linked = _sid(SUBMITTER_A, "0000000a")
+    _add(db, linked, SubmissionType.initial)
+    case = db.assign_case(
+        linked, submitter_id=SUBMITTER_A, local_case_id="ready", submission_type=SubmissionType.initial
+    )
+    for sid in (linked, _sid(SUBMITTER_A, "0000000b")):
+        if sid != linked:
+            _add(db, sid, SubmissionType.initial)
+        db.modify_submission(sid, "submitter_id", SUBMITTER_A)
+        db.modify_submission(sid, "pseudonym", "ready")
+        _record_basic_qc(db, sid, True)
+
+    # without the guard the newcomer would resolve to this case and be failed for its sake
+    assert case.id is not None
+    holder = db.get_initial_submission(case.id)
+    assert holder is not None and holder.id == linked
+
+    newcomer = _sid(SUBMITTER_A, "0000000c")
+    _add(db, newcomer, SubmissionType.initial)
+    db.assert_no_duplicate_initial(
+        newcomer, submitter_id=SUBMITTER_A, local_case_id="ready", submission_type=SubmissionType.initial
     )
 
 

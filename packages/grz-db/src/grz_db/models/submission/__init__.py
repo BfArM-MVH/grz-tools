@@ -389,6 +389,42 @@ def _rejected_by(e: IntegrityError) -> "_Index | None":
     )
 
 
+def case_key_denotes_one_patient(session: Session, submitter_id: str | None, local_case_id: str | None) -> bool:
+    """Whether ``(submitter_id, local_case_id)`` can stand for a single patient.
+
+    A patient has exactly one ``initial`` submission that passes basic QC: earlier uploads that
+    failed it are retries of the same patient, not further patients. So a key carrying more than
+    one of them was reused across patients by the submitter and names no case.
+
+    Nothing carrying such a key is linked: ``case_id`` stays NULL rather than two patients
+    ending up in one case. That is the cheaper direction to be wrong in. NULL is the schema's
+    "not yet resolved" state and a later flow can still resolve those submissions by ``psn``,
+    whereas splitting a merged case means unlinking its submissions one at a time
+    (:meth:`SubmissionDb.clear_submission_case`) and knowing which patient each belongs to,
+    which is the very thing the key failed to say.
+
+    The cases migration ``f8c1a4b7e2d9`` applies the same rule to the rows that predate case
+    tracking, spelled out again there because a migration freezes its rules on purpose.
+
+    :param session: Transaction to read in.
+    :param submitter_id: Submitter identifier half of the key.
+    :param local_case_id: Submitter-local case identifier half of the key, held in the
+        ``submissions.pseudonym`` column.
+    :returns: ``False`` only when more than one QC-passed ``initial`` submission carries this key.
+    """
+    qc_passed_initials = session.exec(
+        select(sqlfn.count())
+        .select_from(Submission)  # type: ignore[arg-type]
+        .where(
+            Submission.submitter_id == submitter_id,
+            Submission.pseudonym == local_case_id,
+            Submission.submission_type == SubmissionType.initial,
+            Submission.basic_qc_passed.is_(True),  # type: ignore[union-attr]
+        )
+    ).one()
+    return qc_passed_initials <= 1
+
+
 class CaseResolver(Protocol):
     """Strategy for locating the case a submission belongs to.
 
@@ -423,6 +459,9 @@ class SubmitterLocalCaseResolver:
 
     A redaction placeholder is not a key (see :func:`is_redacted_local_case_id`), so a submission
     carrying one matches no case rather than every other redacted submission of that submitter.
+    Neither is a key the submitter reused across patients (see
+    :func:`case_key_denotes_one_patient`), for the same reason: it identifies no single patient,
+    so it cannot say which case is meant.
 
     ``ux_cases_submitter_local_case`` makes the pair unique wherever both halves are present, so
     a second match means that index is not in place. Picking one of the matches would link a
@@ -440,7 +479,15 @@ class SubmitterLocalCaseResolver:
         ).all()
         if len(matches) > 1:
             raise AmbiguousCaseError(submitter_id, local_case_id, [case.id for case in matches if case.id is not None])
-        return matches[0] if matches else None
+        if not matches:
+            return None
+        # Only asked when there is a case to return, since that is the only answer it can change
+        # and it scans `submissions`. Asked here as well as in `_diff_case_link` because
+        # `assert_no_duplicate_initial` reaches this resolver directly, and a key that names no
+        # case must not answer the duplicate question either.
+        if not case_key_denotes_one_patient(session, submitter_id, local_case_id):
+            return None
+        return matches[0]
 
 
 class PsnResolver:
@@ -2015,9 +2062,15 @@ class SubmissionDb:
         """Resolve whether committing *metadata* would change the submission's case link.
 
         Case resolution is skipped when ``"case_id"`` is ignored, for ``test`` submissions
-        (never case-tracked), and when ``local_case_id`` is still a redaction placeholder
-        (see :func:`is_redacted_local_case_id`); call :meth:`Submission.restore_redacted_fields` first when
-        *metadata* was read back from an archive bucket.
+        (never case-tracked), when ``local_case_id`` is still a redaction placeholder
+        (see :func:`is_redacted_local_case_id`), and when the key was reused across patients
+        (see :func:`case_key_denotes_one_patient`); call
+        :meth:`Submission.restore_redacted_fields` first when *metadata* was read back from an
+        archive bucket.
+
+        Returning ``None`` is what keeps the submission unlinked. Passing the resolver's "no
+        match" through as a pending link would instead have :meth:`commit_changes` create a case
+        from the very key that names no patient.
 
         :param session: The transaction :meth:`diff` runs in.
         :param current_submission: The submission's row, as :meth:`diff` read it.
@@ -2042,6 +2095,13 @@ class SubmissionDb:
             submission_type=metadata.submission.submission_type,
             session=session,
         )
+        # When nothing matched, the choice is between opening a case and leaving the submission
+        # unlinked, which only the key can settle. Asked after resolution rather than before, so
+        # a diff that found a case skips the scan.
+        if resolved is None and not case_key_denotes_one_patient(
+            session, metadata.submission.submitter_id, metadata.submission.local_case_id
+        ):
+            return None
         resolved_id = resolved.id if resolved is not None else None
         if resolved is not None and resolved_id == current_submission.case_id:
             return None
