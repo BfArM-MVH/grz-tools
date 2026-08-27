@@ -2,9 +2,10 @@
 
 Seeds submissions at the revision just before the cases migration, upgrades, and asserts that the
 backfill groups by ``(submitter_id, pseudonym)``, stores the keys on the case, links submissions,
-keeps distinct submitters apart, and leaves unkeyable rows unlinked. Also asserts that the
-migration fails fast when two QC-passed 'initial' submissions share a key, and that it extends
-the PostgreSQL ``failurereasonenum`` type with ``duplicate_initial``.
+keeps distinct submitters apart, and leaves unkeyable rows unlinked. Also asserts that a key
+shared by more than one QC-passed 'initial' submission is left unlinked in full rather than
+merged, and that the migration extends the PostgreSQL ``failurereasonenum`` type with
+``duplicate_initial``.
 """
 
 import pytest
@@ -87,12 +88,13 @@ def test_cases_backfill_groups_by_submitter_and_local_case(db_test_connection: s
     assert len(db.list_cases()) == 2
 
 
-def test_cases_backfill_rejects_duplicate_qc_passed_initials(db_test_connection: str):
-    """Two QC-passed 'initial' submissions sharing (submitter_id, pseudonym) are genuinely inconsistent.
+def test_cases_backfill_skips_keys_with_several_qc_passed_initials(db_test_connection: str):
+    """A key shared by two QC-passed 'initial' submissions denotes two patients, not one case.
 
-    A case may have at most one initial submission that passed basic QC, so the migration must
-    fail fast instead of silently choosing one of the two as the case's initial submission. This
-    exercises the duplicate-detection query (COUNT(*) ... GROUP BY ... HAVING COUNT(*) > 1).
+    One patient has exactly one initial submission that passes basic QC, so a second one under
+    the same key means the submitter reused the key. Grouping them would merge two patients, and
+    ``submissions.case_id`` cannot be set back to NULL afterwards, so the backfill declines: no
+    case is created for the key and both rows keep ``case_id`` NULL.
     """
     db = SubmissionDb(db_url=db_test_connection, author=None)
     db.upgrade_schema(revision=PRE_CASES_REVISION)
@@ -103,7 +105,6 @@ def test_cases_backfill_rejects_duplicate_qc_passed_initials(db_test_connection:
     initial_a = "111111111_2025-01-01_00000001"
     initial_b = "111111111_2025-01-02_00000002"
     rows = [
-        # two QC-passed 'initial' submissions for the same (submitter, local case id) -> inconsistent
         dict(
             id=initial_a,
             tan_g=_tan(1),
@@ -124,12 +125,81 @@ def test_cases_backfill_rejects_duplicate_qc_passed_initials(db_test_connection:
     with engine.begin() as conn:
         conn.execute(submissions.insert(), rows)
 
-    with pytest.raises(RuntimeError, match="more than one QC-passed 'initial' submission shares"):
-        db.upgrade_schema(revision=CASES_REVISION)
+    db.upgrade_schema(revision=CASES_REVISION)
 
-    # the failed upgrade must not have created the cases table
-    inspector = sqlalchemy.inspect(engine)
-    assert "cases" not in inspector.get_table_names()
+    assert db.get_submission(initial_a).case_id is None
+    assert db.get_submission(initial_b).case_id is None
+    assert db.list_cases() == []
+
+
+def test_cases_backfill_leaves_the_whole_untrusted_group_unlinked(db_test_connection: str):
+    """Everything keyed on an untrusted key stays unlinked, not just the initial submissions.
+
+    The key is what cannot be trusted, so a followup or a QC-failed initial carrying it is no
+    more attributable than the initial submissions that revealed the problem. A second, clean
+    key from the same submitter must still be linked: the verdict is per key, not per submitter.
+    """
+    db = SubmissionDb(db_url=db_test_connection, author=None)
+    db.upgrade_schema(revision=PRE_CASES_REVISION)
+
+    engine = sqlalchemy.create_engine(db_test_connection)
+    submissions = sqlalchemy.Table("submissions", sqlalchemy.MetaData(), autoload_with=engine)
+
+    reused = [f"111111111_2025-01-0{i}_0000000{i}" for i in range(1, 5)]
+    clean = "111111111_2025-02-01_00000009"
+    rows = [
+        # two patients under one reused key, plus a followup and a retry that failed basic QC
+        dict(
+            id=reused[0],
+            tan_g=_tan(1),
+            pseudonym="ready",
+            submitter_id="111111111",
+            submission_type="initial",
+            basic_qc_passed=True,
+        ),
+        dict(
+            id=reused[1],
+            tan_g=_tan(2),
+            pseudonym="ready",
+            submitter_id="111111111",
+            submission_type="initial",
+            basic_qc_passed=True,
+        ),
+        dict(
+            id=reused[2],
+            tan_g=_tan(3),
+            pseudonym="ready",
+            submitter_id="111111111",
+            submission_type="followup",
+            basic_qc_passed=True,
+        ),
+        dict(
+            id=reused[3],
+            tan_g=_tan(4),
+            pseudonym="ready",
+            submitter_id="111111111",
+            submission_type="initial",
+            basic_qc_passed=False,
+        ),
+        # same submitter, a key that does denote one patient
+        dict(
+            id=clean,
+            tan_g=_tan(9),
+            pseudonym="caseY",
+            submitter_id="111111111",
+            submission_type="initial",
+            basic_qc_passed=True,
+        ),
+    ]
+    with engine.begin() as conn:
+        conn.execute(submissions.insert(), rows)
+
+    db.upgrade_schema(revision=CASES_REVISION)
+
+    assert [db.get_submission(sid).case_id for sid in reused] == [None] * len(reused)
+    assert db.get_submission(clean).case_id is not None
+    (case, count) = db.list_cases()[0]
+    assert (case.submitter_id, case.local_case_id, count) == ("111111111", "caseY", 1)
 
 
 def test_cases_backfill_links_competing_initials_that_did_not_all_pass_qc(db_test_connection: str):

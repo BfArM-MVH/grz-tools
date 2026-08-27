@@ -15,14 +15,19 @@ grouped by ``(submitter_id, pseudonym)`` (the ``pseudonym`` column holds the sub
 id) and backfilled into cases. ``submitter_id`` stays on the submission row as well as on the
 case.
 
-Refuses to run when the existing data cannot be grouped: two or more QC-passed ``initial``
-submissions sharing a ``(submitter_id, pseudonym)`` abort the upgrade, naming the groups. Resolve
-those rows first.
+Some rows are left unlinked. A ``(submitter_id, pseudonym)`` key shared by more than one
+QC-passed ``initial`` submission identifies no single patient, so no case is created for it and
+every submission carrying it keeps ``case_id`` NULL. Those keys are logged. NULL is the schema's
+"not yet resolved" state, and a later flow can still resolve such a submission by ``psn``;
+merging distinct patients into one case instead has to be unpicked one submission at a time with
+``grzctl db case unlink``, and the key that caused the merge is no help in deciding which
+submission belongs where.
 
 Also extends ``failurereasonenum`` with ``duplicate_initial``, recorded on a duplicate initial
 submission: one being validated for a case whose initial submission already passed basic QC.
 """
 
+import logging
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -40,38 +45,59 @@ depends_on: str | Sequence[str] | None = None
 # identifies a patient, so neither is a case key. SubmissionDb applies the same check at runtime.
 PSEUDONYM_NON_KEYS = ["", "REDACTED_LOCAL_CASE_ID"]
 
+# Alembic's own progress logger, so these lines appear in the same stream as "Running upgrade".
+logger = logging.getLogger("alembic.runtime.migration")
+
+
+def _can_key_a_case(rows: sa.FromClause) -> sa.ColumnElement[bool]:
+    """Rows carrying both halves of a usable ``(submitter_id, local_case_id)`` key."""
+    return sa.and_(
+        rows.c.submitter_id.is_not(None),
+        rows.c.pseudonym.is_not(None),
+        rows.c.pseudonym.not_in(PSEUDONYM_NON_KEYS),
+    )
+
+
+def _qc_passed_initial(rows: sa.FromClause) -> sa.ColumnElement[bool]:
+    """An ``initial`` submission that passed basic QC.
+
+    One patient has exactly one. Earlier uploads that failed basic QC are retries of the same
+    patient rather than further patients, which is why this counts QC-passed rows and not every
+    ``initial``: counting every one would read a submitter who fixed a failed upload as a
+    submitter who reused the key.
+    """
+    return sa.and_(
+        rows.c.submission_type == "initial",
+        rows.c.basic_qc_passed.is_(True),
+    )
+
 
 def upgrade() -> None:
     """Upgrade schema."""
     bind = op.get_bind()
     submissions = sa.Table("submissions", sa.MetaData(), autoload_with=bind)
 
-    # Fail fast only on genuinely unresolvable data: more than one QC-passed 'initial' submission
-    # with the same (submitter_id, local_case_id). Pending or failed duplicates are legal, since a
-    # case may have at most one initial submission that passed basic QC; they simply stay linked
-    # to their case. Rows that cannot form a key are left unlinked.
-    duplicate_initials = bind.execute(
+    # Report the keys the backfill below will refuse to group. Logged rather than left for the
+    # operator to notice: an upgrade that links only part of the data looks exactly like one that
+    # linked all of it.
+    untrusted_keys = bind.execute(
         sa.select(
             submissions.c.submitter_id,
             submissions.c.pseudonym,
             sa.func.count().label("n"),
         )
-        .where(
-            submissions.c.pseudonym.is_not(None),
-            submissions.c.pseudonym.not_in(PSEUDONYM_NON_KEYS),
-            submissions.c.submitter_id.is_not(None),
-            submissions.c.submission_type == "initial",
-            submissions.c.basic_qc_passed.is_(True),
-        )
+        .where(_can_key_a_case(submissions), _qc_passed_initial(submissions))
         .group_by(submissions.c.submitter_id, submissions.c.pseudonym)
         .having(sa.func.count() > 1)
     ).fetchall()
 
-    if duplicate_initials:
-        groups = ", ".join(f"({row[0]}, {row[1]}): {row[2]}" for row in duplicate_initials)
-        raise RuntimeError(
-            "Cannot backfill cases: more than one QC-passed 'initial' submission shares the same "
-            f"(submitter_id, local_case_id): {groups}"
+    if untrusted_keys:
+        logger.warning(
+            "cases backfill: %d submitter-local case key(s) are shared by more than one QC-passed "
+            "'initial' submission, so they identify no single patient. No case is created for "
+            "them and every submission carrying one keeps case_id NULL:\n%s",
+            len(untrusted_keys),
+            "\n".join(f"  ({row[0]}, {row[1]}): {row[2]} QC-passed initial submissions" for row in untrusted_keys),
         )
 
     # --- Create the cases table ---
@@ -138,19 +164,40 @@ def upgrade() -> None:
             "submission_type",
             sa.Enum("initial", "followup", "addition", "correction", "test", name="submissiontype"),
         ),
+        sa.Column("basic_qc_passed", sa.Boolean()),
+    )
+
+    # The same rule as the report above, asked once per row: how many QC-passed initial
+    # submissions share this row's key? More than one and the key denotes more than one patient,
+    # so it is not a case key at all. Written as a correlated count rather than an IN list of the
+    # keys already fetched, so the statement stays one statement however many keys are bad.
+    peers = submissions_link.alias("peers")
+    key_denotes_one_patient = (
+        sa.select(sa.func.count())
+        .select_from(peers)
+        .where(
+            peers.c.submitter_id == submissions_link.c.submitter_id,
+            peers.c.pseudonym == submissions_link.c.pseudonym,
+            _qc_passed_initial(peers),
+        )
+        .correlate(submissions_link)
+        .scalar_subquery()
+        <= 1
     )
 
     # Only rows that can form a (submitter_id, pseudonym) key participate in the backfill.
     # Test submissions are never case-tracked; the explicit NULL check keeps rows with an unknown
     # type in the backfill, since SQL's three-valued logic would otherwise exclude them too.
+    # A row whose key fails ``key_denotes_one_patient`` is left unlinked whatever its own type or
+    # QC state: the key is what is untrustworthy, so the whole group it names stays out, not just
+    # the initial submissions that revealed the problem.
     has_keys = sa.and_(
-        submissions_link.c.pseudonym.is_not(None),
-        submissions_link.c.pseudonym.not_in(PSEUDONYM_NON_KEYS),
-        submissions_link.c.submitter_id.is_not(None),
+        _can_key_a_case(submissions_link),
         sa.or_(
             submissions_link.c.submission_type.is_(None),
             submissions_link.c.submission_type != "test",
         ),
+        key_denotes_one_patient,
     )
     # INSERT INTO cases (submitter_id, local_case_id)
     # SELECT DISTINCT submitter_id, pseudonym FROM submissions WHERE has_keys
@@ -180,6 +227,9 @@ def upgrade() -> None:
     # Several initial submissions may be linked while pending basic QC (the data alone cannot
     # tell competing uploads apart); whichever passes basic QC first becomes the case's
     # QC-passed initial submission.
+    # CREATE UNIQUE INDEX fails if the rows already break the rule, so the backfill above has to
+    # have left it intact. Skipping the untrusted keys is what does that: their rows are unlinked,
+    # and a unique index does not constrain a NULL case_id.
     op.create_index(
         "ux_submissions_one_initial_per_case",
         table_name="submissions",
