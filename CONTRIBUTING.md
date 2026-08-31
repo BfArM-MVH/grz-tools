@@ -70,6 +70,25 @@ To auto-format the code, run:
 uv run ruff format
 ```
 
+## Docstrings
+
+Docstrings use ReST field lists. Do not use Google-style `Args:` / `Returns:` sections.
+
+```python
+def get_submission(self, submission_id: str) -> Submission | None:
+    """Retrieve a submission and its state history.
+
+    :param submission_id: Submission ID of the submission to retrieve.
+    :returns: The :class:`Submission`, or ``None`` if no submission has that ID.
+    """
+```
+
+Keep the whole description above the field list. A paragraph placed after `:raises:` is rendered
+detached from the description.
+
+Mark code with double backticks. A single backtick is a different role in ReST, so `` `like this` ``
+does not render as a literal.
+
 ## Static type checking
 
 This project uses mypy for static type checking.
