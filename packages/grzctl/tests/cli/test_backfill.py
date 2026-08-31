@@ -530,8 +530,8 @@ def test_backfill_submission_links_case_by_default(
 def _archived(metadata: GrzSubmissionMetadata) -> GrzSubmissionMetadata:
     """The copy archival uploads, in its older spelling: tanG zeroed and localCaseId emptied.
 
-    Mirrors ``S3BotoUploadWorker.archive``, so the case key in an archive bucket is a
-    placeholder shared by every submission of that submitter.
+    The archive still holds objects written before ``REDACTED_LOCAL_CASE_ID`` replaced this
+    spelling. Their case key is a placeholder shared by every submission of that submitter.
     """
     raw = metadata.to_redacted_dict()
     raw["submission"]["submissionType"] = "initial"
@@ -633,8 +633,7 @@ def test_backfill_writes_everything_but_the_link_when_the_case_key_is_ambiguous(
     current = db.get_submission(sid)
     _put_metadata(s3_client_mock, sid, _archived(metadata))
 
-    # the outcome says what was written; the unresolved link is reported alongside it, not
-    # instead of it, or a submission that was updated would be counted as one that was not
+    # link_unresolved=True: the key is ambiguous, not merely missing. See _BackfillOutcome.
     assert _run_backfill(db, s3_client_mock, current) == _BackfillOutcome(_BackfillResult.UPDATED, True)
 
     persisted = db.get_submission(sid)

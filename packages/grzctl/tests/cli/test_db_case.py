@@ -15,7 +15,7 @@ from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 
 def _invoke(cli, config_path: Path, *args: str, input: str | None = None) -> click.testing.Result:
-    """Invoke ``grzctl db ... `` with the given config file and arguments."""
+    """Invoke ``grzctl db ...`` with the given config file and arguments."""
     runner = click.testing.CliRunner()
     return runner.invoke(cli, ["--config", str(config_path), "db", *args], input=input)
 
@@ -45,7 +45,10 @@ def _as_initial_submission(test_metadata_path: Path, tmp_path: Path) -> Path:
 
 
 def _add_and_populate(cli, config_path: Path, test_metadata_path: Path) -> str:
-    """Add + populate the example submission (test-type, so no case is created). Returns the submission id."""
+    """Add + populate the example submission (a test submission, so no case is created).
+
+    Returns the submission id.
+    """
     submission_id = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text()).submission_id
 
     result_add = _invoke(cli, config_path, "submission", "add", submission_id)
@@ -142,7 +145,10 @@ def test_case_list_and_show_json(migrated_database_config_path: Path):
 
 
 def test_case_modify_psn(migrated_database_config_path: Path):
-    """``case modify <id> psn`` updates the PSN; duplicates and unknown keys are rejected."""
+    """``case modify <id> psn`` updates the PSN; duplicates and unknown keys are rejected.
+
+    ``submitter_id`` is checked mutable in passing.
+    """
     cli = grzctl.cli.build_cli()
 
     result_create = _create_case(cli, migrated_database_config_path, "123456789", "case-C")
@@ -212,7 +218,6 @@ def test_case_modify_duplicate_pair_rejected(migrated_database_config_path: Path
 
 
 def test_case_show_unknown_exits_nonzero(migrated_database_config_path: Path):
-    """Showing a nonexistent case id exits non-zero."""
     cli = grzctl.cli.build_cli()
     result = _invoke(cli, migrated_database_config_path, "case", "show", "999999")
     assert result.exit_code != 0
