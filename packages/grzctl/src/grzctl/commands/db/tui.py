@@ -44,7 +44,7 @@ class SubmissionCountByStateTable(Static):
     @textual.work
     async def load(self, database: SubmissionDb) -> None:
         self.loading = True
-        with database._get_session() as session:
+        with database.transaction() as session:
             # credit: https://stackoverflow.com/a/28090544
             log1 = sqlalchemy.orm.aliased(SubmissionStateLog, name="log1")
             log2 = sqlalchemy.orm.aliased(SubmissionStateLog, name="log2")
@@ -87,7 +87,7 @@ class SubmissionCountByConsentTable(Static):
     @textual.work
     async def load(self, database: SubmissionDb) -> None:
         self.loading = True
-        with database._get_session() as session:
+        with database.transaction() as session:
             statement = select(Submission.consented, sqlfn.count(Submission.consented)).group_by(Submission.consented)  # type: ignore[arg-type]
             counts_by_consent = session.exec(statement).all()
 
@@ -117,7 +117,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
     @textual.work
     async def load(self, database: SubmissionDb, quarter: int | None = None, year: int | None = None) -> None:
         self.loading = True
-        with database._get_session() as session:
+        with database.transaction() as session:
             statement = (
                 select(  # type: ignore[type-var]
                     Submission.submitter_id, Submission.submission_uploaded_date, Submission.detailed_qc_passed
@@ -215,7 +215,7 @@ class SearchResultsDataTable(DataTable):
     ) -> None:
         self.loading = True
         self.clear()
-        with database._get_session() as session:
+        with database.transaction() as session:
             latest_state_per_submission = (
                 select(
                     SubmissionStateLog.submission_id.label("submission_id"),  # type: ignore[attr-defined]
@@ -338,7 +338,7 @@ class DatabaseBrowser(App):
         )
         table_states_latest = self.query_exactly_one("#table-states-latest", DataTable)
         table_states_latest.loading = True
-        with self._database._get_session() as session:
+        with self._database.transaction() as session:
             statement = (
                 select(SubmissionStateLog).order_by(SubmissionStateLog.timestamp.desc()).limit(_DEFAULT_SEARCH_LIMIT)  # type: ignore[attr-defined]
             )

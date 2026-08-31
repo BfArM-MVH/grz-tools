@@ -11,12 +11,19 @@ from pydantic_core import core_schema
 from ..common import StrictBaseModel, as_aware_datetime
 
 
-class StrictIgnoringBaseModel(StrictBaseModel):
-    model_config = ConfigDict(extra="ignore")
+class LosslessBaseModel(StrictBaseModel):
+    """A FHIR element that is strict about its declared fields and keeps everything else.
+
+    A real consent document carries fields these models do not declare (``id``, ``meta``,
+    ``extension``, ``organization``, ``policyRule`` on a Consent, among others); discarding
+    them would make a parsed submission lossy.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
 
 class Extension(StrictBaseModel):
-    # Extensions carry an open-ended value[x] payload, so extra keys are allowed here only.
+    # Extensions carry an open-ended value[x] payload, so extra keys are allowed here too.
     model_config = ConfigDict(extra="allow")
     url: str
 
@@ -293,7 +300,7 @@ class Period(FhirElement):
         return moment <= self.end.last_moment
 
 
-class Policy(StrictIgnoringBaseModel):
+class Policy(LosslessBaseModel):
     uri: str
 
 
@@ -315,7 +322,7 @@ class CodeableConcept(FhirElement):
         return frozenset((coding.system, coding.code) for coding in self.coding)
 
 
-class ConsentProvision(StrictIgnoringBaseModel):
+class ConsentProvision(LosslessBaseModel):
     type: ProvisionType
     period: Period
     code: Annotated[list[CodeableConcept], Field(min_length=1)]
@@ -334,7 +341,7 @@ class ConsentProvision(StrictIgnoringBaseModel):
         return self
 
 
-class RootConsentProvision(StrictIgnoringBaseModel):
+class RootConsentProvision(LosslessBaseModel):
     type: ProvisionType
     period: Period
     """
@@ -358,13 +365,13 @@ class RootConsentProvision(StrictIgnoringBaseModel):
         return self
 
 
-class Identifier(StrictIgnoringBaseModel):
+class Identifier(LosslessBaseModel):
     # The profile requires both on Consent.patient.identifier (1..1 each).
     system: str
     value: str
 
 
-class Patient(StrictIgnoringBaseModel):
+class Patient(LosslessBaseModel):
     # The profile marks both as mustSupport yet requires neither, so the patient may be identified
     # either way. A patient stating neither (e.g. display only) carries nothing this model keeps
     # and is rejected rather than silently reduced to an empty object.
@@ -378,7 +385,7 @@ class Patient(StrictIgnoringBaseModel):
         return self
 
 
-class Verification(StrictIgnoringBaseModel):
+class Verification(LosslessBaseModel):
     verified: bool
     verification_date: FhirDateTime | None = None
 
@@ -470,7 +477,7 @@ def _strip_oid_prefix(uri: str) -> str:
     return uri.removeprefix(_OID_URI_PREFIX)
 
 
-class Consent(StrictIgnoringBaseModel):
+class Consent(LosslessBaseModel):
     resource_type: Literal["Consent"] | None = None
     status: Status
     scope: CodeableConcept

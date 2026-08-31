@@ -15,10 +15,10 @@ from typing import Any
 
 import boto3
 import pytest
-from grz_db.models.submission import Submission, SubmissionDb
+from grz_db.models.submission import Submission, SubmissionBase, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.commands.db.cli import _backfill_submission, _BackfillResult
+from grzctl.commands.db.cli import _BACKFILL_IGNORE_FIELDS, _backfill_submission, _BackfillResult
 from moto import mock_aws
 
 BUCKET = "test-backfill-bucket"
@@ -26,7 +26,7 @@ BUCKET = "test-backfill-bucket"
 # We pick it specifically because it's S3's default region, so create_bucket() works without
 # an extra CreateBucketConfiguration/LocationConstraint argument.
 REGION = "us-east-1"
-IGNORE_FIELDS = {"submission_uploaded_date", "tan_g", "pseudonym"}
+IGNORE_FIELDS = set(_BACKFILL_IGNORE_FIELDS)
 DIFFERENT_TAN_G = "b" * 64
 DIFFERENT_PSEUDONYM = "different-pseudonym"
 DIFFERENT_DATE = datetime.date(1999, 1, 1)
@@ -55,10 +55,14 @@ def s3_client_mock() -> Iterator[Any]:
 
 
 def _put_metadata(s3_client: Any, submission_id: str, metadata: GrzSubmissionMetadata) -> None:
+    """Write *metadata* unredacted, unlike archival, which redacts first.
+
+    No test here covers the redacted shape backfill actually reads from the archive.
+    """
     s3_client.put_object(
         Bucket=BUCKET,
         Key=f"{submission_id}/metadata/metadata.json",
-        Body=metadata.model_dump_json(by_alias=True).encode("utf-8"),
+        Body=json.dumps(metadata.get_raw_dict()).encode("utf-8"),
     )
 
 
@@ -291,6 +295,70 @@ def test_backfill_submission_force_does_not_overwrite_ignore_fields(
     assert persisted.submission_metadata == metadata.to_redacted_dict()
 
 
+def test_backfill_leaves_a_missing_upload_date_alone(
+    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    """A NULL upload date stays NULL, even with --force.
+
+    The column records when the upload finished; the metadata's submission_date is what the
+    submitter declared, and it drives the reporting windows, so a declared date must not stand in
+    for a real one. diff() makes that call: given no date it falls back to the metadata's and then
+    ignores the field, so backfill passes the stored value straight through rather than deciding
+    again.
+    """
+    current = db.add_submission(submission_id)
+    assert current.submission_uploaded_date is None
+    assert metadata.submission.submission_date is not None
+    _put_metadata(s3_client_mock, submission_id, metadata)
+
+    result = _backfill_submission(
+        current_submission=current,
+        s3_client=s3_client_mock,
+        bucket=BUCKET,
+        db_service=db,
+        dry_run=False,
+        force=True,
+        ignore_fields=IGNORE_FIELDS,
+    )
+
+    assert result == _BackfillResult.UPDATED
+    assert db.get_submission(submission_id).submission_uploaded_date is None
+
+
+def test_backfill_does_not_write_an_upload_date_from_a_stale_snapshot(
+    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    """A row corrected mid-run keeps the correction, not the value the run started with.
+
+    Backfill builds its candidate list once and then spends the run fetching from S3, so the
+    Submission it holds is a snapshot: diff() re-reads the row from the database, and the two can
+    disagree if an operator writes in between. Offering the snapshot's date would write it back over
+    the correction, and over a deliberate clear it would not even need --force, since filling a NULL
+    is additive.
+    """
+    db.add_submission(submission_id)
+    db.modify_submission(submission_id, "submission_uploaded_date", DIFFERENT_DATE)
+    stale = db.get_submission(submission_id)
+    assert stale.submission_uploaded_date == DIFFERENT_DATE
+
+    # the operator clears the column while the run is in flight
+    db.modify_submission(submission_id, "submission_uploaded_date", None)
+    _put_metadata(s3_client_mock, submission_id, metadata)
+
+    result = _backfill_submission(
+        current_submission=stale,
+        s3_client=s3_client_mock,
+        bucket=BUCKET,
+        db_service=db,
+        dry_run=False,
+        force=True,
+        ignore_fields=IGNORE_FIELDS,
+    )
+
+    assert result == _BackfillResult.UPDATED
+    assert db.get_submission(submission_id).submission_uploaded_date is None
+
+
 def test_backfill_submission_reads_a_consent_datetime_without_a_timezone(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
@@ -393,3 +461,13 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
 
     assert result == _BackfillResult.WOULD_OVERWRITE
     assert db.get_submission(submission_id).submission_size == 1
+
+
+def test_backfill_ignores_only_fields_that_exist() -> None:
+    """Every name in ``_BACKFILL_IGNORE_FIELDS`` must be an actual Submission column.
+
+    A name that matches no column silently ignores nothing (set difference against a
+    non-member is a no-op), so a typo here would only surface once it let backfill overwrite
+    a field it was meant to skip; this asserts it directly instead.
+    """
+    assert _BACKFILL_IGNORE_FIELDS <= SubmissionBase.model_fields.keys()

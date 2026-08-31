@@ -69,10 +69,7 @@ class GrzctlKeyModel(IgnoringBaseModel):
     """Path to the GRZ private key for decryption."""
 
     grz_public_key_path: Annotated[str | None, Field(default=None)] = None
-    """Path to the GRZ public key (used by encrypt wrapper, derived from archives if not set)."""
-
-    submitter_private_key_path: Annotated[str | None, Field(default=None)] = None
-    """Path to the submitter's private key (used by encrypt wrapper)."""
+    """Path to the GRZ public key (optional; encryption targets are configured via archives instead)."""
 
 
 class ArchiveTarget(IgnoringBaseModel):

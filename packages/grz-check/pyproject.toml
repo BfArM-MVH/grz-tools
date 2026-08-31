@@ -17,7 +17,7 @@ classifiers = [
 dev = ["pytest", "maturin"]
 
 [dependency-groups]
-test = ["pytest >=8,<9"]
+test = ["pytest >=9,<10"]
 dev = ["tox >=4.23", "tox-uv"]
 
 [tool.maturin]

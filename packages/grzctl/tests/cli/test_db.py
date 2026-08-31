@@ -17,7 +17,7 @@ import grzctl.cli
 import pytest
 import sqlalchemy
 import yaml
-from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionBase, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
 
@@ -1683,3 +1683,28 @@ def test_submission_show_json_includes_failure_reason(migrated_database_config_p
     assert error_state["failure_reason"] == "decryption_error"
     # No metadata stored for this submission -> current research consent cannot be evaluated.
     assert parsed["research_consented_now"] is None
+
+
+def test_modify_offers_exactly_the_keys_it_accepts():
+    """A key the command lists must be one it can honour.
+
+    The choices and the epilog were built from two different field sets, so `modify` offered
+    `id` and then died on a traceback when it was chosen.
+    """
+    from grzctl.commands.db.cli import _MODIFIABLE_SUBMISSION_KEYS
+
+    assert set(_MODIFIABLE_SUBMISSION_KEYS) == SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields
+
+
+def test_modify_refuses_an_unofferable_key_with_a_usage_error(migrated_database_config_path):
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    args_common = ["--config", str(migrated_database_config_path), "db"]
+    submission_id = "111111111_2025-01-01_0000000a"
+    assert runner.invoke(cli, [*args_common, "submission", "add", submission_id]).exit_code == 0
+
+    result = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, "id", "1"])
+
+    assert result.exit_code == 2, result.output
+    assert "An unexpected error occurred" not in result.output
+    assert "Traceback" not in result.output

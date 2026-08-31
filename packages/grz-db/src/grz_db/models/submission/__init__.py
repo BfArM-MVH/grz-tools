@@ -656,16 +656,33 @@ class SubmissionDb:
         """
         self.engine = create_engine(db_url, echo=debug)
         self._author = author
+        self._schema_confirmed = False
 
     @contextmanager
-    def _get_session(self) -> Generator[Session, Any, None]:
-        """Get an sqlmodel session."""
-        if not self._at_latest_schema():
-            raise OutdatedDatabaseSchemaError(
-                "Database not at latest schema. Please backup the database and then attempt a migration with `grzctl db upgrade`."
-            )
-        with Session(self.engine) as session:
+    def transaction(self, session: Session | None = None) -> Generator[Session, Any, None]:
+        """Open a session that commits when its body completes, or join one already open.
+
+        Joining is what lets a caller apply several writes as one transaction: whoever opened
+        the session is the one that commits it, so a write that joins leaves that decision to
+        its caller, and a rejected write discards everything done under it. A write therefore
+        only ever flushes, which is also what puts it in front of the indices while the
+        handler that can name what they rejected is still in scope.
+
+        ``expire_on_commit=False`` keeps returned instances readable after the commit: the
+        flush has already fetched what the database assigns, such as autoincrement primary
+        keys, and nothing is computed later.
+
+        :param session: A session to join, or ``None`` to open one.
+        :raises OutdatedDatabaseSchemaError: if a session is opened here and the database is
+            not at the latest revision. A joined session is not re-checked.
+        """
+        if session is not None:
             yield session
+            return
+        self._confirm_schema()
+        with Session(self.engine, expire_on_commit=False) as own_session:
+            yield own_session
+            own_session.commit()
 
     def _get_alembic_config(self) -> AlembicConfig:
         """
@@ -678,6 +695,28 @@ class SubmissionDb:
         alembic_cfg.set_main_option("script_location", "grz_db:migrations")
         alembic_cfg.set_main_option("sqlalchemy.url", str(self.engine.url))
         return alembic_cfg
+
+    def _confirm_schema(self) -> None:
+        """Confirm, once, that the database is at the revision this code expects.
+
+        Asking costs a scan of the migration directory and a connection of its own, and one
+        pass over a submission opens several sessions, so the answer is kept. Nothing makes
+        it stale in a way that helps: migrating is an operator action, downgrades are not
+        supported.
+
+        Only a confirmation is kept, never a failure. That is what lets ``db init`` and
+        ``db upgrade`` build this object while the schema is behind, which is the one situation
+        they exist for, and use it once they have fixed it.
+
+        :raises OutdatedDatabaseSchemaError: if the database is not at the latest revision.
+        """
+        if self._schema_confirmed:
+            return
+        if not self._at_latest_schema():
+            raise OutdatedDatabaseSchemaError(
+                "Database not at latest schema. Please backup the database and then attempt a migration with `grzctl db upgrade`."
+            )
+        self._schema_confirmed = True
 
     def _at_latest_schema(self) -> bool:
         directory = AlembicScriptDirectory.from_config(self._get_alembic_config())
@@ -719,7 +758,7 @@ class SubmissionDb:
         Returns:
             An instance of Submission.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             existing_submission = session.get(Submission, submission_id)
             if existing_submission:
                 raise DuplicateSubmissionError(submission_id)
@@ -728,16 +767,8 @@ class SubmissionDb:
             db_submission = Submission.model_validate(submission_create)
 
             session.add(db_submission)
-            try:
-                session.commit()
-                session.refresh(db_submission)
-                return db_submission
-            except IntegrityError as e:
-                session.rollback()
-                raise e
-            except Exception:
-                session.rollback()
-                raise
+            session.flush()
+            return db_submission
 
     @staticmethod
     def _is_tan_g_unique_violation(e: IntegrityError) -> bool:
@@ -752,44 +783,49 @@ class SubmissionDb:
                 return getattr(diag, "constraint_name", None) == "ix_submissions_tan_g"
         return False
 
-    def modify_submission(self, submission_id: str, key: str, value: Any) -> Submission:  # noqa: C901
+    def modify_submission(  # noqa: C901
+        self, submission_id: str, key: str, value: Any, session: Session | None = None
+    ) -> Submission:
+        """Set one column of a submission.
+
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        """
         if key not in SubmissionBase.model_fields:
             raise ValueError(f"Unknown column key '{key}'")
         elif key in SubmissionBase.immutable_fields:
             raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
 
-        with self._get_session() as session:
-            submission = session.get(Submission, submission_id)
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
 
             setattr(submission, key, value)
             if key == "basic_qc_passed":
                 # Basic QC state changed -> Align the in-depth QC queue to the new state
-                queue_entry = session.get(QCQueueEntry, submission_id)
+                queue_entry = active_session.get(QCQueueEntry, submission_id)
 
                 if submission.basic_qc_passed is True and queue_entry is None:
                     # Basic QC passed -> Ensure that submission is tracked in the in-depth QC queue
-                    session.add(QCQueueEntry(submission_id=submission_id))
+                    active_session.add(QCQueueEntry(submission_id=submission_id))
                 elif submission.basic_qc_passed is not True and queue_entry is not None:
                     # Basic QC failed -> Ensure that submission is absent from the in-depth QC queue
-                    session.delete(queue_entry)
+                    active_session.delete(queue_entry)
 
                 # Keep selection flag aligned with failed basic QC.
                 if submission.basic_qc_passed is False:
                     submission.selected_for_qc = False
-            session.add(submission)
+            active_session.add(submission)
             try:
-                session.commit()
-                session.refresh(submission)
+                active_session.flush()
                 return submission
             except IntegrityError as e:
-                session.rollback()
+                active_session.rollback()
                 if self._is_tan_g_unique_violation(e) and key == "tan_g":
                     raise DuplicateTanGError() from e
                 raise
             except Exception:
-                session.rollback()
+                active_session.rollback()
                 raise
 
     def update_submission(self, submission: Submission) -> Submission:
@@ -799,7 +835,7 @@ class SubmissionDb:
         :param submission: The Submission instance with updated field values.
         :return: The updated Submission instance.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             db_submission = session.get(Submission, submission.id)
             if db_submission is None:
                 raise SubmissionNotFoundError(submission.id)
@@ -811,8 +847,7 @@ class SubmissionDb:
 
             session.add(db_submission)
             try:
-                session.commit()
-                session.refresh(db_submission)
+                session.flush()
                 return db_submission
             except IntegrityError as e:
                 session.rollback()
@@ -838,7 +873,7 @@ class SubmissionDb:
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> Sequence[Submission]:
-        with self._get_session() as session:
+        with self.transaction() as session:
             return session.exec(
                 select(Submission)
                 .options(selectinload(Submission.states))  # type: ignore[arg-type]
@@ -918,7 +953,7 @@ class SubmissionDb:
         Returns:
             An instance of SubmissionStateLog.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             submission = session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
@@ -938,46 +973,45 @@ class SubmissionDb:
             state_log_create = SubmissionStateLogCreate(**state_log_payload.model_dump(), signature=signature.hex())
             db_state_log = SubmissionStateLog.model_validate(state_log_create)
             session.add(db_state_log)
+            session.flush()
+            return db_state_log
 
-            try:
-                session.commit()
-                session.refresh(db_state_log)
-                return db_state_log
-            except Exception:
-                session.rollback()
-                raise
+    def get_donors(
+        self, submission_id: str, pseudonym: str | None = None, session: Session | None = None
+    ) -> tuple[Donor, ...]:
+        """Retrieve all donors for a given submission, or, optionally, only for a specific pseudonym.
 
-    def get_donors(self, submission_id: str, pseudonym: str | None = None) -> tuple[Donor, ...]:
-        """Retrieve all donors for a given submission, or, optionally, only for a specific pseudonym."""
-        with self._get_session() as session:
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        """
+        with self.transaction(session) as active_session:
             statement = select(Donor).where(Donor.submission_id == submission_id)
             if pseudonym is not None:
                 statement = statement.where(Donor.pseudonym == pseudonym)
-            donors = tuple(session.exec(statement).all())
+            donors = tuple(active_session.exec(statement).all())
         return donors
 
-    def add_donor(self, donor: Donor) -> Donor:
-        """Add a donor to the database."""
-        with self._get_session() as session:
-            session.add(donor)
+    def add_donor(self, donor: Donor, session: Session | None = None) -> Donor:
+        """Add a donor to the database.
 
-            try:
-                session.commit()
-                session.refresh(donor)
-                return donor
-            except Exception as e:
-                session.rollback()
-                raise e
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        """
+        with self.transaction(session) as active_session:
+            active_session.add(donor)
+            active_session.flush()
+            return donor
 
-    def update_donor(self, updated_donor: Donor) -> Donor:
-        """Update a donor in the database."""
-        with self._get_session() as session:
+    def update_donor(self, updated_donor: Donor, session: Session | None = None) -> Donor:
+        """Update a donor in the database.
+
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        """
+        with self.transaction(session) as active_session:
             statement = (
                 select(Donor)
                 .where(Donor.submission_id == updated_donor.submission_id)
                 .where(Donor.pseudonym == updated_donor.pseudonym)
             )
-            db_donor = session.exec(statement).first()
+            db_donor = active_session.exec(statement).first()
 
             if db_donor is None:
                 raise RuntimeError("Cannot update a donor that doesn't yet exist in the database.")
@@ -992,46 +1026,33 @@ class SubmissionDb:
                 if old_value != new_value:
                     setattr(db_donor, field, new_value)
 
-            session.add(db_donor)
+            active_session.add(db_donor)
+            active_session.flush()
+            return db_donor
 
-            try:
-                session.commit()
-                session.refresh(db_donor)
-                return db_donor
-            except Exception as e:
-                session.rollback()
-                raise e
+    def delete_donor(self, donor: Donor, session: Session | None = None) -> None:
+        """Delete a donor from the database.
 
-    def delete_donor(self, donor: Donor) -> None:
-        """Delete a donor from the database."""
-        with self._get_session() as session:
-            session.delete(donor)
-
-            try:
-                session.commit()
-            except Exception as e:
-                session.rollback()
-                raise e
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        """
+        with self.transaction(session) as active_session:
+            active_session.delete(donor)
+            active_session.flush()
 
     def get_detailed_qc_results(self, submission_id: str) -> tuple[DetailedQCResult, ...]:
         """Retrieve all detailed QC results for a given submission."""
-        with self._get_session() as session:
+        with self.transaction() as session:
             statement = select(DetailedQCResult).where(DetailedQCResult.submission_id == submission_id)
             results = tuple(session.exec(statement).all())
         return results
 
     def add_detailed_qc_result(self, result: DetailedQCResult) -> DetailedQCResult:
         """Add or update a detailed QC result to/in the database."""
-        with self._get_session() as session:
+        with self.transaction() as session:
             session.add(result)
 
-            try:
-                session.commit()
-                session.refresh(result)
-                return result
-            except Exception as e:
-                session.rollback()
-                raise e
+            session.flush()
+            return result
 
     def add_change_request(  # noqa: PLR0913
         self,
@@ -1063,7 +1084,7 @@ class SubmissionDb:
         Returns:
             An instance of ChangeRequestLog.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             submission = session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
@@ -1089,14 +1110,8 @@ class SubmissionDb:
             )
             db_change_request_log = ChangeRequestLog.model_validate(change_request_log_create)
             session.add(db_change_request_log)
-
-            try:
-                session.commit()
-                session.refresh(db_change_request_log)
-                return db_change_request_log
-            except Exception:
-                session.rollback()
-                raise
+            session.flush()
+            return db_change_request_log
 
     def get_submission(self, submission_id: str) -> Submission | None:
         """
@@ -1108,7 +1123,7 @@ class SubmissionDb:
         Returns:
             An instance of Submission or None.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             statement = (
                 select(Submission).where(Submission.id == submission_id).options(selectinload(Submission.states))  # type: ignore[arg-type]
             )
@@ -1124,7 +1139,7 @@ class SubmissionDb:
         """
         if not submission_ids:
             return []
-        with self._get_session() as session:
+        with self.transaction() as session:
             statement = (
                 select(Submission)
                 .where(Submission.id.in_(submission_ids))  # type: ignore[attr-defined]
@@ -1147,7 +1162,7 @@ class SubmissionDb:
             submission state timestamp if not null, otherwise use submission
             date, with submissions missing both of these sorting first.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             latest_state_per_submission = (
                 select(
                     SubmissionStateLog.submission_id.label("submission_id"),  # type: ignore[attr-defined]
@@ -1207,7 +1222,7 @@ class SubmissionDb:
         Lists all submissions processed between the given start and end dates, inclusive.
         Processed is defined as either reported (Prüfbericht submitted) or detailed QC finished.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             reported_within_window = (
                 select(SubmissionStateLog.submission_id)
                 .where(SubmissionStateLog.state.in_([SubmissionStateEnum.REPORTED, SubmissionStateEnum.QCED]))  # type: ignore[attr-defined]
@@ -1230,7 +1245,7 @@ class SubmissionDb:
         Returns:
             A list of all submissions in the database, ordered by their ID.
         """
-        with self._get_session() as session:
+        with self.transaction() as session:
             statement = (
                 select(Submission)
                 .where(Submission.changes.any())  # type: ignore[attr-defined]
@@ -1410,27 +1425,30 @@ class SubmissionDb:
         submission_diff: SubmissionDiffCollection | None = None,
         donors_diff: DonorsDiffCollection | None = None,
     ) -> None:
-        """Write all pending metadata and donor diffs to the database.
-        Can be obtained by calling :func:`diff`
+        """Write all pending metadata and donor diffs to the database, as one transaction.
 
-        :param db: Database service instance to write to.
+        The diffs are one answer to one metadata file, so they are applied whole or not at all:
+        writing them piecemeal would leave a rejected write with the earlier parts stored, and
+        re-running would then preview a different starting state than the one just shown.
+
         :param submission_id: ID of the submission being updated.
         :param submission_diff: Diff result from :func:`diff_metadata`.
         :param donors_diff: Diff result from :func:`build_donor_diff`.
         """
-        if submission_diff is not None:
-            for field_diff in submission_diff.pending:
-                self.modify_submission(submission_id, field_diff.key, field_diff.diff.after)
-        if donors_diff is not None:
-            for donor_diff in donors_diff.added:
-                assert donor_diff.after is not None, "Added NoneType donor, this should not happen"  # noqa: S101
-                self.add_donor(donor_diff.after)
-            for donor_diff in donors_diff.updated:
-                assert donor_diff.after is not None, "Updated NoneType donor, this should not happen"  # noqa: S101
-                self.update_donor(donor_diff.after)
-            for donor_diff in donors_diff.deleted:
-                assert donor_diff.before is not None, "Removed NoneType donor, this should not happen"  # noqa: S101
-                self.delete_donor(donor_diff.before)
+        with self.transaction() as session:
+            if submission_diff is not None:
+                for field_diff in submission_diff.pending:
+                    self.modify_submission(submission_id, field_diff.key, field_diff.diff.after, session=session)
+            if donors_diff is not None:
+                for donor_diff in donors_diff.added:
+                    assert donor_diff.after is not None, "Added NoneType donor, this should not happen"  # noqa: S101
+                    self.add_donor(donor_diff.after, session=session)
+                for donor_diff in donors_diff.updated:
+                    assert donor_diff.after is not None, "Updated NoneType donor, this should not happen"  # noqa: S101
+                    self.update_donor(donor_diff.after, session=session)
+                for donor_diff in donors_diff.deleted:
+                    assert donor_diff.before is not None, "Removed NoneType donor, this should not happen"  # noqa: S101
+                    self.delete_donor(donor_diff.before, session=session)
 
     @staticmethod
     def _log_pending_changes(
