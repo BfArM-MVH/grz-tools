@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v3.0.0...grz-pydantic-models-v3.1.0) (2026-08-31)
+
+
+### Features
+
+* **grz-pydantic-models,grz-common:** keep a parsed submission lossless and redact it by one rule ([#654](https://github.com/BfArM-MVH/grz-tools/issues/654)) ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** add get_raw_dict for the document as ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+
+
+### Bug Fixes
+
+* **grz-common:** require grz-pydantic-models &gt;=3.1 for ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** apply a change set as one transaction ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** export db_backend from grz_db.testing ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grzctl:** name the submission fields the database actually has ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+
 ## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.7.1...grz-pydantic-models-v3.0.0) (2026-08-13)
 
 
