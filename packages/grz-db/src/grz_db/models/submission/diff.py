@@ -247,7 +247,7 @@ class DonorsDiffCollection:
 
     @property
     def pending(self) -> Generator[DonorDiff, None, None]:
-        """All diffs that need to be written to the database (added + updated + deleted)."""
+        """All donor diffs that need to be written to the database (added + updated + deleted)."""
         yield from self.added
         yield from self.updated
         yield from self.deleted

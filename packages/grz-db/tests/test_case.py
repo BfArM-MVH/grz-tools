@@ -624,10 +624,8 @@ def test_diff_resolves_by_psn_when_given_one(
 ):
     """The whole seam, end to end: a psn-keyed deployment links through diff and commit_changes.
 
-    The resolver is the deployment's, set once on the SubmissionDb, so diff and commit_changes
-    cannot be given different ones. Only the psn is per submission, nothing in the metadata
-    carrying one. The submitter's local case ID names a different case here, which must not be
-    the one chosen.
+    Only the psn is per submission, nothing in the metadata carrying one. The submitter's local
+    case ID names a different case here, which must not be the one chosen.
     """
     psn_db = SubmissionDb(db_url=migrated_db_connection, author=test_author, case_resolver=PsnResolver())
     initial_metadata = _with_submission_type(metadata, "initial")

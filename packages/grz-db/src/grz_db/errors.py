@@ -60,7 +60,11 @@ class DatabaseConfigurationError(DatabaseError):
 
 
 class CaseError(GrzDbError):
-    """Base class for errors related to cases."""
+    """Base class for errors about a case row itself.
+
+    Refusing a submission a link to a case is a :class:`SubmissionError`; see
+    :class:`SubmissionTypeInvalidForCaseError`.
+    """
 
 
 class CaseNotFoundError(CaseError):
@@ -92,7 +96,11 @@ class CaseHasLinkedSubmissionsError(CaseError):
 
 
 class SubmissionTypeInvalidForCaseError(SubmissionError):
-    """Exception for when a submission's type does not permit the case link being attempted."""
+    """Base class for a submission refused a link to a case.
+
+    The reason may be the submission's own type or the case's one-initial rule; see
+    :class:`DuplicateInitialSubmissionError`.
+    """
 
 
 class DuplicateInitialSubmissionError(SubmissionTypeInvalidForCaseError):

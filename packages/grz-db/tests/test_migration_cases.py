@@ -37,6 +37,8 @@ def test_cases_backfill_groups_by_submitter_and_local_case(db_test_connection: s
     empty_pseudonym = "111111111_2025-01-06_00000008"
     test_type = "111111111_2025-01-07_00000009"
 
+    # Spelled out rather than imported, mirroring the migration's own frozen PSEUDONYM_NON_KEYS:
+    # a later rename in grz_pydantic_models must not silently start passing this test.
     redacted = "REDACTED_LOCAL_CASE_ID"
     rows = [
         # two submissions, same (submitter, local case id) -> one case, both linked

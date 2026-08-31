@@ -902,17 +902,16 @@ class SubmissionDb:
         *,
         case_resolver: CaseResolver = DEFAULT_CASE_RESOLVER,
     ):
-        """
-        Initializes the SubmissionDb.
+        """Initialize the SubmissionDb.
 
-        Args:
-            db_url: Database URL.
-            debug: Whether to echo SQL statements.
-            case_resolver: Strategy every method here resolves a case with unless handed another.
-                Which one is right is a property of the deployment rather than of a call: today
-                the submitter's ``(submitter_id, local_case_id)``, later the RKI ``psn``. Held
-                here so :meth:`diff` and :meth:`commit_changes` cannot be given different ones
-                and write a link other than the one previewed.
+        :param db_url: Database URL.
+        :param author: Author recorded on every write, or ``None`` for a read-only instance.
+        :param debug: Whether to echo SQL statements.
+        :param case_resolver: Strategy every method here resolves a case with unless handed
+            another. Which one is right is a property of the deployment rather than of a call:
+            today the submitter's ``(submitter_id, local_case_id)``, later the RKI ``psn``. Held
+            here so :meth:`diff` and :meth:`commit_changes` cannot be given different ones and
+            write a link other than the one previewed.
         """
         self.engine = create_engine(db_url, echo=debug)
         self._author = author
@@ -946,11 +945,9 @@ class SubmissionDb:
             own_session.commit()
 
     def _get_alembic_config(self) -> AlembicConfig:
-        """
-        Loads the alembic configuration.
+        """Load the alembic configuration.
 
-        Args:
-            alembic_ini_path: Path to alembic ini file.
+        :returns: A config pointing at the packaged migrations and this instance's database URL.
         """
         alembic_cfg = AlembicConfig()
         alembic_cfg.set_main_option("script_location", "grz_db:migrations")
@@ -990,15 +987,10 @@ class SubmissionDb:
         self.upgrade_schema()
 
     def upgrade_schema(self, revision: str = "head"):
-        """
-        Upgrades the database schema using alembic.
+        """Upgrade the database schema using alembic.
 
-        Args:
-            alembic_ini_path: Path to the alembic.ini file.
-            revision: The Alembic revision to upgrade to (default: 'head').
-
-        Raises:
-            RuntimeError: For underlying Alembic errors.
+        :param revision: The Alembic revision to upgrade to (default: ``"head"``).
+        :raises RuntimeError: for underlying Alembic errors.
         """
         alembic_cfg = self._get_alembic_config()
         try:
@@ -1010,14 +1002,10 @@ class SubmissionDb:
         self,
         submission_id: str,
     ) -> Submission:
-        """
-        Adds a submission to the database.
+        """Add a submission to the database.
 
-        Args:
-            submission_id: Submission ID.
-
-        Returns:
-            An instance of Submission.
+        :param submission_id: Submission ID.
+        :returns: The newly created :class:`Submission`.
         """
         with self.transaction() as session:
             existing_submission = session.get(Submission, submission_id)
@@ -1231,17 +1219,14 @@ class SubmissionDb:
         grzctl_versions: dict[str, str] | None = None,
         failure_reason: FailureReasonEnum | None = None,
     ) -> SubmissionStateLog:
-        """
-        Updates a submission's state to the specified state.
+        """Update a submission's state to the specified state.
 
-        Args:
-            submission_id: Submission ID of the submission to update.
-            state: New state of the submission.
-            data: Optional data to attach to the update.
-            grzctl_versions: Optional dictionary of grzctl dependency versions.
-
-        Returns:
-            An instance of SubmissionStateLog.
+        :param submission_id: Submission ID of the submission to update.
+        :param state: New state of the submission.
+        :param data: Optional data to attach to the update.
+        :param grzctl_versions: Optional dictionary of grzctl dependency versions.
+        :param failure_reason: Why the submission reached an error state, if it did.
+        :returns: The new :class:`SubmissionStateLog` entry.
         """
         with self.transaction() as session:
             submission = session.get(Submission, submission_id)
@@ -1357,22 +1342,20 @@ class SubmissionDb:
         request_raw_content_type: RequestRawContentType | None = None,
         data: dict | None = None,
     ) -> ChangeRequestLog:
-        """
-        Register a change request for a submission.
+        """Register a change request for a submission.
 
-        Args:
-            submission_id: Submission ID of the submission to register a change request for.
-            change: Requested change.
-            requester_name: Full name of the requester.
-            requester_email: Email address of the requester.
-            requested_at: Date the change was requested.
-            request_email_content: Verbatim text content of the request (optional if raw content given).
-            request_raw_content: Optional binary blob (e.g. PDF bytes).
-            request_raw_content_type: Type of the binary blob; required iff request_raw_content is set.
-            data: Optional type-specific extras.
-
-        Returns:
-            An instance of ChangeRequestLog.
+        :param submission_id: Submission ID of the submission to register a change request for.
+        :param change: Requested change.
+        :param requester_name: Full name of the requester.
+        :param requester_email: Email address of the requester.
+        :param requested_at: Date the change was requested.
+        :param request_email_content: Verbatim text content of the request (optional if raw
+            content given).
+        :param request_raw_content: Optional binary blob (e.g. PDF bytes).
+        :param request_raw_content_type: Type of the binary blob; required iff
+            ``request_raw_content`` is set.
+        :param data: Optional type-specific extras.
+        :returns: The new :class:`ChangeRequestLog` entry.
         """
         with self.transaction() as session:
             submission = session.get(Submission, submission_id)
@@ -1404,14 +1387,10 @@ class SubmissionDb:
             return db_change_request_log
 
     def get_submission(self, submission_id: str) -> Submission | None:
-        """
-        Retrieves a submission and its state history.
+        """Retrieve a submission and its state history.
 
-        Args:
-            submission_id: Submission ID of the submission to retrieve.
-
-        Returns:
-            An instance of Submission or None.
+        :param submission_id: Submission ID of the submission to retrieve.
+        :returns: The :class:`Submission`, or ``None`` if no submission has that ID.
         """
         with self.transaction() as session:
             statement = (
@@ -1723,17 +1702,17 @@ class SubmissionDb:
     ) -> Case:
         """Resolve or create the case for a submission and link it.
 
-        A case may have at most one ``initial`` submission that passed basic QC. Once one passes,
-        no other ``initial`` submission of that case may pass.
+        A case may have at most one ``initial`` submission that passed basic QC.
 
         The case is located with this :class:`SubmissionDb`'s ``case_resolver`` (by default
-        ``(submitter_id, local_case_id)``). Competing initial submissions may share a case while
-        pending basic QC, since the data alone cannot tell a re-upload from a duplicate. Any type
-        but ``test`` may open a case; see :meth:`_find_case_for_link` for why. ``test``
-        submissions are never case-tracked and are rejected.
+        ``(submitter_id, local_case_id)``). Any type but ``test`` may open a case, and competing
+        initial submissions may share one while pending basic QC; see
+        :meth:`_find_case_for_link` for why. ``test`` submissions are never case-tracked and are
+        rejected.
 
-        Repeating the call with the same identifiers makes no further change; the resolver has
-        to find the same case, so a call whose key is incomplete creates a new one each time.
+        Repeating the call with the same, resolvable identifiers is a no-op, since the resolver
+        finds the same case again. An incomplete key resolves to nothing, so every such call
+        creates another case.
 
         :param submission_id: ID of the submission to assign.
         :param submitter_id: Submitter identifier passed to the resolver and
@@ -1851,8 +1830,8 @@ class SubmissionDb:
         makes the answer one answer: asked separately, a competing initial can pass basic QC in
         between and this would report a submission as clear that the index is about to reject.
 
-        Answering costs three queries, so callers that are going to write anyway should let the
-        index speak instead.
+        Answering costs up to four queries, so callers that are going to write anyway should let
+        the index speak instead.
 
         :param submission_id: ID of the submission about to be validated. A case whose QC-passed
             initial submission *is* this one is not a duplicate.
@@ -1890,13 +1869,10 @@ class SubmissionDb:
         state_filters: Sequence[SubmissionStateEnum] | None = None,
         state_filter_mode: SubmissionStateFilterModeEnum = SubmissionStateFilterModeEnum.LATEST,
     ) -> Sequence[Submission]:
-        """
-        Lists all submissions in the database.
+        """List all submissions in the database.
 
-        Returns:
-            A list of all submissions in the database. Ordered by latest
-            submission state timestamp if not null, otherwise use submission
-            date, with submissions missing both of these sorting first.
+        :returns: All submissions, ordered by latest submission state timestamp where that is
+            not null and by submission date otherwise. Submissions missing both sort first.
         """
         with self.transaction() as session:
             latest_state_per_submission = (
@@ -1975,11 +1951,9 @@ class SubmissionDb:
             return submissions
 
     def list_change_requests(self) -> Sequence[Submission]:
-        """
-        Lists all submissions in the database.
+        """List every submission that carries a change request.
 
-        Returns:
-            A list of all submissions in the database, ordered by their ID.
+        :returns: Those submissions, ordered by their ID.
         """
         with self.transaction() as session:
             statement = (
@@ -2199,12 +2173,13 @@ class SubmissionDb:
         """
         Collects everything that committing *metadata* would change for a submission.
 
-        This function compares the provided metadata and donors data with the existing
-        state in the system for a specific submission ID. The returned change set carries
-        the submission-level field diffs, the donor diffs, and a pending case link (see
-        :attr:`SubmissionChangeSet.case_link`) when the metadata's case key resolves to a
-        different case than currently linked; :meth:`commit_changes` applies the link via
-        :meth:`assign_case`. ``test`` submissions are never case-tracked.
+        The returned change set carries the submission-level field diffs, the donor diffs, and a
+        pending case link (see :attr:`SubmissionChangeSet.case_link`) when the metadata's case key
+        resolves to a different case than currently linked; :meth:`commit_changes` applies the
+        link via :meth:`assign_case`. ``test`` submissions are never case-tracked.
+
+        Call :meth:`Submission.restore_redacted_fields` on *metadata* first when it was read back
+        from an archive bucket, so that a redaction placeholder cannot key a case link.
 
         :param submission_id: The unique identifier of the submission to be compared.
         :param metadata: The metadata of the submission to compare against.
@@ -2380,6 +2355,10 @@ class SubmissionDb:
         commits via :meth:`commit_changes`. Operational progress is logged via
         the module-level logger; callers configure verbosity through
         ``logging.getLogger("grz_db.models.submission")``.
+
+        A case that could not be resolved is not surfaced here. The submission is left unlinked,
+        everything else is written as usual, and only
+        :attr:`SubmissionChangeSet.case_link_error` records why.
 
         :param submission_id: ID of the submission being populated.
         :param metadata: Parsed submission metadata.

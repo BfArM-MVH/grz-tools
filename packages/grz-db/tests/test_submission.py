@@ -153,11 +153,8 @@ def test_raises_on_duplicate_tan_g(
 
 
 def _redacted(metadata: GrzSubmissionMetadata, local_case_id: str) -> GrzSubmissionMetadata:
-    """A copy of *metadata* redacted the way archival redacts it.
-
-    Archival writes the ``REDACTED_LOCAL_CASE_ID`` sentinel; older objects in the
-    archive carry an empty ``localCaseId``, so both spellings are in the archive and
-    both have to be recognised.
+    """A copy of *metadata* redacted the way archival redacts it, with *local_case_id* as the
+    placeholder. See ``LOCAL_CASE_ID_PLACEHOLDERS`` for why the archive holds two spellings.
     """
     raw = json.loads(metadata.model_dump_json(by_alias=True))
     raw["submission"]["tanG"] = REDACTED_TAN
@@ -230,10 +227,9 @@ def test_restore_redacted_fields_restores_each_column_independently(
 
 
 def test_the_schema_is_checked_once_per_database(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The schema check scans the migration directory and opens a connection of its own, and
-    each write opens its own session, so caching the answer on the instance is what keeps
-    that cost from being paid on every write. The answer cannot change while the process is
-    running, so the cache cannot go stale.
+    """Three writes should cost one schema check, not three.
+
+    See :meth:`SubmissionDb._confirm_schema` for why the answer is cached.
     """
     calls = 0
     original = SubmissionDb._at_latest_schema
@@ -254,10 +250,10 @@ def test_the_schema_is_checked_once_per_database(db: SubmissionDb, monkeypatch: 
 
 
 def test_a_database_that_is_behind_is_asked_again(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only a returned answer is remembered, never a raised one.
+    """Pins the other half of :meth:`SubmissionDb._confirm_schema`'s cache.
 
-    ``db init`` and ``db upgrade`` build this object precisely when the schema is behind, so a
-    remembered failure would outlive the upgrade that fixed it.
+    A remembered failure would outlive the upgrade that fixed it, and ``db upgrade`` could
+    never get past it.
     """
     behind = True
     monkeypatch.setattr(SubmissionDb, "_at_latest_schema", lambda self: not behind)

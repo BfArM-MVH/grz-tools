@@ -31,8 +31,8 @@ def _check_duplicate_initial(db: "SubmissionDb", metadata: GrzSubmissionMetadata
     being recorded, by which point the effort has been spent.
 
     A resolution failure is left to propagate. Reporting "not a duplicate" when the
-    question could not be answered is how a duplicate would pass basic QC unnoticed, and
-    nothing downstream treats an unresolvable case as an error.
+    question could not be answered is how a duplicate would pass basic QC unnoticed.
+    Nothing later in this function asks again, so raising here is the only chance to notice.
     """
     submission = metadata.submission
     db.assert_no_duplicate_initial(

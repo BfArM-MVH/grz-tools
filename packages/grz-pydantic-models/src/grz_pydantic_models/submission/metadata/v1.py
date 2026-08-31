@@ -58,8 +58,8 @@ def redact_metadata_dict(metadata: dict[str, Any]) -> dict[str, Any]:
 
     Replaces ``tanG`` with :data:`REDACTED_TAN`, ``localCaseId`` with
     :data:`REDACTED_LOCAL_CASE_ID`, and the index donor's pseudonym with ``"index"``.
-    v1.1.1 to v1.1.7 (still supported) told submitters to put the tanG in ``donorPseudonym``;
-    v1.1.8 onward says ``"index"``. So that overwrite can be removing a real tanG.
+    v1.1.7 and earlier (still supported) told submitters to put the tanG in ``donorPseudonym``;
+    v1.2.1 onward says ``"index"``. So that overwrite can be removing a real tanG.
 
     Takes a plain dict so archival can apply it to the raw metadata.json it read from disk,
     keeping the archived record faithful to what the submitter sent, while
@@ -1117,8 +1117,8 @@ class LabDatum(StrictBaseModel):
 
 
 class Donor(StrictBaseModel):
-    # v1.1.1 to v1.1.7 (still supported) said "For Index patient use TanG", so a document in
-    # that range may carry the tanG here. v1.1.8 onward says "index".
+    # v1.1.7 and earlier (still supported) said "For Index patient use TanG", so a document in
+    # that range may carry the tanG here. v1.2.1 onward says "index", as the description below.
     donor_pseudonym: str
     """
     A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing;
@@ -1332,11 +1332,9 @@ class GrzSubmissionMetadata(StrictBaseModel):
         placeholders, not what was submitted.
 
         Redaction replaces a third field, the index donor's pseudonym, which this
-        deliberately leaves alone. v1.1.1 to v1.1.7 (still supported) told submitters to put
-        the tanG in ``donorPseudonym``; v1.1.8 onward says ``"index"``. Restoring it would
-        change nothing observable for a document from v1.1.8 onward, since every consumer
-        that keeps a copy stores ``"index"`` for the index donor there, and there would be
-        nothing to restore it from once a tanG is traded for a PSN.
+        deliberately leaves alone. Nothing that keeps a copy of a submission stores anything
+        but ``"index"`` for the index donor, so there is no authoritative value to restore
+        it from.
 
         A field holding something other than a placeholder is left alone and stays
         authoritative, so an unredacted copy is never overwritten.
