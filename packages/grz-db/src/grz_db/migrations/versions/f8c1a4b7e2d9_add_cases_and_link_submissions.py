@@ -15,11 +15,14 @@ grouped by ``(submitter_id, pseudonym)`` (the ``pseudonym`` column holds the sub
 id) and backfilled into cases. ``submitter_id`` stays on the submission row as well as on the
 case.
 
-Some rows are left unlinked. A ``(submitter_id, pseudonym)`` key shared by more than one
-QC-passed ``initial`` submission identifies no single patient, so no case is created for it and
-every submission carrying it keeps ``case_id`` NULL. Those keys are logged. NULL is the schema's
-"not yet resolved" state, and a later flow can still resolve such a submission by ``psn``;
-merging distinct patients into one case instead has to be unpicked one submission at a time with
+Some rows are left unlinked: rows missing either half of the key, ``test`` submissions, and rows
+whose key is shared by more than one QC-passed ``initial`` submission. A ``test`` submission is
+never case-tracked. A shared key identifies no single patient, so no case is created for it and
+every submission carrying it keeps ``case_id`` NULL. Those keys are logged.
+
+A shared key leaves NULL meaning not yet resolved, and a later flow can still resolve those
+submissions by ``psn``. A ``test`` submission's NULL is permanent instead. Merging distinct
+patients into one case has to be unpicked one submission at a time with
 ``grzctl db case unlink``, and the key that caused the merge is no help in deciding which
 submission belongs where.
 
@@ -42,7 +45,8 @@ depends_on: str | Sequence[str] | None = None
 
 # Mirrors grz_pydantic_models.submission.metadata.LOCAL_CASE_ID_PLACEHOLDERS; hardcoded so the
 # migration stays frozen. The archive contains both spellings as redaction placeholders; neither
-# identifies a patient, so neither is a case key. SubmissionDb applies the same check at runtime.
+# identifies a patient, so neither is a case key. The same check runs at resolution time, in
+# SubmitterLocalCaseResolver.find_case, via is_redacted_local_case_id.
 PSEUDONYM_NON_KEYS = ["", "REDACTED_LOCAL_CASE_ID"]
 
 # Alembic's own progress logger, so these lines appear in the same stream as "Running upgrade".

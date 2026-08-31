@@ -146,8 +146,7 @@ class DbContext:
 
         Commits the transaction if no exception occurred, otherwise rolls back.
 
-        Returns:
-            False so any exception is propagated.
+        :returns: ``False``, so any exception is propagated.
         """
         if not self.db:
             return False

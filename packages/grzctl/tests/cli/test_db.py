@@ -1687,11 +1687,7 @@ def test_submission_show_json_includes_failure_reason(migrated_database_config_p
 
 
 def test_modify_offers_exactly_the_keys_it_accepts():
-    """A key the command lists must be one it can honour.
-
-    These were built from two different field sets, so `modify` offered `case_id` and `id` and
-    then died on a traceback when either was chosen.
-    """
+    """A key the command lists must be one it can honour."""
     from grzctl.commands.db.cli import _MODIFIABLE_SUBMISSION_KEYS
 
     assert set(_MODIFIABLE_SUBMISSION_KEYS) == SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields

@@ -269,8 +269,7 @@ def case_show(ctx: click.Context, case_id: int, output_json: bool):
     submissions_table = rich.table.Table(title="Submissions")
     submissions_table.add_column("Submission ID")
     submissions_table.add_column("Type")
-    # Basic QC state distinguishes the case's QC-passed initial submission from any
-    # duplicate initial submissions of the same case, so it is included here.
+    # Shows which initial submission holds the case's QC-passed slot.
     submissions_table.add_column("Basic QC")
     submissions_table.add_column("Latest State")
     for s in submissions:
@@ -333,6 +332,8 @@ def case_relink(ctx: click.Context, submission_id: str, case_id: int):
     try:
         db_service.set_submission_case(submission_id, case_id)
         console_err.print(f"[green]Linked submission '{submission_id}' to case {case_id}[/green]")
+    # DuplicateInitialSubmissionError subclasses SubmissionTypeInvalidForCaseError, so the case's
+    # one-initial rule is caught here too.
     except (SubmissionNotFoundError, CaseNotFoundError, SubmissionTypeInvalidForCaseError) as e:
         _abort(e)
 
@@ -789,7 +790,7 @@ _MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - Submis
 @submission.command(
     epilog="Currently available KEYs are: "
     + ", ".join(_MODIFIABLE_SUBMISSION_KEYS)
-    + ". A submission's case is not a column: use 'db case relink' to change it, "
+    + ". A submission's case cannot be changed here: use 'db case relink' to change it, "
     + "or 'db case unlink' to remove it."
 )
 @_submission_id_argument
@@ -1519,10 +1520,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
         console_err.print(f"[red]  {submission_id}: diff failed: {exc}[/red]")
         return _BackfillOutcome(_BackfillResult.ERROR)
 
-    # An unresolvable case link costs the submission its link and nothing else: the reason is
-    # rarely about this submission, an ambiguous key needs an operator to merge the cases first,
-    # and the rest of the metadata is what the Prüfbericht is built from. A re-run links it once
-    # the cause is cleared.
+    # See _BackfillOutcome: only the link is withheld, not the rest of the submission.
     link_unresolved = changes.case_link_error is not None
     if link_unresolved:
         console_err.print(f"[yellow]  {submission_id}: case link unresolved: {changes.case_link_error}[/yellow]")
@@ -1542,8 +1540,9 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913
             f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
         )
 
-    # The case link is not a column, so --allow-overwrite cannot name it. Replacing one would undo a
-    # deliberate case relink, so an unpermitted change holds the whole submission back.
+    # --allow-overwrite is built from SubmissionBase, which has no case_id, so it cannot name the
+    # case link. Replacing one would undo a deliberate case relink, so an unpermitted change holds
+    # the whole submission back.
     if not force and changes.case_link is not None and changes.case_link.state is DiffState.UPDATED:
         console_err.print(
             f"[dim]  {submission_id}: would overwrite the case link (case {changes.case_link.before}), "

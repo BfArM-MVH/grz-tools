@@ -287,7 +287,7 @@ def test_wgs_trio_1_3_fail_missing_presentation_date(version: str):
     itertools.product(["panel_tumor_only", "wes_tumor_germline", "wgs_tumor_germline", "wgs_trio"], TESTED_VERSIONS),
 )
 def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
-    """BAM files should only be allowed in *_lr lab data"""
+    """BAM files should only be allowed in ``*_lr`` lab data."""
     metadata = json.loads(_metadata_raw(dataset, version))
     # add a BAM file
     metadata["donors"][0]["labData"][0]["sequenceData"]["files"].append(
@@ -1763,7 +1763,7 @@ def _archived(metadata: GrzSubmissionMetadata, local_case_id: str) -> GrzSubmiss
     return GrzSubmissionMetadata.model_validate(raw)
 
 
-@pytest.mark.parametrize("placeholder", LOCAL_CASE_ID_PLACEHOLDERS)
+@pytest.mark.parametrize("placeholder", LOCAL_CASE_ID_PLACEHOLDERS, ids=["empty", "sentinel"])
 def test_restore_redacted_fields_replaces_both_placeholder_spellings(placeholder: str) -> None:
     original = _metadata("wgs_tumor_germline", "1.3.0")
     archived = _archived(original, placeholder)
@@ -1779,7 +1779,7 @@ def test_restore_redacted_fields_replaces_both_placeholder_spellings(placeholder
     assert archived.submission.local_case_id == original.submission.local_case_id
 
 
-@pytest.mark.parametrize("supplied", [None, *LOCAL_CASE_ID_PLACEHOLDERS])
+@pytest.mark.parametrize("supplied", [None, *LOCAL_CASE_ID_PLACEHOLDERS], ids=["none", "empty", "sentinel"])
 def test_restore_redacted_fields_reports_what_it_could_not_restore(supplied: str | None) -> None:
     """A placeholder is no better than nothing, so supplying one restores neither field."""
     archived = _archived(_metadata("wgs_tumor_germline", "1.3.0"), "")
@@ -1804,7 +1804,7 @@ def test_restore_redacted_fields_leaves_an_unredacted_copy_alone() -> None:
     assert metadata.submission.local_case_id == original_local_case_id
 
 
-def test_is_redacted_local_case_id_accepts_a_real_identifier() -> None:
+def test_is_redacted_local_case_id_distinguishes_a_real_identifier_from_every_placeholder() -> None:
     assert not is_redacted_local_case_id("case-4711")
     assert all(is_redacted_local_case_id(value) for value in (None, *LOCAL_CASE_ID_PLACEHOLDERS))
 
