@@ -968,7 +968,7 @@ requires-dist = [
     { name = "botocore", specifier = ">=1.36,<2" },
     { name = "click", specifier = ">=8.2,<9" },
     { name = "crypt4gh", specifier = ">=1.8.6,<2" },
-    { name = "cryptography", specifier = "~=50.0" },
+    { name = "cryptography", specifier = "~=50.0.1" },
     { name = "grz-check", editable = "packages/grz-check" },
     { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
     { name = "packaging", specifier = ">=23,<27" },
