@@ -21,6 +21,7 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+        "interrogation": {"s3": _s3("interrogation"), "keep_failed": False},
     }
 
 
@@ -83,6 +84,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
             "grz_public_key_path": str(public_key_path.resolve()),
         },
         identifiers={"grz": "GRZK00007"},
+        detailed_qc={"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0},
     )
 
 

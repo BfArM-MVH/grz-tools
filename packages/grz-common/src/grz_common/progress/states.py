@@ -52,3 +52,12 @@ class DownloadState(State):
     """
 
     download_successful: bool
+
+
+class ProcessingState(State, total=False):
+    """
+    State for streaming pipeline processing progress.
+    """
+
+    processing_successful: bool
+    validation_errors: list[str]
