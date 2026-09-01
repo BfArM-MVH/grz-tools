@@ -20,7 +20,16 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzctl_configuration
 @grzcli.submission_id
-@grzcli.output_dir
+@click.option(
+    "--output-dir",
+    "output_dir",
+    type=grzcli.DIR_RW_C,
+    default=None,
+    help="Path to the target submission output directory.",
+)
+@grzcli.metadata_dir
+@grzcli.encrypted_files_dir
+@grzcli.logs_dir
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db
@@ -34,6 +43,9 @@ def download(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_id: str,
     output_dir: str,
+    metadata_dir,
+    encrypted_files_dir,
+    logs_dir,
     threads: int,
     force: bool,
     update_db: bool,
@@ -47,6 +59,32 @@ def download(  # noqa: PLR0913
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
+    bundled_mode = output_dir is not None
+    granular_mode = any(map(lambda v: v is not None, [metadata_dir, encrypted_files_dir, logs_dir]))
+
+    if bundled_mode and granular_mode:
+        raise click.UsageError("'--output-dir' is mutually exclusive with explicit path options.")
+
+    if bundled_mode:
+        base = Path(output_dir)
+        _metadata_dir = base / "metadata"
+        _encrypted_files_dir = base / "encrypted_files"
+        _logs_dir = base / "logs"
+    elif granular_mode:
+        required = {
+            "--metadata-dir": metadata_dir,
+            "--encrypted-files-dir": encrypted_files_dir,
+            "--logs-dir": logs_dir,
+        }
+        missing = [name for name, path in required.items() if path is None]
+        if missing:
+            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
+        _metadata_dir = Path(metadata_dir)
+        _encrypted_files_dir = Path(encrypted_files_dir)
+        _logs_dir = Path(logs_dir)
+    else:
+        raise click.UsageError("You must specify either '--output-dir' or the required explicit path options.")
+
     submitter_id = submission_id.split("_", maxsplit=1)[0]
     s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     bucket_name = s3_options.bucket
@@ -54,16 +92,17 @@ def download(  # noqa: PLR0913
 
     log.info(f"Starting download from inbox {inbox_desc}...")
 
-    submission_dir_path = Path(output_dir)
-    if not submission_dir_path.is_dir():
-        log.debug("Creating submission directory %s", submission_dir_path)
-        submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
+    if bundled_mode:
+        submission_dir_path = base
+        if not submission_dir_path.is_dir():
+            log.debug("Creating submission directory %s", submission_dir_path)
+            submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
 
     worker_inst = Worker(
-        metadata_dir=submission_dir_path / "metadata",
-        files_dir=submission_dir_path / "files",
-        log_dir=submission_dir_path / "logs",
-        encrypted_files_dir=submission_dir_path / "encrypted_files",
+        metadata_dir=_metadata_dir,
+        files_dir=_metadata_dir.parent / "files",
+        log_dir=_logs_dir,
+        encrypted_files_dir=_encrypted_files_dir,
         threads=threads,
     )
 
