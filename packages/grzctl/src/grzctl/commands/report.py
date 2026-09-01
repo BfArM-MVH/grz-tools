@@ -119,6 +119,15 @@ def _get_consent_revocations(
 
     A donor pseudonym is only unique within a single submitter.
 
+    The index donor has no pseudonym of its own: its donorPseudonym is the literal "index", so
+    ``submissions.pseudonym`` stands in for it here. That column holds the submitter's
+    localCaseId, not an RKI psn, which makes the two index counts only as good as that
+    localCaseId. A localCaseId reused across patients merges those patients into a single donor.
+    That donor's consent history is then several people's, read in upload order. The rule below
+    decides a revocation from that mixture. The cases migration logs these keys once, when
+    ``grzctl db upgrade`` runs; case tracking refuses to group their submissions for the same
+    reason.
+
     The basic logic for determining revocation is:
     "unconsented at end of quarter" AND ("consented at end of prior quarter" OR "consented sometime within current quarter")
     """

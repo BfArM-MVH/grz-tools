@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+
+
 class GrzDbError(Exception):
     """Base class for all grz_db errors."""
 
@@ -54,3 +57,69 @@ class SubmissionBasicQCNotPassedError(SubmissionError):
 
 class DatabaseConfigurationError(DatabaseError):
     """Exception for database configuration issues."""
+
+
+class CaseError(GrzDbError):
+    """Base class for errors about a case row itself.
+
+    Refusing a submission a link to a case is a :class:`SubmissionError`; see
+    :class:`SubmissionTypeInvalidForCaseError`.
+    """
+
+
+class CaseNotFoundError(CaseError):
+    """Exception for when a case is not found in the database."""
+
+    def __init__(self, case_id: int):
+        super().__init__(f"Case not found for ID {case_id}")
+
+
+class DuplicatePsnError(CaseError):
+    """Exception for when a case with the given RKI pseudonym already exists."""
+
+    def __init__(self, psn: str):
+        super().__init__(f"A case with RKI pseudonym '{psn}' already exists")
+
+
+class DuplicateCaseError(CaseError):
+    """Exception for when a case with the given submitter and local case ID already exists."""
+
+    def __init__(self, submitter_id: str | None, local_case_id: str | None):
+        super().__init__(f"A case for submitter '{submitter_id}' and local case '{local_case_id}' already exists")
+
+
+class CaseHasLinkedSubmissionsError(CaseError):
+    """Exception for when a case cannot be deleted because submissions are still linked to it."""
+
+    def __init__(self, case_id: int, count: int):
+        super().__init__(f"Case {case_id} still has {count} linked submission(s) and cannot be deleted")
+
+
+class SubmissionTypeInvalidForCaseError(SubmissionError):
+    """Base class for a submission refused a link to a case.
+
+    The reason may be the submission's own type or the case's one-initial rule; see
+    :class:`DuplicateInitialSubmissionError`.
+    """
+
+
+class DuplicateInitialSubmissionError(SubmissionTypeInvalidForCaseError):
+    """Exception for when a case would end up with a second initial submission that passed basic QC."""
+
+    def __init__(self, case_id: int | None, winning_submission_id: str | None = None):
+        holder = f" ({winning_submission_id})" if winning_submission_id else ""
+        super().__init__(
+            f"Case {case_id} already has an initial submission that passed basic QC{holder}; "
+            "at most one initial submission per case may pass basic QC."
+        )
+
+
+class AmbiguousCaseError(SubmissionError):
+    """Exception for when a case resolution key matches more than one case."""
+
+    def __init__(self, submitter_id: str | None, local_case_id: str | None, case_ids: Sequence[int]):
+        ids = ", ".join(str(case_id) for case_id in sorted(case_ids))
+        super().__init__(
+            f"Cases [{ids}] share (submitter '{submitter_id}', local case '{local_case_id}'); cannot resolve "
+            "automatically. Relink the cases' submissions and delete the duplicate cases to disambiguate."
+        )

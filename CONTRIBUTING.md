@@ -38,6 +38,16 @@ uv run tox
 Some packages have their own unit tests.
 Run `uv run tox` while inside a specific package directory to run that package's unit tests.
 
+### Database tests
+
+Database tests should use the fixtures from `grz_db.testing` (`db` is the usual entry point) rather
+than constructing their own engine. These fixtures parametrize each test over both sqlite and
+PostgreSQL, so a test that builds its own engine instead only ever exercises sqlite.
+
+The PostgreSQL half is skipped when `pg_config` is not on your `PATH`, and pytest reports this as
+skips rather than failures. A green run with a large skip count can therefore mean half the database
+tests never executed, so check the skip count rather than only the exit status.
+
 ## Code formatting and linting
 
 This project uses ruff for code formatting and linting.
@@ -59,6 +69,25 @@ To auto-format the code, run:
 ```bash
 uv run ruff format
 ```
+
+## Docstrings
+
+Docstrings use ReST field lists. Do not use Google-style `Args:` / `Returns:` sections.
+
+```python
+def get_submission(self, submission_id: str) -> Submission | None:
+    """Retrieve a submission and its state history.
+
+    :param submission_id: Submission ID of the submission to retrieve.
+    :returns: The :class:`Submission`, or ``None`` if no submission has that ID.
+    """
+```
+
+Keep the whole description above the field list. A paragraph placed after `:raises:` is rendered
+detached from the description.
+
+Mark code with double backticks. A single backtick is a different role in ReST, so `` `like this` ``
+does not render as a literal.
 
 ## Static type checking
 
