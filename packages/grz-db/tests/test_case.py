@@ -20,7 +20,14 @@ from grz_db.errors import (
     SubmissionNotFoundError,
     SubmissionTypeInvalidForCaseError,
 )
-from grz_db.models.submission import PsnResolver, SubmissionDb, SubmissionType, _Index, _rejected_by
+from grz_db.models.submission import (
+    PsnResolver,
+    SubmissionDb,
+    SubmissionType,
+    UnlinkedReason,
+    _Index,
+    _rejected_by,
+)
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, GrzSubmissionMetadata
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -1363,3 +1370,164 @@ def test_assert_no_duplicate_initial_does_not_swallow_a_resolution_failure(db: S
             local_case_id=local_case_id,
             submission_type=SubmissionType.initial,
         )
+
+
+def _keyed(db: SubmissionDb, submission_id: str, submitter_id: str, local_case_id: str) -> None:
+    """Give a submission the resolution key halves without linking it to a case."""
+    db.modify_submission(submission_id, "submitter_id", submitter_id)
+    db.modify_submission(submission_id, "pseudonym", local_case_id)
+
+
+def test_list_ambiguous_case_keys_reports_a_key_reused_across_patients(db: SubmissionDb):
+    """Two QC-passed initials under one key mean two patients, so the key is reported.
+
+    The counts are what an operator acts on: the key stands for as many patients as it has
+    QC-passed initial submissions, and every submission carrying it has to be placed by hand.
+    """
+    for suffix in ("aaaaaaa1", "aaaaaaa2"):
+        submission_id = _sid(SUBMITTER_A, suffix)
+        _add(db, submission_id, SubmissionType.initial)
+        _keyed(db, submission_id, SUBMITTER_A, "reused")
+        _record_basic_qc(db, submission_id, True)
+    follow_up = _sid(SUBMITTER_A, "aaaaaaa3")
+    _add(db, follow_up, SubmissionType.followup)
+    _keyed(db, follow_up, SUBMITTER_A, "reused")
+
+    keys = db.list_ambiguous_case_keys()
+
+    assert len(keys) == 1
+    assert keys[0].submitter_id == SUBMITTER_A
+    assert keys[0].local_case_id == "reused"
+    assert keys[0].qc_passed_initials == 2
+    assert keys[0].submissions == 3
+
+
+def test_list_ambiguous_case_keys_ignores_a_key_with_one_qc_passed_initial(db: SubmissionDb):
+    """A retry of a failed upload is the same patient, so counting every initial would misreport."""
+    passed = _sid(SUBMITTER_A, "bbbbbbb1")
+    _add(db, passed, SubmissionType.initial)
+    _keyed(db, passed, SUBMITTER_A, "one-patient")
+    _record_basic_qc(db, passed, True)
+
+    failed = _sid(SUBMITTER_A, "bbbbbbb2")
+    _add(db, failed, SubmissionType.initial)
+    _keyed(db, failed, SUBMITTER_A, "one-patient")
+    _record_basic_qc(db, failed, False)
+
+    assert db.list_ambiguous_case_keys() == []
+
+
+def test_list_ambiguous_case_keys_never_reports_a_placeholder(db: SubmissionDb):
+    """A redaction placeholder is shared by every submission of a submitter and keys nothing.
+
+    Without the placeholder guard this is the loudest false positive there is: one entry per
+    submitter, naming every archived submission they ever sent.
+    """
+    for suffixes, placeholder in ((("ccccccc1", "ccccccc2"), ""), (("ccccccc3", "ccccccc4"), REDACTED_LOCAL_CASE_ID)):
+        for suffix in suffixes:
+            submission_id = _sid(SUBMITTER_A, suffix)
+            _add(db, submission_id, SubmissionType.initial)
+            _keyed(db, submission_id, SUBMITTER_A, placeholder)
+            _record_basic_qc(db, submission_id, True)
+
+    assert db.list_ambiguous_case_keys() == []
+
+
+def test_list_unlinked_submissions_gives_each_row_its_reason(db: SubmissionDb):
+    """The four reasons are distinguishable, which is the whole point of the listing.
+
+    Two of them clear themselves on the next populate; the other two need an operator, so
+    reporting them all under one label would hide the ones that matter.
+    """
+    shared = [_sid(SUBMITTER_A, "ddddddd1"), _sid(SUBMITTER_A, "ddddddd2")]
+    for submission_id in shared:
+        _add(db, submission_id, SubmissionType.initial)
+        _keyed(db, submission_id, SUBMITTER_A, "reused")
+        _record_basic_qc(db, submission_id, True)
+
+    placeholder = _sid(SUBMITTER_A, "ddddddd3")
+    _add(db, placeholder, SubmissionType.initial)
+    _keyed(db, placeholder, SUBMITTER_A, REDACTED_LOCAL_CASE_ID)
+
+    not_populated = _sid(SUBMITTER_A, "ddddddd4")
+    db.add_submission(not_populated)
+
+    linkable = _sid(SUBMITTER_A, "ddddddd5")
+    _add(db, linkable, SubmissionType.initial)
+    _keyed(db, linkable, SUBMITTER_A, "own-case")
+
+    by_id = {row.submission_id: row for row in db.list_unlinked_submissions()}
+
+    assert by_id[shared[0]].reason == UnlinkedReason.KEY_NAMES_SEVERAL_PATIENTS
+    assert by_id[shared[1]].reason == UnlinkedReason.KEY_NAMES_SEVERAL_PATIENTS
+    assert by_id[placeholder].reason == UnlinkedReason.INCOMPLETE_KEY
+    assert by_id[not_populated].reason == UnlinkedReason.TYPE_UNKNOWN
+    assert by_id[linkable].reason == UnlinkedReason.NOT_LINKED_YET
+
+
+def test_list_unlinked_submissions_reports_no_local_case_id_for_a_placeholder(db: SubmissionDb):
+    """A placeholder is not a value an operator can act on, so it is not offered as one."""
+    submission_id = _sid(SUBMITTER_A, "eeeeeee1")
+    _add(db, submission_id, SubmissionType.initial)
+    _keyed(db, submission_id, SUBMITTER_A, REDACTED_LOCAL_CASE_ID)
+
+    (row,) = db.list_unlinked_submissions()
+
+    assert row.local_case_id is None
+    assert row.submitter_id == SUBMITTER_A
+
+
+def test_list_unlinked_submissions_skips_test_submissions(db: SubmissionDb):
+    """A test submission's NULL is permanent, not a repair task."""
+    submission_id = _sid(SUBMITTER_A, "fffffff1")
+    _add(db, submission_id, SubmissionType.test)
+    _keyed(db, submission_id, SUBMITTER_A, "case-t")
+
+    assert db.list_unlinked_submissions() == []
+
+
+def test_list_unlinked_submissions_drops_a_submission_once_it_is_linked(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+):
+    """The listing tracks the repair rather than the original problem."""
+    submission_id = metadata.submission_id
+    initial = _with_submission_type(metadata, "initial")
+    _add(db, submission_id, SubmissionType.initial)
+    _keyed(db, submission_id, SUBMITTER_A, "own-case")
+    assert [row.submission_id for row in db.list_unlinked_submissions()] == [submission_id]
+
+    case = db.create_case(submitter_id=SUBMITTER_A, local_case_id="own-case")
+    assert case.id is not None
+    db.set_submission_case(submission_id, case.id)
+
+    assert db.list_unlinked_submissions() == []
+    assert initial.submission.submission_type == SubmissionType.initial
+
+
+@pytest.mark.parametrize(
+    ("reason", "needs_operator"),
+    [
+        (UnlinkedReason.TYPE_UNKNOWN, False),
+        (UnlinkedReason.NOT_LINKED_YET, False),
+        (UnlinkedReason.INCOMPLETE_KEY, True),
+        (UnlinkedReason.KEY_NAMES_SEVERAL_PATIENTS, True),
+    ],
+    ids=lambda value: value.value if isinstance(value, UnlinkedReason) else str(value),
+)
+def test_needs_operator_classifies_every_reason(reason: UnlinkedReason, needs_operator: bool):
+    """A reason is either cleared by the next run or by a person, and this says which.
+
+    Parametrized over the members rather than spot-checked, so a fifth reason fails here until
+    it is classified instead of silently counting as one a re-run fixes.
+    """
+    assert reason.needs_operator is needs_operator
+
+
+def test_needs_operator_covers_every_member():
+    """The case above has to be exhaustive to mean anything."""
+    assert {reason for reason in UnlinkedReason} == {
+        UnlinkedReason.TYPE_UNKNOWN,
+        UnlinkedReason.NOT_LINKED_YET,
+        UnlinkedReason.INCOMPLETE_KEY,
+        UnlinkedReason.KEY_NAMES_SEVERAL_PATIENTS,
+    }
