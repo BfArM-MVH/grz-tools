@@ -5,10 +5,10 @@ linked to a case during `populate` or `backfill`, and the link is stored on
 `submissions.case_id`. This page covers what a case is, what the upgrade does to existing
 data, and how to repair a link by hand.
 
-> ⚠️ **The upgrade reports unlinkable data once, to its log.** `grzctl db upgrade` names the
-> submitter-local case keys it refused to group, and nothing else records them afterwards.
-> Capture that output. [Upgrading an existing database](#upgrading-an-existing-database)
-> explains what to do with it, and how to re-derive the list in SQL if it was lost.
+> ⚠️ **After `grzctl db upgrade`, run `db case list-unlinked`.** The upgrade does not link
+> every row, and it names the keys it refused to group only once, in its log. The two listing
+> commands report the same state at any later time. See
+> [Upgrading an existing database](#upgrading-an-existing-database).
 
 - [Concepts](#concepts)
 - [One initial submission per case](#one-initial-submission-per-case)
@@ -93,19 +93,27 @@ can still resolve these submissions by `psn`. Merging two patients into one case
 been the destructive choice, because unpicking it means one `db case unlink` per submission
 and the key that caused the merge tells you nothing about which submission belongs where.
 
-If the output was not captured, the same list can be re-derived:
+The log is a convenience rather than the record. Two commands report the same state at any
+later time, so the list is never lost:
 
-```sql
-SELECT submitter_id, pseudonym, count(*)
-FROM submissions
-WHERE submitter_id IS NOT NULL
-  AND pseudonym IS NOT NULL
-  AND pseudonym NOT IN ('', 'REDACTED_LOCAL_CASE_ID')
-  AND submission_type = 'initial'
-  AND basic_qc_passed IS TRUE
-GROUP BY submitter_id, pseudonym
-HAVING count(*) > 1;
+```bash
+db case list-unlinked          # every unlinked submission, with the reason for each
+db case list-ambiguous-keys    # just the keys that name more than one patient
 ```
+
+Run `list-unlinked` first. It reports four reasons:
+
+| Reason | Meaning |
+| --- | --- |
+| `key_names_several_patients` | The key was reused across patients, so it names no single one. |
+| `incomplete_key` | No submitter, or a localCaseId that is still a redaction placeholder. |
+| `type_unknown` | Not populated yet, so the submission's type is unknown. |
+| `not_linked_yet` | The key is usable and names one patient. |
+
+The first two describe a key, and a key does not improve by being retried, so they need a
+person. The last two describe a submission that has not been through populate or backfill with
+case resolution on, so the next run links it. The summary line counts the first two, and a run
+reporting zero of them needs no further attention.
 
 Resolving one of these means deciding which submissions belong to which patient, then
 creating a case per patient and linking its submissions:
@@ -123,6 +131,8 @@ Cases are normally created by `populate`. The commands below exist for repair.
 db case list                  # every case with its linked-submission count
 db case show 7                # one case and its submissions, with basic QC state
 db case show 7 --json         # same, machine-readable
+db case list-unlinked         # submissions with no case, and why
+db case list-ambiguous-keys   # keys that name more than one patient
 ```
 
 `db case show` lists each submission's basic QC state, which is how you see which `initial`
@@ -177,6 +187,8 @@ it.
 | Command                                                 | Purpose                                          |
 | ------------------------------------------------------- | ------------------------------------------------ |
 | `db case list [--json]`                                 | All cases with their linked-submission counts.   |
+| `db case list-unlinked [--json]`                        | Submissions with no case, each with the reason.  |
+| `db case list-ambiguous-keys [--json]`                  | Keys carrying more than one QC-passed initial.   |
 | `db case show CASE_ID [--json]`                         | One case, its columns and its submissions.       |
 | `db case create SUBMITTER_ID LOCAL_CASE_ID [--psn PSN]` | Create a case by hand.                           |
 | `db case modify CASE_ID KEY VALUE`                      | Change `local_case_id`, `psn` or `submitter_id`. |

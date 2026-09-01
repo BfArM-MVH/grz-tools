@@ -7,6 +7,7 @@ import random
 import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum as PyEnum
 from operator import attrgetter
 from typing import Any, ClassVar, Literal, Optional, Protocol, Self, cast
@@ -19,6 +20,7 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
+    LOCAL_CASE_ID_PLACEHOLDERS,
     REDACTED_TAN,
     CoverageType,
     DiseaseType,
@@ -387,6 +389,72 @@ def _rejected_by(e: IntegrityError) -> "_Index | None":
         ),
         None,
     )
+
+
+class UnlinkedReason(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
+    """Why a submission carries no case.
+
+    See :attr:`needs_operator` for which of these clear themselves and which do not.
+    """
+
+    TYPE_UNKNOWN = "type_unknown"
+    INCOMPLETE_KEY = "incomplete_key"
+    KEY_NAMES_SEVERAL_PATIENTS = "key_names_several_patients"
+    NOT_LINKED_YET = "not_linked_yet"
+
+    @property
+    def needs_operator(self) -> bool:
+        """Whether clearing this reason takes a decision rather than another run.
+
+        ``TYPE_UNKNOWN`` and ``NOT_LINKED_YET`` describe a submission that has not been
+        through ``populate`` or ``backfill`` with case resolution on, so the next run links
+        it. The other two describe a key: an incomplete one has no value to resolve with, and
+        one naming several patients has a value that must not be used. Neither improves by
+        being retried.
+
+        :returns: ``True`` when a person has to decide something before the link can be made.
+        """
+        return self in (UnlinkedReason.INCOMPLETE_KEY, UnlinkedReason.KEY_NAMES_SEVERAL_PATIENTS)
+
+
+@dataclass(frozen=True)
+class UnlinkedSubmission:
+    """A submission with no case, and why it has none.
+
+    :param submission_id: ID of the unlinked submission.
+    :param submitter_id: Submitter half of the resolution key, if the row carries one.
+    :param local_case_id: Submitter-local case identifier half, held in the
+        ``submissions.pseudonym`` column. ``None`` when absent or still a redaction
+        placeholder, since neither can key a case.
+    :param submission_type: Type of the submission, or ``None`` before it is populated.
+    :param reason: Why no case is linked.
+    """
+
+    submission_id: str
+    submitter_id: str | None
+    local_case_id: str | None
+    submission_type: SubmissionType | None
+    reason: UnlinkedReason
+
+
+@dataclass(frozen=True)
+class AmbiguousCaseKey:
+    """A resolution key carrying more than one QC-passed ``initial`` submission.
+
+    Such a key names several patients, so it opens no case and every submission carrying it
+    keeps ``case_id`` NULL. See :func:`case_key_denotes_one_patient` for why.
+
+    :param submitter_id: Submitter half of the key.
+    :param local_case_id: Submitter-local case identifier half of the key.
+    :param qc_passed_initials: How many QC-passed ``initial`` submissions carry the key. Always
+        greater than one, and equal to the number of patients the key stands for.
+    :param submissions: How many submissions carry the key in total.
+    """
+
+    submitter_id: str
+    local_case_id: str
+    qc_passed_initials: int
+    submissions: int
 
 
 def case_key_denotes_one_patient(session: Session, submitter_id: str | None, local_case_id: str | None) -> bool:
@@ -1442,6 +1510,118 @@ class SubmissionDb:
                 .order_by(Case.id)  # type: ignore[arg-type]
             ).all()
             return list(rows)
+
+    def _ambiguous_case_keys(self, session: Session) -> list[AmbiguousCaseKey]:
+        """Keys carrying more than one QC-passed ``initial`` submission.
+
+        The predicate matches :func:`case_key_denotes_one_patient` asked of every key at once,
+        and the cases migration applies the same rule to the rows that predate case tracking.
+
+        Takes a ``session`` so a caller can read this and the rows it judges in one snapshot.
+        :meth:`list_unlinked_submissions` needs that: asked in two transactions, a submission
+        could be labelled from a key set that no longer describes it.
+
+        :param session: Transaction to read in.
+        :returns: One entry per key, ordered by submitter then local case ID.
+        """
+        qc_passed_initials = sqlfn.count(
+            sa.case(
+                (
+                    sa.and_(
+                        Submission.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
+                        Submission.basic_qc_passed.is_(True),  # type: ignore[union-attr]
+                    ),
+                    1,
+                ),
+                else_=None,
+            )
+        )
+        rows = session.exec(
+            select(
+                Submission.submitter_id,
+                Submission.pseudonym,
+                qc_passed_initials.label("qc_passed_initials"),
+                sqlfn.count(Submission.id).label("submissions"),  # type: ignore[arg-type]
+            )
+            .where(
+                Submission.submitter_id.is_not(None),  # type: ignore[union-attr]
+                Submission.pseudonym.is_not(None),  # type: ignore[union-attr]
+                Submission.pseudonym.not_in(LOCAL_CASE_ID_PLACEHOLDERS),  # type: ignore[union-attr]
+            )
+            .group_by(Submission.submitter_id, Submission.pseudonym)  # type: ignore[arg-type]
+            .having(qc_passed_initials > 1)
+            .order_by(Submission.submitter_id, Submission.pseudonym)  # type: ignore[arg-type]
+        ).all()
+        return [
+            AmbiguousCaseKey(
+                submitter_id=submitter_id,
+                local_case_id=local_case_id,
+                qc_passed_initials=qc_passed_initials_count,
+                submissions=submissions,
+            )
+            for submitter_id, local_case_id, qc_passed_initials_count, submissions in cast(
+                Sequence[tuple[str, str, int, int]], rows
+            )
+        ]
+
+    def list_ambiguous_case_keys(self) -> list[AmbiguousCaseKey]:
+        """List the resolution keys that name more than one patient.
+
+        These are the keys the cases migration refuses to group and that resolution refuses to
+        key on. They open no case, so every submission carrying one keeps ``case_id`` NULL.
+        Repairing one means deciding which submissions belong to which patient, then creating a
+        case per patient with :meth:`create_case` and linking with :meth:`set_submission_case`.
+
+        :returns: One entry per key, ordered by submitter then local case ID. Empty when every
+            key names a single patient.
+        """
+        with self.transaction() as session:
+            return self._ambiguous_case_keys(session)
+
+    def list_unlinked_submissions(self) -> list[UnlinkedSubmission]:
+        """List the submissions that carry no case, and why each carries none.
+
+        ``test`` submissions are excluded. They are never case-tracked, so their NULL is the
+        expected state rather than something to repair.
+
+        :returns: One entry per unlinked submission, ordered by ascending submission ID.
+        """
+        with self.transaction() as session:
+            ambiguous = {(key.submitter_id, key.local_case_id) for key in self._ambiguous_case_keys(session)}
+            submissions = session.exec(
+                select(Submission)
+                .where(
+                    Submission.case_id.is_(None),  # type: ignore[union-attr]
+                    sa.or_(
+                        Submission.submission_type.is_(None),  # type: ignore[union-attr]
+                        Submission.submission_type != SubmissionType.test,  # type: ignore[arg-type]
+                    ),
+                )
+                .order_by(Submission.id)  # type: ignore[arg-type]
+            ).all()
+
+            unlinked = []
+            for submission in submissions:
+                local_case_id = submission.pseudonym
+                keyable = bool(submission.submitter_id) and not is_redacted_local_case_id(local_case_id)
+                if submission.submission_type is None:
+                    reason = UnlinkedReason.TYPE_UNKNOWN
+                elif not keyable:
+                    reason = UnlinkedReason.INCOMPLETE_KEY
+                elif (submission.submitter_id, local_case_id) in ambiguous:
+                    reason = UnlinkedReason.KEY_NAMES_SEVERAL_PATIENTS
+                else:
+                    reason = UnlinkedReason.NOT_LINKED_YET
+                unlinked.append(
+                    UnlinkedSubmission(
+                        submission_id=submission.id,
+                        submitter_id=submission.submitter_id,
+                        local_case_id=local_case_id if keyable else None,
+                        submission_type=submission.submission_type,
+                        reason=reason,
+                    )
+                )
+            return unlinked
 
     def list_submissions_for_case(self, case_id: int) -> Sequence[Submission]:
         """List all submissions linked to a case.

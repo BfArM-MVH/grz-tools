@@ -405,3 +405,80 @@ def test_case_json_survives_a_coloured_environment(migrated_database_config_path
     assert completed.returncode == 0, completed.stderr
     assert "\x1b" not in completed.stdout, "ANSI escapes reached a consumer parsing this"
     json.loads(completed.stdout)  # raises if anything but JSON was written
+
+
+def _keyed_submission(cli, config_path: Path, submission_id: str, submitter_id: str, local_case_id: str) -> None:
+    """Add a submission carrying a resolution key but no case, as the cases migration leaves it."""
+    assert _invoke(cli, config_path, "submission", "add", submission_id).exit_code == 0
+    for key, value in (("submitter_id", submitter_id), ("pseudonym", local_case_id)):
+        result = _invoke(cli, config_path, "submission", "modify", submission_id, key, value)
+        assert result.exit_code == 0, result.stderr
+
+
+def _reused_key(cli, config_path: Path, submitter_id: str, local_case_id: str) -> list[str]:
+    """Two QC-passed initial submissions under one key, which therefore names two patients."""
+    submission_ids = [f"{submitter_id}_2025-01-0{n}_aaaaaaa{n}" for n in (1, 2)]
+    for submission_id in submission_ids:
+        _keyed_submission(cli, config_path, submission_id, submitter_id, local_case_id)
+        for key, value in (("submission_type", "initial"), ("basic_qc_passed", "true")):
+            result = _invoke(cli, config_path, "submission", "modify", submission_id, key, value)
+            assert result.exit_code == 0, result.stderr
+    return submission_ids
+
+
+def test_case_list_ambiguous_keys_reports_a_reused_key(migrated_database_config_path: Path):
+    """The command replaces the list the cases migration logs once during ``db upgrade``."""
+    cli = grzctl.cli.build_cli()
+    _reused_key(cli, migrated_database_config_path, "123456789", "reused")
+
+    result = _invoke(cli, migrated_database_config_path, "case", "list-ambiguous-keys", "--json")
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout) == [
+        {"submitter_id": "123456789", "local_case_id": "reused", "qc_passed_initials": 2, "submissions": 2}
+    ]
+
+
+def test_case_list_ambiguous_keys_says_so_when_there_are_none(migrated_database_config_path: Path):
+    """An empty result is an answer, so it is worth saying rather than printing nothing."""
+    cli = grzctl.cli.build_cli()
+
+    result = _invoke(cli, migrated_database_config_path, "case", "list-ambiguous-keys")
+
+    assert result.exit_code == 0, result.stderr
+    assert "names a single patient" in result.stderr
+
+
+def test_case_list_unlinked_separates_what_a_re_run_fixes(migrated_database_config_path: Path):
+    """Both kinds are listed, and only the ones needing an operator are counted as such."""
+    cli = grzctl.cli.build_cli()
+    reused = _reused_key(cli, migrated_database_config_path, "123456789", "reused")
+    linkable = "123456789_2025-02-01_bbbbbbb1"
+    _keyed_submission(cli, migrated_database_config_path, linkable, "123456789", "own-case")
+    result_type = _invoke(
+        cli, migrated_database_config_path, "submission", "modify", linkable, "submission_type", "initial"
+    )
+    assert result_type.exit_code == 0, result_type.stderr
+
+    result = _invoke(cli, migrated_database_config_path, "case", "list-unlinked", "--json")
+
+    assert result.exit_code == 0, result.stderr
+    by_id = {row["submission_id"]: row for row in json.loads(result.stdout)}
+    assert by_id[reused[0]]["reason"] == "key_names_several_patients"
+    assert by_id[reused[1]]["reason"] == "key_names_several_patients"
+    assert by_id[linkable]["reason"] == "not_linked_yet"
+
+    summary = _invoke(cli, migrated_database_config_path, "case", "list-unlinked")
+    assert summary.exit_code == 0, summary.stderr
+    assert "3 unlinked, 2 of which will not resolve on a re-run." in summary.stderr
+
+
+def test_case_list_unlinked_ignores_a_test_submission(migrated_database_config_path: Path, test_metadata_path: Path):
+    """The shipped example is a test submission, so populating it must leave nothing to repair."""
+    cli = grzctl.cli.build_cli()
+    _add_and_populate(cli, migrated_database_config_path, test_metadata_path)
+
+    result = _invoke(cli, migrated_database_config_path, "case", "list-unlinked", "--json")
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout) == []

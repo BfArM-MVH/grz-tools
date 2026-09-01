@@ -228,6 +228,110 @@ def case_list(ctx: click.Context, output_json: bool):
     console.print(table)
 
 
+@case.command("list-unlinked")
+@output_json
+@click.pass_context
+def case_list_unlinked(ctx: click.Context, output_json: bool):
+    """List submissions that carry no case, and why each carries none.
+
+    Test submissions are excluded, since they are never case-tracked. A submission whose type
+    is not known yet, or that is simply not linked yet, resolves itself on the next populate or
+    backfill. The other two reasons need an operator: see 'db case list-ambiguous-keys'.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    unlinked = db_service.list_unlinked_submissions()
+
+    if output_json:
+        _dump_json(
+            [
+                {
+                    "submission_id": row.submission_id,
+                    "submitter_id": row.submitter_id,
+                    "local_case_id": row.local_case_id,
+                    "submission_type": row.submission_type,
+                    "reason": row.reason,
+                }
+                for row in unlinked
+            ]
+        )
+        return
+
+    if not unlinked:
+        console_err.print("[green]Every case-trackable submission is linked to a case.[/green]")
+        return
+
+    table = rich.table.Table(title="Unlinked submissions")
+    table.add_column("Submission ID")
+    table.add_column("Type")
+    table.add_column("Submitter ID")
+    table.add_column("Local Case ID")
+    table.add_column("Reason")
+    for row in unlinked:
+        table.add_row(
+            row.submission_id,
+            str(row.submission_type) if row.submission_type is not None else _TEXT_MISSING,
+            row.submitter_id if row.submitter_id is not None else _TEXT_MISSING,
+            row.local_case_id if row.local_case_id is not None else _TEXT_MISSING,
+            str(row.reason).replace("_", " "),
+        )
+    console.print(table)
+
+    needs_operator = sum(1 for row in unlinked if row.reason.needs_operator)
+    console_err.print(f"[cyan]{len(unlinked)} unlinked, {needs_operator} of which will not resolve on a re-run.[/cyan]")
+
+
+@case.command("list-ambiguous-keys")
+@output_json
+@click.pass_context
+def case_list_ambiguous_keys(ctx: click.Context, output_json: bool):
+    """List submitter-local case keys that name more than one patient.
+
+    A patient has one initial submission that passes basic QC, so a key carrying several was
+    reused across patients. Such a key opens no case and its submissions keep case_id NULL.
+    This is the list the cases migration logs once during 'db upgrade'.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    keys = db_service.list_ambiguous_case_keys()
+
+    if output_json:
+        _dump_json(
+            [
+                {
+                    "submitter_id": key.submitter_id,
+                    "local_case_id": key.local_case_id,
+                    "qc_passed_initials": key.qc_passed_initials,
+                    "submissions": key.submissions,
+                }
+                for key in keys
+            ]
+        )
+        return
+
+    if not keys:
+        console_err.print("[green]Every submitter-local case key names a single patient.[/green]")
+        return
+
+    table = rich.table.Table(title="Keys naming more than one patient")
+    table.add_column("Submitter ID")
+    table.add_column("Local Case ID")
+    table.add_column("QC-passed initials", justify="right")
+    table.add_column("Submissions", justify="right")
+    for key in keys:
+        table.add_row(
+            key.submitter_id,
+            key.local_case_id,
+            str(key.qc_passed_initials),
+            str(key.submissions),
+        )
+    console.print(table)
+    console_err.print(
+        "[cyan]Each key stands for as many patients as it has QC-passed initial submissions. "
+        "Create a case per patient with 'db case create', then link with 'db case relink'.[/cyan]"
+    )
+
+
 @case.command("show")
 @_case_id_argument
 @output_json
