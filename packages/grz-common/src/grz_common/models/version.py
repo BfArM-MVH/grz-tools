@@ -149,7 +149,9 @@ class VersionFile(BaseModel):
         :raises VersionFileValidationError: If the bundled version file is invalid.
         """
         content = (
-            importlib.resources.files(BUNDLED_VERSION_FILE_PACKAGE).joinpath(BUNDLED_VERSION_FILE_NAME).read_text(encoding="utf-8")
+            importlib.resources.files(BUNDLED_VERSION_FILE_PACKAGE)
+            .joinpath(BUNDLED_VERSION_FILE_NAME)
+            .read_text(encoding="utf-8")
         )
         try:
             cls.model_validate_json(content)
