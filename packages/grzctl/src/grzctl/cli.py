@@ -27,6 +27,7 @@ from .commands.pruefbericht import pruefbericht
 from .commands.report import report
 from .commands.upload import upload
 from .commands.validate import validate
+from .commands.version_upload import version_upload
 from .models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ def build_cli():
     cli.add_command(encrypt)
     cli.add_command(upload)
     cli.add_command(submit)
+    cli.add_command(version_upload)
 
     cli.add_command(list_submissions, name="list")
     cli.add_command(download)
