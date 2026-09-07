@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "grzcli_version": [
+    {
+      "enforced_from": "2026-09-14T00:00:00+00:00",
+      "minimal_version": "1.7.0",
+      "recommended_version": "2.0.0",
+      "max_version": null
+    }
+  ],
+  "metadata_version": []
+}
