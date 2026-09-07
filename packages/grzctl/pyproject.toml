@@ -62,7 +62,6 @@ test = [
     "pytest-postgresql",
     "psycopg",
     "moto[s3]",
-    "responses",
     "numpy",
     "grz-common",
     "grz-cli",

@@ -1254,7 +1254,6 @@ test = [
     { name = "pytest-mock" },
     { name = "pytest-postgresql" },
     { name = "pytest-sugar" },
-    { name = "responses" },
 ]
 
 [package.metadata]
@@ -1283,7 +1282,6 @@ test = [
     { name = "pytest-mock" },
     { name = "pytest-postgresql" },
     { name = "pytest-sugar" },
-    { name = "responses" },
 ]
 
 [[package]]
