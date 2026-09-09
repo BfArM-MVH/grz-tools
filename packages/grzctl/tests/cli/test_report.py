@@ -424,6 +424,11 @@ def test_quarterly_qc(quarterly_report_dir: Path):
         "wes",
     ]
 
+    # listed because a metric is below its threshold, not because of a deviation
+    for row in rows:
+        assert row[24] == "no"
+        assert row[25] == "no"
+
 
 def test_quarterly_migrated_database(migrated_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on databases migrated from prior schema without backpopulating metadata."""
@@ -584,6 +589,13 @@ def test_quarterly_qc_includes_passing_submission_with_deviation(migrated_databa
     assert germline_row[18] == "no"
     assert float(germline_row[19]) == pytest.approx(-42.0)
     assert somatic_row[18] == "yes"
+
+    # detailed QC passed throughout, so the deviation is the only reason the case is listed,
+    # and only the deviating lab datum is flagged
+    assert germline_row[24] == "yes"
+    assert germline_row[25] == "yes"
+    assert somatic_row[24] == "yes"
+    assert somatic_row[25] == "no"
 
     # ...but it is not counted as a failed QC in the overview
     overview_output_path = Path(report_tmp_dir) / "1-Gesamtübersicht_GRZX00000_3_2025.tsv"

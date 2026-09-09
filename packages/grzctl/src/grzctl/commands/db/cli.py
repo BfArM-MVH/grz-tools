@@ -59,7 +59,7 @@ from grz_pydantic_models.submission.metadata import (
     SequenceSubtype,
     SequenceType,
 )
-from grz_pydantic_models.submission.thresholds import Thresholds
+from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
 from sqlmodel import Session, select
 from tqdm.auto import tqdm
@@ -762,9 +762,6 @@ class QCStatus(StrEnum):
     TOO_LOW = "TOO LOW"
     THRESHOLD_NOT_MET = "THRESHOLD NOT MET"
 
-
-# Keep in sync with PCT_DEV_CUTOFF in GRZ_QC_Workflow's compare_threshold.py
-PCT_DEV_CUTOFF = 10
 
 # Absolute tolerance (in percentage points) below which a stored and a recomputed percent
 # deviation are considered equal, so that float noise (e.g. from CSV round-trips) does not

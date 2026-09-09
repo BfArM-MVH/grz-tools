@@ -24,6 +24,7 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, SubmissionType
+from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
 
@@ -369,6 +370,13 @@ class DetailedQCPassedReportState(StrEnum):
     NO = "no"
 
 
+def _detailed_qc_passed_state(submission: Submission) -> DetailedQCPassedReportState:
+    """Report the stored detailed QC verdict, which is unset until detailed QC has run."""
+    if submission.detailed_qc_passed is None:
+        return DetailedQCPassedReportState.NOT_PERFORMED
+    return DetailedQCPassedReportState.YES if submission.detailed_qc_passed else DetailedQCPassedReportState.NO
+
+
 def _dump_dataset_report(
     output_path: Path, database: SubmissionDb, year: int, quarter: int, with_submission_ids: bool = False
 ) -> None:
@@ -441,11 +449,7 @@ def _dump_dataset_report(
             + (["submission_id"] if with_submission_ids else [])
         )
         for submission in submissions:
-            detailed_qc_passed = DetailedQCPassedReportState.NOT_PERFORMED
-            if submission.detailed_qc_passed is not None:
-                detailed_qc_passed = (
-                    DetailedQCPassedReportState.YES if submission.detailed_qc_passed else DetailedQCPassedReportState.NO
-                )
+            detailed_qc_passed = _detailed_qc_passed_state(submission)
             if submission.id in id2mv_consented:
                 mv_consented = "yes" if id2mv_consented[submission.id] else "no"
             else:
@@ -489,8 +493,10 @@ def _dump_qc_report(
     with database.transaction() as session:
         # The quarterly QC report lists submissions that failed the detailed QC (a computed
         # metric below the required threshold) as well as submissions that passed but carry a
-        # deviation of more than 10% between the computed and provided values on any metric.
-        # BfArM requires both to be reported; the latter does not count as a failure.
+        # deviation of more than PCT_DEV_CUTOFF percent between the computed and provided values
+        # on any metric. BfArM requires both to be reported; the latter does not count as a
+        # failure. The detailed_qc_passed and deviation_exceeds_tolerance columns tell the two
+        # reasons apart per row.
         submission_ids_with_deviation = select(DetailedQCResult.submission_id).where(
             sa.or_(
                 sa.not_(DetailedQCResult.percent_bases_above_quality_threshold_passed_qc),  # type: ignore[call-overload]
@@ -559,6 +565,8 @@ def _dump_qc_report(
                 "targetedRegionsAboveMinCoverage",
                 "targetedRegionsAboveMinCoverage_detailedQC_passed",
                 "targetedRegionsAboveMinCoverage_detailedQC_deviation%",
+                "detailed_qc_passed",
+                "deviation_exceeds_tolerance",
             ]
             + (["submission_id"] if with_submission_ids else [])
         )
@@ -566,6 +574,14 @@ def _dump_qc_report(
         for report in reports_to_include:
             submission = id2submission[report.submission_id]
             relation = Relation(idpseudo2relation[(report.submission_id, report.pseudonym)])
+            deviation_exceeds_tolerance = any(
+                abs(deviation) > PCT_DEV_CUTOFF
+                for deviation in (
+                    report.percent_bases_above_quality_threshold_percent_deviation,
+                    report.mean_depth_of_coverage_percent_deviation,
+                    report.targeted_regions_above_min_coverage_percent_deviation,
+                )
+            )
             writer.writerow(
                 [
                     submission.data_node_id,
@@ -592,6 +608,8 @@ def _dump_qc_report(
                     report.targeted_regions_above_min_coverage,
                     "yes" if report.targeted_regions_above_min_coverage_passed_qc else "no",
                     report.targeted_regions_above_min_coverage_percent_deviation,
+                    _detailed_qc_passed_state(submission),
+                    "yes" if deviation_exceeds_tolerance else "no",
                 ]
                 + ([report.submission_id] if with_submission_ids else [])
             )
