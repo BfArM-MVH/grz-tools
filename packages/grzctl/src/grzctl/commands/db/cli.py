@@ -473,7 +473,7 @@ def add(ctx: click.Context, submission_id: str):
 )
 @click.option("--ignore-error-state/--confirm-error-state")
 @click.pass_context
-def update(  # noqa: C901, PLR0913
+def update(  # noqa: C901, PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     state_str: str,
@@ -652,7 +652,7 @@ def _prepare_donor_console_table(
 )
 @_ignore_field_option
 @click.pass_context
-def populate(  # noqa: C901, PLR0913
+def populate(  # noqa: C901, PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     metadata_path: str,
@@ -933,7 +933,7 @@ def populate_qc(
     help="Validate inputs and check the submission exists, but do not write the change request.",
 )
 @click.pass_context
-def change_request(  # noqa: PLR0913
+def change_request(  # noqa: PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     change_str: str,
@@ -1174,7 +1174,7 @@ class _BackfillResult(StrEnum):
     CONSENT_MISMATCH = "consent_mismatch"
 
 
-def _backfill_submission(  # noqa: PLR0911, PLR0913
+def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     current_submission: Submission,
     s3_client: Any,
     bucket: str,
@@ -1310,7 +1310,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ctx: click.Context,
     configuration: GrzctlConfig,
     dry_run: bool,
