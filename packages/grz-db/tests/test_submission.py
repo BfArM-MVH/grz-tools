@@ -69,7 +69,7 @@ def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata
     assert submission.disease_type == metadata.submission.disease_type
     assert submission.genomic_study_type == metadata.submission.genomic_study_type
     assert submission.genomic_study_subtype == metadata.submission.genomic_study_subtype
-    assert submission.pseudonym == metadata.submission.local_case_id
+    assert submission.local_case_id == metadata.submission.local_case_id
     assert submission.data_node_id == metadata.submission.genomic_data_center_id
     assert submission.submission_uploaded_date == explicit_date  # explicit date takes precedence
     assert submission.submission_size == metadata.get_submission_size()
@@ -169,7 +169,7 @@ def test_restore_redacted_fields_uses_the_stored_row(
     """Both redaction spellings are restored from the columns populate wrote."""
     submission = db.add_submission(SUBMISSION_ID)
     db.modify_submission(SUBMISSION_ID, "tan_g", TAN_G_1)
-    db.modify_submission(SUBMISSION_ID, "pseudonym", "the-real-case")
+    db.modify_submission(SUBMISSION_ID, "local_case_id", "the-real-case")
     submission = db.get_submission(SUBMISSION_ID)
 
     archived = _redacted(metadata, placeholder)
@@ -190,7 +190,7 @@ def test_restore_redacted_fields_reports_what_it_cannot_restore(
     archived = _redacted(metadata, placeholder)
     unrestored = submission.restore_redacted_fields(archived)
 
-    assert unrestored == frozenset({"tan_g", "pseudonym"})
+    assert unrestored == frozenset({"tan_g", "local_case_id"})
     assert archived.submission.tan_g == REDACTED_TAN
     assert archived.submission.local_case_id == placeholder
 
@@ -201,7 +201,7 @@ def test_restore_redacted_fields_leaves_unredacted_values_alone(
     """An unredacted copy is authoritative, so it is diffed rather than overwritten."""
     db.add_submission(SUBMISSION_ID)
     db.modify_submission(SUBMISSION_ID, "tan_g", TAN_G_1)
-    db.modify_submission(SUBMISSION_ID, "pseudonym", "stored-case")
+    db.modify_submission(SUBMISSION_ID, "local_case_id", "stored-case")
     submission = db.get_submission(SUBMISSION_ID)
 
     unrestored = submission.restore_redacted_fields(metadata)
@@ -214,9 +214,9 @@ def test_restore_redacted_fields_leaves_unredacted_values_alone(
 def test_restore_redacted_fields_restores_each_column_independently(
     db: SubmissionDb, metadata: GrzSubmissionMetadata
 ) -> None:
-    """A stored pseudonym still helps even when the tanG cannot be recovered."""
+    """A stored local case ID still helps even when the tanG cannot be recovered."""
     db.add_submission(SUBMISSION_ID)
-    db.modify_submission(SUBMISSION_ID, "pseudonym", "the-real-case")
+    db.modify_submission(SUBMISSION_ID, "local_case_id", "the-real-case")
     submission = db.get_submission(SUBMISSION_ID)
 
     archived = _redacted(metadata, "")

@@ -4,16 +4,17 @@ Revision ID: f8c1a4b7e2d9
 Revises: c8d4a7f2b1e6
 Create Date: 2026-07-08 00:00:00.000000+00:00
 
-Introduces the ``cases`` table and links each submission to its case via ``submissions.case_id``.
+Renames ``submissions.pseudonym`` to ``submissions.local_case_id``, the name of what it holds
+(the submitter's ``localCaseId``), introduces the ``cases`` table and links each submission to its
+case via ``submissions.case_id``.
 
 A case's authoritative identity is ``psn`` (the RKI pseudonym), unique once assigned.
 ``submitter_id`` and ``local_case_id`` are resolution keys used to locate a case before a ``psn``
 exists, not the authoritative identity themselves. The partial unique index
 ``ux_cases_submitter_local_case`` keeps the pair unique wherever both halves are present; neither
 is required, since a future flow may resolve a case by ``psn`` alone. Existing submissions are
-grouped by ``(submitter_id, pseudonym)`` (the ``pseudonym`` column holds the submitter-local case
-id) and backfilled into cases. ``submitter_id`` stays on the submission row as well as on the
-case.
+grouped by ``(submitter_id, local_case_id)`` and backfilled into cases. ``submitter_id`` stays on
+the submission row as well as on the case.
 
 Some rows are left unlinked: rows missing either half of the key, ``test`` submissions, and rows
 whose key is shared by more than one QC-passed ``initial`` submission. A ``test`` submission is
@@ -47,7 +48,7 @@ depends_on: str | Sequence[str] | None = None
 # migration stays frozen. The archive contains both spellings as redaction placeholders; neither
 # identifies a patient, so neither is a case key. The same check runs at resolution time, in
 # SubmitterLocalCaseResolver.find_case, via is_redacted_local_case_id.
-PSEUDONYM_NON_KEYS = ["", "REDACTED_LOCAL_CASE_ID"]
+LOCAL_CASE_ID_NON_KEYS = ["", "REDACTED_LOCAL_CASE_ID"]
 
 # Alembic's own progress logger, so these lines appear in the same stream as "Running upgrade".
 logger = logging.getLogger("alembic.runtime.migration")
@@ -57,8 +58,8 @@ def _can_key_a_case(rows: sa.FromClause) -> sa.ColumnElement[bool]:
     """Rows carrying both halves of a usable ``(submitter_id, local_case_id)`` key."""
     return sa.and_(
         rows.c.submitter_id.is_not(None),
-        rows.c.pseudonym.is_not(None),
-        rows.c.pseudonym.not_in(PSEUDONYM_NON_KEYS),
+        rows.c.local_case_id.is_not(None),
+        rows.c.local_case_id.not_in(LOCAL_CASE_ID_NON_KEYS),
     )
 
 
@@ -79,6 +80,14 @@ def _qc_passed_initial(rows: sa.FromClause) -> sa.ColumnElement[bool]:
 def upgrade() -> None:
     """Upgrade schema."""
     bind = op.get_bind()
+
+    # --- Name the local case ID column for what it holds ---
+    # Done first so that the reflection below and the backfill see the new name. The index is
+    # dropped and recreated because SQLite cannot rename one.
+    op.alter_column("submissions", "pseudonym", new_column_name="local_case_id")
+    op.drop_index("ix_submissions_pseudonym", table_name="submissions")
+    op.create_index("ix_submissions_local_case_id", "submissions", ["local_case_id"])
+
     submissions = sa.Table("submissions", sa.MetaData(), autoload_with=bind)
 
     # Report the keys the backfill below will refuse to group. Logged rather than left for the
@@ -87,11 +96,11 @@ def upgrade() -> None:
     untrusted_keys = bind.execute(
         sa.select(
             submissions.c.submitter_id,
-            submissions.c.pseudonym,
+            submissions.c.local_case_id,
             sa.func.count().label("n"),
         )
         .where(_can_key_a_case(submissions), _qc_passed_initial(submissions))
-        .group_by(submissions.c.submitter_id, submissions.c.pseudonym)
+        .group_by(submissions.c.submitter_id, submissions.c.local_case_id)
         .having(sa.func.count() > 1)
     ).fetchall()
 
@@ -147,7 +156,7 @@ def upgrade() -> None:
             remote_cols=["id"],
         )
 
-    # --- Backfill: one case per distinct (submitter_id, pseudonym), storing the keys, then link ---
+    # --- Backfill: one case per distinct (submitter_id, local_case_id), storing the keys, then link ---
     # Lightweight, standalone Table objects (not reflected) describing just the columns we
     # need. A fresh MetaData per table avoids re-defining the ``submissions`` table reflected above.
     cases = sa.Table(
@@ -162,7 +171,7 @@ def upgrade() -> None:
         sa.MetaData(),
         sa.Column("case_id", sa.Integer()),
         sa.Column("submitter_id", AutoString()),
-        sa.Column("pseudonym", AutoString()),
+        sa.Column("local_case_id", AutoString()),
         # declared as the existing native enum so comparisons render with the right type
         sa.Column(
             "submission_type",
@@ -181,7 +190,7 @@ def upgrade() -> None:
         .select_from(peers)
         .where(
             peers.c.submitter_id == submissions_link.c.submitter_id,
-            peers.c.pseudonym == submissions_link.c.pseudonym,
+            peers.c.local_case_id == submissions_link.c.local_case_id,
             _qc_passed_initial(peers),
         )
         .correlate(submissions_link)
@@ -189,7 +198,7 @@ def upgrade() -> None:
         <= 1
     )
 
-    # Only rows that can form a (submitter_id, pseudonym) key participate in the backfill.
+    # Only rows that can form a (submitter_id, local_case_id) key participate in the backfill.
     # Test submissions are never case-tracked; the explicit NULL check keeps rows with an unknown
     # type in the backfill, since SQL's three-valued logic would otherwise exclude them too.
     # A row whose key fails ``key_denotes_one_patient`` is left unlinked whatever its own type or
@@ -204,21 +213,21 @@ def upgrade() -> None:
         key_denotes_one_patient,
     )
     # INSERT INTO cases (submitter_id, local_case_id)
-    # SELECT DISTINCT submitter_id, pseudonym FROM submissions WHERE has_keys
+    # SELECT DISTINCT submitter_id, local_case_id FROM submissions WHERE has_keys
     bind.execute(
         sa.insert(cases).from_select(
             ["submitter_id", "local_case_id"],
-            sa.select(submissions_link.c.submitter_id, submissions_link.c.pseudonym).where(has_keys).distinct(),
+            sa.select(submissions_link.c.submitter_id, submissions_link.c.local_case_id).where(has_keys).distinct(),
         )
     )
     # Scalar subquery, one per submissions row, that looks up the matching case's id:
     #   SELECT c.id FROM cases c
-    #   WHERE c.submitter_id = submissions.submitter_id AND c.local_case_id = submissions.pseudonym
+    #   WHERE c.submitter_id = submissions.submitter_id AND c.local_case_id = submissions.local_case_id
     matching_case_id = (
         sa.select(cases.c.id)
         .where(
             cases.c.submitter_id == submissions_link.c.submitter_id,
-            cases.c.local_case_id == submissions_link.c.pseudonym,
+            cases.c.local_case_id == submissions_link.c.local_case_id,
         )
         # mark `submissions_link` as coming from the enclosing UPDATE
         .correlate(submissions_link)

@@ -25,7 +25,7 @@ A case has three identifying columns, and they are not equally authoritative:
 
 Two naming traps are worth knowing before you read any query:
 
-- **`submissions.pseudonym` is not the `psn`.** That column holds the submitter's `localCaseId`. The quarterly report also uses it to stand in for the index donor, whose own `donorPseudonym` is the literal `"index"`.
+- **`Submission.pseudonym` is the case's `psn`, not a column.** It is read through `case_id` and stays empty until a psn is assigned. The submitter's `localCaseId` is `submissions.local_case_id`. The quarterly report keys the index donor on `local_case_id` until psns exist; the index donor's own `donorPseudonym` is the literal `"index"`.
 - **A redaction placeholder is not a case key.** Archived documents carry either an empty `localCaseId` or `REDACTED_LOCAL_CASE_ID`. Neither identifies a patient, so neither opens or resolves a case. Restore the submitter's value first when you work from an archived copy.
 
 `test` submissions are never case-tracked. Their `case_id` stays NULL permanently, and the `db case` commands refuse to link them.
@@ -42,7 +42,7 @@ With `--no-update-db`, nothing is written, so the check only logs a warning.
 
 ## Upgrading an existing database
 
-The cases migration adds the `cases` table and `submissions.case_id`, groups existing submissions by `(submitter_id, pseudonym)`, and creates one case per group.
+The cases migration renames `submissions.pseudonym` to `submissions.local_case_id`, adds the `cases` table and `submissions.case_id`, groups existing submissions by `(submitter_id, local_case_id)`, and creates one case per group.
 
 **Run the upgrade:**
 

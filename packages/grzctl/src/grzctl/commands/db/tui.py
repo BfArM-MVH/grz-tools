@@ -202,14 +202,15 @@ class SearchResultsDataTable(DataTable):
     def on_mount(self) -> None:
         self.loading = True
         self.cursor_type = "row"
-        self.add_columns("Submission ID", "Pseudonym", "Latest State", "State Timestamp (UTC)")
+        self.add_columns("Submission ID", "Pseudonym", "Local Case ID", "Latest State", "State Timestamp (UTC)")
 
     @textual.work
-    async def search(
+    async def search(  # noqa: PLR0913
         self,
         database: SubmissionDb,
         submission_id: str | None = None,
         pseudonym: str | None = None,
+        local_case_id: str | None = None,
         submitter_id: str | None = None,
         limit: int | None = None,
     ) -> None:
@@ -231,6 +232,8 @@ class SearchResultsDataTable(DataTable):
                 statement = statement.where(Submission.id == submission_id)
             if pseudonym:
                 statement = statement.where(Submission.pseudonym == pseudonym)
+            if local_case_id:
+                statement = statement.where(Submission.local_case_id == local_case_id)
             if submitter_id:
                 statement = statement.where(Submission.submitter_id == submitter_id)
             statement = statement.join(
@@ -253,6 +256,7 @@ class SearchResultsDataTable(DataTable):
             self.add_row(
                 submission.id,
                 submission.pseudonym,
+                submission.local_case_id,
                 latest_state.state if latest_state else rich.text.Text("missing", style="italic yellow"),
                 latest_state.timestamp if latest_state else rich.text.Text("missing", style="italic yellow"),
             )
@@ -302,10 +306,14 @@ class DatabaseBrowser(App):
                     # explicitly validate here because is_valid initializes to True and validation only automatically runs on change events
                     input_id.validate(input_id.value)
                     yield input_id
-                    input_pseudonym = Input(id="search-input-pseudonym", placeholder="CASE12345")
+                    input_pseudonym = Input(id="search-input-pseudonym", placeholder="RKI-000123")
                     input_pseudonym.border_title = "Pseudonym"
                     input_pseudonym.validate(input_pseudonym.value)
                     yield input_pseudonym
+                    input_local_case_id = Input(id="search-input-local-case-id", placeholder="CASE12345")
+                    input_local_case_id.border_title = "Local Case ID"
+                    input_local_case_id.validate(input_local_case_id.value)
+                    yield input_local_case_id
                     input_submitter = Input(
                         id="search-input-submitter", placeholder="123456789", validators=[Regex(r"^[0-9]{9}$")]
                     )
@@ -367,6 +375,9 @@ class DatabaseBrowser(App):
         input_pseudonym = self.query_exactly_one("#search-input-pseudonym", Input)
         pseudonym = input_pseudonym.value if input_pseudonym.is_valid else None
 
+        input_local_case_id = self.query_exactly_one("#search-input-local-case-id", Input)
+        local_case_id = input_local_case_id.value if input_local_case_id.is_valid else None
+
         input_submitter = self.query_exactly_one("#search-input-submitter", Input)
         submitter = input_submitter.value if input_submitter.is_valid else None
 
@@ -379,6 +390,7 @@ class DatabaseBrowser(App):
             database=self._database,
             submission_id=submission_id,
             pseudonym=pseudonym,
+            local_case_id=local_case_id,
             submitter_id=submitter,
             limit=limit,
         )
