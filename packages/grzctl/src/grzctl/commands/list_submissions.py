@@ -121,7 +121,7 @@ def _prepare_table(
 @click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
 @inbox_options
 @limit
-def list_submissions(  # noqa: PLR0913
+def list_submissions(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     output_json: bool,
     show_cleaned: bool,

@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
     default=True,
     help="Update the submission metadata with information from metadata.json and S3.",
 )
-def download(  # noqa: PLR0913
+def download(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_id: str,
     output_dir: str,
