@@ -4,6 +4,10 @@ definitions:
     access_key: ${GRZ_S3__ACCESS_KEY}
     secret: ${GRZ_S3__SECRET}
     private_key_path: /path/to/grz-default-inbox.sec
+    # If the inbox key is passphrase-protected, either set:
+    #   private_key_passphrase: ${GRZ_S3__PRIVATE_KEY_PASSPHRASE}
+    # or export the standard crypt4gh environment variable C4GH_PASSPHRASE
+    # (used as a fallback when private_key_passphrase is not set).
 
   - &default_archive_s3_connection
     endpoint_url: https://archive.s3.example.com

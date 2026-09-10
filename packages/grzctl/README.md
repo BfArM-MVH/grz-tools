@@ -36,3 +36,15 @@ it's easy to grant write while leaving abort ungranted (see
 instance), so verify abort works — or rely on a bucket lifecycle rule that
 deletes incomplete multipart uploads after a few days.
 
+## Sensitive configuration
+
+Secret values (S3 secret keys, session tokens, key passphrases, Prüfbericht
+client secret) are read from the environment and stored as Pydantic
+`SecretStr`.  They are never written back to YAML, commands that dump the
+config (e.g. `grzctl dump-config`) print `**********` instead.
+
+When a passphrase is not configured for a key, `grzctl process` falls back to
+the standard crypt4gh environment variable `C4GH_PASSPHRASE`.  If that is also
+unset, you will be prompted interactively.  Prefer an explicit `GRZ_...__PRIVATE_KEY_PASSPHRASE`
+environment variable (or the `private_key_passphrase` config key) for automated runs.
+
