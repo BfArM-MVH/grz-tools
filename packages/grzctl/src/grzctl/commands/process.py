@@ -158,7 +158,7 @@ def process(  # noqa: PLR0913
             if not db_service.get_submission(submission_id):
                 db_service.add_submission(submission_id)
         except (DuplicateSubmissionError, DuplicateTanGError):
-            log.warning(f"Submission '{submission_id}' already exists in the database.")
+            raise click.ClickException(f"Submission '{submission_id}' already exists in the database. Aborting.")
         except Exception as e:
             raise click.ClickException(f"Failed to add submission: {e}") from e
 
