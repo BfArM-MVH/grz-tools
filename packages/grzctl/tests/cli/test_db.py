@@ -17,7 +17,7 @@ import grzctl.cli
 import pytest
 import sqlalchemy
 import yaml
-from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionBase, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import FailureReasonEnum, SubmissionBase, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
 
@@ -44,9 +44,11 @@ def test_all_migrations(initial_revision_database_config_path):
     pseudonym = "CASE12345"
     submission_id = "123456789_2024-11-08_d0f805c5"
     engine = sqlalchemy.create_engine(config.db.database_url)
+    # the column is still called "pseudonym" at this revision; the cases migration renames it.
+    submissions = sqlalchemy.Table("submissions", sqlalchemy.MetaData(), autoload_with=engine)
     with engine.connect() as connection:
         connection.execute(
-            sqlalchemy.insert(Submission),
+            submissions.insert(),
             {"tan_g": tan_g, "pseudonym": pseudonym, "id": submission_id},
         )
         connection.execute(
@@ -133,7 +135,7 @@ def test_populate(migrated_database_config_path: Path, test_metadata_path: Path)
     db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
-    assert submission.pseudonym == metadata.submission.local_case_id
+    assert submission.local_case_id == metadata.submission.local_case_id
     assert submission.consented == metadata.consents_to_research(metadata.submission.submission_date)
 
     # check that the consent records were populated
@@ -246,7 +248,7 @@ def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_me
     )
     assert result_populate_s1.exit_code == 0, result_populate_s1.stderr
 
-    # second submission with same pseudonym from different submitter
+    # second submission with same local case ID from different submitter
     metadata_raw["submission"]["submitterId"] = "987654321"
     metadata_raw["submission"]["tanG"] = hashlib.sha256(rng.randbytes(128)).hexdigest()
     metadata_s2 = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
@@ -288,7 +290,7 @@ def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_me
             "--ignore-field",
             "tan_g",
             "--ignore-field",
-            "pseudonym",
+            "local_case_id",
             "--submission_date",
             changed_date.strftime("%Y-%m-%d"),
         ],
@@ -734,7 +736,8 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
     assert parsed == {
         "id": metadata.submission_id,
         "tan_g": metadata.submission.tan_g,
-        "pseudonym": metadata.submission.local_case_id,
+        "pseudonym": None,
+        "local_case_id": metadata.submission.local_case_id,
         "submission_uploaded_date": metadata.submission.submission_date.isoformat()
         if metadata.submission.submission_date
         else None,
@@ -742,6 +745,7 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
         "submission_type": metadata.submission.submission_type,
         "submission_metadata": metadata.to_redacted_dict(),
         "submitter_id": metadata.submission.submitter_id,
+        "case_id": None,  # the example is a test submission, which is never case-tracked
         "data_node_id": metadata.submission.genomic_data_center_id,
         "coverage_type": metadata.submission.coverage_type,
         "disease_type": metadata.submission.disease_type,
@@ -754,6 +758,45 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
         "genomic_study_subtype": metadata.submission.genomic_study_subtype,
         "states": [],
     }
+
+
+def test_list_and_show_expose_the_case_psn_and_the_local_case_id(migrated_database_config_path: Path):
+    """The linked case's psn (``pseudonym``) and the submitter's own ``local_case_id`` are
+    distinct fields, and both ``list --json`` and ``submission show`` must expose them.
+    """
+    args_common = ["--config", migrated_database_config_path, "db"]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    submission_id = "123456789_2025-01-01_0000000a"
+    local_case_id = "case-with-psn"
+    psn = "RKI-000999"
+
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+    for key, value in (("submission_type", "initial"), ("local_case_id", local_case_id)):
+        result_modify = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, key, value])
+        assert result_modify.exit_code == 0, result_modify.stderr
+
+    result_create = runner.invoke(cli, [*args_common, "case", "create", "123456789", local_case_id, "--psn", psn])
+    assert result_create.exit_code == 0, result_create.stderr
+    result_case_list = runner.invoke(cli, [*args_common, "case", "list", "--json"])
+    assert result_case_list.exit_code == 0, result_case_list.stderr
+    case_id = json.loads(result_case_list.stdout)[0]["id"]
+
+    result_relink = runner.invoke(cli, [*args_common, "case", "relink", submission_id, str(case_id)])
+    assert result_relink.exit_code == 0, result_relink.stderr
+
+    result_list = runner.invoke(cli, [*args_common, "list", "--json"])
+    assert result_list.exit_code == 0, result_list.stderr
+    listed = next(row for row in json.loads(result_list.stdout) if row["id"] == submission_id)
+    assert listed["pseudonym"] == psn
+    assert listed["local_case_id"] == local_case_id
+
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+    assert psn in result_show.stdout
+    assert local_case_id in result_show.stdout
 
 
 def _seed_state_histories(cli, args_common: list) -> SimpleNamespace:
@@ -1160,7 +1203,7 @@ def test_template_with_only_date_filled_in_still_fails(migrated_database_config_
 
 
 def test_change_request_template_for_other_change_types_includes_audit_fields():
-    """Audit fields are universal — every change type prints the same scaffold (with type-specific guidance)."""
+    """Audit fields are universal: every change type prints the same scaffold (with type-specific guidance)."""
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     result = runner.invoke(cli, ["change-request-template", "Modify"])
@@ -1176,14 +1219,14 @@ def test_change_request_validate_accepts_valid_input_without_config(tmp_path: Pa
     data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    # Note: no `db --config-file ...` — the command must work standalone.
+    # Note: no `db --config-file ...`; the command must work standalone.
     result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
     assert result.exit_code == 0, result.stderr
     assert "valid" in result.stderr.lower()
 
 
 def test_change_request_validate_rejects_unedited_template(tmp_path: Path):
-    """Saving the template and validating it unchanged must fail — the safety net still applies offline."""
+    """Saving the template and validating it unchanged must fail: the safety net still applies offline."""
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     template = runner.invoke(cli, ["change-request-template", "Delete"]).stdout
@@ -1315,7 +1358,7 @@ def test_change_request_dry_run_validates_before_db_check(migrated_database_conf
 
 
 def test_change_request_modify_requires_audit_fields_too(migrated_database_config_path: Path, tmp_path: Path):
-    """Audit fields are universal — Modify also requires them via --data/--data-file."""
+    """Audit fields are universal: Modify also requires them via --data/--data-file."""
     args_common = ["--config", migrated_database_config_path, "db"]
     submission_id = "260840108_2025-12-16_cc9973f0"
     runner = click.testing.CliRunner()
@@ -1686,24 +1729,21 @@ def test_submission_show_json_includes_failure_reason(migrated_database_config_p
 
 
 def test_modify_offers_exactly_the_keys_it_accepts():
-    """A key the command lists must be one it can honour.
-
-    The choices and the epilog were built from two different field sets, so `modify` offered
-    `id` and then died on a traceback when it was chosen.
-    """
+    """A key the command lists must be one it can honour."""
     from grzctl.commands.db.cli import _MODIFIABLE_SUBMISSION_KEYS
 
     assert set(_MODIFIABLE_SUBMISSION_KEYS) == SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields
 
 
-def test_modify_refuses_an_unofferable_key_with_a_usage_error(migrated_database_config_path):
+@pytest.mark.parametrize("key", ["case_id", "id"])
+def test_modify_refuses_an_unofferable_key_with_a_usage_error(migrated_database_config_path, key: str):
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
     args_common = ["--config", str(migrated_database_config_path), "db"]
     submission_id = "111111111_2025-01-01_0000000a"
     assert runner.invoke(cli, [*args_common, "submission", "add", submission_id]).exit_code == 0
 
-    result = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, "id", "1"])
+    result = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, key, "1"])
 
     assert result.exit_code == 2, result.output
     assert "An unexpected error occurred" not in result.output

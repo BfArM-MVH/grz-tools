@@ -430,7 +430,7 @@ def test_quarterly_migrated_database(migrated_database_config_path: Path, tmp_pa
     # add some minimal test data
     config = GrzctlConfig.from_path(migrated_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
-    pseudonym = "CASE12345"
+    local_case_id = "CASE12345"
     submission_date = date(year=2025, month=9, day=14)
     submitter_id = "123456789"
     submission_id = f"{submitter_id}_{submission_date.isoformat()}_d0f805c5"
@@ -440,7 +440,7 @@ def test_quarterly_migrated_database(migrated_database_config_path: Path, tmp_pa
             sqlalchemy.insert(Submission),
             {
                 "tan_g": tan_g,
-                "pseudonym": pseudonym,
+                "local_case_id": local_case_id,
                 "id": submission_id,
                 "submission_uploaded_date": submission_date,
                 "submission_type": "initial",
