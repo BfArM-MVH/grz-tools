@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import concurrent.futures
-import hashlib
 import json
 import logging
 import mmap
@@ -36,6 +35,7 @@ from ..models.identifiers import IdentifiersModel
 from ..pipeline.components import ReadStream, Tee, TqdmObserver
 from ..pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
+from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
 
 log = logging.getLogger(__name__)
@@ -61,13 +61,9 @@ class SubmissionMetadata:
         """
         self.file_path = metadata_file
         self.content = self._read_metadata(self.file_path)
-        self._checksum = self._calculate_metadata_checksum(self.file_path)
+        self._checksum = calculate_sha256(self.file_path, progress=False)
 
         self._files: dict | None = None
-
-    def _calculate_metadata_checksum(self, file_path: Path) -> str:
-        """Calculate SHA256 checksum of the metadata file."""
-        return hashlib.sha256(open(file_path, "rb").read(), usedforsecurity=False).hexdigest()
 
     @classmethod
     def _read_metadata(cls, file_path: Path) -> GrzSubmissionMetadata:
@@ -460,10 +456,10 @@ class Submission:
                 for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
                     checksum_issues = []
 
-                    for w in getattr(report, "warnings", []):
+                    for w in report.warnings:
                         self.__log.warning(f"{file_path.name}: {w}")
 
-                    report_sha256 = getattr(report, "sha256", None)
+                    report_sha256 = report.sha256
 
                     if not report_sha256:
                         checksum_issues.append("No checksum found.")
