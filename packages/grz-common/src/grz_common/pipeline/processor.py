@@ -654,7 +654,7 @@ class SubmissionProcessor:
             log.info("Interrogation config keep_failed is True. Leaving failed files in interrogation bucket.")
             return
 
-        log.info("Cleaning up interrogation bucket due to failure...")
+        log.warning("Cleaning up interrogation bucket due to failure...")
         for key in self._get_expected_keys(run_state):
             try:
                 run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
