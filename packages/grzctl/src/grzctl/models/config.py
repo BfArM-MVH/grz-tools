@@ -1,9 +1,9 @@
 import logging
-import sys
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
 
+import click
 import yaml
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
@@ -290,31 +290,30 @@ class GrzctlConfig(IgnoringBaseSettings):
         entry = self._le_by_id.get(submitter_id)
         if entry is None:
             available = ", ".join(self._describe_le(le_id, e) for le_id, e in self.leistungserbringer.items())
-            log.error(f"Submitter '{submitter_id}' not found. Available: {available}")
-            sys.exit(1)
+            raise click.ClickException(f"Submitter '{submitter_id}' not found. Available: {available}")
 
         if inbox_name is not None:
             if inbox_name not in entry.inbox_buckets:
                 available = ", ".join(entry.inbox_buckets.keys())
-                log.error(
+                raise click.ClickException(
                     f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(submitter_id, entry)}. "
                     f"Available: {available}"
                 )
-                sys.exit(1)
             bucket_name = inbox_name
         elif len(entry.inbox_buckets) == 1:
             bucket_name = next(iter(entry.inbox_buckets))
         else:
             available_buckets = ", ".join(entry.inbox_buckets.keys())
-            log.error(
+            raise click.ClickException(
                 f"Multiple inboxes found for {self._describe_le(submitter_id, entry)} "
                 f"({available_buckets}). Please specify --inbox."
             )
-            sys.exit(1)
 
         inbox_cfg = entry.inbox_buckets[bucket_name]
         bucket = inbox_cfg.bucket or bucket_name
+
         return InboxTarget(
             s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
-            **inbox_cfg.model_dump(include={"private_key_path", "private_key_passphrase"}),
+            private_key_path=inbox_cfg.private_key_path,
+            private_key_passphrase=inbox_cfg.private_key_passphrase,
         )

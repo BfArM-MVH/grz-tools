@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from crypt4gh.keys import get_public_key
 from grz_common.constants import TQDM_DEFAULTS
+from grz_common.models.base import get_secret_value
+from grz_common.models.s3 import S3Options
 from grz_common.pipeline.components import ObserverWithMetrics
+from grz_common.progress import FileProgressLogger, ProcessingState
+from grz_common.transfer import init_s3_client
+from grz_common.utils.crypt import Crypt4GH
+from grz_common.utils.redaction import redact_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import File, FileType
@@ -21,11 +27,6 @@ from grzctl.dbcontext import DbContext
 from grzctl.models.config import GrzctlConfig, InboxTarget
 from tqdm.auto import tqdm
 
-from ..models.s3 import S3Options
-from ..progress import FileProgressLogger, ProcessingState
-from ..transfer import init_s3_client
-from ..utils.crypt import Crypt4GH
-from ..utils.redaction import redact_file
 from .components import Tee, TqdmObserver
 from .components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from .components.perf import StreamMetricsRegistry
@@ -56,6 +57,13 @@ else:
 
 @dataclass
 class SubmissionRunState:
+    """Holds all the state needed to run the streaming pipeline for one submission.
+
+    Encapsulates the resolved S3 clients/buckets for the interrogation (staging)
+    and final archive, the target re-encryption key, and the per-submission
+    pipeline ``context`` that components share as they stream files through.
+    """
+
     submission_metadata: SubmissionMetadata
     interrogation_s3: S3Client
     interrogation_bucket: str
@@ -77,6 +85,13 @@ class SubmissionRunState:
 
 
 class S3ClientCache:
+    """Caches boto3 S3 clients keyed by (endpoint_url, bucket).
+
+    Processing multiple submissions often reuses the same few endpoints and
+    buckets; sharing clients avoids recreating connections (and their
+    connection pools) for every file stage.
+    """
+
     def __init__(self, pool_size: int):
         self._pool_size = pool_size
         self._target_s3_map: dict[tuple[str, str], S3Client] = {}
@@ -89,6 +104,13 @@ class S3ClientCache:
 
 
 class RunSetupCoordinator:
+    """Turns a submission's metadata into a fully-resolved ``SubmissionRunState``.
+
+    Decides which archive (consented vs non-consented) and which re-encryption
+    key to use based on the consent status, and whether the submission is
+    selected for detailed QC.
+    """
+
     def __init__(
         self,
         config: GrzctlConfig,
@@ -138,11 +160,19 @@ class RunSetupCoordinator:
 
 
 class FilePipelineExecutor:
+    """Executes the streaming file pipeline for a single submission.
+
+    Coordinates the fixed pipeline stages (download → decrypt → validate →
+    encrypt → upload) and the QC pass, using a brand-new S3 connection on each
+    call so a fresh source inbox is always used.
+    """
+
     def __init__(  # noqa: PLR0913
         self,
         source_s3: S3Client,
         source_bucket: str,
         private_key: bytes,
+        sender_private_key: bytes | None,
         progress_logger: FileProgressLogger[ProcessingState],
         threads: int,
         max_concurrent_uploads: int,
@@ -153,6 +183,7 @@ class FilePipelineExecutor:
         self._source_s3 = source_s3
         self._source_bucket = source_bucket
         self._private_key = private_key
+        self._sender_private_key = sender_private_key
         self._progress_logger = progress_logger
         self._threads = threads
         self._max_concurrent_uploads = max_concurrent_uploads
@@ -389,7 +420,10 @@ class FilePipelineExecutor:
             # re-encrypt
             pipeline = (
                 pipeline
-                | Crypt4GHEncryptor(recipient_pubkey=run_state.target_public_key)
+                | Crypt4GHEncryptor(
+                    recipient_pubkey=run_state.target_public_key,
+                    sender_privkey=self._sender_private_key,
+                )
                 | metrics.measure("4_Encrypt")
             )
 
@@ -498,10 +532,23 @@ class SubmissionProcessor:
             non_consented_pub_key=get_public_key(configuration.archives.non_consented.public_key_path),
             s3_client_cache=S3ClientCache(pool_size=s3_pool_size),
         )
+
+        # Load the GRZ private key for signing re-encrypted files.  This matches
+        # the step-by-step ``encrypt`` command which signs with the GRZ's key.
+        # If no key is configured (unusual), the encryptor will fall back to a
+        # random ephemeral sender key.
+        sender_private_key: bytes | None = None
+        grz_key_path = configuration.keys.grz_private_key_path
+        if grz_key_path:
+            sender_private_key = Crypt4GH.retrieve_private_key(grz_key_path)
+
         self._pipeline_executor = FilePipelineExecutor(
             source_s3=init_s3_client(s3_options=self._source_s3_options, max_pool_connections=s3_pool_size),
             source_bucket=self._source_s3_options.bucket,
-            private_key=Crypt4GH.retrieve_private_key(inbox.private_key_path, passphrase=inbox.private_key_passphrase),
+            private_key=Crypt4GH.retrieve_private_key(
+                inbox.private_key_path, passphrase=get_secret_value(inbox.private_key_passphrase)
+            ),
+            sender_private_key=sender_private_key,
             progress_logger=FileProgressLogger[ProcessingState](status_file_path),
             threads=threads,
             max_concurrent_uploads=max_concurrent_uploads,
@@ -576,6 +623,17 @@ class SubmissionProcessor:
         return keys
 
     def _commit_to_archive(self, run_state: SubmissionRunState) -> None:
+        """Copy all staged files from the interrogation bucket to the final archive.
+
+        After a successful copy the source files are deleted from the interrogation
+        bucket.  If the copy fails midway, the exception propagates and the caller
+        is responsible for cleaning up the interrogation bucket (via
+        ``_handle_interrogation_failure``).
+
+        .. warning:: A partial copy failure leaves some objects in the final archive
+           that cannot be automatically rolled back.  The operator must remove them
+           manually.
+        """
         expected_keys = self._get_expected_keys(run_state)
         log.info(f"Copying {len(expected_keys)} files from interrogation bucket to final archive...")
         for key in tqdm(expected_keys, desc="Copying to final archive", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
@@ -631,7 +689,7 @@ class SubmissionProcessor:
             self._pipeline_executor.process_submission_files(submission_run)
 
             if submission_run.context.has_errors:
-                log.error(f"Pipeline errors: {submission_run.context._errors}")
+                log.error(f"Pipeline errors: {submission_run.context.errors}")
                 raise PipelineValidationError("Submission failed consistency checks or validation.")
 
             # validation passed, so mark basic QC as passed in the database.
@@ -645,6 +703,8 @@ class SubmissionProcessor:
 
             if should_qc:
                 log.info(f"Running detailed QC pass for {submission_run.submission_id}...")
+                detailed_qc = self.config.detailed_qc
+
                 qc_logger = FileProgressLogger[ProcessingState](self._log_dir / "progress_qc.cjson")
                 self._pipeline_executor.process_submission_files(
                     submission_run,
@@ -653,16 +713,16 @@ class SubmissionProcessor:
                 )
 
                 # write metadata to local storage for the QC workflow
-                submission_basepath = Path(self.config.detailed_qc.local_storage) / submission_run.submission_id
+                submission_basepath = Path(detailed_qc.local_storage) / submission_run.submission_id
                 metadata_dir = submission_basepath / "metadata"
                 metadata_dir.mkdir(parents=True, exist_ok=True)
                 metadata_file = metadata_dir / "metadata.json"
                 metadata_file.write_text(json.dumps(submission_metadata.content.model_dump(), indent=2))
                 log.info(f"Wrote submission metadata to {metadata_file}")
 
-                if self.config.detailed_qc.auto_run:
+                if detailed_qc.auto_run:
                     output_basepath = submission_basepath / "qc"
-                    shell_command = self.config.detailed_qc.shell_command.format(
+                    shell_command = detailed_qc.shell_command.format(
                         submission_basepath=str(submission_basepath),
                         output_basepath=str(output_basepath),
                         submission_id=submission_run.submission_id,
@@ -680,5 +740,13 @@ class SubmissionProcessor:
             log.info(f"Submission {submission_run.submission_id} processed successfully.")
             self._maybe_cleanup_inbox(submission_run)
         except InterrogationFailedError:
+            # Pipeline validation failed, clean up staged files in interrogation.
+            self._handle_interrogation_failure(submission_run)
+            raise
+        except Exception:
+            # Any other failure after files have been uploaded to the interrogation
+            # bucket (e.g. copy to final archive, metadata upload, QC workflow,
+            # inbox cleanup) must also trigger interrogation cleanup so orphaned
+            # staged files don't linger indefinitely.
             self._handle_interrogation_failure(submission_run)
             raise

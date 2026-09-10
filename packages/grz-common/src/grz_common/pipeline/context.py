@@ -41,6 +41,12 @@ class SubmissionContext:
         with self._lock:
             return len(self._errors) > 0
 
+    @property
+    def errors(self) -> list[str]:
+        """Return a snapshot of all recorded error messages."""
+        with self._lock:
+            return list(self._errors)
+
 
 class ReadPairConsistencyValidator:
     def __init__(self, context: SubmissionContext, partner_map: dict[str, str]) -> None:

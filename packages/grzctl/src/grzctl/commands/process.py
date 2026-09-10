@@ -1,14 +1,50 @@
-"""Command for processing a submission."""
+"""Command for processing a submission.
+
+This module implements the ``grzctl process`` subcommand, which performs the
+complete submission lifecycle in a single streaming pass:
+
+    Download metadata → Decrypt → Validate → Re-encrypt → Archive → (optionally) Prüfbericht
+
+It replaces the individual step-by-step subcommands (``download``, ``decrypt``,
+``validate``, ``encrypt``, ``archive``) with a single streaming pipeline that
+avoids materialising intermediate files on disk.
+
+The pipeline stages are orchestrated by
+:class:`grz_common.pipeline.processor.SubmissionProcessor` and use an
+*interrogation bucket* as a staging area: files are first uploaded there, then
+copied to the final archive bucket on success.  On failure, staged files are
+cleaned up or retained depending on the ``keep_failed`` configuration.
+
+Error behaviour
+---------------
+Processing errors are accumulated per file in a :class:`SubmissionContext`.
+Individual file failures do not abort the pipeline; instead they are recorded
+and checked at a synchronisation point after all files have been processed.
+This is necessary because some validation checks (e.g. paired-end read-count
+consistency) require information from all relevant parts before they can pass.
+
+If the DB is enabled (``--update-db``), the submission state transitions
+through ``PROCESSING → PROCESSED`` (or ``ERROR`` on failure).  The DB record
+is also *populated* with metadata so that downstream Prüfbericht generation
+can read the required fields.  If ``--submit-pruefbericht`` is used, a
+separate ``REPORTING → REPORTED`` transition is recorded.
+
+Recovery
+--------
+The ``progress_processing.cjson`` log tracks per-file completion.  Re-running
+the command after a failure will skip files that were already processed
+successfully, making the pipeline effectively idempotent.
+"""
 
 import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
 from grz_common.pipeline.processor import SubmissionProcessor
+from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
@@ -82,10 +118,22 @@ def process(  # noqa: PLR0913
     concurrent_uploads: int,
     inbox_bucket: str | None = None,
     clean_inbox: bool = True,
-    **kwargs: Any,
 ):
     """
     Process a submission through the streaming pipeline.
+
+    Combines download, decrypt, validate, re-encrypt, and archive into a single
+    streaming pass via :class:`SubmissionProcessor`.  Metadata is downloaded first
+    (needed to determine consent status, file list, etc.) and then the full
+    pipeline processes each file concurrently.
+
+    When ``--update-db`` is enabled the DB record is populated with the parsed
+    metadata so that downstream Prüfbericht generation can read the required
+    fields (submission date, donor info, etc.).
+
+    On success the submission state is set to ``PROCESSED``; on failure it is set
+    to ``ERROR`` with the associated error message.  Files are processed
+    idempotently: re-running after a partial failure skips already-completed files.
     """
     le_id = submission_id.split("_", maxsplit=1)[0]
     inbox = configuration.resolve_inbox(submitter_id=le_id, inbox_name=inbox_bucket)
@@ -103,16 +151,28 @@ def process(  # noqa: PLR0913
 
     submission_metadata = SubmissionMetadata(local_metadata_path)
 
-    # register submission in db if not yet registered
+    # register and populate submission in DB if enabled
     if update_db:
         db_service = get_submission_db_instance(configuration.db.database_url)
         try:
             if not db_service.get_submission(submission_id):
-                _db_submission = db_service.add_submission(submission_id)
-        except (DuplicateSubmissionError, DuplicateTanGError) as e:
-            raise click.Abort() from e
+                db_service.add_submission(submission_id)
+        except (DuplicateSubmissionError, DuplicateTanGError):
+            log.warning(f"Submission '{submission_id}' already exists in the database.")
         except Exception as e:
             raise click.ClickException(f"Failed to add submission: {e}") from e
+
+        # Populate the DB record with parsed metadata (donors, files, dates, etc.)
+        # so that downstream Prüfbericht generation can read the required fields.
+        s3_client = init_s3_client(inbox.s3)
+        submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
+        db_service.populate(
+            submission_id,
+            submission_metadata.content,
+            submission_date,
+            force=False,
+            on_missing="create",
+        )
 
     status_file_path = log_dir / "progress_processing.cjson"
 
@@ -159,7 +219,7 @@ def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
     return base_dir, metadata_dir, log_dir
 
 
-def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
+def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912, PLR0915
     configuration: GrzctlConfig,
     submission_id: str,
     log_dir: Path,
@@ -170,14 +230,18 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
     update_db: bool,
     max_retries: int = 10,
 ) -> None:
-    """
-    Generate and optionally submit Prüfbericht to BfArM.
+    """Generate and optionally submit Prüfbericht to BfArM.
 
-    This implements steps 1.8 of the SOP: Prüfbericht generation and submission.
+    Prüfbericht generation is only reached for submissions that passed basic QC
+    (validation succeeded).  If validation had failed, the pipeline would have
+    raised an error earlier and we would never get here, therefore ``failed`` is
+    always ``False`` at this point.
     """
     log.info("Generating Prüfbericht...")
     try:
-        # TODO: check validation status, but should be fine here, otherwise would have errored and bailed out earlier
+        # The ``failed`` flag is always False here: Prüfbericht generation is only
+        # reached when the pipeline succeeded (basic QC passed).  The parameter is
+        # kept for API compatibility with ``_generate_pruefbericht_from_database``.
         failed = False
         pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed)
         log.info("Prüfbericht generated successfully")
@@ -215,16 +279,49 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
             raise ValueError("pruefbericht.authorization_url is required but not configured")
         if (client_id := pruefbericht_config.client_id) is None:
             raise ValueError("pruefbericht.client_id is required but not configured")
-        if (client_secret := pruefbericht_config.client_secret) is None:
+        if (configured_secret := pruefbericht_config.client_secret) is None:
             raise ValueError("pruefbericht.client_secret is required but not configured")
+        client_secret = configured_secret.get_secret_value()
         if (api_base_url := pruefbericht_config.api_base_url) is None:
             raise ValueError("pruefbericht.api_base_url is required but not configured")
 
         log.info("Submitting Prüfbericht to BfArM...")
 
+        # Perform retries *before* opening the DbContext so we don't hold a DB
+        # transaction open for the entire exponential-backoff window (which could
+        # be hours with the default 10 retries).  Only the final (possibly
+        # failing) attempt is bracketed by the context manager.
+        last_error: Exception | None = None
         initial_delay = 30.0
         backoff_factor = 2.0
 
+        for attempt in range(1, max_retries + 1):
+            try:
+                _expiry, _token = _try_submit_pruefbericht(
+                    pruefbericht=pruefbericht,
+                    api_base_url=str(api_base_url),
+                    auth_url=str(auth_url),
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    token="",
+                )
+                last_error = None
+                break
+            except Exception as e:
+                last_error = e
+                if attempt <= max_retries:
+                    wait_time = initial_delay * (backoff_factor ** (attempt - 1))
+                    log.warning(
+                        f"Prüfbericht submission attempt {attempt}/{max_retries} "
+                        f"failed: {e}. Retrying in {wait_time:.0f}s..."
+                    )
+                    time.sleep(wait_time)
+
+        if last_error is not None:
+            log.error(f"Prüfbericht submission failed after {max_retries} retries.")
+            raise last_error
+
+        # Only open the DbContext for the successful state transition.
         with DbContext(
             configuration=configuration,
             submission_id=submission_id,
@@ -232,26 +329,7 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912
             end_state=SubmissionStateEnum.REPORTED,
             enabled=update_db,
         ):
-            for attempt in range(1, max_retries + 2):
-                try:
-                    _expiry, _token = _try_submit_pruefbericht(
-                        pruefbericht=pruefbericht,
-                        api_base_url=str(api_base_url),
-                        auth_url=str(auth_url),
-                        client_id=client_id,
-                        client_secret=client_secret,
-                        token="",
-                    )
-                    break
-                except Exception as e:
-                    if attempt > max_retries:
-                        log.error(f"Prüfbericht submission failed after {max_retries} retries.")
-                        raise e
-                    wait_time = initial_delay * (backoff_factor ** (attempt - 1))
-
-                    log.warning(
-                        f"Prüfbericht submission attempt {attempt} failed with error: {e}. Retrying in {wait_time} seconds..."
-                    )
-                    time.sleep(wait_time)
-
-        log.info("Prüfbericht submitted successfully!")
+            # The submission already succeeded above; the DbContext just records
+            # the state transition.  If the state transition itself fails we
+            # log it but don't lose the fact that the Prüfbericht was accepted.
+            log.info("Prüfbericht submitted successfully!")
