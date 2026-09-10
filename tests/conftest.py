@@ -569,8 +569,10 @@ def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitt
 @pytest.fixture
 def aws_credentials(s3_config_model):
     """Mocked AWS Credentials for moto."""
+    from grz_common.models.base import get_secret_value
+
     os.environ["AWS_ACCESS_KEY_ID"] = s3_config_model.s3.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = s3_config_model.s3.secret
+    os.environ["AWS_SECRET_ACCESS_KEY"] = get_secret_value(s3_config_model.s3.secret)
     os.environ["MOTO_ALLOW_NONEXISTENT_REGION"] = "1"
     with mock_aws():
         yield

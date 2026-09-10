@@ -1,7 +1,7 @@
 from typing import Annotated, Self
 
 from grz_common.models.base import IgnoringBaseSettings
-from pydantic import Field, FilePath, model_validator
+from pydantic import Field, FilePath, SecretStr, model_validator
 
 # No whitespace (\s)
 # No control characters (\x00-\x1f and \x7f)
@@ -25,7 +25,7 @@ class Author(IgnoringBaseSettings):
     private_key_path: FilePath | None = None
     """Path to the author's private key (needed to sign DB modifications)."""
 
-    private_key_passphrase: str | None = None
+    private_key_passphrase: SecretStr | None = None
     """Passphrase to author's private key (should almost always be provided in an environment variable)"""
 
     @model_validator(mode="after")

@@ -14,6 +14,7 @@ import click.testing
 import grzctl.cli
 import pytest
 import yaml
+from grz_common.models.base import get_secret_value
 from grzctl.models.config import GrzctlConfig
 from moto import mock_aws
 
@@ -699,7 +700,7 @@ class TestConfigValidation:
 
         config = GrzctlConfig.from_configuration(raw_dict)
         entry = config.leistungserbringer[le_id]
-        assert entry.inbox_buckets[bucket_name].private_key_passphrase == "dotenv-secret-passphrase"
+        assert get_secret_value(entry.inbox_buckets[bucket_name].private_key_passphrase) == "dotenv-secret-passphrase"
 
     def test_pydantic_json_env_var_merging(self, tmp_path: Path, monkeypatch, process_config_content: dict):
         le_id = "260914050"
@@ -738,4 +739,4 @@ class TestConfigValidation:
 
         config = GrzctlConfig.from_configuration(raw_dict)
         entry = config.leistungserbringer[le_id]
-        assert entry.inbox_buckets[bucket_name].private_key_passphrase == "json-secret-passphrase"
+        assert get_secret_value(entry.inbox_buckets[bucket_name].private_key_passphrase) == "json-secret-passphrase"

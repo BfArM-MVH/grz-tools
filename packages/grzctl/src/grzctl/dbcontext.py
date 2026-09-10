@@ -10,6 +10,7 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
+from grz_common.models.base import get_secret_value
 from grz_db.errors import DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
@@ -197,7 +198,7 @@ class DbContext:
         return Author(
             name=db_config.author.name,
             private_key_bytes=key_path.read_bytes(),
-            private_key_passphrase=db_config.author.private_key_passphrase,
+            private_key_passphrase=get_secret_value(db_config.author.private_key_passphrase),
         )
 
     def _map_exception_to_failure_reason(
