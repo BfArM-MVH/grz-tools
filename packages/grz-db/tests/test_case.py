@@ -22,6 +22,7 @@ from grz_db.errors import (
 )
 from grz_db.models.submission import (
     PsnResolver,
+    Submission,
     SubmissionDb,
     SubmissionType,
     UnlinkedReason,
@@ -31,6 +32,7 @@ from grz_db.models.submission import (
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, GrzSubmissionMetadata
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import select
 
 SUBMITTER_A = "111111111"
 SUBMITTER_B = "222222222"
@@ -756,20 +758,20 @@ def test_diff_skips_case_link_when_case_id_ignored(db: SubmissionDb, metadata: G
     assert changes.case_link is None
 
 
-def test_diff_links_case_while_pseudonym_column_stays_ignored(db: SubmissionDb, metadata: GrzSubmissionMetadata):
-    """Ignoring the pseudonym skips the column write but not case resolution."""
+def test_diff_links_case_while_local_case_id_column_stays_ignored(db: SubmissionDb, metadata: GrzSubmissionMetadata):
+    """Ignoring the local case ID skips the column write but not case resolution."""
     initial_metadata = _with_submission_type(metadata, "initial")
     submission_id = initial_metadata.submission_id
     db.add_submission(submission_id)
 
-    changes = db.diff(submission_id, initial_metadata, submission_uploaded_date=None, ignore_fields={"pseudonym"})
+    changes = db.diff(submission_id, initial_metadata, submission_uploaded_date=None, ignore_fields={"local_case_id"})
     assert changes.case_link is not None
-    assert all(d.key != "pseudonym" for d in changes.fields.pending)
+    assert all(d.key != "local_case_id" for d in changes.fields.pending)
 
     db.commit_changes(submission_id, changes)
     submission = db.get_submission(submission_id)
     assert submission is not None and submission.case_id is not None
-    assert submission.pseudonym is None
+    assert submission.local_case_id is None
 
 
 def test_linked_failed_initial_resolves_without_error(db: SubmissionDb):
@@ -872,7 +874,7 @@ def _reuse_key_across_patients(
         sid = _sid(submitter_id, suffix)
         _add(db, sid, SubmissionType.initial)
         db.modify_submission(sid, "submitter_id", submitter_id)
-        db.modify_submission(sid, "pseudonym", local_case_id)
+        db.modify_submission(sid, "local_case_id", local_case_id)
         _record_basic_qc(db, sid, True)
 
 
@@ -906,7 +908,7 @@ def test_a_retry_that_failed_basic_qc_does_not_make_a_key_untrusted(db: Submissi
         sid = _sid(SUBMITTER_A, suffix)
         _add(db, sid, SubmissionType.initial)
         db.modify_submission(sid, "submitter_id", SUBMITTER_A)
-        db.modify_submission(sid, "pseudonym", "caseX")
+        db.modify_submission(sid, "local_case_id", "caseX")
         _record_basic_qc(db, sid, qc_passed)
 
     followup = _sid(SUBMITTER_A, "000000f3")
@@ -957,7 +959,7 @@ def test_no_duplicate_initial_is_reported_for_a_key_reused_across_patients(db: S
         if sid != linked:
             _add(db, sid, SubmissionType.initial)
         db.modify_submission(sid, "submitter_id", SUBMITTER_A)
-        db.modify_submission(sid, "pseudonym", "ready")
+        db.modify_submission(sid, "local_case_id", "ready")
         _record_basic_qc(db, sid, True)
 
     # without the guard the newcomer would resolve to this case and be failed for its sake
@@ -1246,7 +1248,7 @@ def test_joining_a_full_case_names_the_index_that_rejected_the_link(
 
 
 def test_assign_case_names_the_psn_that_rejected_the_case_it_opened(db: SubmissionDb):
-    """Opening a case carries the pseudonym, so the psn index can reject the write that opens it.
+    """Opening a case carries the local case ID, so the psn index can reject the write that opens it.
 
     Only the insert can break that index; the link that follows writes ``submissions.case_id``
     and nothing a case is keyed on.
@@ -1375,7 +1377,7 @@ def test_assert_no_duplicate_initial_does_not_swallow_a_resolution_failure(db: S
 def _keyed(db: SubmissionDb, submission_id: str, submitter_id: str, local_case_id: str) -> None:
     """Give a submission the resolution key halves without linking it to a case."""
     db.modify_submission(submission_id, "submitter_id", submitter_id)
-    db.modify_submission(submission_id, "pseudonym", local_case_id)
+    db.modify_submission(submission_id, "local_case_id", local_case_id)
 
 
 def test_list_ambiguous_case_keys_reports_a_key_reused_across_patients(db: SubmissionDb):
@@ -1531,3 +1533,39 @@ def test_needs_operator_covers_every_member():
         UnlinkedReason.INCOMPLETE_KEY,
         UnlinkedReason.KEY_NAMES_SEVERAL_PATIENTS,
     }
+
+
+def test_submission_pseudonym_is_the_linked_case_psn(db: SubmissionDb):
+    """``Submission.pseudonym`` reads the linked case's ``psn``, or ``None`` when the submission
+    carries no case.
+    """
+    linked = _sid(SUBMITTER_A, "0000cc01")
+    _add(db, linked, SubmissionType.initial)
+    db.assign_case(
+        linked,
+        submitter_id=SUBMITTER_A,
+        local_case_id="caseX",
+        psn="RKI-000123",
+        submission_type=SubmissionType.initial,
+    )
+
+    unlinked = _sid(SUBMITTER_A, "0000cc02")
+    _add(db, unlinked, SubmissionType.initial)
+
+    assert db.get_submission(linked).pseudonym == "RKI-000123"
+    assert db.get_submission(unlinked).pseudonym is None
+
+    with db.transaction() as session:
+        matches = session.exec(select(Submission).where(Submission.pseudonym == "RKI-000123")).all()
+    assert [s.id for s in matches] == [linked]
+
+    # the case is loaded with the row, so a row read outside its session still answers
+    with db.transaction() as session:
+        bare = session.exec(select(Submission).where(Submission.id == linked)).one()
+    assert bare.pseudonym == "RKI-000123"
+
+    # a relink reports the new case's psn on the row it returns, not the one loaded before
+    other = db.create_case(submitter_id=SUBMITTER_A, local_case_id="caseY", psn="RKI-000124")
+    assert other.id is not None
+    assert db.set_submission_case(linked, other.id).pseudonym == "RKI-000124"
+    assert db.clear_submission_case(linked).pseudonym is None

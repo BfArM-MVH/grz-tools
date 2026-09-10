@@ -562,6 +562,7 @@ def list_submissions(
     table.add_column("ID", style="dim", min_width=29, width=29)
     table.add_column("tanG", style="cyan")
     table.add_column("Pseudonym", style="magenta")
+    table.add_column("Local Case ID", style="magenta")
     table.add_column("Latest State", style="green")
     table.add_column("Last State Timestamp (UTC)", style="yellow")
     table.add_column("Data Steward")
@@ -600,6 +601,7 @@ def list_submissions(
                 submission.id,
                 submission.tan_g[:8] + "…" if submission.tan_g is not None else _TEXT_MISSING,
                 submission.pseudonym if submission.pseudonym is not None else _TEXT_MISSING,
+                submission.local_case_id if submission.local_case_id is not None else _TEXT_MISSING,
                 latest_state_str,
                 latest_timestamp_str,
                 author_name_str,
@@ -630,6 +632,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
     table.add_column("ID", style="dim", width=12)
     table.add_column("tanG", style="cyan")
     table.add_column("Pseudonym", style="magenta")
+    table.add_column("Local Case ID", style="magenta")
     table.add_column("Change", style="green")
     table.add_column("Last State Timestamp (UTC)", style="yellow")
     table.add_column("Data Steward")
@@ -661,6 +664,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                     submission.id,
                     submission.tan_g[:8] + "…" if submission.tan_g is not None else _TEXT_MISSING,
                     submission.pseudonym if submission.pseudonym is not None else _TEXT_MISSING,
+                    submission.local_case_id if submission.local_case_id is not None else _TEXT_MISSING,
                     latest_change_str,
                     latest_timestamp_str,
                     author_name_str,
@@ -760,6 +764,7 @@ def _build_submission_dict_from(
         "id": submission.id,
         "tan_g": submission.tan_g,
         "pseudonym": submission.pseudonym,
+        "local_case_id": submission.local_case_id,
         "latest_state": None,
     }
     if log_obj:
@@ -1068,7 +1073,7 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
         raise ValueError(
             f"Refusing to populate a seemingly-redacted submission: {e} "
             f"(from {metadata_path}). "
-            "Add 'tan_g'/'pseudonym' to --ignore-field to bypass, "
+            "Add 'tan_g'/'local_case_id' to --ignore-field to bypass, "
             "or use 'grzctl db submission modify' directly."
         ) from e
 
@@ -1411,6 +1416,7 @@ def _build_attribute_table(submission: Submission, research_consented_now: bool 
     for label, attr_name in (
         ("tanG", "tan_g"),
         ("Pseudonym", "pseudonym"),
+        ("Local Case ID", "local_case_id"),
         ("Submission Uploaded Date", "submission_uploaded_date"),
         ("Submission Size", "submission_size"),
         ("Submission Type", "submission_type"),
@@ -1451,6 +1457,8 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
 
     if output_json:
         submission_dict = submission.model_dump(mode="json")
+        # the case's psn is a hybrid property, not a field, so model_dump leaves it out
+        submission_dict["pseudonym"] = submission.pseudonym
         submission_dict["research_consented_now"] = research_consented_now
         submission_dict["states"] = []
 

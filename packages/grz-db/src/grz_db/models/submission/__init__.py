@@ -40,9 +40,10 @@ from grz_pydantic_models.submission.metadata import (
 )
 from grz_pydantic_models.submission.metadata.v1 import Donor as MetadataDonor
 from pydantic import ConfigDict, field_serializer, field_validator, model_validator
-from sqlalchemy import JSON, BigInteger, Column, Enum
+from sqlalchemy import JSON, BigInteger, Column, ColumnElement, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import selectinload
 from sqlmodel import DateTime, Field, Relationship, Session, SQLModel, create_engine, select
 
@@ -153,7 +154,7 @@ class SubmissionBase(SQLModel):
 
     id: str
     tan_g: Tan | None = Field(default=None, unique=True, index=True, alias="tanG")
-    pseudonym: str | None = Field(default=None, index=True)
+    local_case_id: str | None = Field(default=None, index=True)
 
     # fields from Prüfbericht
     submission_uploaded_date: datetime.date | None = None
@@ -181,16 +182,15 @@ class SubmissionBase(SQLModel):
     )
 
 
-# The submitter's local case ID is stored in the pseudonym column; ``tan_g``, the other
-# redacted field, is named the same on both sides.
-_METADATA_FIELD_TO_COLUMN = {"local_case_id": "pseudonym"}
-
-
 class Submission(SubmissionBase, table=True):
     """Submission table model."""
 
     __tablename__ = "submissions"
     __table_args__ = {"extend_existing": True}
+
+    # ``pseudonym`` below is a hybrid_property, a descriptor rather than a field; pydantic
+    # rejects an unannotated class attribute unless its type is listed here.
+    model_config = ConfigDict(ignored_types=(hybrid_property,))  # type: ignore[assignment]
 
     id: str = Field(primary_key=True, index=True)
 
@@ -212,7 +212,24 @@ class Submission(SubmissionBase, table=True):
 
     changes: list["ChangeRequestLog"] = Relationship(back_populates="submission")
 
-    case: Optional["Case"] = Relationship(back_populates="submissions")
+    # Loaded with the row: ``pseudonym`` reads it, and callers read that on rows returned after
+    # their session has closed. A join on the primary key, so it costs no extra round trip.
+    case: Optional["Case"] = Relationship(back_populates="submissions", sa_relationship_kwargs={"lazy": "joined"})
+
+    @hybrid_property
+    def pseudonym(self) -> str | None:
+        """The RKI pseudonym of the case this submission is linked to.
+
+        ``None`` while the submission has no case or the case has no ``psn`` yet. Not a column:
+        a psn identifies the patient, so it lives once on :class:`Case`, and this reads it
+        through the ``case`` relationship, which is loaded with the row.
+        """
+        return self.case.psn if self.case is not None else None
+
+    @pseudonym.inplace.expression
+    @classmethod
+    def _pseudonym_expression(cls) -> ColumnElement[str | None]:
+        return select(Case.psn).where(Case.id == cls.case_id).scalar_subquery()
 
     def diff(
         self,
@@ -280,7 +297,7 @@ class Submission(SubmissionBase, table=True):
                 "disease_type": metadata.submission.disease_type,
                 "genomic_study_type": metadata.submission.genomic_study_type,
                 "genomic_study_subtype": metadata.submission.genomic_study_subtype,
-                "pseudonym": metadata.submission.local_case_id,
+                "local_case_id": metadata.submission.local_case_id,
                 "data_node_id": metadata.submission.genomic_data_center_id,
                 "consented": metadata.consents_to_research(date=metadata_submission_date),
                 "submission_size": metadata.get_submission_size(),
@@ -302,8 +319,7 @@ class Submission(SubmissionBase, table=True):
             Pass these to :meth:`SubmissionDb.diff` as ``ignore_fields`` so that a
             placeholder is never written.
         """
-        unrestored = metadata.restore_redacted_fields(tan_g=self.tan_g, local_case_id=self.pseudonym)
-        return frozenset(_METADATA_FIELD_TO_COLUMN.get(field, field) for field in unrestored)
+        return metadata.restore_redacted_fields(tan_g=self.tan_g, local_case_id=self.local_case_id)
 
 
 class Case(SQLModel, table=True):
@@ -314,7 +330,8 @@ class Case(SQLModel, table=True):
     resolution keys used to locate the case before a ``psn`` exists, not the authoritative identity
     themselves. The partial unique index ``ux_cases_submitter_local_case`` keeps the pair unique
     wherever both halves are present; neither is required, since a future flow may resolve a case
-    by ``psn`` alone (with ``local_case_id`` absent).
+    by ``psn`` alone (with ``local_case_id`` absent). A linked submission exposes the case's
+    ``psn`` as :attr:`Submission.pseudonym`.
     """
 
     # Without this a table model takes any value its annotations forbid, so a mistyped
@@ -424,7 +441,7 @@ class UnlinkedSubmission:
     :param submission_id: ID of the unlinked submission.
     :param submitter_id: Submitter half of the resolution key, if the row carries one.
     :param local_case_id: Submitter-local case identifier half, held in the
-        ``submissions.pseudonym`` column. ``None`` when absent or still a redaction
+        ``submissions.local_case_id`` column. ``None`` when absent or still a redaction
         placeholder, since neither can key a case.
     :param submission_type: Type of the submission, or ``None`` before it is populated.
     :param reason: Why no case is linked.
@@ -477,7 +494,7 @@ def case_key_denotes_one_patient(session: Session, submitter_id: str | None, loc
     :param session: Transaction to read in.
     :param submitter_id: Submitter identifier half of the key.
     :param local_case_id: Submitter-local case identifier half of the key, held in the
-        ``submissions.pseudonym`` column.
+        ``submissions.local_case_id`` column.
     :returns: ``False`` only when more than one QC-passed ``initial`` submission carries this key.
     """
     qc_passed_initials = session.exec(
@@ -485,7 +502,7 @@ def case_key_denotes_one_patient(session: Session, submitter_id: str | None, loc
         .select_from(Submission)  # type: ignore[arg-type]
         .where(
             Submission.submitter_id == submitter_id,
-            Submission.pseudonym == local_case_id,
+            Submission.local_case_id == local_case_id,
             Submission.submission_type == SubmissionType.initial,
             Submission.basic_qc_passed.is_(True),  # type: ignore[union-attr]
         )
@@ -1539,18 +1556,18 @@ class SubmissionDb:
         rows = session.exec(
             select(
                 Submission.submitter_id,
-                Submission.pseudonym,
+                Submission.local_case_id,
                 qc_passed_initials.label("qc_passed_initials"),
                 sqlfn.count(Submission.id).label("submissions"),  # type: ignore[arg-type]
             )
             .where(
                 Submission.submitter_id.is_not(None),  # type: ignore[union-attr]
-                Submission.pseudonym.is_not(None),  # type: ignore[union-attr]
-                Submission.pseudonym.not_in(LOCAL_CASE_ID_PLACEHOLDERS),  # type: ignore[union-attr]
+                Submission.local_case_id.is_not(None),  # type: ignore[union-attr]
+                Submission.local_case_id.not_in(LOCAL_CASE_ID_PLACEHOLDERS),  # type: ignore[union-attr]
             )
-            .group_by(Submission.submitter_id, Submission.pseudonym)  # type: ignore[arg-type]
+            .group_by(Submission.submitter_id, Submission.local_case_id)  # type: ignore[arg-type]
             .having(qc_passed_initials > 1)
-            .order_by(Submission.submitter_id, Submission.pseudonym)  # type: ignore[arg-type]
+            .order_by(Submission.submitter_id, Submission.local_case_id)  # type: ignore[arg-type]
         ).all()
         return [
             AmbiguousCaseKey(
@@ -1602,7 +1619,7 @@ class SubmissionDb:
 
             unlinked = []
             for submission in submissions:
-                local_case_id = submission.pseudonym
+                local_case_id = submission.local_case_id
                 keyable = bool(submission.submitter_id) and not is_redacted_local_case_id(local_case_id)
                 if submission.submission_type is None:
                     reason = UnlinkedReason.TYPE_UNKNOWN
@@ -1777,7 +1794,7 @@ class SubmissionDb:
             case = session.get(Case, case_id)
             if case is None:
                 raise CaseNotFoundError(case_id)
-            submission.case_id = case_id
+            submission.case = case
             session.add(submission)
             with self._translating_conflicts(session, case_id=case_id):
                 session.flush()
@@ -1805,7 +1822,7 @@ class SubmissionDb:
             submission = session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
-            submission.case_id = None
+            submission.case = None
             session.add(submission)
             session.flush()
             return submission
@@ -1945,7 +1962,7 @@ class SubmissionDb:
 
             # Linking is a write in its own right: whether the case was found or created by
             # whoever won the race to create it, it may already hold the initial slot.
-            submission.case_id = case.id
+            submission.case = case
             active_session.add(submission)
             with self._translating_conflicts(active_session, case_id=case.id):
                 active_session.flush()
@@ -2500,7 +2517,7 @@ class SubmissionDb:
         Checks ``tan_g`` against :data:`REDACTED_TAN` and ``local_case_id``
         against :func:`is_redacted_local_case_id`. Each check can be
         bypassed by including the corresponding key in ``ignore_fields``:
-        ``"tan_g"`` bypasses the redacted-TAN check; ``"pseudonym"`` bypasses
+        ``"tan_g"`` bypasses the redacted-TAN check; ``"local_case_id"`` bypasses
         the missing/redacted-``local_case_id`` check.
 
         :param metadata: Parsed submission metadata.
@@ -2512,7 +2529,7 @@ class SubmissionDb:
         ignore_fields = ignore_fields or set()
         if metadata.submission.tan_g == REDACTED_TAN and "tan_g" not in ignore_fields:
             raise ValueError(f"Submission {submission_id} has redacted tan_g in metadata.")
-        if is_redacted_local_case_id(metadata.submission.local_case_id) and "pseudonym" not in ignore_fields:
+        if is_redacted_local_case_id(metadata.submission.local_case_id) and "local_case_id" not in ignore_fields:
             raise ValueError(f"Submission {submission_id} has missing or redacted local_case_id in metadata.")
 
     def populate(  # noqa: PLR0913
@@ -2530,7 +2547,7 @@ class SubmissionDb:
 
         Rejects redacted ``tan_g`` or missing/redacted ``local_case_id`` via
         :meth:`assert_metadata_not_redacted` unless the corresponding key
-        (``"tan_g"`` or ``"pseudonym"``) is in ``ignore_fields``. Computes diffs
+        (``"tan_g"`` or ``"local_case_id"``) is in ``ignore_fields``. Computes diffs
         via :meth:`diff`, rejects destructive changes unless ``force``, and
         commits via :meth:`commit_changes`. Operational progress is logged via
         the module-level logger; callers configure verbosity through

@@ -410,7 +410,7 @@ def test_case_json_survives_a_coloured_environment(migrated_database_config_path
 def _keyed_submission(cli, config_path: Path, submission_id: str, submitter_id: str, local_case_id: str) -> None:
     """Add a submission carrying a resolution key but no case, as the cases migration leaves it."""
     assert _invoke(cli, config_path, "submission", "add", submission_id).exit_code == 0
-    for key, value in (("submitter_id", submitter_id), ("pseudonym", local_case_id)):
+    for key, value in (("submitter_id", submitter_id), ("local_case_id", local_case_id)):
         result = _invoke(cli, config_path, "submission", "modify", submission_id, key, value)
         assert result.exit_code == 0, result.stderr
 

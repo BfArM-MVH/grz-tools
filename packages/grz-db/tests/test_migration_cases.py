@@ -1,7 +1,7 @@
 """Backfill coverage for the cases migration (f8c1a4b7e2d9).
 
 Seeds submissions at the revision just before the cases migration, upgrades, and asserts that the
-backfill groups by ``(submitter_id, pseudonym)``, stores the keys on the case, links submissions,
+backfill groups by ``(submitter_id, local_case_id)``, stores the keys on the case, links submissions,
 keeps distinct submitters apart, and leaves unkeyable rows unlinked. Also asserts that a key
 shared by more than one QC-passed 'initial' submission is left unlinked in full rather than
 merged, and that the migration extends the PostgreSQL ``failurereasonenum`` type with
@@ -37,8 +37,10 @@ def test_cases_backfill_groups_by_submitter_and_local_case(db_test_connection: s
     empty_pseudonym = "111111111_2025-01-06_00000008"
     test_type = "111111111_2025-01-07_00000009"
 
-    # Spelled out rather than imported, mirroring the migration's own frozen PSEUDONYM_NON_KEYS:
-    # a later rename in grz_pydantic_models must not silently start passing this test.
+    # Spelled out rather than imported, mirroring the migration's own frozen LOCAL_CASE_ID_NON_KEYS:
+    # a later rename in grz_pydantic_models must not silently start passing this test. The seeds
+    # below use "pseudonym" because that is still the column name at PRE_CASES_REVISION; the
+    # migration under test is what renames it to "local_case_id".
     redacted = "REDACTED_LOCAL_CASE_ID"
     rows = [
         # two submissions, same (submitter, local case id) -> one case, both linked
@@ -63,6 +65,14 @@ def test_cases_backfill_groups_by_submitter_and_local_case(db_test_connection: s
         conn.execute(submissions.insert(), rows)
 
     db.upgrade_schema(revision=CASES_REVISION)
+
+    upgraded_submissions = sqlalchemy.Table("submissions", sqlalchemy.MetaData(), autoload_with=engine)
+    upgraded_columns = {column.name for column in upgraded_submissions.columns}
+    assert "local_case_id" in upgraded_columns
+    assert "pseudonym" not in upgraded_columns
+    index_names = {index["name"] for index in sqlalchemy.inspect(engine).get_indexes("submissions")}
+    assert "ix_submissions_local_case_id" in index_names
+    assert "ix_submissions_pseudonym" not in index_names
 
     case_id_a1 = db.get_submission(shared_a1).case_id
     case_id_a2 = db.get_submission(shared_a2).case_id

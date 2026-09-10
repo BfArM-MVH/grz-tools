@@ -25,7 +25,7 @@ from moto import mock_aws
 BUCKET = "test-backfill-bucket"
 REGION = "us-east-1"
 DIFFERENT_TAN_G = "b" * 64
-DIFFERENT_PSEUDONYM = "different-pseudonym"
+DIFFERENT_LOCAL_CASE_ID = "different-local-case-id"
 DIFFERENT_DATE = datetime.date(1999, 1, 1)
 
 
@@ -266,11 +266,11 @@ def test_backfill_force_reconciles_against_an_unredacted_copy(
     current = db.add_submission(submission_id)
     current.submission_uploaded_date = DIFFERENT_DATE
     current.tan_g = DIFFERENT_TAN_G
-    current.pseudonym = DIFFERENT_PSEUDONYM
+    current.local_case_id = DIFFERENT_LOCAL_CASE_ID
     db.update_submission(current)
     current = db.get_submission(submission_id)
     assert metadata.submission.tan_g != DIFFERENT_TAN_G
-    assert metadata.submission.local_case_id != DIFFERENT_PSEUDONYM
+    assert metadata.submission.local_case_id != DIFFERENT_LOCAL_CASE_ID
     assert metadata.submission.submission_date != DIFFERENT_DATE
     _put_metadata(s3_client_mock, submission_id, metadata)
 
@@ -288,7 +288,7 @@ def test_backfill_force_reconciles_against_an_unredacted_copy(
     persisted = db.get_submission(submission_id)
     assert persisted.submission_uploaded_date == DIFFERENT_DATE
     assert persisted.tan_g == metadata.submission.tan_g
-    assert persisted.pseudonym == metadata.submission.local_case_id
+    assert persisted.local_case_id == metadata.submission.local_case_id
     assert persisted.submission_size == metadata.get_submission_size()
     assert persisted.submission_metadata is not None
     assert persisted.submission_metadata == metadata.to_redacted_dict()
@@ -468,7 +468,7 @@ def test_backfill_never_overwrites_stored_values_with_placeholders(
     """A redacted archive copy is restored from the row first, so the stored values survive."""
     db.add_submission(submission_id)
     db.modify_submission(submission_id, "tan_g", DIFFERENT_TAN_G)
-    db.modify_submission(submission_id, "pseudonym", DIFFERENT_PSEUDONYM)
+    db.modify_submission(submission_id, "local_case_id", DIFFERENT_LOCAL_CASE_ID)
     current = db.get_submission(submission_id)
     _put_metadata(s3_client_mock, submission_id, _archived(metadata))
 
@@ -476,9 +476,9 @@ def test_backfill_never_overwrites_stored_values_with_placeholders(
 
     persisted = db.get_submission(submission_id)
     assert persisted.tan_g == DIFFERENT_TAN_G
-    assert persisted.pseudonym == DIFFERENT_PSEUDONYM
-    # and the restored pseudonym is what keyed the case, not the placeholder
-    assert [case.local_case_id for case, _count in db.list_cases()] == [DIFFERENT_PSEUDONYM]
+    assert persisted.local_case_id == DIFFERENT_LOCAL_CASE_ID
+    # and the restored local case ID is what keyed the case, not the placeholder
+    assert [case.local_case_id for case, _count in db.list_cases()] == [DIFFERENT_LOCAL_CASE_ID]
 
 
 def _as_initial(metadata: GrzSubmissionMetadata) -> GrzSubmissionMetadata:
@@ -523,8 +523,8 @@ def test_backfill_submission_links_case_by_default(
     assert result.status == _BackfillResult.UPDATED
     linked = db.get_submission(sid)
     assert linked.case_id is not None
-    # this copy is unredacted, so it is authoritative and fills the NULL pseudonym too
-    assert linked.pseudonym == initial_metadata.submission.local_case_id
+    # this copy is unredacted, so it is authoritative and fills the NULL local case ID too
+    assert linked.local_case_id == initial_metadata.submission.local_case_id
 
 
 def _archived(metadata: GrzSubmissionMetadata) -> GrzSubmissionMetadata:
@@ -552,20 +552,20 @@ def _run_backfill(db: SubmissionDb, s3_client: Any, current: Submission) -> _Bac
     )
 
 
-def test_backfill_keys_cases_on_the_stored_pseudonym(
+def test_backfill_keys_cases_on_the_stored_local_case_id(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata
 ) -> None:
     """Two patients whose archived metadata both read localCaseId "" must not share a case."""
     archived = _archived(metadata)
     submitter = metadata.submission.submitter_id
     rows = []
-    for sid, tan_g, pseudonym in (
+    for sid, tan_g, local_case_id in (
         (f"{submitter}_2024-01-01_aaaaaaa1", "a" * 64, "patient-A"),
         (f"{submitter}_2024-01-02_aaaaaaa2", "b" * 64, "patient-B"),
     ):
         db.add_submission(sid)
         db.modify_submission(sid, "tan_g", tan_g)
-        db.modify_submission(sid, "pseudonym", pseudonym)
+        db.modify_submission(sid, "local_case_id", local_case_id)
         db.modify_submission(sid, "submission_type", "initial")
         _put_metadata(s3_client_mock, sid, archived)
         rows.append(db.get_submission(sid))
@@ -582,7 +582,7 @@ def test_backfill_keys_cases_on_the_stored_pseudonym(
     assert len(set(linked.values())) == 2
 
 
-def test_backfill_without_a_stored_pseudonym_skips_the_case_link(
+def test_backfill_without_a_stored_local_case_id_skips_the_case_link(
     db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """Nothing to restore from, so the placeholders are ignored rather than written or keyed on."""
@@ -594,7 +594,7 @@ def test_backfill_without_a_stored_pseudonym_skips_the_case_link(
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == metadata.get_submission_size()
     assert persisted.case_id is None
-    assert persisted.pseudonym is None
+    assert persisted.local_case_id is None
     assert persisted.tan_g is None
     assert db.list_cases() == []
 
@@ -629,7 +629,7 @@ def test_backfill_writes_everything_but_the_link_when_the_case_key_is_ambiguous(
 
     sid = f"{submitter}_2024-01-01_aaaaaaa1"
     db.add_submission(sid)
-    db.modify_submission(sid, "pseudonym", "patient-A")
+    db.modify_submission(sid, "local_case_id", "patient-A")
     current = db.get_submission(sid)
     _put_metadata(s3_client_mock, sid, _archived(metadata))
 
@@ -654,7 +654,7 @@ def test_backfill_links_once_the_ambiguity_is_gone(
 
     sid = f"{submitter}_2024-01-01_aaaaaaa1"
     db.add_submission(sid)
-    db.modify_submission(sid, "pseudonym", "patient-A")
+    db.modify_submission(sid, "local_case_id", "patient-A")
     _put_metadata(s3_client_mock, sid, _archived(metadata))
     assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillOutcome(_BackfillResult.UPDATED, True)
 

@@ -120,9 +120,11 @@ def _get_consent_revocations(
     A donor pseudonym is only unique within a single submitter.
 
     The index donor has no pseudonym of its own: its donorPseudonym is the literal "index", so
-    ``submissions.pseudonym`` stands in for it here. That column holds the submitter's
-    localCaseId, not an RKI psn, which makes the two index counts only as good as that
-    localCaseId. A localCaseId reused across patients merges those patients into a single donor.
+    ``submissions.local_case_id`` stands in for it here. ``Submission.pseudonym``, the case's
+    psn, takes over once the local case ID is removed; keying on it while no psn is assigned
+    would merge every index donor of a submitter into one. Until then the two index counts are
+    only as good as that localCaseId. A localCaseId reused across patients merges those
+    patients into a single donor.
     That donor's consent history is then several people's, read in upload order. The rule below
     decides a revocation from that mixture. The cases migration logs these keys once, when
     ``grzctl db upgrade`` runs; case tracking refuses to group their submissions for the same
@@ -131,20 +133,11 @@ def _get_consent_revocations(
     The basic logic for determining revocation is:
     "unconsented at end of quarter" AND ("consented at end of prior quarter" OR "consented sometime within current quarter")
     """
-    subquery_quarter_submissions = (
-        select(Submission)
-        .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
-        .subquery()
-    )
     query_quarter_donors = (
-        select(
-            subquery_quarter_submissions.c.data_node_id,
-            subquery_quarter_submissions.c.submitter_id,
-            subquery_quarter_submissions.c.pseudonym,
-            Donor,
-        )
-        .join(subquery_quarter_submissions, subquery_quarter_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_quarter_submissions.c.submission_uploaded_date)
+        select(Submission.data_node_id, Submission.submitter_id, Submission.local_case_id, Donor)
+        .join_from(Donor, Submission, Submission.id == Donor.submission_id)  # type: ignore[arg-type]
+        .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+        .order_by(Submission.submission_uploaded_date)  # type: ignore[arg-type]
     )
     quarter_donors = session.exec(query_quarter_donors).all()
 
@@ -153,8 +146,8 @@ def _get_consent_revocations(
     # key is (data_node_id, submiter_id, pseudonym)
     relation_by_donor: dict[tuple[str, str, str], Relation] = {}
     # iterate over donors from earliest submission to latest, tracking all consent states
-    for data_node_id, submitter_id, index_pseudonym, donor in quarter_donors:
-        pseudonym = index_pseudonym if donor.relation == Relation.index_ else donor.pseudonym
+    for data_node_id, submitter_id, index_local_case_id, donor in quarter_donors:
+        pseudonym = index_local_case_id if donor.relation == Relation.index_ else donor.pseudonym
         quarter_consent_states_by_donor[
             (
                 data_node_id,
@@ -174,25 +167,18 @@ def _get_consent_revocations(
         relation_by_donor[(data_node_id, submitter_id, pseudonym)] = donor.relation
 
     # now query before the current quarter
-    subquery_prior_submissions = (
-        select(Submission).where(Submission.submission_uploaded_date < quarter_start_date).subquery()
-    )
     query_prior_donors = (
-        select(
-            subquery_prior_submissions.c.data_node_id,
-            subquery_prior_submissions.c.submitter_id,
-            subquery_prior_submissions.c.pseudonym,
-            Donor,
-        )
-        .join(subquery_prior_submissions, subquery_prior_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_prior_submissions.c.submission_uploaded_date)
+        select(Submission.data_node_id, Submission.submitter_id, Submission.local_case_id, Donor)
+        .join_from(Donor, Submission, Submission.id == Donor.submission_id)  # type: ignore[arg-type]
+        .where(Submission.submission_uploaded_date < quarter_start_date)
+        .order_by(Submission.submission_uploaded_date)  # type: ignore[arg-type]
     )
     prior_donors = session.exec(query_prior_donors).all()
 
     prior_consent_state_by_donor: dict[tuple[str, str, str, str], bool] = {}
     # iterate over donors from earliest submission to latest, later overriding earlier
-    for data_node_id, submitter_id, index_pseudonym, donor in prior_donors:
-        pseudonym = index_pseudonym if donor.relation == Relation.index_ else donor.pseudonym
+    for data_node_id, submitter_id, index_local_case_id, donor in prior_donors:
+        pseudonym = index_local_case_id if donor.relation == Relation.index_ else donor.pseudonym
         # skip over donors that don't show up in current quarter
         if (data_node_id, submitter_id, pseudonym, "mv") in quarter_consent_states_by_donor:
             prior_consent_state_by_donor[
@@ -519,8 +505,8 @@ def _dump_qc_report(
         relevant_donors = session.exec(query_relevant_donors).all()
 
     # Note: for future, this join only works because *both* DetailedQCResult
-    # and Donor store index pseudonym as "index", since the submission table
-    # has the index pseudonym
+    # and Donor store the index donor's pseudonym as "index"; the identifier the
+    # submitter uses for the index donor is submissions.local_case_id
     idpseudo2relation = {(donor.submission_id, donor.pseudonym): donor.relation for donor in relevant_donors}
     id2submission = {submission.id: submission for submission in submissions_that_failed_detailed_qc}
     with open(output_path, mode="w", encoding="utf-8", newline="") as output_file:
