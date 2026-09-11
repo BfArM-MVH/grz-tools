@@ -234,8 +234,9 @@ def submit(  # noqa: PLR0913, PLR0917
         raise ValueError("pruefbericht.auth_url must be provided to submit Prüfberichte")
     if (client_id := pb.client_id) is None:
         raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
-    if (client_secret := pb.client_secret) is None:
+    if (configured_secret := pb.client_secret) is None:
         raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
+    client_secret = configured_secret.get_secret_value()
     if (api_base_url := pb.api_base_url) is None:
         raise ValueError("pruefbericht.api_base_url must be provided to submit Prüfberichte")
 

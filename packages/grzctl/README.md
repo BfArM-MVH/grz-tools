@@ -15,3 +15,36 @@ Command-line tool for internal GRZ operations.
 
 - [Registering change requests](docs/change-requests.md) — recording that a submission must be modified, deleted, or transferred, with the who/when/what audit trail.
 
+## S3 permissions for `grzctl process`
+
+`grzctl process` uploads to the archive buckets using multipart uploads. The
+credentials you give it must be allowed to **abort** a multipart upload, not just
+to write — these are often separate permissions.
+
+This matters when an upload fails partway through: the tool tries to abort the
+upload so no partial object is left behind. If the credentials lack abort
+permission, the abort is skipped — processing still fails with the original
+error, but the already-uploaded parts stay in the bucket and you can't remove
+them yourself. Over time these orphaned parts pile up and cost storage.
+
+Confusingly, S3 providers split multipart permissions in non-obvious ways (AWS,
+for example, has both object-level and bucket-level multipart actions), and our
+archive backend is Ceph/RGW rather than AWS, so check your provider's own
+documentation for the exact action names. The practical point holds everywhere:
+it's easy to grant write while leaving abort ungranted (see
+[velero-io/velero#416](https://github.com/velero-io/velero/issues/416) for one
+instance), so verify abort works — or rely on a bucket lifecycle rule that
+deletes incomplete multipart uploads after a few days.
+
+## Sensitive configuration
+
+Secret values (S3 secret keys, session tokens, key passphrases, Prüfbericht
+client secret) are read from the environment and stored as Pydantic
+`SecretStr`.  They are never written back to YAML, commands that dump the
+config (e.g. `grzctl dump-config`) print `**********` instead.
+
+When a passphrase is not configured for a key, `grzctl process` falls back to
+the standard crypt4gh environment variable `C4GH_PASSPHRASE`.  If that is also
+unset, you will be prompted interactively.  Prefer an explicit `GRZ_...__PRIVATE_KEY_PASSPHRASE`
+environment variable (or the `private_key_passphrase` config key) for automated runs.
+

@@ -27,7 +27,7 @@ import grzctl.cli
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from grz_db.models.submission import SubmissionDb
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
 SUB_ID = "260840108_2026-03-27_deadbeef"
 SUB_ID_PDF = "260840108_2026-04-15_deadbeef"
@@ -163,7 +163,7 @@ def main() -> int:  # noqa: PLR0915
         _run(runner, cli, [*cr_cmd_pdf, "--data-file", str(good), "--raw-content", str(fake_pdf)])
 
         _step("11. Resulting DB row (audit columns + binary blob)")
-        config = DbConfig.from_path(cfg)
+        config = GrzctlConfig.from_path(cfg)
         db = SubmissionDb(db_url=config.db.database_url, author=None)
         row = next(s for s in db.list_change_requests() if s.id == SUB_ID_PDF).changes[0]
         rendered = [

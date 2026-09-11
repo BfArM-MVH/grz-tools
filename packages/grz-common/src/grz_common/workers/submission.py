@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import concurrent
+import concurrent.futures
 import json
 import logging
 import mmap
+import os
 from collections.abc import Generator
 from contextlib import ExitStack
 from itertools import groupby
@@ -31,6 +32,8 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
+from ..pipeline.components import ReadStream, Tee, TqdmObserver
+from ..pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
@@ -429,7 +432,13 @@ class Submission:
                     elif task_type == "raw":
                         reports = [grz_check.validate_raw(sources[0])]
             except Exception as e:
-                raise e
+                # Catch rust panics, IOErrors gracefully and bubble as standard validation errors
+                reports = [
+                    grz_check.ValidationReport(
+                        path=str(p), is_valid=False, errors=[f"Validation runtime error: {str(e)}"]
+                    )
+                    for p in paths
+                ]
 
             return paths, metas, reports
 
@@ -450,16 +459,18 @@ class Submission:
                     for w in report.warnings:
                         self.__log.warning(f"{file_path.name}: {w}")
 
-                    if not report.sha256:
+                    report_sha256 = report.sha256
+
+                    if not report_sha256:
                         checksum_issues.append("No checksum found.")
 
                     if (
-                        report.sha256
+                        report_sha256
                         and file_metadata.checksum_type == ChecksumType.sha256
-                        and file_metadata.file_checksum != report.sha256
+                        and file_metadata.file_checksum != report_sha256
                     ):
                         checksum_issues.append(
-                            f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
+                            f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report_sha256}'"
                         )
 
                     if file_path.exists() and file_path.is_file():
@@ -517,10 +528,13 @@ class Submission:
             raise FileNotFoundError(msg)
         if not submitter_private_key_path:
             self.__log.warning("No submitter private key provided, skipping signing.")
+            submitter_private_key = None
         elif not Path(submitter_private_key_path).expanduser().is_file():
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
             raise FileNotFoundError(msg)
+        else:
+            submitter_private_key = Crypt4GH.retrieve_private_key(submitter_private_key_path)
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -533,6 +547,7 @@ class Submission:
 
         try:
             public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
+            recipient_public_key = public_keys[0][2]
         except Exception as e:
             self.__log.error(f"Error preparing public keys: {e}")
             raise e
@@ -565,7 +580,25 @@ class Submission:
                     )
 
                 try:
-                    Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
+                    with (
+                        open(file_path, "rb") as src,
+                        open(encrypted_file_path, "wb") as f,
+                        tqdm(  # type: ignore[call-overload]
+                            total=os.stat(file_path).st_size,
+                            desc="ENCRYPT ",
+                            postfix={"file": Path(file_path).name},
+                            leave=False,
+                            **TQDM_DEFAULTS,
+                        ) as pbar,
+                    ):
+                        pipeline = (
+                            ReadStream(src)
+                            | Tee(TqdmObserver(pbar))
+                            | Crypt4GHEncryptor(
+                                recipient_pubkey=recipient_public_key, sender_privkey=submitter_private_key
+                            )
+                        )
+                        pipeline >> f
 
                     self.__log.info(f"Encryption complete for {str(file_path)}. ")
                     progress_logger.set_state(
@@ -744,7 +777,21 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
+                    with (
+                        open(encrypted_file_path, "rb") as src,
+                        open(decrypted_file_path, "wb") as f,
+                        tqdm(  # type: ignore[call-overload]
+                            total=os.stat(encrypted_file_path).st_size,
+                            desc="DECRYPT ",
+                            postfix={"file": Path(encrypted_file_path).name},
+                            leave=False,
+                            **TQDM_DEFAULTS,
+                        ) as pbar,
+                    ):
+                        pipeline = (
+                            ReadStream(src) | Tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
+                        )
+                        pipeline >> f
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(
