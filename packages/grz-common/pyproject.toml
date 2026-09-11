@@ -63,6 +63,17 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/grz_common"]
+include = [
+    "src/grz_common/**/*.json",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/grz_common/**/*.json",
+    "src/grz_common/**/*.py",
+    "README.md",
+    "pyproject.toml",
+]
 
 [tool.hatch.version]
 path = "src/grz_common/__init__.py"

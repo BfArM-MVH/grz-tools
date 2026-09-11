@@ -11,7 +11,6 @@ from grzctl.models.config import GrzctlConfig
 
 
 def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
-
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
         if endpoint_url:

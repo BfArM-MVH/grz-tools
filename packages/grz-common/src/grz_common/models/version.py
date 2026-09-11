@@ -1,3 +1,4 @@
+import importlib.resources
 import json
 import logging
 from datetime import datetime
@@ -18,6 +19,9 @@ from ..transfer import init_s3_client
 from .s3 import S3Options
 
 logger = logging.getLogger(__name__)
+
+BUNDLED_VERSION_FILE_PACKAGE = "grz_common.version_file"
+BUNDLED_VERSION_FILE_NAME = "version.json"
 
 
 class PydanticVersion(Version):
@@ -134,3 +138,25 @@ class VersionFile(BaseModel):
             msg = f"Invalid version file format or content: {e}"
             logger.error(msg, exc_info=e)
             raise VersionFileValidationError(msg) from e
+
+    @classmethod
+    def read_bundled_text(cls) -> str:
+        """Return the raw JSON text of the canonical version.json policy bundled with grz-common.
+
+        Shipped as package data (rather than fetched over the network) so the policy a given
+        grz-common release publishes always matches the schema that release understands.
+
+        :raises VersionFileValidationError: If the bundled version file is invalid.
+        """
+        content = (
+            importlib.resources.files(BUNDLED_VERSION_FILE_PACKAGE)
+            .joinpath(BUNDLED_VERSION_FILE_NAME)
+            .read_text(encoding="utf-8")
+        )
+        try:
+            cls.model_validate_json(content)
+        except ValidationError as e:
+            msg = f"Invalid bundled version file: {e}"
+            logger.error(msg, exc_info=e)
+            raise VersionFileValidationError(msg) from e
+        return content
