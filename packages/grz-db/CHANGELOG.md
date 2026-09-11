@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v3.0.0...grz-db-v3.1.0) (2026-09-11)
+
+
+### Features
+
+* **grz-pydantic-models,grz-common:** keep a parsed submission lossless and redact it by one rule ([#654](https://github.com/BfArM-MVH/grz-tools/issues/654)) ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** add get_raw_dict for the document as ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** publish PCT_DEV_CUTOFF ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+* **grzctl:** explain why a case is listed in the Detailprüfung report ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+* **grzctl:** report QC deviations without failing and add recompute-qc backfill ([#656](https://github.com/BfArM-MVH/grz-tools/issues/656)) ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+
+
+### Bug Fixes
+
+* **grz-common:** require grz-pydantic-models &gt;=3.1 for ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** apply a change set as one transaction ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** export db_backend from grz_db.testing ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** raise the grz-pydantic-models floor to 3.1 ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+* **grzctl:** name the submission fields the database actually has ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+
 ## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v2.1.2...grz-db-v3.0.0) (2026-08-13)
 
 
