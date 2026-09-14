@@ -40,8 +40,9 @@ deletes incomplete multipart uploads after a few days.
 
 Secret values (S3 secret keys, session tokens, key passphrases, Prüfbericht
 client secret) are read from the environment and stored as Pydantic
-`SecretStr`.  They are never written back to YAML, commands that dump the
-config (e.g. `grzctl dump-config`) print `**********` instead.
+`SecretStr`.  They are never written back to YAML, and `grzctl dump-config`
+prints `**********` in their place. `grzctl dump-config --reveal-secrets`
+prints the plain values instead, so its YAML output loads back as a config file.
 
 When a passphrase is not configured for a key, `grzctl process` falls back to
 the standard crypt4gh environment variable `C4GH_PASSPHRASE`.  If that is also

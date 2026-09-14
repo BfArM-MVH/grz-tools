@@ -1,10 +1,18 @@
 from os import PathLike
 from pathlib import Path
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 import yaml
 from grz_common.utils.config import read_and_merge_config_files
-from pydantic import AfterValidator, BaseModel, ConfigDict, SecretStr
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    SecretStr,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    field_serializer,
+)
 from pydantic.types import PathType
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,57 +33,26 @@ def get_secret_value(value: SecretStr | str | None) -> str | None:
     return str(value)
 
 
-def _mask_secrets(data: dict) -> dict:
-    """Recursively replace ``SecretStr`` instances in a dict with ``"**********"``."""
-    masked: dict = {}
-    for key, value in data.items():
-        if isinstance(value, SecretStr):
-            masked[key] = "**********"
-        elif isinstance(value, dict):
-            masked[key] = _mask_secrets(value)
-        elif isinstance(value, list):
-            masked[key] = [
-                _mask_secrets(v) if isinstance(v, dict) else ("**********" if isinstance(v, SecretStr) else v)
-                for v in value
-            ]
-        else:
-            masked[key] = value
-    return masked
+class _RevealableSecrets:
+    """In JSON mode, writes ``SecretStr`` fields in plain text when the caller asks for it.
+
+    By default pydantic writes them as ``"**********"``. With ``context={"reveal_secrets": True}``,
+    ``model_dump(mode="json")`` and ``model_dump_json()`` return output that loads back into an equal model.
+    """
+
+    @field_serializer("*", mode="wrap", when_used="json")
+    def _serialize_secret(self, value: Any, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
+        if isinstance(value, SecretStr) and (info.context or {}).get("reveal_secrets"):
+            return value.get_secret_value()
+        return handler(value)
 
 
-class IgnoringBaseModel(BaseModel):
+class IgnoringBaseModel(_RevealableSecrets, BaseModel):
     model_config = ConfigDict(
         extra="ignore",
         validate_assignment=True,
         use_enum_values=True,
     )
-
-    def model_dump(
-        self,
-        *,
-        mode: str = "python",
-        exclude_none: bool = False,
-        exclude_unset: bool = False,
-        exclude_defaults: bool = False,
-        **kwargs,
-    ) -> dict:
-        """Serialize the model.
-
-        In ``mode="json"`` secret fields are masked with ``"**********"`` so
-        that serialized output never leaks credentials.  Use ``mode="python"``
-        (the default) when you need the actual ``SecretStr`` objects so that
-        downstream code can call ``.get_secret_value()``.
-        """
-        data = super().model_dump(
-            mode=mode,
-            exclude_none=exclude_none,
-            exclude_unset=exclude_unset,
-            exclude_defaults=exclude_defaults,
-            **kwargs,
-        )
-        if mode == "json":
-            return _mask_secrets(data)
-        return data
 
     def to_yaml(self, fd):
         """Reads the configuration file and validates it against the schema."""
@@ -90,7 +67,7 @@ class IgnoringBaseModel(BaseModel):
         return config
 
 
-class IgnoringBaseSettings(BaseSettings):
+class IgnoringBaseSettings(_RevealableSecrets, BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
         validate_assignment=True,
@@ -99,33 +76,6 @@ class IgnoringBaseSettings(BaseSettings):
         env_prefix="grz_",
         env_file=".env",
     )
-
-    def model_dump(
-        self,
-        *,
-        mode: str = "python",
-        exclude_none: bool = False,
-        exclude_unset: bool = False,
-        exclude_defaults: bool = False,
-        **kwargs,
-    ) -> dict:
-        """Serialize the model.
-
-        In ``mode="json"`` secret fields are masked with ``"**********"`` so
-        that serialized output never leaks credentials.  Use ``mode="python"``
-        (the default) when you need the actual ``SecretStr`` objects so that
-        downstream code can call ``.get_secret_value()``.
-        """
-        data = super().model_dump(
-            mode=mode,
-            exclude_none=exclude_none,
-            exclude_unset=exclude_unset,
-            exclude_defaults=exclude_defaults,
-            **kwargs,
-        )
-        if mode == "json":
-            return _mask_secrets(data)
-        return data
 
     def to_yaml(self, fd):
         """Reads the configuration file and validates it against the schema."""
