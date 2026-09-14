@@ -48,8 +48,7 @@ def test_failed_pipeline_aborts_upload():
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket=BUCKET)
 
-    # 9 MiB is larger than the default 8 MiB part size, so at least one part is actually
-    # uploaded before the failure -- not just the create_multipart_upload call.
+    # Any non-empty stream starts a multipart upload, which the failure has to abort.
     source = ReadStream(io.BytesIO(b"x" * (9 * 1024 * 1024)))
     chain = source | Tee(_FailOnCloseObserver())
     uploader = S3MultipartUploader(s3, BUCKET, KEY)

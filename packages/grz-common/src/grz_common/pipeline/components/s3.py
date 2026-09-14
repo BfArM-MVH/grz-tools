@@ -45,7 +45,8 @@ class S3Downloader(ReadStream):
 class S3MultipartUploader(Observer):
     """
     Writing to S3 is a Sink (Observer).
-    It buffers data and uploads parts.
+    It buffers data and uploads parts. An empty stream is sent with an empty PUT on close,
+    because a multipart upload needs at least one part.
     """
 
     def __init__(  # noqa: PLR0913
@@ -102,6 +103,8 @@ class S3MultipartUploader(Observer):
         """
         if self._closed:
             raise ValueError("I/O operation on closed file.")
+        if not chunk:
+            return
 
         if not self._upload_id:
             self._start_multipart_upload()
@@ -120,14 +123,7 @@ class S3MultipartUploader(Observer):
         """
         Don't read from disk if the executor queue is full.
         """
-        # clean up any futures that have finished already
-        active = []
-        for f in self._futures:
-            if f.done():
-                self._parts.append(f.result())
-            else:
-                active.append(f)
-        self._futures = active
+        self._check_futures()
 
         # if we have reached our max concurrency limit, wait for one to finish
         if len(self._futures) >= self.max_threads:
@@ -146,16 +142,19 @@ class S3MultipartUploader(Observer):
         self._closed = True
 
         try:
-            # upload remaining data
-            if self._buffer:
-                self._submit_part(bytes(self._buffer), self._part_number)
+            if not self._upload_id:
+                # nothing was written: an empty object needs a PUT
+                self._put_object(bytes(self._buffer))
                 self._buffer.clear()
+            else:
+                # upload remaining data
+                if self._buffer:
+                    self._submit_part(bytes(self._buffer), self._part_number)
+                    self._buffer.clear()
 
-            if self._futures:
                 for f in self._futures:
                     self._parts.append(f.result())
 
-            if self._upload_id:
                 self._parts.sort(key=lambda x: x["PartNumber"])
                 self._complete_upload()
 
@@ -180,11 +179,30 @@ class S3MultipartUploader(Observer):
         self._cleanup()
         self._closed = True  # prevent a later close()/finalizer from re-running on an aborted upload
 
+    def _put_object(self, data: bytes) -> None:
+        hasher = hashlib.md5(data, usedforsecurity=False)
+        local_md5_hex = hasher.hexdigest()
+
+        kwargs: dict[str, Any] = {
+            "Bucket": self.bucket,
+            "Key": self.key,
+            "Body": data,
+            "ContentMD5": base64.b64encode(hasher.digest()).decode("utf-8"),
+        }
+        if self.content_type:
+            kwargs["ContentType"] = self.content_type
+        resp = self.s3.put_object(**kwargs)
+
+        server_etag = resp["ETag"].strip('"')
+        if server_etag != local_md5_hex:
+            raise DataIntegrityError(
+                f"Local checksum does not match remote one! Expected: {local_md5_hex}, Got: {server_etag}",
+                stage=self.__class__.__name__,
+            )
+
     def _submit_part(self, data: bytes, part_num: int):
-        if not self._executor:
-            raise RuntimeError("Executor not initialized")
-        if not self._upload_id:
-            raise RuntimeError("Multipart upload not yet initialized")
+        if not self._executor or not self._upload_id:
+            raise RuntimeError("Multipart upload not started")
 
         future = self._executor.submit(self._upload_part, self._upload_id, part_num, data)
         self._futures.append(future)
@@ -216,10 +234,6 @@ class S3MultipartUploader(Observer):
     def _complete_upload(self):
         expected = self._calc_etag(self._parts)
         parts_payload = [{"PartNumber": p["PartNumber"], "ETag": p["ETag"]} for p in self._parts]
-
-        if not parts_payload:
-            empty_part = self._upload_part(self._upload_id, 1, b"")
-            parts_payload.append({"PartNumber": 1, "ETag": empty_part["ETag"]})
 
         complete = self.s3.complete_multipart_upload(
             Bucket=self.bucket,

@@ -17,9 +17,6 @@ MULTIPART_MAX_PARTS = 1000
 # Minimum part size
 MULTIPART_MIN_PART_SIZE = 5 * 1024 * 1024  # 5 MiB
 
-# Threshold for when to use multipart upload (boto3 default)
-MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8 MiB
-
 # Default chunk/part size for multipart uploads
 # Using 256MB as default to reduce number of parts for large files
 MULTIPART_DEFAULT_PART_SIZE = 256 * 1024 * 1024  # 256 MiB
