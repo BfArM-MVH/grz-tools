@@ -30,7 +30,7 @@ class Crypt4GHDecryptor(Transformer):
         """
         super().__init__(source)
         self._private_key = private_key
-        self._session_keys: bytes | None = None
+        self._session_keys: list[bytes] = []
         self._header_parsed = False
         self._buffer = bytearray()
         self._out_buffer = bytearray(self.CIPHER_SEGMENT_SIZE)
@@ -56,9 +56,6 @@ class Crypt4GHDecryptor(Transformer):
 
         if len(ciphersegment) <= self.CIPHER_DIFF:
             raise ValueError("Truncated cipher segment")
-
-        if not self._session_keys:
-            raise ValueError("No session keys found in Crypt4GH header")
 
         segment_len = len(ciphersegment) - self.CIPHER_DIFF
         errors = []

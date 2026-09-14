@@ -6,7 +6,6 @@ import concurrent.futures
 import json
 import logging
 import mmap
-import os
 from collections.abc import Generator
 from contextlib import ExitStack
 from itertools import groupby
@@ -32,8 +31,6 @@ from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
-from ..pipeline.components import ReadStream, Tee, TqdmObserver
-from ..pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
@@ -528,13 +525,16 @@ class Submission:
             raise FileNotFoundError(msg)
         if not submitter_private_key_path:
             self.__log.warning("No submitter private key provided, skipping signing.")
-            submitter_private_key = None
         elif not Path(submitter_private_key_path).expanduser().is_file():
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
             raise FileNotFoundError(msg)
-        else:
-            submitter_private_key = Crypt4GH.retrieve_private_key(submitter_private_key_path)
+
+        try:
+            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path, submitter_private_key_path or None)
+        except Exception as e:
+            self.__log.error(f"Error preparing encryption keys: {e}")
+            raise e
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -544,13 +544,6 @@ class Submission:
             encrypted_files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
         progress_logger = FileProgressLogger[EncryptionState](log_file_path=progress_log_file)
-
-        try:
-            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
-            recipient_public_key = public_keys[0][2]
-        except Exception as e:
-            self.__log.error(f"Error preparing public keys: {e}")
-            raise e
 
         for file_path, file_metadata in self.files.items():
             # encryption_successful = True
@@ -580,25 +573,7 @@ class Submission:
                     )
 
                 try:
-                    with (
-                        open(file_path, "rb") as src,
-                        open(encrypted_file_path, "wb") as f,
-                        tqdm(  # type: ignore[call-overload]
-                            total=os.stat(file_path).st_size,
-                            desc="ENCRYPT ",
-                            postfix={"file": Path(file_path).name},
-                            leave=False,
-                            **TQDM_DEFAULTS,
-                        ) as pbar,
-                    ):
-                        pipeline = (
-                            ReadStream(src)
-                            | Tee(TqdmObserver(pbar))
-                            | Crypt4GHEncryptor(
-                                recipient_pubkey=recipient_public_key, sender_privkey=submitter_private_key
-                            )
-                        )
-                        pipeline >> f
+                    Crypt4GH.encrypt_file(file_path, encrypted_file_path, public_keys)
 
                     self.__log.info(f"Encryption complete for {str(file_path)}. ")
                     progress_logger.set_state(
@@ -777,21 +752,7 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    with (
-                        open(encrypted_file_path, "rb") as src,
-                        open(decrypted_file_path, "wb") as f,
-                        tqdm(  # type: ignore[call-overload]
-                            total=os.stat(encrypted_file_path).st_size,
-                            desc="DECRYPT ",
-                            postfix={"file": Path(encrypted_file_path).name},
-                            leave=False,
-                            **TQDM_DEFAULTS,
-                        ) as pbar,
-                    ):
-                        pipeline = (
-                            ReadStream(src) | Tee(TqdmObserver(pbar)) | Crypt4GHDecryptor(private_key=private_key)
-                        )
-                        pipeline >> f
+                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(
