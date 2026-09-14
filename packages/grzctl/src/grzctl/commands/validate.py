@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
     help="Whether to use mmap.",
 )
 @grzcli.update_db
-def validate(  # noqa: PLR0913
+def validate(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_dir,
     force,

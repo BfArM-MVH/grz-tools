@@ -214,7 +214,7 @@ def from_database(submission_id, configuration: GrzctlConfig, failed):
     is_flag=True,
 )
 @grzcli.update_db
-def submit(  # noqa: PLR0913
+def submit(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     pruefbericht_file,
     submission_id,
@@ -265,7 +265,7 @@ def submit(  # noqa: PLR0913
         click.echo(token)
 
 
-def _try_submit(  # noqa: PLR0913
+def _try_submit(  # noqa: PLR0913, PLR0917
     pruefbericht: Pruefbericht, api_base_url: str, auth_url: str, client_id: str, client_secret: str, token: str
 ) -> tuple[Any, Any]:
     if token:
@@ -282,7 +282,7 @@ def _try_submit(  # noqa: PLR0913
     try:
         _submit_pruefbericht(base_url=api_base_url, token=token, pruefbericht=pruefbericht)
     except requests.HTTPError as error:
-        if error.response.status_code == requests.codes.unauthorized:
+        if error.response is not None and error.response.status_code == requests.codes.unauthorized:
             # get a new token and try again
             log.warning("Provided token has expired. Attempting to refresh.")
             token, expiry = _get_new_token(
