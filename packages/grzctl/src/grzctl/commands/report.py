@@ -24,6 +24,7 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, SubmissionType
+from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF
 from sqlalchemy import func as sqlfn
 from sqlmodel import select
 
@@ -369,6 +370,13 @@ class DetailedQCPassedReportState(StrEnum):
     NO = "no"
 
 
+def _detailed_qc_passed_state(submission: Submission) -> DetailedQCPassedReportState:
+    """Report the stored detailed QC verdict, which is unset until detailed QC has run."""
+    if submission.detailed_qc_passed is None:
+        return DetailedQCPassedReportState.NOT_PERFORMED
+    return DetailedQCPassedReportState.YES if submission.detailed_qc_passed else DetailedQCPassedReportState.NO
+
+
 def _dump_dataset_report(
     output_path: Path, database: SubmissionDb, year: int, quarter: int, with_submission_ids: bool = False
 ) -> None:
@@ -441,11 +449,7 @@ def _dump_dataset_report(
             + (["submission_id"] if with_submission_ids else [])
         )
         for submission in submissions:
-            detailed_qc_passed = DetailedQCPassedReportState.NOT_PERFORMED
-            if submission.detailed_qc_passed is not None:
-                detailed_qc_passed = (
-                    DetailedQCPassedReportState.YES if submission.detailed_qc_passed else DetailedQCPassedReportState.NO
-                )
+            detailed_qc_passed = _detailed_qc_passed_state(submission)
             if submission.id in id2mv_consented:
                 mv_consented = "yes" if id2mv_consented[submission.id] else "no"
             else:
@@ -487,25 +491,43 @@ def _dump_qc_report(
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     with database.transaction() as session:
-        query_submissions_that_failed_detailed_qc = (
+        # The quarterly QC report lists submissions that failed the detailed QC (a computed
+        # metric below the required threshold) as well as submissions that passed but carry a
+        # deviation of more than PCT_DEV_CUTOFF percent between the computed and provided values
+        # on any metric. BfArM requires both to be reported; the latter does not count as a
+        # failure. The detailed_qc_passed and deviation_exceeds_tolerance columns tell the two
+        # reasons apart per row.
+        submission_ids_with_deviation = select(DetailedQCResult.submission_id).where(
+            sa.or_(
+                sa.not_(DetailedQCResult.percent_bases_above_quality_threshold_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.mean_depth_of_coverage_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.targeted_regions_above_min_coverage_passed_qc),  # type: ignore[call-overload]
+            )
+        )
+        query_submissions_to_report = (
             select(Submission)
             .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
-            .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
+            .filter(
+                sa.or_(
+                    sa.not_(Submission.detailed_qc_passed),  # type: ignore[call-overload]
+                    Submission.id.in_(submission_ids_with_deviation),  # type: ignore[attr-defined]
+                )
+            )
         )
-        submissions_that_failed_detailed_qc = session.exec(query_submissions_that_failed_detailed_qc).all()
+        submissions_to_report = session.exec(query_submissions_to_report).all()
 
-        subquery_submissions_that_failed_detailed_qc = query_submissions_that_failed_detailed_qc.subquery()
-        query_reports_of_failed_submissions = select(DetailedQCResult).join(
-            subquery_submissions_that_failed_detailed_qc,
-            subquery_submissions_that_failed_detailed_qc.c.id == DetailedQCResult.submission_id,
+        subquery_submissions_to_report = query_submissions_to_report.subquery()
+        query_reports_to_include = select(DetailedQCResult).join(
+            subquery_submissions_to_report,
+            subquery_submissions_to_report.c.id == DetailedQCResult.submission_id,
         )
-        reports_of_failed_submissions = session.exec(query_reports_of_failed_submissions).all()
+        reports_to_include = session.exec(query_reports_to_include).all()
 
-        subquery_reports_of_failed_submissions = query_reports_of_failed_submissions.subquery()
+        subquery_reports_to_include = query_reports_to_include.subquery()
         query_relevant_donors = select(Donor).join(
-            subquery_reports_of_failed_submissions,
-            (subquery_reports_of_failed_submissions.c.submission_id == Donor.submission_id)  # type: ignore[arg-type]
-            & (subquery_reports_of_failed_submissions.c.pseudonym == Donor.pseudonym),
+            subquery_reports_to_include,
+            (subquery_reports_to_include.c.submission_id == Donor.submission_id)  # type: ignore[arg-type]
+            & (subquery_reports_to_include.c.pseudonym == Donor.pseudonym),
         )
         relevant_donors = session.exec(query_relevant_donors).all()
 
@@ -513,7 +535,7 @@ def _dump_qc_report(
     # and Donor store index pseudonym as "index", since the submission table
     # has the index pseudonym
     idpseudo2relation = {(donor.submission_id, donor.pseudonym): donor.relation for donor in relevant_donors}
-    id2submission = {submission.id: submission for submission in submissions_that_failed_detailed_qc}
+    id2submission = {submission.id: submission for submission in submissions_to_report}
     with open(output_path, mode="w", encoding="utf-8", newline="") as output_file:
         writer = csv.writer(output_file, delimiter="\t")
         # header
@@ -543,13 +565,23 @@ def _dump_qc_report(
                 "targetedRegionsAboveMinCoverage",
                 "targetedRegionsAboveMinCoverage_detailedQC_passed",
                 "targetedRegionsAboveMinCoverage_detailedQC_deviation%",
+                "detailed_qc_passed",
+                "deviation_exceeds_tolerance",
             ]
             + (["submission_id"] if with_submission_ids else [])
         )
 
-        for report in reports_of_failed_submissions:
+        for report in reports_to_include:
             submission = id2submission[report.submission_id]
             relation = Relation(idpseudo2relation[(report.submission_id, report.pseudonym)])
+            deviation_exceeds_tolerance = any(
+                abs(deviation) > PCT_DEV_CUTOFF
+                for deviation in (
+                    report.percent_bases_above_quality_threshold_percent_deviation,
+                    report.mean_depth_of_coverage_percent_deviation,
+                    report.targeted_regions_above_min_coverage_percent_deviation,
+                )
+            )
             writer.writerow(
                 [
                     submission.data_node_id,
@@ -576,6 +608,8 @@ def _dump_qc_report(
                     report.targeted_regions_above_min_coverage,
                     "yes" if report.targeted_regions_above_min_coverage_passed_qc else "no",
                     report.targeted_regions_above_min_coverage_percent_deviation,
+                    _detailed_qc_passed_state(submission),
+                    "yes" if deviation_exceeds_tolerance else "no",
                 ]
                 + ([report.submission_id] if with_submission_ids else [])
             )
