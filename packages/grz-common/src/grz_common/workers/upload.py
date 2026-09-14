@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..pipeline.components import ReadStream, Tee, TqdmObserver
-from ..pipeline.components.s3 import S3MultipartUploader
+from ..pipeline.components.s3 import S3MultipartUploader, calculate_s3_part_size
 from ..progress import FileProgressLogger, UploadState
 from ..transfer import init_s3_client, init_s3_resource
 from ..utils.redaction import redact_file
@@ -113,7 +113,12 @@ class S3BotoUploadWorker(UploadWorker):
             open(local_file_path, "rb") as f,
         ):
             pipeline = ReadStream(f) | Tee(TqdmObserver(pbar))
-            uploader = S3MultipartUploader(self._s3_client, self._s3_options.bucket, s3_object_id)
+            uploader = S3MultipartUploader(
+                self._s3_client,
+                self._s3_options.bucket,
+                s3_object_id,
+                part_size=calculate_s3_part_size(file_size, self._s3_options.multipart_chunksize),
+            )
 
             pipeline >> uploader
 

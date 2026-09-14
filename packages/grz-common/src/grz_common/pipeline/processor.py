@@ -67,6 +67,7 @@ class SubmissionRunState:
     submission_metadata: SubmissionMetadata
     interrogation_s3: S3Client
     interrogation_bucket: str
+    interrogation_part_size: int
     final_s3: S3Client
     final_bucket: str
     target_public_key: bytes
@@ -147,6 +148,7 @@ class RunSetupCoordinator:
             submission_metadata=submission_metadata,
             interrogation_s3=self._s3_client_cache.get(interrogation_archive.s3),
             interrogation_bucket=interrogation_archive.s3.bucket,
+            interrogation_part_size=interrogation_archive.s3.multipart_chunksize,
             final_s3=self._s3_client_cache.get(target_archive.s3),
             final_bucket=target_archive.s3.bucket,
             target_public_key=self._consented_pub_key if is_research_consented else self._non_consented_pub_key,
@@ -399,8 +401,9 @@ class FilePipelineExecutor:
             ExitStack() as stack,
         ):
             # download and decrypt
+            source = S3Downloader(self._source_s3, self._source_bucket, src_key)
             pipeline = (
-                S3Downloader(self._source_s3, self._source_bucket, src_key)
+                source
                 | metrics.measure("1_Source")
                 | Crypt4GHDecryptor(private_key=self._private_key)
                 | metrics.measure("2_Decrypt")
@@ -431,8 +434,10 @@ class FilePipelineExecutor:
             # progress bar
             pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]), threaded=self._background_tee)
 
-            # upload to archive bucket
-            part_size = calculate_s3_part_size(file_meta.file_size_in_bytes)
+            # upload to archive bucket.
+            # Size the parts by the inbox object: the re-encrypted object has the same payload and a
+            # one-packet header, the smallest header an inbox object can have, so it is never larger.
+            part_size = calculate_s3_part_size(source.length, run_state.interrogation_part_size)
             uploader = S3MultipartUploader(
                 run_state.interrogation_s3,
                 run_state.interrogation_bucket,

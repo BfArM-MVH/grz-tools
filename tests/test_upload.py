@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from grz_common.constants import MULTIPART_MIN_PART_SIZE
 from grz_common.progress.progress_logging import FileProgressLogger
 from grz_common.progress.states import UploadState
 from grz_common.utils.checksums import calculate_sha256
@@ -58,6 +59,19 @@ def test_boto_upload(
 
     assert calculate_sha256(local_tmpdir_path / "small_test_file.bed") == temp_small_file_sha256sum
     assert calculate_sha256(local_tmpdir_path / "large_test_file.fastq") == temp_fastq_file_sha256sum
+
+
+def test_boto_upload_uses_configured_part_size(s3_config_model, remote_bucket, temp_upload_log_file_path, tmp_path):
+    """upload_file splits a file into parts of the configured multipart_chunksize."""
+    s3_options = s3_config_model.s3.model_copy(update={"multipart_chunksize": MULTIPART_MIN_PART_SIZE})
+    upload_worker = S3BotoUploadWorker(s3_options=s3_options, status_file_path=temp_upload_log_file_path)
+    file_path = tmp_path / "three_parts.bin"
+    file_path.write_bytes(b"x" * (2 * MULTIPART_MIN_PART_SIZE + 1))
+
+    upload_worker.upload_file(file_path, "three_parts.bin")
+
+    etag = remote_bucket.Object("three_parts.bin").e_tag.strip('"')
+    assert etag.endswith("-3"), f"expected a 3-part multipart upload, got ETag {etag}"
 
 
 def test__gather_files_to_upload(encrypted_submission):

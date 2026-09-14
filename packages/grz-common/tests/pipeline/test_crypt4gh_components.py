@@ -3,6 +3,8 @@
 import os
 from io import BytesIO
 
+import crypt4gh.lib
+import pytest
 from crypt4gh import SEGMENT_SIZE
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
@@ -107,3 +109,24 @@ class TestCrypt4GHDecryptor:
             decrypted = decryptor.read(-1)
 
         assert decrypted == plaintext
+
+
+@pytest.mark.parametrize("size", [0, 1, SEGMENT_SIZE - 1, SEGMENT_SIZE, SEGMENT_SIZE + 1, 3 * SEGMENT_SIZE])
+def test_reencryption_does_not_grow_the_object(size):
+    """Re-encrypting must not make the object larger: grzctl process sizes its upload parts by the inbox object."""
+    submitter_private, _ = generate_keypair()
+    grz_private, grz_public = generate_keypair()
+    _, archive_public = generate_keypair()
+
+    # the inbox object, encrypted by the reference crypt4gh implementation
+    inbox = BytesIO()
+    crypt4gh.lib.encrypt([(0, submitter_private, grz_public)], BytesIO(os.urandom(size)), inbox)
+
+    with (
+        BytesIO(inbox.getvalue()) as f,
+        Crypt4GHDecryptor(f, private_key=grz_private) as decryptor,
+        Crypt4GHEncryptor(decryptor, recipient_pubkey=archive_public) as encryptor,
+    ):
+        reencrypted = encryptor.read(-1)
+
+    assert len(reencrypted) <= len(inbox.getvalue())

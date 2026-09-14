@@ -12,23 +12,18 @@ from . import DataIntegrityError, Observer, ReadStream
 log = logging.getLogger(__name__)
 
 
-def calculate_s3_part_size(file_size: int | None, user_part_size: int | None = None) -> int:
+def calculate_s3_part_size(file_size: int | None, preferred_part_size: int = MULTIPART_DEFAULT_PART_SIZE) -> int:
     """
-    Calculate the appropriate part size for a multipart upload.
-    Ensures the number of parts stays within limits (Ceph/Bluestore/Quobyte: 1000).
+    Calculate the part size for a multipart upload of ``file_size`` bytes.
+
+    Returns ``preferred_part_size``, at least ``MULTIPART_MIN_PART_SIZE``. If the file would then
+    need more than ``MULTIPART_MAX_PARTS`` parts (Ceph/Bluestore/Quobyte: 1000), the part size is
+    raised so that it fits.
     """
-    if user_part_size is not None:
-        return user_part_size
-
-    if file_size is None or file_size <= 0:
-        return MULTIPART_DEFAULT_PART_SIZE
-
-    # If default part size would result in too many parts, increase it
-    if file_size / MULTIPART_DEFAULT_PART_SIZE > MULTIPART_MAX_PARTS:
-        optimal = math.ceil(file_size / MULTIPART_MAX_PARTS)
-        return max(optimal, MULTIPART_MIN_PART_SIZE)
-
-    return max(MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MIN_PART_SIZE)
+    part_size = max(preferred_part_size, MULTIPART_MIN_PART_SIZE)
+    if file_size is not None and file_size > part_size * MULTIPART_MAX_PARTS:
+        part_size = math.ceil(file_size / MULTIPART_MAX_PARTS)
+    return part_size
 
 
 class S3Downloader(ReadStream):
@@ -38,7 +33,7 @@ class S3Downloader(ReadStream):
         self.response = s3_client.get_object(Bucket=bucket, Key=key)
         # S3 Body is already a buffered stream, but we wrap it to be Pipeable
         super().__init__(self.response["Body"])
-        self.length = self.response.get("ContentLength", 0)
+        self.length: int = self.response.get("ContentLength", 0)
 
     def read(self, size: int | None = -1) -> bytes:
         try:
@@ -66,7 +61,7 @@ class S3MultipartUploader(Observer):
         self.s3 = s3_client
         self.bucket = bucket
         self.key = key
-        self.part_size = calculate_s3_part_size(None, part_size)
+        self.part_size = part_size or MULTIPART_DEFAULT_PART_SIZE
         self.max_threads = max_threads
         self.content_type = content_type
 
