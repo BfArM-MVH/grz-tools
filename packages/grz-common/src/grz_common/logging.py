@@ -12,12 +12,7 @@ import sys
 from os import PathLike
 from pathlib import Path
 
-try:
-    from tqdm.auto import tqdm
-
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
+from tqdm.auto import tqdm
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +107,7 @@ def add_filelogger(file_path: str | PathLike, level: str = "INFO", logger_name: 
 def setup_cli_logging(log_file: str | None, log_level: str):
     """
     Setup logging for the CLI.
-    Uses TqdmLoggingHandler if available to play nicely with progress bars.
+    Uses TqdmLoggingHandler to play nicely with progress bars.
     """
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level.upper())
@@ -123,7 +118,7 @@ def setup_cli_logging(log_file: str | None, log_level: str):
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    console_handler = TqdmLoggingHandler() if HAS_TQDM else logging.StreamHandler(sys.stderr)
+    console_handler = TqdmLoggingHandler()
 
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)

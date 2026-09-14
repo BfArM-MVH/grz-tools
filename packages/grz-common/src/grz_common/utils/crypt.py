@@ -14,6 +14,8 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from grz_common.pipeline.components import ReadStream, Tee, TqdmObserver
 from tqdm.auto import tqdm
 
+from ..constants import TQDM_DEFAULTS
+
 log = logging.getLogger(__name__)
 
 
@@ -76,12 +78,12 @@ class Crypt4GH:
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
             (
-                tqdm(
+                tqdm(  # type: ignore[call-overload]
                     total=input_path.stat().st_size,
-                    desc="ENCRYPT",
+                    desc="ENCRYPT ",
                     postfix={"file": input_path.name},
-                    unit="B",
-                    unit_scale=True,
+                    leave=False,
+                    **TQDM_DEFAULTS,
                 )
                 if show_progress
                 else nullcontext()
@@ -139,12 +141,12 @@ class Crypt4GH:
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
             (
-                tqdm(
+                tqdm(  # type: ignore[call-overload]
                     total=input_path.stat().st_size,
-                    desc="DECRYPT",
+                    desc="DECRYPT ",
                     postfix={"file": input_path.name},
-                    unit="B",
-                    unit_scale=True,
+                    leave=False,
+                    **TQDM_DEFAULTS,
                 )
                 if show_progress
                 else nullcontext()

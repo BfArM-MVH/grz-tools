@@ -295,7 +295,8 @@ class FilePipelineExecutor:
         if state and state.get("processing_successful"):
             log.info(f"Skipping {file_meta.file_path}, already processed.")
             if pbar_global is not None:
-                pbar_global.update(file_meta.file_size_in_bytes)
+                with TqdmObserver.lock:
+                    pbar_global.update(file_meta.file_size_in_bytes)
             run_state.context.mark_completed(file_path_str)
             return
 

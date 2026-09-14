@@ -418,14 +418,18 @@ class Tee(ReadStream):
 
 
 class TqdmObserver(Observer):
+    # One lock for all instances: threads share progress bars (e.g. the total bar of a
+    # thread pool), and tqdm's update() does not lock its counter. Other updates of a
+    # shared bar must take it too.
+    lock = threading.Lock()
+
     def __init__(self, pbar: Any | list[Any]):
         super().__init__()
         self.pbars = pbar if isinstance(pbar, list) else [pbar]
-        self._lock = threading.Lock()
 
     def observe(self, chunk: bytes) -> None:
         n = len(chunk)
-        with self._lock:
+        with self.lock:
             for pbar in self.pbars:
                 pbar.update(n)
 
