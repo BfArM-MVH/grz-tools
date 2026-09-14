@@ -1,5 +1,7 @@
 import datetime
 import math
+import threading
+import time
 
 import pytest
 from grz_db.errors import (
@@ -374,3 +376,71 @@ class TestQcStrategy:
 
         with pytest.raises(SubmissionBasicQCNotPassedError):
             db.should_qc(submission_id, 2.0, "salt")
+
+    def test_should_qc_concurrent_decisions_select_only_one_submission(
+        self, db: SubmissionDb, migrated_db_connection: str, test_author, monkeypatch
+    ):
+        """Two should_qc calls racing for the same submitter and month must still select only one.
+
+        should_qc locks the whole read-then-write decision, so the two calls are serialized and
+        the second always sees the first one's stored selection. _list_submitter_qc_candidates is
+        patched to sleep right after its read, widening the window in which a missing lock would
+        let both calls read before either one writes.
+        """
+        base_date = datetime.date(2025, 12, 1)
+        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
+
+        submission_id_a = f"{SUBMITTER_ID}_{base_date}_00000000"
+        submission_id_b = f"{SUBMITTER_ID}_{base_date}_00000001"
+        _add_submission_with_history(
+            db, submission_id_a, SUBMITTER_ID, base_date, DEFAULT_HISTORY, base_timestamp=start_time
+        )
+        _add_submission_with_history(
+            db,
+            submission_id_b,
+            SUBMITTER_ID,
+            base_date,
+            DEFAULT_HISTORY,
+            base_timestamp=start_time + datetime.timedelta(minutes=10),
+        )
+
+        original_list_candidates = SubmissionDb._list_submitter_qc_candidates
+
+        def _slow_list_candidates(self, *args, **kwargs):
+            candidates = original_list_candidates(self, *args, **kwargs)
+            time.sleep(0.3)
+            return candidates
+
+        monkeypatch.setattr(SubmissionDb, "_list_submitter_qc_candidates", _slow_list_candidates)
+
+        db_b = SubmissionDb(db_url=migrated_db_connection, author=test_author)
+        try:
+            barrier = threading.Barrier(2)
+            results: dict[str, bool] = {}
+            exceptions: dict[str, Exception] = {}
+
+            def _run(name: str, target_db: SubmissionDb, submission_id: str):
+                try:
+                    barrier.wait()
+                    results[name] = target_db.should_qc(submission_id, 2.0, "salt")
+                except Exception as e:
+                    exceptions[name] = e
+
+            thread_a = threading.Thread(target=_run, args=("a", db, submission_id_a))
+            thread_b = threading.Thread(target=_run, args=("b", db_b, submission_id_b))
+            thread_a.start()
+            thread_b.start()
+            thread_a.join()
+            thread_b.join()
+        finally:
+            db_b.engine.dispose()
+
+        assert not exceptions, f"should_qc raised in a thread: {exceptions}"
+        assert sum(results.values()) == 1, f"expected exactly one True, got {results}"
+
+        submission_a = db.get_submission(submission_id_a)
+        submission_b = db.get_submission(submission_id_b)
+        assert submission_a is not None
+        assert submission_b is not None
+        selected_flags = [submission_a.selected_for_qc, submission_b.selected_for_qc]
+        assert selected_flags.count(True) == 1, f"expected exactly one selected_for_qc=True, got {selected_flags}"
