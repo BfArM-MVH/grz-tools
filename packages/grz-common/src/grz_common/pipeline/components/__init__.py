@@ -293,37 +293,54 @@ class PushToPullAdapter(io.RawIOBase):
     File-like adapter that bridges pipeline push operations to pull ones.
 
     Producers put byte chunks on ``queue`` and ``None`` at the end of the stream.
-    ``read()`` and ``readall()`` come from ``io.RawIOBase`` via ``readinto()``.
 
-    ``readinto()`` waits for the first chunk only, then also takes the chunks already queued, up
-    to the size of the buffer. A reader in another thread, such as grz_check, then needs the GIL
-    once per batch instead of once per chunk.
+    ``read()`` waits for the first chunk only, then also takes the chunks already queued, up to
+    ``size`` bytes, and returns them joined. A reader in another thread, such as grz_check, then
+    needs the GIL once per batch instead of once per chunk, and each batch is copied only once.
+    ``readinto()`` goes through ``read()``, and ``readall()`` comes from ``io.RawIOBase``.
     """
 
     def __init__(self, max_queue_size: int = 128) -> None:
         self.queue: queue.Queue[bytes | None] = queue.Queue(maxsize=max_queue_size)
-        self.buffer = bytearray()
+        self.buffer = b""  # the rest of a chunk that did not fit into the last read()
         self.eof = False
 
     def readable(self) -> bool:
         return True
 
+    def read(self, size: int | None = -1) -> bytes:
+        if size is None or size < 0:
+            return self.readall()
+        parts: list[bytes] = []
+        n = 0
+        while n < size:
+            if self.buffer:
+                chunk = self.buffer
+                self.buffer = b""
+            elif self.eof:
+                break
+            else:
+                try:
+                    item = self.queue.get(block=not parts)
+                except queue.Empty:
+                    break
+                if item is None:
+                    self.eof = True
+                    break
+                chunk = item
+            room = size - n
+            if len(chunk) > room:
+                self.buffer = chunk[room:]  # the rest waits for the next read()
+                chunk = chunk[:room]
+            parts.append(chunk)
+            n += len(chunk)
+        return b"".join(parts)
+
     def readinto(self, buffer: Buffer) -> int:
         view = memoryview(buffer).cast("B")
-        while len(self.buffer) < len(view) and not self.eof:
-            try:
-                chunk = self.queue.get(block=not self.buffer)
-            except queue.Empty:
-                break
-            if chunk is None:
-                self.eof = True
-            else:
-                self.buffer.extend(chunk)
-
-        n = min(len(view), len(self.buffer))
-        view[:n] = self.buffer[:n]
-        del self.buffer[:n]
-        return n
+        data = self.read(len(view))
+        view[: len(data)] = data
+        return len(data)
 
 
 class Tee(ReadStream):
