@@ -205,7 +205,7 @@ class SearchResultsDataTable(DataTable):
         self.add_columns("Submission ID", "Pseudonym", "Local Case ID", "Latest State", "State Timestamp (UTC)")
 
     @textual.work
-    async def search(  # noqa: PLR0913
+    async def search(  # noqa: PLR0913, PLR0917
         self,
         database: SubmissionDb,
         submission_id: str | None = None,
