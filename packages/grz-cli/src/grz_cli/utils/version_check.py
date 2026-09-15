@@ -46,18 +46,6 @@ def check_version_and_exit_if_needed(
     _check_policy_and_exit_if_needed("grz-cli", current_version, version_file.grzcli_version)
 
 
-def check_metadata_version_and_exit_if_needed(
-    s3_options: S3Options,
-    metadata_schema_version: str,
-    version_file_key: str = "version.json",
-) -> None:
-    """Validate the metadata schema version against the policy defined in version.json."""
-    version_file = VersionFile.from_s3(s3_options, version_file_key)
-
-    current_version = pkg_version.Version(metadata_schema_version)
-    _check_policy_and_exit_if_needed("metadata", current_version, version_file.metadata_version)
-
-
 def _check_policy_and_exit_if_needed(
     subject: str,
     current_version: pkg_version.Version,
