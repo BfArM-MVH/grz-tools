@@ -1,7 +1,7 @@
 import logging
 import threading
 from collections import defaultdict
-from typing import Any, Self
+from typing import Any
 
 from grz_common.workers.submission import SubmissionMetadata
 
@@ -61,10 +61,6 @@ class ReadPairConsistencyValidator:
                 partner_map[fq1.file_path] = fq2.file_path
                 partner_map[fq2.file_path] = fq1.file_path
         return partner_map
-
-    @classmethod
-    def from_submission_metadata(cls, context: SubmissionContext, submission_metadata: SubmissionMetadata) -> Self:
-        return cls(context, cls.get_partner_map(submission_metadata))
 
     def check_pair(self, path_a: str, path_b: str) -> bool:
         """

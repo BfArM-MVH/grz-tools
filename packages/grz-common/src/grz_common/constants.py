@@ -20,6 +20,3 @@ MULTIPART_MIN_PART_SIZE = 5 * 1024 * 1024  # 5 MiB
 # Default chunk/part size for multipart uploads
 # Using 256MB as default to reduce number of parts for large files
 MULTIPART_DEFAULT_PART_SIZE = 256 * 1024 * 1024  # 256 MiB
-
-# Default chunk size for streaming operations (matches crypt4gh segment size)
-STREAMING_CHUNK_SIZE = 64 * 1024  # 64 KiB

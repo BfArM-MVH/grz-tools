@@ -60,4 +60,3 @@ class ProcessingState(State, total=False):
     """
 
     processing_successful: bool
-    validation_errors: list[str]
