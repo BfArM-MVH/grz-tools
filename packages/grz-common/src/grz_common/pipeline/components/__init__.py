@@ -359,6 +359,78 @@ class TqdmObserver(Observer):
                 pbar.update(n)
 
 
+class ThreadedObserver(Observer):
+    """
+    Runs an observer in its own worker thread, so a slow observer does not hold up the stream.
+
+    Chunks travel to the worker through a queue that holds at most ``max_queue_size`` chunks.
+    If the observer fails, the next write or ``close()`` raises its error; neither waits on a
+    queue that nobody empties anymore. ``close()`` waits until the worker has written every
+    chunk, then closes the observer.
+
+    Usage::
+
+        pipeline |= Tee(ThreadedObserver(ChecksumValidator(expected_checksum=...)))
+    """
+
+    def __init__(self, observer: Writable, max_queue_size: int = 8) -> None:
+        super().__init__()
+        self.observer = observer
+        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=max_queue_size)
+        self._thread: threading.Thread | None = None
+        self._exc: Exception | None = None
+
+    def observe(self, chunk: bytes) -> None:
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        if self._thread is None:
+            # start on the first chunk, not when the pipeline is built
+            self._thread = threading.Thread(target=self._work, daemon=True)
+            self._thread.start()
+        self._put(chunk)
+
+    def _work(self) -> None:
+        try:
+            while (chunk := self._queue.get()) is not None:
+                self.observer.write(chunk)
+        except Exception as e:
+            self._exc = e
+
+    def _put(self, item: bytes | None) -> None:
+        """Hand an item to the worker, without waiting forever once the worker has stopped."""
+        while True:
+            self._raise_if_failed()
+            try:
+                self._queue.put(item, timeout=0.1)
+                return
+            except queue.Full:
+                if self._thread is not None and not self._thread.is_alive():
+                    self._raise_if_failed()
+                    raise PipelineError("Observer thread stopped unexpectedly", stage=self.__class__.__name__) from None
+
+    def _raise_if_failed(self) -> None:
+        if self._exc is not None:
+            raise self._exc
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        try:
+            try:
+                if self._thread is not None:
+                    self._put(None)  # end marker
+                    self._thread.join()
+                    self._raise_if_failed()
+            except BaseException:
+                # report the worker's error, not a follow-up one from closing the observer
+                with contextlib.suppress(Exception):
+                    self.observer.close()
+                raise
+            self.observer.close()
+        finally:
+            super().close()
+
+
 class DevNullSink(io.BufferedIOBase, Writable):
     """Sink that discards all data."""
 
