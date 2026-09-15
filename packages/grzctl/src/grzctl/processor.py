@@ -112,7 +112,7 @@ class FilePipelineExecutor:
     call so a fresh source inbox is always used.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         source_s3: S3Client,
         source_bucket: str,
@@ -163,7 +163,7 @@ class FilePipelineExecutor:
                     run_state, progress_logger, files_map, thresholds, pbar_global=pbar_global
                 )
 
-    def _process_files_concurrent(  # noqa: PLR0913
+    def _process_files_concurrent(  # noqa: PLR0913, PLR0917
         self,
         run_state: SubmissionRunState,
         progress_logger: FileProgressLogger[ProcessingState],
@@ -188,7 +188,7 @@ class FilePipelineExecutor:
             for future in futures:
                 future.result()
 
-    def _process_one_file(  # noqa: PLR0913
+    def _process_one_file(  # noqa: PLR0913, PLR0917
         self,
         run_state: SubmissionRunState,
         progress_logger: FileProgressLogger[ProcessingState],
@@ -295,7 +295,7 @@ class FilePipelineExecutor:
 
         return format_validator
 
-    def _run_pipeline(  # noqa: PLR0913
+    def _run_pipeline(  # noqa: PLR0913, PLR0917
         self,
         run_state: SubmissionRunState,
         file_meta: File,
@@ -416,7 +416,7 @@ class SubmissionProcessor:
     Inbox -> Decrypt -> Validate -> Re-Encrypt -> Archive
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         configuration: GrzctlConfig,
         inbox: InboxTarget,

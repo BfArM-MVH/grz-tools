@@ -101,7 +101,7 @@ log = logging.getLogger(__name__)
     default=True,
     help="Clean submission from inbox bucket after successful processing.",
 )
-def process(  # noqa: PLR0913
+def process(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_id: str,
     output_dir: str,
@@ -213,7 +213,7 @@ def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
     return base_dir, metadata_dir, log_dir
 
 
-def _handle_pruefbericht(  # noqa: PLR0913
+def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_id: str,
     log_dir: Path,

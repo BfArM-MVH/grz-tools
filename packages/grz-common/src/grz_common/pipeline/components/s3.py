@@ -49,7 +49,7 @@ class S3MultipartUploader(Observer):
     because a multipart upload needs at least one part.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         s3_client: Any,
         bucket: str,
