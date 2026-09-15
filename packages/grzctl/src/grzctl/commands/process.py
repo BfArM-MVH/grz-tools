@@ -48,6 +48,7 @@ from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
 from grz_db.models.submission import SubmissionStateEnum
+from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from ..commands import grzctl_configuration
@@ -56,7 +57,7 @@ from ..models.config import GrzctlConfig
 from ..models.pruefbericht import PruefberichtModel
 from ..processor import SubmissionProcessor
 from .db.cli import get_submission_db_instance
-from .pruefbericht import _generate_pruefbericht_from_database
+from .pruefbericht import _generate_pruefbericht_from_database, _get_submission_credentials
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
 
 log = logging.getLogger(__name__)
@@ -85,11 +86,6 @@ log = logging.getLogger(__name__)
     help="Whether to redact sensitive information from written Prüfbericht",
 )
 @click.option(
-    "--redact-logs/--no-redact-logs",
-    default=True,
-    help="Redact sensitive information from logs before archiving.",
-)
-@click.option(
     "--concurrent-uploads",
     type=int,
     default=4,
@@ -114,7 +110,6 @@ def process(  # noqa: PLR0913
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
     redact_pruefbericht: bool,
-    redact_logs: bool,
     concurrent_uploads: int,
     inbox_bucket: str | None = None,
     clean_inbox: bool = True,
@@ -202,7 +197,6 @@ def process(  # noqa: PLR0913
         submit_pruefbericht=submit_pruefbericht,
         save_pruefbericht=save_pruefbericht,
         redact_pruefbericht=redact_pruefbericht,
-        redact_logs=redact_logs,
         update_db=update_db,
     )
 
@@ -219,16 +213,14 @@ def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
     return base_dir, metadata_dir, log_dir
 
 
-def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912, PLR0915
+def _handle_pruefbericht(  # noqa: PLR0913
     configuration: GrzctlConfig,
     submission_id: str,
     log_dir: Path,
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
     redact_pruefbericht: bool,
-    redact_logs: bool,
     update_db: bool,
-    max_retries: int = 10,
 ) -> None:
     """Generate and optionally submit Prüfbericht to BfArM.
 
@@ -251,75 +243,12 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912, PLR0915
             raise
         return
 
-    # save Prüfbericht
-    if save_pruefbericht:
-        save_path = Path(save_pruefbericht)
-        pruefbericht_data = pruefbericht.model_dump(by_alias=True, mode="json")
-        # ... with redacted TAN if requested
-        if redact_pruefbericht:
-            pruefbericht_data["SubmittedCase"]["tan"] = REDACTED_TAN
-        with open(save_path, "w") as f:
-            json.dump(pruefbericht_data, f, indent=2)
-        log.info(f"Saved Prüfbericht (with redacted TAN) to: {save_path}")
+    _save_pruefbericht(pruefbericht, log_dir, save_pruefbericht, redact_pruefbericht)
 
-    # also save a copy to the logs directory (with redacted TAN)
-    pruefbericht_log_path = log_dir / "pruefbericht.json"
-    redacted_for_log = pruefbericht.model_dump(by_alias=True, mode="json")
-    if redact_logs:
-        redacted_for_log["SubmittedCase"]["tan"] = REDACTED_TAN
-    with open(pruefbericht_log_path, "w") as f:
-        json.dump(redacted_for_log, f, indent=2)
-    log.info(f"Saved Prüfbericht copy to logs: {pruefbericht_log_path}")
-
-    # submit Prüfbericht if requested
     if submit_pruefbericht:
-        pruefbericht_config: PruefberichtModel = configuration.pruefbericht
-
-        if (auth_url := pruefbericht_config.authorization_url) is None:
-            raise ValueError("pruefbericht.authorization_url is required but not configured")
-        if (client_id := pruefbericht_config.client_id) is None:
-            raise ValueError("pruefbericht.client_id is required but not configured")
-        if (configured_secret := pruefbericht_config.client_secret) is None:
-            raise ValueError("pruefbericht.client_secret is required but not configured")
-        client_secret = configured_secret.get_secret_value()
-        if (api_base_url := pruefbericht_config.api_base_url) is None:
-            raise ValueError("pruefbericht.api_base_url is required but not configured")
-
-        log.info("Submitting Prüfbericht to BfArM...")
-
-        # Perform retries *before* opening the DbContext so we don't hold a DB
-        # transaction open for the entire exponential-backoff window (which could
-        # be hours with the default 10 retries).  Only the final (possibly
-        # failing) attempt is bracketed by the context manager.
-        last_error: Exception | None = None
-        initial_delay = 30.0
-        backoff_factor = 2.0
-
-        for attempt in range(1, max_retries + 1):
-            try:
-                _expiry, _token = _try_submit_pruefbericht(
-                    pruefbericht=pruefbericht,
-                    api_base_url=str(api_base_url),
-                    auth_url=str(auth_url),
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    token="",
-                )
-                last_error = None
-                break
-            except Exception as e:
-                last_error = e
-                if attempt <= max_retries:
-                    wait_time = initial_delay * (backoff_factor ** (attempt - 1))
-                    log.warning(
-                        f"Prüfbericht submission attempt {attempt}/{max_retries} "
-                        f"failed: {e}. Retrying in {wait_time:.0f}s..."
-                    )
-                    time.sleep(wait_time)
-
-        if last_error is not None:
-            log.error(f"Prüfbericht submission failed after {max_retries} retries.")
-            raise last_error
+        # Retry *before* opening the DbContext so we don't hold a DB transaction
+        # open for the entire exponential-backoff window (which could be hours).
+        _submit_pruefbericht_with_retries(pruefbericht, configuration.pruefbericht)
 
         # Only open the DbContext for the successful state transition.
         with DbContext(
@@ -333,3 +262,58 @@ def _handle_pruefbericht(  # noqa: C901, PLR0913, PLR0912, PLR0915
             # the state transition.  If the state transition itself fails we
             # log it but don't lose the fact that the Prüfbericht was accepted.
             log.info("Prüfbericht submitted successfully!")
+
+
+def _save_pruefbericht(
+    pruefbericht: Pruefbericht, log_dir: Path, save_pruefbericht: str | None, redact_pruefbericht: bool
+) -> None:
+    """Write the Prüfbericht to ``save_pruefbericht`` if given, and a copy with redacted TAN to ``log_dir``."""
+    if save_pruefbericht:
+        save_path = Path(save_pruefbericht)
+        pruefbericht_data = pruefbericht.model_dump(by_alias=True, mode="json")
+        # ... with redacted TAN if requested
+        if redact_pruefbericht:
+            pruefbericht_data["SubmittedCase"]["tan"] = REDACTED_TAN
+        with open(save_path, "w") as f:
+            json.dump(pruefbericht_data, f, indent=2)
+        log.info(f"Saved Prüfbericht (with redacted TAN) to: {save_path}")
+
+    # also save a copy to the logs directory (with redacted TAN)
+    pruefbericht_log_path = log_dir / "pruefbericht.json"
+    redacted_for_log = pruefbericht.model_dump(by_alias=True, mode="json")
+    redacted_for_log["SubmittedCase"]["tan"] = REDACTED_TAN
+    with open(pruefbericht_log_path, "w") as f:
+        json.dump(redacted_for_log, f, indent=2)
+    log.info(f"Saved Prüfbericht copy to logs: {pruefbericht_log_path}")
+
+
+def _submit_pruefbericht_with_retries(pruefbericht: Pruefbericht, pruefbericht_config: PruefberichtModel) -> None:
+    """Submit the Prüfbericht, retrying with exponential backoff; re-raise the last error."""
+    auth_url, client_id, client_secret, api_base_url = _get_submission_credentials(pruefbericht_config)
+
+    log.info("Submitting Prüfbericht to BfArM...")
+
+    max_attempts = 10
+    initial_delay = 30.0
+    backoff_factor = 2.0
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            _try_submit_pruefbericht(
+                pruefbericht=pruefbericht,
+                api_base_url=api_base_url,
+                auth_url=auth_url,
+                client_id=client_id,
+                client_secret=client_secret,
+                token="",
+            )
+            return
+        except Exception as e:
+            if attempt == max_attempts:
+                log.error(f"Prüfbericht submission failed after {max_attempts} attempts.")
+                raise
+            wait_time = initial_delay * (backoff_factor ** (attempt - 1))
+            log.warning(
+                f"Prüfbericht submission attempt {attempt}/{max_attempts} failed: {e}. Retrying in {wait_time:.0f}s..."
+            )
+            time.sleep(wait_time)

@@ -17,6 +17,7 @@ from pydantic_core import to_jsonable_python
 from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
+from ..models.pruefbericht import PruefberichtModel
 
 log = logging.getLogger(__name__)
 fail_or_pass = click.option(
@@ -225,20 +226,10 @@ def submit(  # noqa: PLR0913, PLR0917
     **kwargs,
 ):
     """Submit a Prüfbericht JSON to BfArM."""
-    pb = configuration.pruefbericht
-
     with open(pruefbericht_file) as f:
         pruefbericht = Pruefbericht.model_validate_json(f.read())
 
-    if (auth_url := pb.authorization_url) is None:
-        raise ValueError("pruefbericht.auth_url must be provided to submit Prüfberichte")
-    if (client_id := pb.client_id) is None:
-        raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
-    if (configured_secret := pb.client_secret) is None:
-        raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
-    client_secret = configured_secret.get_secret_value()
-    if (api_base_url := pb.api_base_url) is None:
-        raise ValueError("pruefbericht.api_base_url must be provided to submit Prüfberichte")
+    auth_url, client_id, client_secret, api_base_url = _get_submission_credentials(configuration.pruefbericht)
 
     if pruefbericht.submitted_case.tan == REDACTED_TAN and not allow_redacted_tan_g:
         raise ValueError("Refusing to submit a Prüfbericht with a redacted TAN")
@@ -252,8 +243,8 @@ def submit(  # noqa: PLR0913, PLR0917
     ):
         expiry, token = _try_submit(
             pruefbericht=pruefbericht,
-            api_base_url=str(api_base_url),
-            auth_url=str(auth_url),
+            api_base_url=api_base_url,
+            auth_url=auth_url,
             client_id=client_id,
             client_secret=client_secret,
             token=token,
@@ -264,6 +255,19 @@ def submit(  # noqa: PLR0913, PLR0917
     if expiry and print_token:
         log.info(f"New token expires at {expiry.isoformat()}")
         click.echo(token)
+
+
+def _get_submission_credentials(pb: PruefberichtModel) -> tuple[str, str, str, str]:
+    """Return ``(auth_url, client_id, client_secret, api_base_url)``, or raise if one is not configured."""
+    if (auth_url := pb.authorization_url) is None:
+        raise ValueError("pruefbericht.authorization_url must be provided to submit Prüfberichte")
+    if (client_id := pb.client_id) is None:
+        raise ValueError("pruefbericht.client_id must be provided to submit Prüfberichte")
+    if (client_secret := pb.client_secret) is None:
+        raise ValueError("pruefbericht.client_secret must be provided to submit Prüfberichte")
+    if (api_base_url := pb.api_base_url) is None:
+        raise ValueError("pruefbericht.api_base_url must be provided to submit Prüfberichte")
+    return str(auth_url), client_id, client_secret.get_secret_value(), str(api_base_url)
 
 
 def _try_submit(  # noqa: PLR0913, PLR0917
