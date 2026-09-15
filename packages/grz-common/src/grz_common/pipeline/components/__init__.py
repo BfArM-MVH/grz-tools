@@ -291,142 +291,55 @@ class ObserverWithMetrics(Observer, Metrics, metaclass=abc.ABCMeta):
 class PushToPullAdapter(io.RawIOBase):
     """
     File-like adapter that bridges pipeline push operations to pull ones.
+
+    Producers put byte chunks on ``queue`` and ``None`` at the end of the stream.
+    ``read()`` and ``readall()`` come from ``io.RawIOBase`` via ``readinto()``.
     """
 
-    def __init__(self, max_queue_size: int = 128):
-        self.queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
-        self.buffer: bytearray = bytearray()
-        self.eof: bool = False
-        self.exception: Exception | None = None
+    def __init__(self, max_queue_size: int = 128) -> None:
+        self.queue: queue.Queue[bytes | None] = queue.Queue(maxsize=max_queue_size)
+        self.buffer = bytearray()
+        self.eof = False
 
     def readable(self) -> bool:
         return True
 
-    def read(self, size: int = -1) -> bytes:
-        if size == -1:
-            result = bytearray()
-            while True:
-                chunk = self._get_chunk()
-                if not chunk:
-                    break
-                result.extend(chunk)
-            return bytes(result)
-
-        result = bytearray()
-        while len(result) < size:
-            if not self.buffer:
-                chunk = self._get_chunk()
-                if not chunk:
-                    break
+    def readinto(self, buffer: Buffer) -> int:
+        while not self.buffer and not self.eof:
+            chunk = self.queue.get()
+            if chunk is None:
+                self.eof = True
+            else:
                 self.buffer.extend(chunk)
 
-            needed = size - len(result)
-            take = min(needed, len(self.buffer))
-            result.extend(self.buffer[:take])
-            del self.buffer[:take]
-
-        return bytes(result)
-
-    def _get_chunk(self) -> bytes:
-        if self.eof:
-            return b""
-        chunk = self.queue.get()
-        if chunk is None:
-            self.eof = True
-            self.queue.task_done()
-            return b""
-        if isinstance(chunk, Exception):
-            self.exception = chunk
-            self.queue.task_done()
-            raise chunk
-        self.queue.task_done()
-        return chunk
-
-    def throw(self, exception: Exception):
-        """Inject an exception directly into the queue to immediately alert and unblock the reading thread."""
-        with contextlib.suppress(queue.Full):
-            self.queue.put_nowait(exception)
+        view = memoryview(buffer).cast("B")
+        n = min(len(view), len(self.buffer))
+        view[:n] = self.buffer[:n]
+        del self.buffer[:n]
+        return n
 
 
 class Tee(ReadStream):
-    """
-    Branches the stream to an Observer.
-    Supports asynchronous background threads or synchronous execution.
-    """
+    """Branches the stream to an observer."""
 
-    def __init__(self, observer: Writable, max_queue_size: int = 128, threaded: bool = False):
+    def __init__(self, observer: Writable):
         super().__init__(None)
         self.observer = observer
-        self.max_queue_size = max_queue_size
-        self._threaded = threaded
-        self._queue: queue.Queue[bytes | None] | None = None
-        self._thread: threading.Thread | None = None
-        self._exc: Exception | None = None
-
-    @property
-    def source(self) -> Readable | None:
-        return self._source
-
-    @source.setter
-    def source(self, source: Readable) -> None:
-        super(Tee, type(self)).source.fset(self, source)  # type: ignore[attr-defined]
-
-        if source is not None and self._threaded:
-            self._queue = queue.Queue(maxsize=self.max_queue_size)
-            self._thread = threading.Thread(target=self._worker, daemon=True)
-            self._thread.start()
 
     def read(self, size: int | None = -1) -> bytes:
-        if self._threaded and self._exc:
-            raise self._exc
-
-        if self._source is None:
-            raise RuntimeError("Stream source not set")
-
-        chunk = self._source.read(size)
-
-        if self._threaded and self._queue:
-            if chunk:
-                self._queue.put(chunk, block=True)
-            else:
-                self._queue.put(None)
-        elif chunk:
+        chunk = super().read(size)
+        if chunk:
             self.observer.write(chunk)
-
         return chunk
-
-    def _worker(self) -> None:
-        try:
-            if not self._queue:
-                return
-            while True:
-                chunk = self._queue.get()
-                if chunk is None:
-                    self._queue.task_done()
-                    break
-                self.observer.write(chunk)
-                self._queue.task_done()
-        except Exception as e:
-            self._exc = e
 
     def close(self) -> None:
         if self.closed:
             return
-        # close upstream sources first, and the observer even if that fails
+        # close upstream sources first
         try:
             super().close()
         finally:
-            # shut down the background worker gracefully
-            if self._threaded and self._thread and self._thread.is_alive() and self._queue:
-                with contextlib.suppress(queue.Full):
-                    self._queue.put_nowait(None)
-                self._thread.join()
-
-            if hasattr(self.observer, "close"):
-                self.observer.close()
-
-        if self._exc:
-            raise self._exc
+            self.observer.close()
 
 
 class TqdmObserver(Observer):

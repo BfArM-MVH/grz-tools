@@ -1,12 +1,20 @@
 """Tests for the modular pipeline components."""
 
+import array
 import gzip
 import hashlib
 import io
 from io import BytesIO
 
 import pytest
-from grz_common.pipeline.components import DataValidationError, Observer, ReadStream, Tee, Transformer
+from grz_common.pipeline.components import (
+    DataValidationError,
+    Observer,
+    PushToPullAdapter,
+    ReadStream,
+    Tee,
+    Transformer,
+)
 from grz_common.pipeline.components.validation import ChecksumValidator, FastqValidator
 
 
@@ -214,3 +222,26 @@ class TestCloseErrors:
 
         with pytest.raises(OSError, match="source failed"):
             pipeline >> BytesIO()
+
+
+class TestPushToPullAdapter:
+    """The adapter hands queued chunks to a reader, as a raw file object."""
+
+    def test_readinto_fills_any_writable_buffer_bytewise(self):
+        """readinto() must count bytes, also for buffers whose items are wider than one byte."""
+        adapter = PushToPullAdapter()
+        adapter.queue.put(b"abcdefgh")
+        adapter.queue.put(None)
+        buffer = array.array("i", [0, 0])
+
+        assert adapter.readinto(buffer) == 8
+        assert buffer.tobytes() == b"abcdefgh"
+
+    def test_read_returns_queued_chunks_until_the_end_marker(self):
+        adapter = PushToPullAdapter()
+        for chunk in (b"abc", b"defg", None):
+            adapter.queue.put(chunk)
+
+        assert adapter.read(2) == b"ab"
+        assert adapter.readall() == b"cdefg"
+        assert adapter.read(1) == b""

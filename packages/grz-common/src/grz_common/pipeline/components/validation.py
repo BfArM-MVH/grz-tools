@@ -38,6 +38,11 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
         except Exception as exception:
             self.exception = exception
 
+    def _raise_if_invalid(self) -> None:
+        if self.report and not self.report.is_valid:
+            errors = "; ".join(self.report.errors)
+            raise DataValidationError(f"{self._format_error_prefix()}: {errors}", stage=self.__class__.__name__)
+
     def _enqueue_chunk(self, chunk: bytes | None):
         """Push a chunk to the adapter queue, monitoring thread health."""
         while True:
@@ -45,14 +50,12 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
                 raise self.exception
             try:
                 self.adapter.queue.put(chunk, timeout=0.1)
-                break
+                return
             except queue.Full as e:
-                if not self.validation_thread.is_alive():
-                    if self.report and not self.report.is_valid:
-                        errors = "; ".join(self.report.errors)
-                        prefix = self._format_error_prefix()
-                        raise DataValidationError(f"{prefix}: {errors}", stage=self.__class__.__name__) from e
-                    raise PipelineError("Validation thread stopped unexpectedly", stage=self.__class__.__name__) from e
+                if self.validation_thread.is_alive():
+                    continue
+                self._raise_if_invalid()
+                raise PipelineError("Validation thread stopped unexpectedly", stage=self.__class__.__name__) from e
 
     def close(self):
         if self.closed:
@@ -70,10 +73,7 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
                 raise DataValidationError(str(self.exception), stage=self.__class__.__name__, cause=self.exception)
 
             if self.report:
-                if not self.report.is_valid:
-                    errors = "; ".join(self.report.errors)
-                    prefix = self._format_error_prefix()
-                    raise DataValidationError(f"{prefix}: {errors}", stage=self.__class__.__name__)
+                self._raise_if_invalid()
                 for warning in self.report.warnings:
                     prefix = self._format_error_prefix().split()[0]
                     log.warning(f"{prefix} Warning: {warning}")
