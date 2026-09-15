@@ -2,6 +2,7 @@ import io
 import os
 
 import pytest
+from grz_common.pipeline.components import ReadStream, WriteStream
 from grz_common.pipeline.components.perf import MeasuringReadStream, MeasuringWriteStream, StreamMetricsRegistry
 
 
@@ -48,6 +49,21 @@ def test_measuring_observer_chaining(registry, random_data):
     stats = registry.metrics.get("test_observer")
     assert stats is not None
     assert stats["bytes"] == len(random_data)
+
+
+def test_measure_with_pipe_syntax(registry, random_data):
+    """``| registry.measure(name)`` times the stage before it, for reading and for writing stages."""
+    pipeline = ReadStream(io.BytesIO(random_data)) | registry.measure("read")
+    sink = io.BytesIO()
+    writer = WriteStream(sink) | registry.measure("write")
+
+    writer.write(pipeline.read())
+
+    assert isinstance(pipeline, MeasuringReadStream)
+    assert isinstance(writer, MeasuringWriteStream)
+    assert sink.getvalue() == random_data
+    assert registry.metrics["read"]["bytes"] == len(random_data)
+    assert registry.metrics["write"]["bytes"] == len(random_data)
 
 
 def test_measurement_small_reads(registry):

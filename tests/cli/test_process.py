@@ -15,7 +15,9 @@ import grzctl.cli
 import pytest
 import yaml
 from grz_common.models.base import get_secret_value
+from grz_db.models.submission import SubmissionDb
 from grzctl.models.config import GrzctlConfig
+from grzctl.processor import FilePipelineExecutor
 from moto import mock_aws
 
 # Path to test fixtures
@@ -670,6 +672,120 @@ class TestProcessValidationFailure:
             Key=f"{submission_id}/files/invalid.fastq.gz.c4gh",
             Body=gzipped_content,  # Not actually encrypted for simplicity
         )
+
+
+@pytest.fixture
+def qc_process_config_file_path(temp_data_dir_path, process_config_content) -> Path:
+    """Write a process config that selects submissions for detailed QC and can sign DB state changes."""
+    process_config_content["detailed_qc"]["target_percentage"] = "100.0"
+    process_config_content["db"]["author"]["private_key_passphrase"] = "test"
+    config_file = temp_data_dir_path / "config.process.qc.yaml"
+    with open(config_file, "w") as fd:
+        yaml.dump(process_config_content, fd)
+    return config_file
+
+
+def _run_process(config_file_path: Path, submission_id: str, output_dir: Path, *extra_args: str):
+    args = [
+        "--config",
+        str(config_file_path),
+        "process",
+        "--submission-id",
+        submission_id,
+        "--output-dir",
+        str(output_dir),
+        "--no-submit-pruefbericht",
+        *extra_args,
+    ]
+    return click.testing.CliRunner().invoke(grzctl.cli.build_cli(), args)
+
+
+def _upload_initial_submission_to_inbox(inbox_bucket, submission_id: str) -> None:
+    """Upload the valid submission as an initial one, since only initial submissions are selected for QC."""
+    upload_submission_to_inbox(inbox_bucket, submission_id)
+    metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+    metadata["submission"]["submissionType"] = "initial"
+    inbox_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+
+
+def _qc_files(process_config_content: dict, submission_id: str) -> set[str]:
+    files_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / submission_id / "files"
+    return {p.relative_to(files_dir).as_posix() for p in files_dir.rglob("*") if p.is_file()}
+
+
+class TestProcessDetailedQc:
+    """Tests for the detailed QC prefetch: the main pass writes the QC copy when a selection is likely."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_prefetch_replaces_the_qc_pass(
+        self,
+        s3_buckets,
+        qc_process_config_file_path,
+        process_config_content,
+        initialized_db,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """When the guess is right, the QC pass finds every file already in QC storage."""
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
+
+        def fail_qc_download(*args, **kwargs):
+            raise AssertionError("the QC pass should not download files that the main pass already wrote")
+
+        monkeypatch.setattr(FilePipelineExecutor, "_run_qc_pipeline", fail_qc_download)
+
+        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path, "--update-db")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        expected = {
+            file["filePath"]
+            for donor in metadata["donors"]
+            for lab_datum in donor["labData"]
+            for file in lab_datum.get("sequenceData", {}).get("files", [])
+        }
+        assert _qc_files(process_config_content, self.SUBMISSION_ID) == expected
+        qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / self.SUBMISSION_ID
+        uploaded_metadata = {**metadata, "submission": {**metadata["submission"], "submissionType": "initial"}}
+        assert json.loads((qc_dir / "metadata" / "metadata.json").read_text()) == uploaded_metadata
+
+    def test_prefetched_files_are_deleted_when_not_selected(
+        self,
+        s3_buckets,
+        qc_process_config_file_path,
+        process_config_content,
+        initialized_db,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """A wrong guess leaves no decrypted files and no QC progress log behind."""
+        upload_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
+
+        # guess "selected", then decide "not selected"
+        monkeypatch.setattr(SubmissionDb, "should_qc", lambda self, *args, predict=False, **kwargs: predict)
+
+        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path, "--update-db")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
+        assert not (working_dir_path / "logs" / "progress_qc.cjson").exists()
+
+    def test_no_update_db_skips_qc_selection(
+        self,
+        s3_buckets,
+        qc_process_config_file_path,
+        process_config_content,
+        initialized_db,
+        working_dir_path,
+    ):
+        """The selection stores its decision in the DB, so ``--no-update-db`` runs without detailed QC."""
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
+
+        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path, "--no-update-db")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
 
 
 class TestConfigValidation:

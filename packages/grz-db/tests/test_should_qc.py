@@ -63,6 +63,36 @@ def _add_submission_with_history(
         current_timestamp += datetime.timedelta(seconds=1)
 
 
+def _add_submission_pending_basic_qc(
+    db: SubmissionDb,
+    submission_id: str,
+    submitter_id: str,
+    submission_date: datetime.date,
+    states: list[str],
+    base_timestamp: datetime.datetime,
+):
+    """
+    Helper to manually insert a submission whose basic QC has not been decided yet.
+
+    Skips the ``basic_qc_passed`` step of ``_add_submission_with_history``, so the row is left
+    with both ``basic_qc_passed`` and ``selected_for_qc`` at their default None. Setting
+    ``basic_qc_passed`` to false through ``modify_submission`` instead would also force
+    ``selected_for_qc`` to false as a side effect, which is not the state a submission is in
+    before basic QC has run.
+    """
+    db.add_submission(submission_id)
+
+    db.modify_submission(submission_id, "submission_uploaded_date", str(submission_date.isoformat()))
+    db.modify_submission(submission_id, "submission_type", SubmissionType.initial)
+    db.modify_submission(submission_id, "submitter_id", submitter_id)
+
+    current_timestamp = base_timestamp
+    for state_str in states:
+        state_enum = SubmissionStateEnum(state_str.capitalize())
+        _update_submission_state(db, submission_id, state_enum, current_timestamp)
+        current_timestamp += datetime.timedelta(seconds=1)
+
+
 def _add_qc_candidates(db: SubmissionDb, base_date: datetime.date, start_time: datetime.datetime, count: int) -> list:
     """Add *count* QC candidates ten minutes apart and return them in submission order."""
     submissions = []
@@ -376,6 +406,50 @@ class TestQcStrategy:
 
         with pytest.raises(SubmissionBasicQCNotPassedError):
             db.should_qc(submission_id, 2.0, "salt")
+
+    def test_should_qc_predict_before_basic_qc_answers_without_persisting(self, db: SubmissionDb):
+        """predict=True must answer even before basic QC has passed, and must store nothing.
+
+        The submission is the only one from its submitter this month, so the month rule selects
+        it regardless of the prediction; the point of this test is that predict skips the
+        "basic QC must have passed" check and leaves selected_for_qc untouched afterwards.
+        """
+        test_date = datetime.date(2025, 12, 1)
+        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
+        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+
+        _add_submission_pending_basic_qc(
+            db, submission_id, SUBMITTER_ID, test_date, DEFAULT_HISTORY, base_timestamp=base_timestamp
+        )
+
+        should_run = db.should_qc(submission_id, 2.0, "any_salt", predict=True)
+
+        assert should_run is True
+
+        submission = db.get_submission(submission_id)
+        assert submission is not None
+        assert submission.selected_for_qc is None
+
+    def test_should_qc_predict_returns_stored_selected_for_qc_false(self, db: SubmissionDb):
+        """predict=True must return an already-stored decision rather than compute a fresh one."""
+        test_date = datetime.date(2025, 12, 1)
+        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
+        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+
+        _add_submission_with_history(
+            db,
+            submission_id,
+            SUBMITTER_ID,
+            test_date,
+            DEFAULT_HISTORY,
+            base_timestamp=base_timestamp,
+            is_qced=False,
+        )
+        db.modify_submission(submission_id, "selected_for_qc", "false")
+
+        should_run = db.should_qc(submission_id, 2.0, "any_salt", predict=True)
+
+        assert should_run is False
 
     def test_should_qc_concurrent_decisions_select_only_one_submission(
         self, db: SubmissionDb, migrated_db_connection: str, test_author, monkeypatch

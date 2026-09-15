@@ -1263,17 +1263,22 @@ class SubmissionDb:
             change_requests = session.exec(statement).all()
             return change_requests
 
-    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:
+    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None, predict: bool = False) -> bool:
         """
         Determines whether or not a submission should go through detailed QC or not.
 
         The decision reads the submitter's QC queue and stores ``selected_for_qc`` in one
         transaction, and only one decision runs at a time. A decision therefore sees every
         decision made before it, also those made by other processes.
+
+        :param predict: Answer before basic QC has passed, as if it had: skip that check and
+            store nothing. While the submission is not in the QC queue, the answer never
+            includes a random selection.
         """
         with self.transaction() as session:
-            self._lock_qc_selection(session)
-            return self._decide_qc(session, submission_id, target_percentage / 100.0, salt)
+            if not predict:
+                self._lock_qc_selection(session)
+            return self._decide_qc(session, submission_id, target_percentage / 100.0, salt, predict)
 
     def _lock_qc_selection(self, session: Session) -> None:
         """Block other QC selections until the transaction of *session* ends."""
@@ -1285,7 +1290,7 @@ class SubmissionDb:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
 
     def _decide_qc(  # noqa: C901
-        self, session: Session, submission_id: str, target_proportion: float, salt: str | None
+        self, session: Session, submission_id: str, target_proportion: float, salt: str | None, predict: bool
     ) -> bool:
         submission = self.get_submission(submission_id, session=session)
 
@@ -1300,7 +1305,7 @@ class SubmissionDb:
         if submission_type != SubmissionType.initial:
             # only initial submissions matter for detailed QC selection
             return False
-        if submission.basic_qc_passed is not True:
+        if submission.basic_qc_passed is not True and not predict:
             # only submissions that passed basic QC are eligible for detailed QC
             raise SubmissionBasicQCNotPassedError(submission_id)
         if submission.selected_for_qc is True:
@@ -1350,7 +1355,8 @@ class SubmissionDb:
                 salt=salt,
             )
 
-        self.set_selected_for_qc(submission_id, should_select, session=session)
+        if not predict:
+            self.set_selected_for_qc(submission_id, should_select, session=session)
         return should_select
 
     def _diff_metadata(

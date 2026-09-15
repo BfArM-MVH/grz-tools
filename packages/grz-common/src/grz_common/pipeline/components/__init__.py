@@ -91,7 +91,7 @@ class Pipeable:
         Piping operator for chaining components.
 
         0. self | None -> self
-        1. self | Class -> Class(self)
+        1. self | callable -> callable(self), e.g. a class or StreamMetricsRegistry.measure(...)
         2. self: Readable | other: ReadStream  -> other, with other.source = self
             -> other will read from self
         3. self: WriteStream | other: Writable -> self, with self.sink = other
@@ -100,7 +100,7 @@ class Pipeable:
         if other is None:
             return self
 
-        if isinstance(other, type):
+        if callable(other):
             return other(self)
 
         if isinstance(self, Readable) and self.readable() and isinstance(other, ReadStream):
@@ -111,7 +111,7 @@ class Pipeable:
             self.sink = other
             return self
 
-        raise TypeError(f"Operator '|' expects a pipeable object or type, got {type(other)}")
+        raise TypeError(f"Operator '|' expects a pipeable object or a callable, got {type(other)}")
 
     def __rshift__(self, other: Writable) -> Writable:
         """
@@ -345,7 +345,7 @@ class Tee(ReadStream):
     Supports asynchronous background threads or synchronous execution.
     """
 
-    def __init__(self, observer: Observer, max_queue_size: int = 128, threaded: bool = False):
+    def __init__(self, observer: Writable, max_queue_size: int = 128, threaded: bool = False):
         super().__init__(None)
         self.observer = observer
         self.max_queue_size = max_queue_size

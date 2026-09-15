@@ -10,7 +10,7 @@ It replaces the individual step-by-step subcommands (``download``, ``decrypt``,
 avoids materialising intermediate files on disk.
 
 The pipeline stages are orchestrated by
-:class:`grz_common.pipeline.processor.SubmissionProcessor` and use an
+:class:`grzctl.processor.SubmissionProcessor` and use an
 *interrogation bucket* as a staging area: files are first uploaded there, then
 copied to the final archive bucket on success.  On failure, staged files are
 cleaned up or retained depending on the ``keep_failed`` configuration.
@@ -43,7 +43,6 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
-from grz_common.pipeline.processor import SubmissionProcessor
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import SubmissionMetadata
@@ -55,6 +54,7 @@ from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from ..models.pruefbericht import PruefberichtModel
+from ..processor import SubmissionProcessor
 from .db.cli import get_submission_db_instance
 from .pruefbericht import _generate_pruefbericht_from_database
 from .pruefbericht import _try_submit as _try_submit_pruefbericht

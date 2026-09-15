@@ -14,10 +14,11 @@ Command-line tool for internal GRZ operations.
 ## Documentation
 
 - [Registering change requests](docs/change-requests.md) — recording that a submission must be modified, deleted, or transferred, with the who/when/what audit trail.
+- [Processing a submission](docs/process.md): the `grzctl process` streaming pipeline, detailed QC prediction and selection, and recovery from partial failures.
 
 ## S3 permissions for `grzctl process`
 
-`grzctl process` uploads to the archive buckets using multipart uploads. The
+`grzctl process` uploads files to the archive buckets using multipart uploads. The
 credentials you give it must be allowed to **abort** a multipart upload, not just
 to write — these are often separate permissions.
 
