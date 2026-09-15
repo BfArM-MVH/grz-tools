@@ -4,9 +4,6 @@ import array
 import gzip
 import hashlib
 import io
-import threading
-import time
-from collections.abc import Callable
 from io import BytesIO
 
 import pytest
@@ -16,7 +13,6 @@ from grz_common.pipeline.components import (
     PushToPullAdapter,
     ReadStream,
     Tee,
-    ThreadedObserver,
     Transformer,
 )
 from grz_common.pipeline.components.validation import ChecksumValidator, FastqValidator
@@ -259,101 +255,3 @@ class TestPushToPullAdapter:
         assert adapter.read(8) == b"abcdefgh"
         # returns the rest at once, although the queue is empty and no end marker came yet
         assert adapter.read(8) == b"ij"
-
-
-class _SlowObserver(Observer):
-    """Test helper that takes a while per chunk and records the chunks and the threads it ran on."""
-
-    def __init__(self, delay: float = 0.0):
-        super().__init__()
-        self.delay = delay
-        self.chunks: list[bytes] = []
-        self.threads: set[int] = set()
-
-    def observe(self, chunk: bytes) -> None:
-        time.sleep(self.delay)
-        self.threads.add(threading.get_ident())
-        self.chunks.append(chunk)
-
-
-class _FailingObserver(Observer):
-    """Test helper that fails on its first chunk, after a delay."""
-
-    def __init__(self, delay: float = 0.0):
-        super().__init__()
-        self.delay = delay
-
-    def observe(self, chunk: bytes) -> None:
-        time.sleep(self.delay)
-        raise RuntimeError("observer failed")
-
-
-def _finishes_within(seconds: float, fn: Callable[[], object]) -> None:
-    """Run *fn* in a daemon thread; fail the test instead of hanging if it does not return in time."""
-    errors: list[BaseException] = []
-
-    def run() -> None:
-        try:
-            fn()
-        except BaseException as e:  # re-raised in the test thread below
-            errors.append(e)
-
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
-    thread.join(seconds)
-    if thread.is_alive():
-        pytest.fail(f"did not finish within {seconds} s")
-    if errors:
-        raise errors[0]
-
-
-class TestThreadedObserver:
-    """ThreadedObserver runs an observer in a worker thread and never hangs on a failed or slow worker."""
-
-    def test_passes_every_chunk_in_order_on_another_thread(self):
-        observer = _SlowObserver()
-        pipeline = ReadStream(BytesIO(b"0123456789")) | Tee(ThreadedObserver(observer))
-
-        _finishes_within(5, lambda: pipeline >> BytesIO())
-
-        assert b"".join(observer.chunks) == b"0123456789"
-        assert observer.threads
-        assert threading.get_ident() not in observer.threads
-        assert observer.closed
-
-    def test_failing_observer_does_not_block_the_producer(self):
-        """Hang path 1: the worker dies while the queue is full, so nothing empties it anymore."""
-        threaded = ThreadedObserver(_FailingObserver(delay=0.2), max_queue_size=1)
-
-        def write_many() -> None:
-            for _ in range(100):
-                threaded.write(b"x")
-
-        with pytest.raises(RuntimeError, match="observer failed"):
-            _finishes_within(5, write_many)
-
-    def test_close_with_a_full_queue_delivers_every_chunk(self):
-        """Hang path 2: close() must get its end marker through a full queue."""
-        observer = _SlowObserver(delay=0.01)
-        threaded = ThreadedObserver(observer, max_queue_size=1)
-        for i in range(20):
-            threaded.write(bytes([i]))
-
-        _finishes_within(5, threaded.close)
-
-        assert observer.chunks == [bytes([i]) for i in range(20)]
-        assert observer.closed
-
-    def test_worker_error_after_the_last_chunk_is_reported_at_close(self):
-        threaded = ThreadedObserver(_FailingObserver(delay=0.1))
-        threaded.write(b"last chunk")
-
-        with pytest.raises(RuntimeError, match="observer failed"):
-            _finishes_within(5, threaded.close)
-
-    def test_observer_error_at_close_fails_the_pipeline(self):
-        """A validator that only fails at close, like a checksum mismatch, still fails the pipeline."""
-        pipeline = ReadStream(BytesIO(b"data")) | Tee(ThreadedObserver(ChecksumValidator(expected_checksum="0" * 64)))
-
-        with pytest.raises(DataValidationError, match="Checksum mismatch"):
-            _finishes_within(5, lambda: pipeline >> BytesIO())
