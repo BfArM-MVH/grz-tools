@@ -592,6 +592,53 @@ class TestProcessValidationFailure:
         assert len(consented_keys) == 0, f"Consented archive should be empty, has: {consented_keys}"
         assert len(non_consented_keys) == 0, f"Non-consented archive should be empty, has: {non_consented_keys}"
 
+    def test_checksum_mismatch_fails_processing(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        initialized_db,
+        working_dir_path,
+    ):
+        """A file whose content does not match its metadata checksum must fail the run and reach no archive."""
+        submission_id = "260914050_2024-07-15_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        # replace the metadata with a copy in which one file has a wrong checksum; the file is
+        # listed under several donors, so change every entry
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        for donor in metadata["donors"]:
+            for lab_datum in donor["labData"]:
+                for file in lab_datum.get("sequenceData", {}).get("files", []):
+                    if file["filePath"] == "target_regions.bed":
+                        file["fileChecksum"] = "0" * 64
+        s3_buckets["inbox"].put_object(
+            Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode()
+        )
+
+        args = [
+            "--config",
+            str(temp_process_config_file_path),
+            "process",
+            "--submission-id",
+            submission_id,
+            "--output-dir",
+            str(working_dir_path),
+            "--no-submit-pruefbericht",
+            "--no-update-db",
+        ]
+
+        runner = click.testing.CliRunner()
+        cli = grzctl.cli.build_cli()
+        result = runner.invoke(cli, args)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        progress_log = (working_dir_path / "logs" / "progress_processing.cjson").read_text()
+        assert "Checksum mismatch" in progress_log
+
+        for bucket in ("consented", "non_consented", "interrogation"):
+            keys = {o.key for o in s3_buckets[bucket].objects.all()}
+            assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
+
     def _upload_submission_with_invalid_fastq(self, inbox_bucket, submission_id: str, tmp_path: Path):
         """
         Upload a submission with an invalid FASTQ file to the inbox.

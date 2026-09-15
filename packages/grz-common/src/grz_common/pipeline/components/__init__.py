@@ -127,12 +127,16 @@ class Pipeable:
         # Drive everything through the destination's context manager: it finalizes the write
         # on a clean exit and aborts it on error. Close the source inside the block so that a
         # validation failure there also triggers the abort, rather than leaving a half-uploaded
-        # object behind.
+        # object behind. If streaming itself failed, report that error, not a follow-up one
+        # from closing the stages.
         with other:
             try:
                 shutil.copyfileobj(self, other, length=READ_CHUNK_SIZE)
-            finally:
-                self.close()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    self.close()
+                raise
+            self.close()
         return other
 
 
@@ -171,10 +175,12 @@ class ReadStream(io.BufferedIOBase, Pipeable):
         return self._source.read(size)
 
     def close(self) -> None:
-        if not self.closed:
+        if self.closed:
+            return
+        try:
             if self._source:
-                with contextlib.suppress(Exception):
-                    self._source.close()
+                self._source.close()
+        finally:
             super().close()
 
 
@@ -245,9 +251,12 @@ class WriteStream(io.BufferedIOBase, Pipeable):
         return self._sink.write(data)
 
     def close(self) -> None:
-        if not self.closed:
+        if self.closed:
+            return
+        try:
             if self._sink:
                 self._sink.close()
+        finally:
             super().close()
 
 
@@ -401,17 +410,20 @@ class Tee(ReadStream):
             self._exc = e
 
     def close(self) -> None:
-        # close upstream sources first
-        super().close()
+        if self.closed:
+            return
+        # close upstream sources first, and the observer even if that fails
+        try:
+            super().close()
+        finally:
+            # shut down the background worker gracefully
+            if self._threaded and self._thread and self._thread.is_alive() and self._queue:
+                with contextlib.suppress(queue.Full):
+                    self._queue.put_nowait(None)
+                self._thread.join()
 
-        # shut down the background worker gracefully
-        if self._threaded and self._thread and self._thread.is_alive() and self._queue:
-            with contextlib.suppress(queue.Full):
-                self._queue.put_nowait(None)
-            self._thread.join()
-
-        if hasattr(self.observer, "close"):
-            self.observer.close()
+            if hasattr(self.observer, "close"):
+                self.observer.close()
 
         if self._exc:
             raise self._exc

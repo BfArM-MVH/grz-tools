@@ -2,10 +2,11 @@
 
 import gzip
 import hashlib
+import io
 from io import BytesIO
 
 import pytest
-from grz_common.pipeline.components import DataValidationError, Observer, ReadStream, Transformer
+from grz_common.pipeline.components import DataValidationError, Observer, ReadStream, Tee, Transformer
 from grz_common.pipeline.components.validation import ChecksumValidator, FastqValidator
 
 
@@ -33,6 +34,22 @@ class _RecordingObserver(Observer):
 
     def observe(self, chunk: bytes) -> None:
         self.chunks.append(chunk)
+
+
+class _FailingSource(io.RawIOBase):
+    """Test helper that returns one chunk, then fails on the next read."""
+
+    def __init__(self):
+        self.reads = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int = -1) -> bytes:
+        self.reads += 1
+        if self.reads > 1:
+            raise OSError("source failed")
+        return b"some data"
 
 
 class TestPipeAssociativity:
@@ -170,3 +187,30 @@ class TestRawChecksumValidator:
                 ChecksumValidator(expected_checksum="0" * 64) as validator,
             ):
                 source >> validator
+
+
+class TestCloseErrors:
+    """Errors raised in close() by any stage must reach the caller of '>>'."""
+
+    def test_checksum_mismatch_before_later_stages(self):
+        """Same shape as the grzctl process chain: validation Tee, transformer, progress Tee."""
+        pipeline = (
+            ReadStream(BytesIO(b"Test data for checksum validation"))
+            | Tee(ChecksumValidator(expected_checksum="0" * 64))
+            | _CountingChunkTransformer(chunk_size=4)
+            | Tee(_RecordingObserver())
+        )
+
+        with pytest.raises(DataValidationError, match=r"Checksum mismatch"):
+            pipeline >> BytesIO()
+
+    def test_stream_error_wins_over_close_error(self):
+        """When streaming fails, report that failure, not the follow-up failure from close()."""
+        pipeline = (
+            ReadStream(_FailingSource())
+            | Tee(ChecksumValidator(expected_checksum="0" * 64))
+            | _CountingChunkTransformer(chunk_size=4)
+        )
+
+        with pytest.raises(OSError, match="source failed"):
+            pipeline >> BytesIO()
