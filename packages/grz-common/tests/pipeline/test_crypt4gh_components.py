@@ -8,6 +8,7 @@ import pytest
 from crypt4gh import SEGMENT_SIZE
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from grz_common.exceptions import DecryptionError
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 
 
@@ -105,6 +106,58 @@ class TestCrypt4GHDecryptor:
         with (
             BytesIO(encrypted) as f,
             Crypt4GHDecryptor(f, private_key=private_key) as decryptor,
+        ):
+            decrypted = decryptor.read(-1)
+
+        assert decrypted == plaintext
+
+    def test_decrypt_rejects_a_tampered_segment(self):
+        """A changed byte fails the segment's authentication instead of producing wrong plaintext."""
+        sender_private, _ = generate_keypair()
+        recipient_private, recipient_public = generate_keypair()
+        encrypted = BytesIO()
+        crypt4gh.lib.encrypt([(0, sender_private, recipient_public)], BytesIO(os.urandom(1000)), encrypted)
+        tampered = bytearray(encrypted.getvalue())
+        tampered[-1] ^= 1  # last byte of the segment's MAC
+
+        with (
+            BytesIO(bytes(tampered)) as f,
+            Crypt4GHDecryptor(f, private_key=recipient_private) as decryptor,
+            pytest.raises(DecryptionError),
+        ):
+            decryptor.read(-1)
+
+
+class TestCrypt4GHInterop:
+    """The components encrypt segments themselves, so they must stay compatible with the reference crypt4gh."""
+
+    @pytest.mark.parametrize("size", [0, 1, SEGMENT_SIZE, 2 * SEGMENT_SIZE + 12345])
+    def test_reference_decrypts_what_the_encryptor_writes(self, size):
+        sender_private, _ = generate_keypair()
+        recipient_private, recipient_public = generate_keypair()
+        plaintext = os.urandom(size)
+
+        with (
+            BytesIO(plaintext) as f,
+            Crypt4GHEncryptor(f, sender_privkey=sender_private, recipient_pubkey=recipient_public) as encryptor,
+        ):
+            encrypted = encryptor.read(-1)
+
+        decrypted = BytesIO()
+        crypt4gh.lib.decrypt([(0, recipient_private, None)], BytesIO(encrypted), decrypted)
+        assert decrypted.getvalue() == plaintext
+
+    @pytest.mark.parametrize("size", [0, 1, SEGMENT_SIZE, 2 * SEGMENT_SIZE + 12345])
+    def test_decryptor_reads_what_the_reference_writes(self, size):
+        sender_private, _ = generate_keypair()
+        recipient_private, recipient_public = generate_keypair()
+        plaintext = os.urandom(size)
+        encrypted = BytesIO()
+        crypt4gh.lib.encrypt([(0, sender_private, recipient_public)], BytesIO(plaintext), encrypted)
+
+        with (
+            BytesIO(encrypted.getvalue()) as f,
+            Crypt4GHDecryptor(f, private_key=recipient_private) as decryptor,
         ):
             decrypted = decryptor.read(-1)
 

@@ -3,9 +3,13 @@ import os
 
 import crypt4gh.header
 import crypt4gh.lib
-from crypt4gh.sodium import chacha20poly1305_decrypt, chacha20poly1305_encrypt
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+# Segments go through cryptography's ChaCha20Poly1305, not through crypt4gh's libsodium binding:
+# it releases the GIL while it computes, and it is faster.
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from grz_common.exceptions import DecryptionError
 
 from . import StreamConfigurationError, Transformer
@@ -20,6 +24,7 @@ class Crypt4GHDecryptor(Transformer):
         - Pipeline:   source >> Crypt4GHDecryptor(private_key=key) >> sink
     """
 
+    NONCE_LENGTH = 12
     CIPHER_DIFF = crypt4gh.lib.CIPHER_DIFF
     CIPHER_SEGMENT_SIZE = crypt4gh.lib.CIPHER_SEGMENT_SIZE
 
@@ -30,10 +35,9 @@ class Crypt4GHDecryptor(Transformer):
         """
         super().__init__(source)
         self._private_key = private_key
-        self._session_keys: list[bytes] = []
+        self._ciphers: list[ChaCha20Poly1305] = []  # one per session key in the header
         self._header_parsed = False
         self._buffer = bytearray()
-        self._out_buffer = bytearray(self.CIPHER_SEGMENT_SIZE)
 
     def _fill_buffer(self) -> bytes:
         if not self._header_parsed:
@@ -57,15 +61,14 @@ class Crypt4GHDecryptor(Transformer):
         if len(ciphersegment) <= self.CIPHER_DIFF:
             raise ValueError("Truncated cipher segment")
 
-        segment_len = len(ciphersegment) - self.CIPHER_DIFF
+        nonce = ciphersegment[: self.NONCE_LENGTH]
+        ciphertext = memoryview(ciphersegment)[self.NONCE_LENGTH :]
         errors = []
-        out_view = memoryview(self._out_buffer)[:segment_len]
 
-        for key in self._session_keys:
+        for cipher in self._ciphers:
             try:
-                out_len = chacha20poly1305_decrypt(out_view, ciphersegment, bytes(key))
-                return bytes(out_view[:out_len])
-            except Exception as e:
+                return cipher.decrypt(nonce, ciphertext, None)
+            except InvalidTag as e:
                 errors.append(repr(e))
 
         raise DecryptionError(f"Decryption failed: {errors}")
@@ -82,7 +85,7 @@ class Crypt4GHDecryptor(Transformer):
             if not session_keys:
                 raise ValueError("No session keys found in Crypt4GH header")
 
-            self._session_keys = session_keys
+            self._ciphers = [ChaCha20Poly1305(bytes(key)) for key in session_keys]
             self._header_parsed = True
         except Exception as e:
             raise OSError(f"Crypt4GH Header Error: {e}") from e
@@ -120,9 +123,9 @@ class Crypt4GHEncryptor(Transformer):
             )
         )
         self._session_key = os.urandom(32)
+        self._cipher = ChaCha20Poly1305(self._session_key)
         self._header_sent = False
         self._buffer = bytearray()
-        self._out_buffer = bytearray(self.SEGMENT_SIZE + self.CIPHER_DIFF)
 
     def _fill_buffer(self) -> bytes:
         if not self._header_sent:
@@ -146,11 +149,8 @@ class Crypt4GHEncryptor(Transformer):
         segment = bytes(self._buffer[:segment_len])
         del self._buffer[:segment_len]
 
-        out_length = segment_len + self.CIPHER_DIFF
-        out_view = memoryview(self._out_buffer)[:out_length]
-        out_len = chacha20poly1305_encrypt(out_view, segment, self._session_key)
-
-        return bytes(out_view[:out_len])
+        nonce = os.urandom(self.NONCE_LENGTH)
+        return nonce + self._cipher.encrypt(nonce, segment, None)
 
     def _compose_header(self) -> bytes:
         keys = [(0, self._sender_privkey, self._recipient_pubkey)]
