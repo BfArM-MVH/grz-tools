@@ -103,7 +103,6 @@ lint = [
     "types-pyyaml",
     "types-tqdm",
     "types-boto3[s3] >=1.36,<2",
-    "boto3-stubs >=1.36,<2",
     "pydantic",
     "mypy",
     "packaging",
@@ -117,7 +116,6 @@ exclude = [
     "build",
     "dist",
     "out",
-    "testing_setup",
 ]
 extend-exclude = ["alembic"]
 
