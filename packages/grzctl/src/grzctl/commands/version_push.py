@@ -33,9 +33,7 @@ def version_push(configuration: GrzctlConfig, **kwargs):
                 failures.append((le_id, inbox_name))
                 continue
 
-            message = f"Published version.json to {target} (LE {le_id}, inbox {inbox_name})"
-            log.info(message)
-            click.echo(message)
+            click.echo(f"Published version.json to {target} (LE {le_id}, inbox {inbox_name})")
 
     if failures:
         failed_str = ", ".join(f"{le_id}/{inbox_name}" for le_id, inbox_name in failures)
