@@ -250,6 +250,16 @@ class TestPushToPullAdapter:
         assert adapter.readall() == b"cdefg"
         assert adapter.read(1) == b""
 
+    def test_read_takes_the_queued_chunks_up_to_the_size_without_waiting(self):
+        """read() waits for one chunk only, then takes the chunks already queued."""
+        adapter = PushToPullAdapter()
+        for chunk in (b"abc", b"defg", b"hij"):
+            adapter.queue.put(chunk)
+
+        assert adapter.read(8) == b"abcdefgh"
+        # returns the rest at once, although the queue is empty and no end marker came yet
+        assert adapter.read(8) == b"ij"
+
 
 class _SlowObserver(Observer):
     """Test helper that takes a while per chunk and records the chunks and the threads it ran on."""

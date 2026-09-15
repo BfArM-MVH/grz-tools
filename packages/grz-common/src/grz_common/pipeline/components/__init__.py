@@ -294,6 +294,10 @@ class PushToPullAdapter(io.RawIOBase):
 
     Producers put byte chunks on ``queue`` and ``None`` at the end of the stream.
     ``read()`` and ``readall()`` come from ``io.RawIOBase`` via ``readinto()``.
+
+    ``readinto()`` waits for the first chunk only, then also takes the chunks already queued, up
+    to the size of the buffer. A reader in another thread, such as grz_check, then needs the GIL
+    once per batch instead of once per chunk.
     """
 
     def __init__(self, max_queue_size: int = 128) -> None:
@@ -305,14 +309,17 @@ class PushToPullAdapter(io.RawIOBase):
         return True
 
     def readinto(self, buffer: Buffer) -> int:
-        while not self.buffer and not self.eof:
-            chunk = self.queue.get()
+        view = memoryview(buffer).cast("B")
+        while len(self.buffer) < len(view) and not self.eof:
+            try:
+                chunk = self.queue.get(block=not self.buffer)
+            except queue.Empty:
+                break
             if chunk is None:
                 self.eof = True
             else:
                 self.buffer.extend(chunk)
 
-        view = memoryview(buffer).cast("B")
         n = min(len(view), len(self.buffer))
         view[:n] = self.buffer[:n]
         del self.buffer[:n]
