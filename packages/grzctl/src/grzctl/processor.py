@@ -27,6 +27,7 @@ from grz_common.transfer import init_s3_client
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.utils.redaction import redact_file
 from grz_common.workers.submission import SubmissionMetadata
+from grz_db.errors import DuplicateInitialSubmissionError
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
@@ -677,7 +678,16 @@ class SubmissionProcessor:
 
             # validation passed, so mark basic QC as passed in the database.
             if self._update_db:
-                db.modify_submission(submission_run.submission_id, "basic_qc_passed", True)
+                try:
+                    db.modify_submission(submission_run.submission_id, "basic_qc_passed", True)
+                except DuplicateInitialSubmissionError as e:
+                    # another initial submission of this case passed basic QC while this one was processed
+                    log.warning(
+                        f"Submission '{submission_run.submission_id}' data validated, but {e} "
+                        "Failing basic QC for this submission."
+                    )
+                    db.modify_submission(submission_run.submission_id, "basic_qc_passed", False)
+                    raise
 
             # determine whether to perform detailed QC (now that basic QC is marked as passed).
             selected_for_qc = self._determine_qc_flag(db, submission_run.submission_id)

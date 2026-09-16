@@ -45,7 +45,9 @@ $ grzctl --config $CONFIG_PATH process \
 
 ```
 1. download metadata.json from inbox
-   --update-db: add + populate submission's DB row
+   --update-db: add + populate submission's DB row;
+                case already has a QC-passed initial submission?
+                basic_qc_passed = false, state = ERROR (duplicate_initial); STOP
                      │
                      ▼
 2. predict detailed QC (--update-db and detailed_qc.target_percentage > 0 only)
@@ -101,7 +103,7 @@ $ grzctl --config $CONFIG_PATH process \
    submit (--submit-pruefbericht, with retries)
 ```
 
-Steps 2-9 run inside the DB state transition `PROCESSING → PROCESSED` (or `ERROR`
+The duplicate-initial check in step 1 and steps 2-9 run inside the DB state transition `PROCESSING → PROCESSED` (or `ERROR`
 on failure) when `--update-db` is set.
 
 ## Detailed QC: prediction and decision
@@ -192,6 +194,11 @@ If any file fails in the main pass (step 3), the pipeline:
    `archives.interrogation.keep_failed` is `true`,
 3. fails the run; with `--update-db`, the DB state becomes `ERROR`.
 
+With `--update-db`, step 5 can fail the same way. If another initial submission of
+the same case passed basic QC during the main pass, the database rejects
+`basic_qc_passed = true`. The pipeline then stores `basic_qc_passed = false` and
+handles the failure as above, with the failure reason `duplicate_initial`.
+
 ## Recovery and reruns
 
 Three progress logs live under `<output-dir>/logs/`:
@@ -212,7 +219,7 @@ prefetching from scratch if it is picked again.
 
 | Option | Default | Effect on this flow |
 | --- | --- | --- |
-| `--update-db` / `--no-update-db` | `--update-db` | Turns the DB row, `basic_qc_passed`, the detailed-QC prediction and decision, and the `PROCESSING`/`PROCESSED`/`ERROR` state transitions on or off. With `--no-update-db`, detailed QC never runs. |
+| `--update-db` / `--no-update-db` | `--update-db` | Turns the DB row, `basic_qc_passed`, the detailed-QC prediction and decision, and the `PROCESSING`/`PROCESSED`/`ERROR` state transitions on or off. With `--no-update-db`, detailed QC never runs, and duplicate initial submissions are not detected. |
 | `--threads` | `min(cpu_count, 4)` | Number of files processed concurrently in the thread pool (step 3 and the QC pass). |
 | `--concurrent-uploads` | `4` | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. |
 | `--inbox-bucket` | `None` | Selects which inbox to read from, if the submitter has more than one configured. |

@@ -4,6 +4,7 @@ Integration tests for grzctl process command.
 This tests the full streaming pipeline with mocked S3 buckets (inbox + archive).
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -15,7 +16,7 @@ import grzctl.cli
 import pytest
 import yaml
 from grz_common.models.base import get_secret_value
-from grz_db.models.submission import SubmissionDb
+from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 from grzctl.models.config import GrzctlConfig
 from grzctl.processor import FilePipelineExecutor
 from moto import mock_aws
@@ -833,6 +834,91 @@ class TestProcessDetailedQc:
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
+
+
+@pytest.fixture
+def db_process_config_file_path(temp_data_dir_path, process_config_content) -> Path:
+    """Write a process config that can sign DB state changes, without detailed QC."""
+    process_config_content["db"]["author"]["private_key_passphrase"] = "test"
+    config_file = temp_data_dir_path / "config.process.db.yaml"
+    with open(config_file, "w") as fd:
+        yaml.dump(process_config_content, fd)
+    return config_file
+
+
+class TestProcessDuplicateInitial:
+    """An initial submission fails basic QC when its case already has a QC-passed initial submission."""
+
+    FIRST_ID = "260914050_2024-07-15_c64603a7"
+    DUPLICATE_TAN_G = "bbbbbbbb00000000bbbbbbbb00000000bbbbbbbb00000000bbbbbbbb00000000"
+
+    def _process_first_and_upload_duplicate(self, inbox_bucket, config_file_path: Path, working_dir_path: Path) -> str:
+        """Process an initial submission with ``--update-db``, then upload a second initial submission of its case."""
+        _upload_initial_submission_to_inbox(inbox_bucket, self.FIRST_ID)
+        result = _run_process(config_file_path, self.FIRST_ID, working_dir_path / "first", "--update-db")
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # same submitter and local case ID, but its own tanG and therefore its own submission ID
+        duplicate_id = f"260914050_2024-07-15_{hashlib.sha256(self.DUPLICATE_TAN_G.encode()).hexdigest()[:8]}"
+        upload_submission_to_inbox(inbox_bucket, duplicate_id)
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        metadata["submission"]["submissionType"] = "initial"
+        metadata["submission"]["tanG"] = self.DUPLICATE_TAN_G
+        inbox_bucket.put_object(Key=f"{duplicate_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+        return duplicate_id
+
+    @staticmethod
+    def _assert_failed_basic_qc(process_config_content: dict, submission_id: str) -> None:
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        submission = db.get_submission(submission_id)
+        assert submission is not None
+        assert submission.basic_qc_passed is False
+        assert submission.states[-1].state == SubmissionStateEnum.ERROR
+        assert submission.states[-1].failure_reason == FailureReasonEnum.DUPLICATE_INITIAL
+
+    def test_update_db_fails_basic_qc_before_processing(
+        self,
+        s3_buckets,
+        db_process_config_file_path,
+        process_config_content,
+        initialized_db,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """The pre-check rejects the duplicate before any file is processed."""
+        duplicate_id = self._process_first_and_upload_duplicate(
+            s3_buckets["inbox"], db_process_config_file_path, working_dir_path
+        )
+
+        def must_not_process(*args, **kwargs):
+            raise AssertionError("no file should be processed for a duplicate initial submission")
+
+        monkeypatch.setattr(FilePipelineExecutor, "process_submission_files", must_not_process)
+
+        result = _run_process(db_process_config_file_path, duplicate_id, working_dir_path / "duplicate", "--update-db")
+
+        assert result.exit_code != 0
+        self._assert_failed_basic_qc(process_config_content, duplicate_id)
+
+    def test_update_db_records_duplicate_detected_after_processing(
+        self,
+        s3_buckets,
+        db_process_config_file_path,
+        process_config_content,
+        initialized_db,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """The ``basic_qc_passed`` write catches a competing initial submission that the pre-check missed."""
+        duplicate_id = self._process_first_and_upload_duplicate(
+            s3_buckets["inbox"], db_process_config_file_path, working_dir_path
+        )
+        monkeypatch.setattr(SubmissionDb, "assert_no_duplicate_initial", lambda self, *args, **kwargs: None)
+
+        result = _run_process(db_process_config_file_path, duplicate_id, working_dir_path / "duplicate", "--update-db")
+
+        assert result.exit_code != 0
+        self._assert_failed_basic_qc(process_config_content, duplicate_id)
 
 
 class TestConfigValidation:

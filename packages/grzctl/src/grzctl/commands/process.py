@@ -46,7 +46,7 @@ import grz_common.cli as grzcli
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import SubmissionMetadata
-from grz_db.errors import DuplicateSubmissionError, DuplicateTanGError
+from grz_db.errors import DuplicateInitialSubmissionError, DuplicateSubmissionError, DuplicateTanGError
 from grz_db.models.submission import SubmissionStateEnum
 from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
@@ -59,6 +59,7 @@ from ..processor import SubmissionProcessor
 from .db.cli import get_submission_db_instance
 from .pruefbericht import _generate_pruefbericht_from_database, _get_submission_credentials
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
+from .validate import _check_duplicate_initial
 
 log = logging.getLogger(__name__)
 
@@ -187,7 +188,15 @@ def process(  # noqa: PLR0913, PLR0917
         start_state=SubmissionStateEnum.PROCESSING,
         end_state=SubmissionStateEnum.PROCESSED,
         enabled=update_db,
-    ):
+    ) as dbcontext_inst:
+        if update_db:
+            try:
+                _check_duplicate_initial(dbcontext_inst.db, submission_metadata.content)
+            except DuplicateInitialSubmissionError as e:
+                # fail basic QC before any file is streamed, as ``grzctl validate`` does
+                log.warning(f"{e} Failing basic QC for submission '{submission_id}' without processing.")
+                dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", False)
+                raise
         processor.run(submission_metadata)
 
     _handle_pruefbericht(
