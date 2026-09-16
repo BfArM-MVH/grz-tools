@@ -5,8 +5,8 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
-from grz_cli.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 

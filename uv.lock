@@ -1251,7 +1251,7 @@ test = [
 name = "grzctl"
 source = { editable = "packages/grzctl" }
 dependencies = [
-    { name = "grz-cli" },
+    { name = "grz-common" },
     { name = "grz-db" },
     { name = "requests" },
     { name = "textual" },
@@ -1263,7 +1263,6 @@ dev = [
     { name = "tox-uv" },
 ]
 test = [
-    { name = "grz-cli" },
     { name = "grz-common" },
     { name = "grz-db", extra = ["testing"] },
     { name = "grz-pydantic-models-testing" },
@@ -1279,7 +1278,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "grz-cli", editable = "packages/grz-cli" },
+    { name = "grz-common", editable = "packages/grz-common" },
     { name = "grz-db", editable = "packages/grz-db" },
     { name = "requests", specifier = ">=2.32.3,<3" },
     { name = "textual", specifier = "~=5.3" },
@@ -1291,7 +1290,6 @@ dev = [
     { name = "tox-uv" },
 ]
 test = [
-    { name = "grz-cli", editable = "packages/grz-cli" },
     { name = "grz-common", editable = "packages/grz-common" },
     { name = "grz-db", extras = ["testing"], editable = "packages/grz-db" },
     { name = "grz-pydantic-models-testing", editable = "packages/grz-pydantic-models-testing" },

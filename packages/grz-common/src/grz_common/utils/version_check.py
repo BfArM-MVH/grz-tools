@@ -1,11 +1,11 @@
 import logging
 import sys
 from datetime import UTC, datetime
-from importlib.metadata import version
 
-from grz_common.models.s3 import S3Options
-from grz_common.models.version import VERSION_FILE_KEY, VersionFile, VersionInfo
 from packaging import version as pkg_version
+
+from ..models.s3 import S3Options
+from ..models.version import VERSION_FILE_KEY, VersionFile, VersionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +16,13 @@ def _select_active_policy(
 ) -> VersionInfo | None:
     """Select the version policy that is active for the given datetime.
 
-    :param policies: A non-empty list of available version policies.
+    :param policies: The available version policies.
                      Each policy defines version constraints and an
                      enforcement start datetime.
     :param now: The reference datetime used to determine which policy
                 is currently active (typically ``datetime.now(UTC)``).
-    :returns: The policy that should be applied for the given datetime.
-    :raises ValueError: If policies is empty.
+    :returns: The policy with the latest ``enforced_from`` that is not after ``now``,
+              or ``None`` if ``policies`` is empty or no policy has started yet.
     """
     if not policies:
         return None
@@ -35,15 +35,16 @@ def _select_active_policy(
     return max(applicable, key=lambda p: p.enforced_from)
 
 
-def check_version_and_exit_if_needed(
+def check_metadata_version_and_exit_if_needed(
     s3_options: S3Options,
+    metadata_schema_version: str,
     version_file_key: str = VERSION_FILE_KEY,
 ) -> None:
-    """Validate the installed grz-cli version against the policy defined in version.json."""
+    """Validate the metadata schema version against the policy defined in version.json."""
     version_file = VersionFile.from_s3(s3_options, version_file_key)
 
-    current_version = pkg_version.Version(version("grz-cli"))
-    _check_policy_and_exit_if_needed("grz-cli", current_version, version_file.grzcli_version)
+    current_version = pkg_version.Version(metadata_schema_version)
+    _check_policy_and_exit_if_needed("metadata", current_version, version_file.metadata_version)
 
 
 def _check_policy_and_exit_if_needed(
@@ -56,7 +57,7 @@ def _check_policy_and_exit_if_needed(
 
     policy = _select_active_policy(policies, now)
     if policy is None:
-        logger.debug("No active version policy found — skipping version check.")
+        logger.debug("No active version policy found, skipping version check.")
         return
 
     minimal_version = policy.minimal_version
@@ -80,7 +81,7 @@ def _check_policy_and_exit_if_needed(
         )
         sys.exit(1)
 
-    # supported but behind recommended — skip if recommended_version not set
+    # supported but behind recommended; skip if recommended_version not set
     if recommended_version is not None and minimal_version <= current_version < recommended_version:
         logger.warning(
             f"You are using {subject} {current_version}, but the recommended version is "
@@ -88,7 +89,7 @@ def _check_policy_and_exit_if_needed(
         )
         return
 
-    # too new — skip if max_version not set
+    # too new; skip if max_version not set
     if max_version is not None and current_version > max_version:
         logger.error(
             f"{subject} version {current_version} is newer than the maximum supported version ({max_version})."

@@ -1469,7 +1469,6 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
     test_version = "0.1.2-test"
     test_versions_dict = {
         "grzctl": test_version,
-        "grz-cli": "1.0.0",
         "grz-common": "1.0.0",
         "grz-db": "1.0.0",
         "grz-pydantic-models": "1.0.0",
@@ -1517,7 +1516,7 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
         assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
         assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
         # Verify all expected keys are present
-        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
+        expected_keys = {"grzctl", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
         assert set(state["grzctl_versions"].keys()) == expected_keys, (
             f"grzctl_versions has unexpected keys in state {i}: {state['grzctl_versions'].keys()}"
         )
@@ -1556,7 +1555,7 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
             f"grzctl_versions should be dict, got {type(state_log.grzctl_versions)}"
         )
         # Verify all expected keys are present
-        expected_keys = {"grzctl", "grz-cli", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
+        expected_keys = {"grzctl", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
         assert set(state_log.grzctl_versions.keys()) == expected_keys, (
             f"grzctl_versions has unexpected keys: {state_log.grzctl_versions.keys()}"
         )
@@ -1586,7 +1585,6 @@ def test_submission_grzctl_version_different_versions(
         "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.1.0",
-            "grz-cli": "1.0.0",
             "grz-common": "1.0.0",
             "grz-db": "1.0.0",
             "grz-pydantic-models": "1.0.0",
@@ -1603,7 +1601,6 @@ def test_submission_grzctl_version_different_versions(
         "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.1.1",
-            "grz-cli": "1.0.0",
             "grz-common": "1.0.0",
             "grz-db": "1.0.0",
             "grz-pydantic-models": "1.0.0",
@@ -1620,7 +1617,6 @@ def test_submission_grzctl_version_different_versions(
         "grzctl.commands.db.cli.get_versions",
         lambda: {
             "grzctl": "0.2.0",
-            "grz-cli": "1.0.0",
             "grz-common": "1.0.0",
             "grz-db": "1.0.0",
             "grz-pydantic-models": "1.0.0",
