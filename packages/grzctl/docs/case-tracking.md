@@ -1,6 +1,6 @@
 # Case tracking
 
-A _case_ groups the submissions belonging to one patient. Every non-`test` submission is linked to a case during `populate` or `backfill`, and the link is stored on `submissions.case_id`. This page covers what a case is, what the upgrade does to existing data, and how to repair a link by hand.
+A _case_ groups the submissions belonging to one patient. `populate` and `backfill` link each non-`test` submission to a case through its `submitter_id` and `local_case_id`, and store the link on `submissions.case_id`. A submission stays unlinked when that pair is incomplete or names more than one patient, see [Finding the unlinked rows later](#finding-the-unlinked-rows-later). This page covers what a case is, what the upgrade does to existing data, and how to repair a link by hand.
 
 > ⚠️ **After `grzctl db upgrade`, run `db case list-unlinked`.** The upgrade does not link every row, and it names the keys it refused to group only once, in its log. The two listing commands report the same state at any later time. See [Upgrading an existing database](#upgrading-an-existing-database).
 
@@ -68,7 +68,7 @@ NULL is the "not yet resolved" state here, not a failure. Nothing is lost, and a
 
 ### Finding the unlinked rows later
 
-The folllowing commands report the same database inconsistencies as the `db upgrade`:
+The following commands report the same database inconsistencies as the `db upgrade`:
 
 ```bash
 grzctl db case list-unlinked          # every unlinked submission, with the reason for each
