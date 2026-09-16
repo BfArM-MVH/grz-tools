@@ -16,7 +16,6 @@ def get_versions() -> dict[str, str | None]:
 
     return {
         "grzctl": get_version("grzctl"),
-        "grz-cli": get_version("grz-cli"),
         "grz-common": get_version("grz-common"),
         "grz-db": get_version("grz-db"),
         "grz-pydantic-models": get_version("grz-pydantic-models"),
