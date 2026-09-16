@@ -15,7 +15,7 @@ dynamic = ["version"]
 dependencies = [
     "requests >=2.32.3,<3",
     "grz-db >=3,<4",
-    "grz-cli >=2,<3",
+    "grz-common >=4,<5",
     "textual~=5.3"
 ]
 classifiers = [
@@ -64,7 +64,6 @@ test = [
     "moto[s3]",
     "numpy",
     "grz-common",
-    "grz-cli",
     "grz-db[testing]",
     "grz-pydantic-models-testing",
 ]

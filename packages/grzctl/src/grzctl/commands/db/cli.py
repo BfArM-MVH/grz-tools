@@ -1244,7 +1244,7 @@ def change_request(  # noqa: PLR0913, PLR0917
         if existing is None:
             console_err.print(
                 f"[red]Dry run: submission '{submission_id}' not found. "
-                f"You might need to add it first: grz-cli db submission add {submission_id}[/red]"
+                f"You might need to add it first: grzctl db submission add {submission_id}[/red]"
             )
             raise click.Abort()
         console_err.print(

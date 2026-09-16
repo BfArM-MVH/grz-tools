@@ -8,7 +8,6 @@ from pathlib import Path
 import click
 import platformdirs
 import yaml
-from grz_cli.commands.submit import submit
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
 
@@ -93,11 +92,9 @@ def build_cli():
             config = GrzctlConfig.from_path(config_path)
             ctx.obj["configuration"] = config
 
-    # For convenience, include grz-cli commands as well.
     cli.add_command(validate)
     cli.add_command(encrypt)
     cli.add_command(upload)
-    cli.add_command(submit)
 
     cli.add_command(list_submissions, name="list")
     cli.add_command(download)
