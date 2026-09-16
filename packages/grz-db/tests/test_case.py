@@ -22,6 +22,8 @@ from grz_db.errors import (
     SubmissionTypeInvalidForCaseError,
 )
 from grz_db.models.submission import (
+    DEFAULT_CASE_RESOLVER,
+    CaseResolver,
     PsnResolver,
     Submission,
     SubmissionDb,
@@ -1165,6 +1167,57 @@ def test_assign_case_joins_a_case_that_appeared_mid_flight(
 
     assert [c.id for c, _n in db.list_cases()] == [case.id], "the loser must join, not create a second case"
     assert db.get_submission(sid).case_id == case.id
+
+
+@pytest.mark.parametrize(
+    ("resolver", "submitter_id", "local_case_id"),
+    [(DEFAULT_CASE_RESOLVER, SUBMITTER_A, "caseX"), (PsnResolver(), None, None)],
+    ids=["key_resolver", "psn_resolver"],
+)
+def test_assign_case_joins_a_case_with_the_same_psn_that_appeared_mid_flight(
+    db: SubmissionDb,
+    migrated_db_connection,
+    test_author,
+    monkeypatch: pytest.MonkeyPatch,
+    resolver: CaseResolver,
+    submitter_id: str | None,
+    local_case_id: str | None,
+):
+    """The winner's case can reject the insert through ``ux_cases_psn`` instead of the key index.
+    Either index may report first, and both mean the race was lost.
+    """
+    sid = _sid(SUBMITTER_A, "0000000a")
+    _add(db, sid, SubmissionType.initial)
+    loser = SubmissionDb(db_url=migrated_db_connection, author=test_author, case_resolver=resolver)
+    other = SubmissionDb(db_url=migrated_db_connection, author=test_author)
+    _lose_the_race_to(monkeypatch, lambda submitter, local_case: other.create_case(submitter, local_case, psn="PSN-1"))
+    try:
+        case = loser.assign_case(
+            sid,
+            submitter_id=submitter_id,
+            local_case_id=local_case_id,
+            psn="PSN-1",
+            submission_type=SubmissionType.initial,
+        )
+    finally:
+        other.engine.dispose()
+        loser.engine.dispose()
+
+    assert [c.id for c, _n in db.list_cases()] == [case.id], "the loser must join, not create a second case"
+    assert db.get_submission(sid).case_id == case.id
+
+
+def test_assign_case_refuses_a_psn_that_a_case_with_another_key_holds(db: SubmissionDb):
+    """The resolver does not find that case, so this is a conflict rather than a lost race."""
+    db.create_case(SUBMITTER_A, "caseY", psn="PSN-1")
+    sid = _sid(SUBMITTER_A, "0000000a")
+    _add(db, sid, SubmissionType.initial)
+
+    with pytest.raises(DuplicatePsnError):
+        db.assign_case(
+            sid, submitter_id=SUBMITTER_A, local_case_id="caseX", psn="PSN-1", submission_type=SubmissionType.initial
+        )
+    assert db.get_submission(sid).case_id is None
 
 
 def test_modify_case_names_the_index_that_rejected_the_write(db: SubmissionDb):

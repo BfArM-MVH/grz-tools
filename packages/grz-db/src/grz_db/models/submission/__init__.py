@@ -1978,16 +1978,18 @@ class SubmissionDb:
                         case = Case(submitter_id=submitter_id, local_case_id=local_case_id, psn=psn)
                         active_session.add(case)
                         active_session.flush()
-                except DuplicateCaseError:
+                except (DuplicateCaseError, DuplicatePsnError):
                     # Another process created this case between our lookup and our insert. Its row
                     # is the case now, so join that one: losing the race is not a failure, and
                     # letting it surface would fail a submission that did nothing wrong. A caller's
                     # transaction loses nothing to the rollback, since the link below is the first
-                    # thing this applies.
+                    # thing this applies. Either index may report the race first.
                     case = self._case_resolver.find_case(
                         active_session, submitter_id=submitter_id, local_case_id=local_case_id, psn=psn
                     )
-                    if case is None:  # pragma: no cover - the row that rejected our insert must exist
+                    if case is None:
+                        # The resolver does not find the rejecting case, such as one holding this
+                        # psn under another key. That is a conflict, not a lost race.
                         raise
                     # The rollback expired the submission the lookup handed back.
                     submission = cast(Submission, active_session.get(Submission, submission_id))
