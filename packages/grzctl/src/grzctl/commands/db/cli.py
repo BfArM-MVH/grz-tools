@@ -44,7 +44,6 @@ from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
-    DiffState,
     FailureReasonEnum,
     FieldDiff,
     Submission,
@@ -1894,7 +1893,7 @@ def _fetch_metadata_json_from_archives(
     return found
 
 
-def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
+def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     current_submission: Submission,
     raw_json: str,
     db_service: SubmissionDb,
@@ -1912,8 +1911,9 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     *ignore_fields* disables that), and already-up-to-date submissions are detected
     without a write.
 
-    When *force* is False, a destructive diff (existing non-NULL field would change)
-    is skipped instead of committed, preserving manually-corrected values.
+    When *force* is False, destructive changes (see
+    :attr:`SubmissionChangeSet.destructive_changes`) are held back instead of committed,
+    preserving manually-corrected values.
 
     :param raw_json: The metadata.json content, from the one archive that holds it.
     """
@@ -1956,26 +1956,25 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
         return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved)
 
-    # Filling a field that was NULL destroys nothing, so it is always written. Replacing one that
-    # already has a value needs saying so: --force permits every such overwrite, --allow-overwrite
-    # only the fields it names, and anything else is held back and reported.
-    allowed = {diff.key for diff in changes.fields.pending} if force else allow_overwrite
-    changes.fields, withheld = changes.fields.withhold_destructive(allowed)
-    if withheld:
-        console_err.print(
-            f"[dim]  {submission_id}: not overwriting {', '.join(diff.key for diff in withheld)} "
-            f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
-        )
-
-    # --allow-overwrite is built from SubmissionBase, which has no case_id, so it cannot name the
-    # case link. Replacing one would undo a deliberate case relink, so an unpermitted change holds
-    # the whole submission back.
-    if not force and changes.case_link is not None and changes.case_link.state is DiffState.UPDATED:
-        console_err.print(
-            f"[dim]  {submission_id}: would overwrite the case link (case {changes.case_link.before}), "
-            "skipping (use --force to overwrite).[/dim]"
-        )
-        return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
+    # Filling a NULL destroys nothing, so it is always written. Replacing or removing a stored value
+    # needs saying so: --force permits every such change, --allow-overwrite only the fields it names,
+    # and anything else is held back and reported.
+    if not force:
+        changes, withheld = changes.withhold_destructive(allow_overwrite)
+        # --allow-overwrite is built from SubmissionBase, which has no case_id, so it cannot name the
+        # case link. Replacing one would undo a deliberate case relink, so a held-back link holds the
+        # whole submission back.
+        if withheld.case_link is not None:
+            console_err.print(
+                f"[dim]  {submission_id}: would overwrite {', '.join(withheld.destructive_changes)}. "
+                "A changed case link skips the whole submission (use --force to overwrite).[/dim]"
+            )
+            return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
+        if withheld.has_pending:
+            console_err.print(
+                f"[dim]  {submission_id}: not overwriting {', '.join(withheld.destructive_changes)} "
+                f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
+            )
 
     if not changes.has_pending:
         return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
@@ -2005,8 +2004,9 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
 @click.option(
     "--force/--no-force",
     default=False,
-    help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
-    "Without this flag, such fields are reported and left alone while the rest is still written.",
+    help="Overwrite or remove stored values that differ from metadata.json (destructive changes): "
+    "non-NULL fields, donors, and the case link. Without this flag, such changes are reported and "
+    "left alone while the rest is still written. A changed case link holds back the whole submission.",
 )
 @click.option(
     "--allow-overwrite",
@@ -2060,6 +2060,10 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     different value is only overwritten with --force, or when --allow-overwrite names it;
     any other overwrite is reported and held back, so a submission is updated in part
     rather than skipped entirely.
+
+    A donor that is missing in the database is always added. Updating or deleting a stored
+    donor needs --force, which --allow-overwrite cannot grant. Without it, only the donor
+    changes are held back.
 
     Both the consented and non-consented archive buckets are always scanned, before
     anything is written. A submission whose metadata.json is found in both, or whose
