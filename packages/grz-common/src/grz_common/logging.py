@@ -109,19 +109,12 @@ def setup_cli_logging(log_file: str | None, log_level: str):
     Setup logging for the CLI.
     Uses TqdmLoggingHandler to play nicely with progress bars.
     """
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level.upper())
+    # set the root log level since this is the CLI; basicConfig skips this when handlers already exist
+    logging.getLogger().setLevel(log_level.upper())
 
-    formatter = logging.Formatter(fmt=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT)
-
-    # Remove existing handlers to avoid duplication (e.g. default handlers)
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-
-    console_handler = TqdmLoggingHandler()
-
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+    logging.basicConfig(
+        level=log_level.upper(), format=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT, handlers=[TqdmLoggingHandler()]
+    )
 
     if log_file:
         # add file handler to root logger
