@@ -1566,9 +1566,8 @@ class SubmissionDb:
         The predicate matches :func:`case_key_denotes_one_patient` asked of every key at once,
         and the cases migration applies the same rule to the rows that predate case tracking.
 
-        Takes a ``session`` so a caller can read this and the rows it judges in one snapshot.
-        :meth:`list_unlinked_submissions` needs that: asked in two transactions, a submission
-        could be labelled from a key set that no longer describes it.
+        Takes a ``session`` so :meth:`list_unlinked_submissions` can read this and the rows it
+        judges in one transaction.
 
         :param session: Transaction to read in.
         :returns: One entry per key, ordered by submitter then local case ID.
@@ -2440,9 +2439,8 @@ class SubmissionDb:
             ignore_fields = ignore_fields or set()
             ignore_fields.add("submission_uploaded_date")
 
-        # One transaction for the whole change set: the three parts describe one submission at
-        # one moment, and computing them against separate snapshots would let them disagree.
-        # Reading the row here also means resolution and the field diff share it.
+        # One transaction, so resolution and the field diff share the row read here. It is not
+        # one snapshot: each later read sees what other connections committed before it ran.
         # ``get_submission`` would eagerly load the state log, which nothing in a diff reads.
         with self.transaction() as session:
             current_submission = session.get(Submission, submission_id)

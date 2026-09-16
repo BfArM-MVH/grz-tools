@@ -664,15 +664,13 @@ def _counting_reads(engine: sqlalchemy.Engine) -> Iterator[dict[str, int]]:
         sqlalchemy.event.remove(engine, "before_cursor_execute", on_statement)
 
 
-def test_diff_reads_one_snapshot(db: SubmissionDb, metadata: GrzSubmissionMetadata):
-    """A change set must answer for one submission at one moment: it opens one transaction and
-    reads the submission row once, so a write committed mid-diff cannot leave fields, donors
-    and the case link describing three different snapshots.
+def test_diff_reads_the_submission_row_once(db: SubmissionDb, metadata: GrzSubmissionMetadata):
+    """A diff opens one transaction and reads the submission row once, so resolution and the
+    field diff share it.
 
     Two reads of the submissions table rather than one: the row itself, plus the aggregate
     behind :func:`case_key_denotes_one_patient`, which decides whether this key may open a case
-    at all. That one counts rows instead of fetching the submission again, so the snapshot the
-    change set is built from is still a single read.
+    at all. That one counts rows instead of fetching the submission again.
     """
     initial_metadata = _with_submission_type(metadata, "initial")
     submission_id = initial_metadata.submission_id
