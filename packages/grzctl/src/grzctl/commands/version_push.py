@@ -5,7 +5,7 @@ import sys
 
 import botocore
 import click
-from grz_common.models.version import VersionFile
+from grz_common.models.version import VERSION_FILE_KEY, VersionFile
 from grz_common.transfer import init_s3_resource
 
 from ..commands import grzctl_configuration
@@ -24,10 +24,10 @@ def version_push(configuration: GrzctlConfig, **kwargs):
     for le_id, entry in configuration.leistungserbringer.items():
         for inbox_name in entry.inbox_buckets:
             s3_options = configuration.resolve_inbox(submitter_id=le_id, inbox_name=inbox_name).s3
-            target = f"s3://{s3_options.bucket}/version.json"
+            target = f"s3://{s3_options.bucket}/{VERSION_FILE_KEY}"
             try:
                 s3_resource = init_s3_resource(s3_options)
-                s3_resource.Bucket(s3_options.bucket).put_object(Key="version.json", Body=content.encode("utf-8"))
+                s3_resource.Bucket(s3_options.bucket).put_object(Key=VERSION_FILE_KEY, Body=content.encode("utf-8"))
             except botocore.exceptions.ClientError as e:
                 log.error(f"Failed to publish to {target} (LE {le_id}, inbox {inbox_name}): {e}")
                 failures.append((le_id, inbox_name))

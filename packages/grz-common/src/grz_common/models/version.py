@@ -21,7 +21,10 @@ from .s3 import S3Options
 logger = logging.getLogger(__name__)
 
 BUNDLED_VERSION_FILE_PACKAGE = "grz_common.version_file"
-BUNDLED_VERSION_FILE_NAME = "version.json"
+
+#: Canonical name of the version-compatibility policy, both as the bundled package
+#: resource filename and as the object key it is published under in an inbox bucket.
+VERSION_FILE_KEY = "version.json"
 
 
 class PydanticVersion(Version):
@@ -150,7 +153,7 @@ class VersionFile(BaseModel):
         """
         content = (
             importlib.resources.files(BUNDLED_VERSION_FILE_PACKAGE)
-            .joinpath(BUNDLED_VERSION_FILE_NAME)
+            .joinpath(VERSION_FILE_KEY)
             .read_text(encoding="utf-8")
         )
         try:
