@@ -11,7 +11,7 @@ from grz_common.exceptions import (
     UploadError,
 )
 from grz_common.models.base import get_secret_value
-from grz_db.errors import DuplicateTanGError, SubmissionNotFoundError
+from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 from pydantic import ValidationError
@@ -147,8 +147,7 @@ class DbContext:
 
         Commits the transaction if no exception occurred, otherwise rolls back.
 
-        Returns:
-            False so any exception is propagated.
+        :returns: ``False``, so any exception is propagated.
         """
         if not self.db:
             return False
@@ -213,6 +212,7 @@ class DbContext:
             NetworkError: FailureReasonEnum.NETWORK_ERROR,
             UploadError: FailureReasonEnum.UPLOAD_ERROR,
             DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
+            DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
         }
         for exc_class, failure_reason in exception_map.items():
