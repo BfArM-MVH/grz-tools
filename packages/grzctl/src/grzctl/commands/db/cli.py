@@ -141,17 +141,18 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
-def _read_known_public_keys(path: str | Path) -> dict[str, SSHPublicKeyTypes]:
+def _read_known_public_keys(path: str | Path) -> dict[str, list[SSHPublicKeyTypes]]:
     """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
 
-    The comment names the key's owner, and signature checks look a key up by it. So the comment
-    is required, and it may contain spaces. Blank lines and lines starting with ``#`` are skipped.
+    The comment names the key's owner, and signature checks look keys up by it. So the comment
+    is required, and it may contain spaces. Several keys may share a comment, for example across
+    a key rotation, and all of them are kept. Blank lines and lines starting with ``#`` are skipped.
 
     :param path: Path to the known public keys file.
-    :returns: The public keys, keyed by their comment.
+    :returns: The public keys, grouped by their comment in file order.
     :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
     """
-    public_keys: dict[str, SSHPublicKeyTypes] = {}
+    public_keys: dict[str, list[SSHPublicKeyTypes]] = {}
     with open(path) as f:
         for line_number, line in enumerate(f, start=1):
             entry = line.strip()
@@ -163,7 +164,7 @@ def _read_known_public_keys(path: str | Path) -> dict[str, SSHPublicKeyTypes]:
                     f"{path}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
                 )
             try:
-                public_keys[parts[2]] = load_ssh_public_key(entry.encode())
+                public_keys.setdefault(parts[2], []).append(load_ssh_public_key(entry.encode()))
             except (ValueError, UnsupportedAlgorithm) as e:
                 raise DatabaseConfigurationError(f"{path}:{line_number}: cannot load the public key: {e}") from e
     return public_keys
@@ -194,8 +195,8 @@ def db(
 
     log.debug("Reading known public keys...")
     public_keys = _read_known_public_keys(db_config.known_public_keys)
-    for comment in public_keys:
-        log.debug(f"Found public key labeled '{comment}'")
+    for comment, keys in public_keys.items():
+        log.debug(f"Found {len(keys)} public key(s) labeled '{comment}'")
 
     author = Author(
         name=author_name,
