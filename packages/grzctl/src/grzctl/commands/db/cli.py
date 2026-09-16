@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 import traceback
-from collections import Counter, namedtuple
+from collections import Counter
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
@@ -21,7 +21,8 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from cryptography.hazmat.primitives.serialization import load_ssh_public_key
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes, load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.transfer import init_s3_client
@@ -140,6 +141,34 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
+def _read_known_public_keys(path: str | Path) -> dict[str, SSHPublicKeyTypes]:
+    """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
+
+    The comment names the key's owner, and signature checks look a key up by it. So the comment
+    is required, and it may contain spaces. Blank lines and lines starting with ``#`` are skipped.
+
+    :param path: Path to the known public keys file.
+    :returns: The public keys, keyed by their comment.
+    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
+    """
+    public_keys: dict[str, SSHPublicKeyTypes] = {}
+    with open(path) as f:
+        for line_number, line in enumerate(f, start=1):
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            parts = entry.split(maxsplit=2)
+            if len(parts) < 3:
+                raise DatabaseConfigurationError(
+                    f"{path}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
+                )
+            try:
+                public_keys[parts[2]] = load_ssh_public_key(entry.encode())
+            except (ValueError, UnsupportedAlgorithm) as e:
+                raise DatabaseConfigurationError(f"{path}:{line_number}: cannot load the public key: {e}") from e
+    return public_keys
+
+
 @click.group(help="Database operations")
 @grzctl_configuration
 @click.pass_context
@@ -164,14 +193,9 @@ def db(
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
-    KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])
-    with open(db_config.known_public_keys) as f:
-        public_key_list = list(map(lambda v: KnownKeyEntry(*v), map(lambda s: s.strip().split(), f.readlines())))
-        public_keys = {
-            comment: load_ssh_public_key(f"{fmt}\t{key}\t{comment}".encode()) for fmt, key, comment in public_key_list
-        }
-        for comment in public_keys:
-            log.debug(f"Found public key labeled '{comment}'")
+    public_keys = _read_known_public_keys(db_config.known_public_keys)
+    for comment in public_keys:
+        log.debug(f"Found public key labeled '{comment}'")
 
     author = Author(
         name=author_name,
