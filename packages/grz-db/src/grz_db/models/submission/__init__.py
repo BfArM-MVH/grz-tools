@@ -44,7 +44,7 @@ from sqlalchemy import JSON, BigInteger, Column, ColumnElement, Enum
 from sqlalchemy import func as sqlfn
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, validates
 from sqlmodel import DateTime, Field, Relationship, Session, SQLModel, create_engine, select
 
 from ...common import (
@@ -64,6 +64,7 @@ from ...errors import (
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
     SubmissionNotFoundError,
+    SubmissionTypeAlreadySetError,
     SubmissionTypeInvalidForCaseError,
     SubmissionTypeIsNoneError,
 )
@@ -202,6 +203,28 @@ class Submission(SubmissionBase, table=True):
             raise ValueError(f"Submission ID '{v}' does not match the required pattern.")
         return v
 
+    @validates("submission_type")
+    def _refuse_submission_type_change(self, key: str, value: Any) -> Any:
+        """Refuse an assignment that would change a submission type that is already set.
+
+        Setting a missing type stays allowed, since populate fills it in on a row created without
+        one. Case tracking checks the type only when a link is made, see
+        :meth:`SubmissionDb._assert_case_trackable`. A later change could otherwise leave a
+        ``test`` submission linked to a case, or take a QC-passed ``initial`` out of the
+        one-initial index.
+
+        SQLAlchemy calls this on every assignment, on attached and detached rows alike. Loading a
+        row from the database does not call it, and neither does a Core ``update()`` statement.
+
+        :param key: Name of the assigned attribute, always ``"submission_type"``.
+        :param value: Type the assignment would store.
+        :returns: *value*, unchanged.
+        :raises SubmissionTypeAlreadySetError: if the stored type is set and *value* differs.
+        """
+        if self.submission_type is not None and value != self.submission_type:
+            raise SubmissionTypeAlreadySetError(self.id, self.submission_type, value)
+        return value
+
     # additionally constrained by the partial unique index ux_submissions_one_initial_per_case
     # (created in the cases migration): at most one QC-passed 'initial' submission per case.
     # NULL means not case-tracked (a 'test' submission) or not yet resolved; the partial
@@ -242,6 +265,7 @@ class Submission(SubmissionBase, table=True):
         :param ignore_fields: Field names to skip entirely during the comparison.
         :returns: A :class:`SubmissionDiffCollection` summarising all detected differences.
         :raises ValueError: If an immutable field has changed.
+        :raises SubmissionTypeAlreadySetError: If ``submission_type`` is set and *other* has a different one.
         """
         result = SubmissionDiffCollection()
         for key in other.model_fields_set - (ignore_fields or set()):
@@ -258,6 +282,10 @@ class Submission(SubmissionBase, table=True):
             field_diff = FieldDiff.classify_field(key, old_value, new_value)
             if key in other.immutable_fields and field_diff.diff.state != DiffState.UNCHANGED:
                 raise ValueError(f"Column '{key}' is read-only and cannot be modified.")
+            if key == "submission_type":
+                # A diff assigns nothing, so the validator does not run on its own. Asking it here
+                # refuses the change before any preview or ``force`` check.
+                self._refuse_submission_type_change(key, new_value)
             result.append(field_diff)
         return result
 
@@ -1165,6 +1193,8 @@ class SubmissionDb:
         """Set one column of a submission.
 
         :param session: Transaction to join; a fresh one is opened and committed when absent.
+        :raises SubmissionTypeAlreadySetError: if *key* is ``submission_type`` and the stored type is
+            set and differs from *value*.
         """
         if key not in SubmissionBase.model_fields:
             raise ValueError(f"Unknown column key '{key}'")
@@ -1205,6 +1235,8 @@ class SubmissionDb:
 
         :param submission: The Submission instance with updated field values.
         :return: The updated Submission instance.
+        :raises SubmissionTypeAlreadySetError: if the stored type is set and *submission* has a
+            different one.
         """
         with self.transaction() as session:
             db_submission = session.get(Submission, submission.id)
@@ -1833,6 +1865,7 @@ class SubmissionDb:
 
         Excluding ``test`` submissions is the only rule cases place on a submission's type, so
         it has to hold for a link resolved from metadata and for one an operator names directly.
+        Checking it only when a link is made is enough, because a set type never changes.
 
         An unknown type is refused too, since it may yet turn out to be ``test``: a row that
         has not been populated carries no type, and linking it would decide the question
@@ -2396,6 +2429,8 @@ class SubmissionDb:
             nothing about the other diffs; :meth:`resolve_case` still raises for a caller
             that asked about the case alone.
         :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        :raises SubmissionTypeAlreadySetError: if the stored type is set and *metadata* has a
+            different one. Unlike other overwrites, ``force`` does not permit this.
         """
         if submission_uploaded_date is None:
             # set arbitrary date if not provided
@@ -2574,6 +2609,8 @@ class SubmissionDb:
         :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
             and the corresponding key is not in ``ignore_fields``.
         :raises RuntimeError: if pending changes are destructive and ``force`` is False.
+        :raises SubmissionTypeAlreadySetError: if the stored type is set and *metadata* has a
+            different one, whatever ``force`` says.
         """
         ignore_fields = ignore_fields or set()
 

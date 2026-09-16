@@ -18,6 +18,7 @@ from grz_db.errors import (
     DuplicateInitialSubmissionError,
     DuplicatePsnError,
     SubmissionNotFoundError,
+    SubmissionTypeAlreadySetError,
     SubmissionTypeInvalidForCaseError,
 )
 from grz_db.models.submission import (
@@ -361,7 +362,27 @@ def _case_with_competing_initials(db: SubmissionDb) -> tuple[str, str, int]:
     return qc_passed_id, duplicate_id, case.id
 
 
-def test_modify_submission_type_cannot_smuggle_in_a_second_initial(db: SubmissionDb):
+def _change_type_via_modify(db: SubmissionDb, submission_id: str, submission_type: SubmissionType) -> None:
+    db.modify_submission(submission_id, "submission_type", submission_type.value)
+
+
+def _change_type_via_update(db: SubmissionDb, submission_id: str, submission_type: SubmissionType) -> None:
+    submission = db.get_submission(submission_id)
+    submission.submission_type = submission_type
+    db.update_submission(submission)
+
+
+_change_type = pytest.mark.parametrize(
+    "change_type",
+    [_change_type_via_modify, _change_type_via_update],
+    ids=["modify_submission", "update_submission"],
+)
+
+
+@_change_type
+def test_submission_type_change_cannot_smuggle_in_a_second_initial(
+    db: SubmissionDb, change_type: Callable[[SubmissionDb, str, SubmissionType], None]
+):
     """Changing submission_type to 'initial' on an already QC-passed submission must not create a
     second initial submission that passed basic QC for the case.
     """
@@ -371,9 +392,46 @@ def test_modify_submission_type_cannot_smuggle_in_a_second_initial(db: Submissio
     db.assign_case(addition, submitter_id=SUBMITTER_A, local_case_id="caseX", submission_type=SubmissionType.addition)
     _record_basic_qc(db, addition, True)  # fine: addition is not an initial submission
 
-    with pytest.raises(DuplicateInitialSubmissionError):
-        db.modify_submission(addition, "submission_type", SubmissionType.initial.value)
+    with pytest.raises(SubmissionTypeAlreadySetError):
+        change_type(db, addition, SubmissionType.initial)
     assert db.get_submission(addition).submission_type == SubmissionType.addition
+
+
+@_change_type
+def test_a_linked_initial_cannot_become_a_test_submission(
+    db: SubmissionDb, change_type: Callable[[SubmissionDb, str, SubmissionType], None]
+):
+    """Links are only checked when made, so a linked 'test' submission would stay in its case.
+    Leaving 'initial' would also free the case's one-initial slot for a second initial.
+    """
+    qc_passed_id, _ = _case_with_qc_passed_initial(db)
+
+    with pytest.raises(SubmissionTypeAlreadySetError):
+        change_type(db, qc_passed_id, SubmissionType.test)
+    assert db.get_submission(qc_passed_id).submission_type == SubmissionType.initial
+
+
+def test_writing_the_stored_submission_type_again_is_allowed(db: SubmissionDb):
+    """The CLI passes the type as a string, which must compare equal to the stored enum."""
+    submission_id = _sid(SUBMITTER_A, "0000000a")
+    _add(db, submission_id, SubmissionType.initial)
+
+    db.modify_submission(submission_id, "submission_type", SubmissionType.initial.value)
+    assert db.get_submission(submission_id).submission_type == SubmissionType.initial
+
+
+def test_populate_cannot_change_a_set_submission_type_even_with_force(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+):
+    """Populate fills in a missing type, but a metadata file with a different type is refused."""
+    initial_metadata = _with_submission_type(metadata, "initial")
+    submission_id = initial_metadata.submission_id
+    db.add_submission(submission_id)
+    db.populate(submission_id, initial_metadata, submission_date=None)
+
+    with pytest.raises(SubmissionTypeAlreadySetError):
+        db.populate(submission_id, _with_submission_type(metadata, "followup"), submission_date=None, force=True)
+    assert db.get_submission(submission_id).submission_type == SubmissionType.initial
 
 
 def test_one_initial_violation_is_recognized_in_the_backend_error(db: SubmissionDb):

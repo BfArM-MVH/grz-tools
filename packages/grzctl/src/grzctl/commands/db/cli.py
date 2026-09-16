@@ -34,6 +34,7 @@ from grz_db.errors import (
     DuplicatePsnError,
     SubmissionError,
     SubmissionNotFoundError,
+    SubmissionTypeAlreadySetError,
     SubmissionTypeInvalidForCaseError,
 )
 from grz_db.models.author import Author
@@ -908,7 +909,7 @@ _MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - Submis
     epilog="Currently available KEYs are: "
     + ", ".join(_MODIFIABLE_SUBMISSION_KEYS)
     + ". A submission's case cannot be changed here: use 'db case relink' to change it, "
-    + "or 'db case unlink' to remove it."
+    + "or 'db case unlink' to remove it. A submission_type can only be set while it is empty."
 )
 @_submission_id_argument
 @click.argument("key", metavar="KEY", type=click.Choice(_MODIFIABLE_SUBMISSION_KEYS))
@@ -929,7 +930,7 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         console_err.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
     except SubmissionNotFoundError as e:
         _abort_missing_submission(e, submission_id)
-    except SubmissionTypeInvalidForCaseError as e:
+    except (SubmissionTypeAlreadySetError, SubmissionTypeInvalidForCaseError) as e:
         _abort(e)
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")

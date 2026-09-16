@@ -48,6 +48,16 @@ class SubmissionTypeIsNoneError(SubmissionError):
         super().__init__("Submission type is None")
 
 
+class SubmissionTypeAlreadySetError(SubmissionError):
+    """Exception for when a write would change a submission type that is already set."""
+
+    def __init__(self, submission_id: str, submission_type: str, requested_type: str | None):
+        super().__init__(
+            f"Submission '{submission_id}' already has type '{submission_type}' and cannot change to "
+            f"'{requested_type}': a submission type is set once."
+        )
+
+
 class SubmissionBasicQCNotPassedError(SubmissionError):
     """Exception for when a submission has not passed basic QC."""
 
