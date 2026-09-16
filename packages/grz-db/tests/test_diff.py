@@ -7,7 +7,7 @@ def _collection() -> SubmissionDiffCollection:
     collection.append(FieldDiff.classify_field("submission_size", None, 42))  # added
     collection.append(FieldDiff.classify_field("submission_metadata", {"stale": True}, {"fresh": True}))  # updated
     collection.append(FieldDiff.classify_field("consented", True, False))  # updated
-    collection.append(FieldDiff.classify_field("pseudonym", "old", None))  # deleted
+    collection.append(FieldDiff.classify_field("local_case_id", "old", None))  # deleted
     collection.append(FieldDiff.classify_field("tan_g", "same", "same"))  # unchanged
     return collection
 
@@ -17,7 +17,7 @@ def test_withhold_destructive_keeps_only_the_allowed_overwrites():
 
     assert [d.key for d in committable.updated] == ["submission_metadata"]
     assert [d.key for d in committable.deleted] == []
-    assert sorted(d.key for d in withheld) == ["consented", "pseudonym"]
+    assert sorted(d.key for d in withheld) == ["consented", "local_case_id"]
 
 
 def test_withhold_destructive_always_keeps_additive_and_unchanged_diffs():

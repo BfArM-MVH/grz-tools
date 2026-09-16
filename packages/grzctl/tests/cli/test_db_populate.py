@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import SubmissionDb
-from grz_db.models.submission.diff import DiffState, DonorDiff, DonorsDiffCollection, SubmissionDiffCollection
+from grz_db.models.submission.diff import DiffState, DonorDiff, SubmissionChangeSet
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
 
@@ -87,7 +87,7 @@ def test_populate_no_raise_on_additive_changes(db_ctx: SimpleNamespace):
 
     submission = ctx.db.get_submission(ctx.submission_id)
     assert submission.submitter_id == ctx.metadata.submission.submitter_id
-    assert submission.pseudonym == ctx.metadata.submission.local_case_id
+    assert submission.local_case_id == ctx.metadata.submission.local_case_id
     assert len(ctx.db.get_donors(ctx.submission_id)) == len(ctx.metadata.donors)
 
 
@@ -122,18 +122,17 @@ def test_populate_raises_without_force_on_submission_update(db_ctx: SimpleNamesp
 def test_populate_raises_without_force_on_donor_deletion(db_ctx: SimpleNamespace):
     """RuntimeError when donors would be deleted and force=False.
 
-    ``db.diff`` is mocked so the submission diff is clean but one donor is
-    deleted, isolating the donors guard.
+    ``db.diff`` is mocked so the field diffs are clean but one donor is
+    deleted, isolating the donor part of the destructive guard.
     """
     ctx = db_ctx
-    clean_submission_diff = SubmissionDiffCollection()
-    donors_diff_with_deletion = DonorsDiffCollection()
-    donors_diff_with_deletion.deleted.append(
+    changes = SubmissionChangeSet()
+    changes.donors.deleted.append(
         DonorDiff(before=MagicMock(), after=None, state=DiffState.DELETED, pseudonym="deleted_donor")
     )
 
-    with patch.object(ctx.db, "diff", return_value=(clean_submission_diff, donors_diff_with_deletion)):
-        with pytest.raises(RuntimeError, match="donors"):
+    with patch.object(ctx.db, "diff", return_value=changes):
+        with pytest.raises(RuntimeError, match="donor 'deleted_donor'"):
             ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=False)
 
 
@@ -162,11 +161,11 @@ def test_populate_skips_redacted_tan_g_when_ignored(db_ctx: SimpleNamespace):
     )
 
     submission = ctx.db.get_submission(ctx.submission_id)
-    assert submission.pseudonym == ctx.metadata.submission.local_case_id
+    assert submission.local_case_id == ctx.metadata.submission.local_case_id
 
 
 def test_populate_raises_on_redacted_local_case_id(db_ctx: SimpleNamespace):
-    """ValueError when ``local_case_id`` is redacted and ``"pseudonym"`` is not in ``ignore_fields``."""
+    """ValueError when ``local_case_id`` is redacted and ``"local_case_id"`` is not in ``ignore_fields``."""
     ctx = db_ctx
     ctx.metadata_raw["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
     redacted_metadata = _parse(ctx.metadata_raw)
@@ -176,7 +175,7 @@ def test_populate_raises_on_redacted_local_case_id(db_ctx: SimpleNamespace):
 
 
 def test_populate_skips_redacted_local_case_id_when_ignored(db_ctx: SimpleNamespace):
-    """``ignore_fields={"pseudonym"}`` bypasses the missing/redacted local_case_id guard."""
+    """``ignore_fields={"local_case_id"}`` bypasses the missing/redacted local_case_id guard."""
     ctx = db_ctx
     ctx.metadata_raw["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
     redacted_metadata = _parse(ctx.metadata_raw)
@@ -186,7 +185,7 @@ def test_populate_skips_redacted_local_case_id_when_ignored(db_ctx: SimpleNamesp
         redacted_metadata,
         SUBMISSION_DATE,
         force=True,
-        ignore_fields={"pseudonym"},
+        ignore_fields={"local_case_id"},
     )
 
     submission = ctx.db.get_submission(ctx.submission_id)

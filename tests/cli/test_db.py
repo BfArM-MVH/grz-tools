@@ -29,7 +29,7 @@ def test_db(
     result = execute(add_args)
     assert result.exit_code == 0, result.output
 
-    # then update the submission's tanG and/or pseudonym
+    # then update the submission's tanG and/or local case ID
     modify_args = [
         *args_prefix,
         "submission",
@@ -40,7 +40,7 @@ def test_db(
     ]
     result = execute(modify_args)
     assert result.exit_code == 0, result.output
-    modify_args = [*args_prefix, "submission", "modify", submission_id, "pseudonym", "bar"]
+    modify_args = [*args_prefix, "submission", "modify", submission_id, "local_case_id", "bar"]
     result = execute(modify_args)
     assert result.exit_code == 0, result.output
 
@@ -73,7 +73,8 @@ def test_db(
         {
             "id": submission_id,
             "tan_g": tan_g,
-            "pseudonym": "bar",
+            "pseudonym": None,
+            "local_case_id": "bar",
             "latest_state": {
                 "state": "Downloaded",
                 "timestamp": "MASKED",
