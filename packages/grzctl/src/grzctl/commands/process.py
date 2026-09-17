@@ -235,10 +235,10 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
         pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed)
         log.info("Prüfbericht generated successfully")
     except Exception as e:
+        # the run archived the submission, so a Prüfbericht that cannot be generated is the one
+        # thing left undone, and swallowing it would report the run as complete
         log.error(f"Failed to generate Prüfbericht: {e}")
-        if submit_pruefbericht:
-            raise
-        return
+        raise
 
     _save_pruefbericht(pruefbericht, log_dir, save_pruefbericht, redact_pruefbericht)
 
