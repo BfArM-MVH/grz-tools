@@ -1133,6 +1133,11 @@ class SubmissionDb:
 
             submission_create = SubmissionCreate(id=submission_id)
             db_submission = Submission.model_validate(submission_create)
+            # a new row has no states, change requests or case yet; assigning them marks them loaded,
+            # so they stay readable after the session closes, without another query
+            db_submission.states = []
+            db_submission.changes = []
+            db_submission.case = None
 
             session.add(db_submission)
             session.flush()

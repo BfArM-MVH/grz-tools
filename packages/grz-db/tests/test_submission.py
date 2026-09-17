@@ -65,6 +65,15 @@ def test_every_submission_state_can_be_stored(db: SubmissionDb, submission, stat
     assert result.get_latest_state().state == state
 
 
+def test_added_submission_reads_its_relationships(db: SubmissionDb) -> None:
+    """The submission from add_submission reads its state history, change requests and case after its session closed."""
+    submission = db.add_submission(SUBMISSION_ID)
+
+    assert submission.get_latest_state() is None
+    assert submission.changes == []
+    assert submission.pseudonym is None
+
+
 def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata) -> None:
     """Submission.from_metadata must map every metadata field correctly and leave system fields unset."""
     explicit_date = datetime.date(2025, 3, 1)
