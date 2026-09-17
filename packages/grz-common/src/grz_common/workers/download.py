@@ -126,21 +126,31 @@ class S3BotoDownloadWorker:
         """
         Download a single file from S3 to local storage using streaming pipeline.
 
+        A failed download leaves no file behind.
+
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
         """
-        with (
-            tqdm(  # type: ignore[call-overload]
-                total=file_metadata.file_size_in_bytes,
-                desc="DOWNLOAD",
-                postfix={"file": local_file_path},
-                leave=False,
-                **TQDM_DEFAULTS,
-            ) as pbar,
-            open(local_file_path, "wb") as f,
-        ):
-            pipeline = S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) | Tee(TqdmObserver(pbar))
-            pipeline >> f
+        try:
+            with (
+                tqdm(  # type: ignore[call-overload]
+                    total=file_metadata.file_size_in_bytes,
+                    desc="DOWNLOAD",
+                    postfix={"file": local_file_path},
+                    leave=False,
+                    **TQDM_DEFAULTS,
+                ) as pbar,
+                open(local_file_path, "wb") as f,
+            ):
+                pipeline = S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) | Tee(
+                    TqdmObserver(pbar)
+                )
+                pipeline >> f
+        except Exception:
+            # a later step reads whatever lies in the target directory and would take an
+            # incomplete file for a downloaded one; a rerun starts the file over anyway
+            Path(local_file_path).unlink(missing_ok=True)
+            raise
 
     def download_file(
         self,

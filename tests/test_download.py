@@ -1,13 +1,34 @@
 """Tests for the download module"""
 
+import io
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import botocore.client
 import pytest
+from grz_common.exceptions import NetworkError
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.download import DownloadError, S3BotoDownloadWorker
 from grz_common.workers.submission import EncryptedSubmission
 from grz_common.workers.worker import Worker
+
+
+class _BreakingBody(io.RawIOBase):
+    """An S3 response body that hands out one chunk and then breaks, like a dropped connection."""
+
+    def __init__(self, first_chunk: bytes):
+        super().__init__()
+        self._first_chunk = first_chunk
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int | None = -1) -> bytes:
+        if not self._first_chunk:
+            raise ConnectionError("connection reset by peer")
+        chunk = self._first_chunk
+        self._first_chunk = b""
+        return chunk
 
 
 @pytest.fixture(scope="module")
@@ -103,6 +124,79 @@ def test_download_file_fails_for_missing_key(
             file_metadata,
             encrypted_submission.submission_id,
         )
+
+
+def test_download_file_leaves_no_file_behind_for_a_missing_key(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    tmp_path,
+):
+    """A key that is not in the bucket leaves no local file behind."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
+    local_file_path = tmp_path / "files" / file_path.name
+
+    with pytest.raises(DownloadError):
+        download_worker.download_file(
+            local_file_path,
+            f"{encrypted_submission.submission_id}/files/missing.c4gh",
+            progress_logger,
+            file_metadata,
+            encrypted_submission.submission_id,
+        )
+
+    assert not local_file_path.exists(), "a failed download should leave no local file behind"
+
+
+def test_download_file_leaves_no_partial_file_when_the_stream_breaks(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """A download that breaks part way through leaves no partial file behind."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def break_the_body(self, operation_name, kwargs):
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            response["Body"] = _BreakingBody(b"encrypted ")
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", break_the_body)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    with pytest.raises(NetworkError):
+        download_worker.download_file(
+            local_file_path,
+            f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+            progress_logger,
+            file_metadata,
+            submission.submission_id,
+        )
+
+    assert not local_file_path.exists(), "a broken download should leave no partial file behind"
 
 
 def test_download_skips_file_already_downloaded_for_same_submission(
