@@ -127,6 +127,49 @@ class TestCrypt4GHDecryptor:
         ):
             decryptor.read(-1)
 
+    def test_decrypt_of_an_empty_stream_fails(self):
+        """An empty file has no header, which fails as a decryption error rather than as empty output."""
+        recipient_private, _ = generate_keypair()
+
+        with (
+            BytesIO(b"") as f,
+            Crypt4GHDecryptor(f, private_key=recipient_private) as decryptor,
+            pytest.raises(DecryptionError),
+        ):
+            decryptor.read(-1)
+
+    def test_decrypt_of_a_cut_header_fails(self):
+        """A file that ends inside its header fails as a decryption error."""
+        sender_private, _ = generate_keypair()
+        recipient_private, recipient_public = generate_keypair()
+        encrypted = BytesIO()
+        crypt4gh.lib.encrypt([(0, sender_private, recipient_public)], BytesIO(os.urandom(1000)), encrypted)
+
+        with (
+            BytesIO(encrypted.getvalue()[:20]) as f,
+            Crypt4GHDecryptor(f, private_key=recipient_private) as decryptor,
+            pytest.raises(DecryptionError),
+        ):
+            decryptor.read(-1)
+
+    # a segment of 1000 bytes is 1028 long, so cutting 1001 leaves a stub below the nonce and MAC
+    @pytest.mark.parametrize(
+        "cut", [1, 29, 500, 1001], ids=["one-byte", "past-the-mac", "half-the-segment", "all-but-a-stub"]
+    )
+    def test_decrypt_of_a_truncated_file_fails(self, cut):
+        """A file that ends inside a segment fails instead of returning the plaintext it could read."""
+        sender_private, _ = generate_keypair()
+        recipient_private, recipient_public = generate_keypair()
+        encrypted = BytesIO()
+        crypt4gh.lib.encrypt([(0, sender_private, recipient_public)], BytesIO(os.urandom(1000)), encrypted)
+
+        with (
+            BytesIO(encrypted.getvalue()[:-cut]) as f,
+            Crypt4GHDecryptor(f, private_key=recipient_private) as decryptor,
+            pytest.raises(DecryptionError),
+        ):
+            decryptor.read(-1)
+
     def test_decrypt_with_the_wrong_key_fails(self):
         """A private key that decrypts no header packet fails as a decryption error."""
         sender_private, _ = generate_keypair()
