@@ -1216,3 +1216,69 @@ class TestProcessPruefbericht:
             SubmissionStateEnum.REPORTING,
             SubmissionStateEnum.ERROR,
         ]
+
+
+def _config_with_distinct_archive_keys(tmp_path: Path, process_config_content: dict) -> Path:
+    """Write a process config whose two archives have different keys, so their contents tell them apart."""
+    process_config_content["archives"]["consented"]["public_key_path"] = str(MOCK_FILES_DIR / "archive_consented.pub")
+    process_config_content["archives"]["non_consented"]["public_key_path"] = str(
+        MOCK_FILES_DIR / "archive_non_consented.pub"
+    )
+    config_file = tmp_path / "config.process.archive-keys.yaml"
+    config_file.write_text(yaml.dump(process_config_content))
+    return config_file
+
+
+def _upload_submission_without_research_consent(inbox_bucket, submission_id: str) -> None:
+    """Upload the valid submission with the first donor's research consent denied.
+
+    One donor without research consent makes the whole submission non-consented.
+    """
+    upload_submission_to_inbox(inbox_bucket, submission_id)
+    metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+    for consent in metadata["donors"][0]["researchConsents"]:
+        for provision in consent["scope"]["provision"]["provision"]:
+            provision["type"] = "deny"
+    inbox_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+
+
+class TestProcessConsentRouting:
+    """A submission reaches the archive of its consent status, encrypted with that archive's key."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_consented_submission_reaches_the_consented_archive(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Every file decrypts with the consented archive's key, and the other archive stays empty."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        config_file_path = _config_with_distinct_archive_keys(tmp_path, process_config_content)
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        _assert_archived(s3_buckets["consented"], sid, MOCK_FILES_DIR / "archive_consented.sec")
+        assert not {o.key for o in s3_buckets["non_consented"].objects.all()}
+
+    def test_a_non_consented_submission_reaches_the_non_consented_archive(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Every file decrypts with the non-consented archive's key, and the other archive stays empty."""
+        sid = self.SUBMISSION_ID
+        _upload_submission_without_research_consent(s3_buckets["inbox"], sid)
+        config_file_path = _config_with_distinct_archive_keys(tmp_path, process_config_content)
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        _assert_archived(s3_buckets["non_consented"], sid, MOCK_FILES_DIR / "archive_non_consented.sec")
+        assert not {o.key for o in s3_buckets["consented"].objects.all()}
