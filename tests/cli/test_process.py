@@ -1044,3 +1044,68 @@ class TestProcessInboxCleanup:
             SubmissionStateEnum.PROCESSING,
             SubmissionStateEnum.PROCESSED,
         ]
+
+
+def _auto_run_config(tmp_path: Path, process_config_content: dict, shell_command: str) -> Path:
+    """Write a process config that selects every submission for detailed QC and runs ``shell_command``."""
+    process_config_content["detailed_qc"]["target_percentage"] = "100.0"
+    process_config_content["detailed_qc"]["auto_run"] = True
+    process_config_content["detailed_qc"]["shell_command"] = shell_command
+    config_file = tmp_path / "config.process.auto-run.yaml"
+    config_file.write_text(yaml.dump(process_config_content))
+    return config_file
+
+
+class TestProcessDetailedQcAutoRun:
+    """With ``auto_run``, the run calls the configured QC workflow once the files are on local storage."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_the_qc_command_runs_with_the_paths_of_the_submission(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """The command is called with the submission's local storage path, its output path and its ID."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        config_file_path = _auto_run_config(
+            tmp_path,
+            process_config_content,
+            "mkdir -p '{output_basepath}' && printf '%s' '{submission_id}' > '{output_basepath}/ran.txt' "
+            "&& ls '{submission_basepath}' > '{output_basepath}/contents.txt'",
+        )
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / sid / "qc"
+        assert (qc_dir / "ran.txt").read_text() == sid
+        assert set((qc_dir / "contents.txt").read_text().split()) == {"files", "metadata", "qc"}
+
+    def test_a_failing_qc_command_fails_the_run(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A QC command that exits non-zero fails the run, and no file reaches an archive."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        config_file_path = _auto_run_config(tmp_path, process_config_content, "exit 3")
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        recorded_error = (state.data or {}).get("error", "")
+        assert "non-zero exit status 3" in recorded_error, f"the QC command should be the cause, got: {recorded_error}"
+        for bucket in ("consented", "non_consented", "interrogation"):
+            keys = {o.key for o in s3_buckets[bucket].objects.all()}
+            assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+        assert inbox_keys, "a failed run leaves the files in the inbox"
