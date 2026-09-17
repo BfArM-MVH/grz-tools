@@ -1,5 +1,39 @@
 # Changelog
 
+## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v3.0.0...grz-pydantic-models-v4.0.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** `db submission modify` and `--ignore-field` take `local_case_id` where they took `pseudonym`. In JSON output `pseudonym` is now the case's psn (null until assigned); the former value is under `local_case_id`.
+
+### Features
+
+* **grz-db,grzctl:** add case tracking for submissions ([#633](https://github.com/BfArM-MVH/grz-tools/issues/633)) ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grz-db,grzctl:** add db case list-unlinked and list-ambiguous-keys ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grz-db:** let a psn-keyed deployment resolve cases through diff and ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grz-pydantic-models,grz-common:** keep a parsed submission lossless and redact it by one rule ([#654](https://github.com/BfArM-MVH/grz-tools/issues/654)) ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** add get_raw_dict for the document as ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** publish PCT_DEV_CUTOFF ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+* **grzctl:** add db case commands and link submissions to cases on ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grzctl:** explain why a case is listed in the Detailprüfung report ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+* **grzctl:** fail a rival initial submission's basic QC during validate ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grzctl:** report QC deviations without failing and add recompute-qc backfill ([#656](https://github.com/BfArM-MVH/grz-tools/issues/656)) ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+
+
+### Bug Fixes
+
+* **grz-common:** require grz-pydantic-models &gt;=3.1 for ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** apply a change set as one transaction ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** consult the resolver assert_no_duplicate_initial is ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grz-db:** export db_backend from grz_db.testing ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** leave a local case ID reused across patients unlinked ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grz-db:** raise the grz-pydantic-models floor to 3.1 ([a0e1bfe](https://github.com/BfArM-MVH/grz-tools/commit/a0e1bfe743a235ab59d580ea83ea57e379f4710c))
+* **grz-db:** require grz-pydantic-models &gt;=3.1 for ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35)), closes [#632](https://github.com/BfArM-MVH/grz-tools/issues/632)
+* **grzctl:** abort cleanly on a duplicate case key and a malformed ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+* **grzctl:** name the submission fields the database actually has ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grzctl:** stop backfill counting an updated submission as not updated ([68c75dc](https://github.com/BfArM-MVH/grz-tools/commit/68c75dcf6caa8c570833f28e48195d1061b94e35))
+
 ## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v2.7.1...grz-pydantic-models-v3.0.0) (2026-08-13)
 
 

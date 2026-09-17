@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v2.0.0...grz-cli-v2.0.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **grzctl,grz-common,grz-cli:** drop grzctl submit and grzctl's grz-cli dependency ([#675](https://github.com/BfArM-MVH/grz-tools/issues/675)) ([e6f27c1](https://github.com/BfArM-MVH/grz-tools/commit/e6f27c1714fc73d5159b29356914bc345a797c0a))
+
 ## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.8.0...grz-cli-v2.0.0) (2026-08-13)
 
 
