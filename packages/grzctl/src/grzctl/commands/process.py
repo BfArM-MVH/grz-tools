@@ -48,7 +48,7 @@ import grz_common.cli as grzcli
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import SubmissionMetadata
-from grz_db.errors import DuplicateInitialSubmissionError, DuplicateSubmissionError, DuplicateTanGError
+from grz_db.errors import DuplicateInitialSubmissionError
 from grz_db.models.submission import SubmissionStateEnum
 from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
@@ -58,7 +58,6 @@ from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from ..models.pruefbericht import PruefberichtModel
 from ..processor import SubmissionProcessor
-from .db.cli import get_submission_db_instance
 from .pruefbericht import _generate_pruefbericht_from_database, _get_submission_credentials
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
 from .validate import _check_duplicate_initial
@@ -147,28 +146,6 @@ def process(  # noqa: PLR0913, PLR0917
 
     submission_metadata = SubmissionMetadata(local_metadata_path)
 
-    # register and populate submission in DB
-    db_service = get_submission_db_instance(configuration.db.database_url)
-    try:
-        if not db_service.get_submission(submission_id):
-            db_service.add_submission(submission_id)
-    except (DuplicateSubmissionError, DuplicateTanGError) as e:
-        raise click.ClickException(f"Submission '{submission_id}' already exists in the database. Aborting.") from e
-    except Exception as e:
-        raise click.ClickException(f"Failed to add submission: {e}") from e
-
-    # Populate the DB record with parsed metadata (donors, files, dates, etc.)
-    # so that downstream Prüfbericht generation can read the required fields.
-    s3_client = init_s3_client(inbox.s3)
-    submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
-    db_service.populate(
-        submission_id,
-        submission_metadata.content,
-        submission_date,
-        force=False,
-        on_missing="create",
-    )
-
     processor = SubmissionProcessor(
         configuration=configuration,
         inbox=inbox,
@@ -184,6 +161,18 @@ def process(  # noqa: PLR0913, PLR0917
         start_state=SubmissionStateEnum.PROCESSING,
         end_state=SubmissionStateEnum.PROCESSED,
     ) as dbcontext_inst:
+        # Populate the DB record with parsed metadata (donors, files, dates, etc.)
+        # so that downstream Prüfbericht generation can read the required fields.
+        # A rejected write, such as a duplicate tanG, then records the ERROR state.
+        s3_client = init_s3_client(inbox.s3)
+        submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
+        dbcontext_inst.db.populate(
+            submission_id,
+            submission_metadata.content,
+            submission_date,
+            force=False,
+            on_missing="create",
+        )
         try:
             _check_duplicate_initial(dbcontext_inst.db, submission_metadata.content)
         except DuplicateInitialSubmissionError as e:

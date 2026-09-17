@@ -45,6 +45,8 @@ $ grzctl --config $CONFIG_PATH process \
 ```
 1. download metadata.json from inbox
    add + populate submission's DB row;
+   tanG already held by another submission?
+   state = ERROR (duplicate_tang); STOP
    case already has a QC-passed initial submission?
    basic_qc_passed = false, state = ERROR (duplicate_initial); STOP
                      │

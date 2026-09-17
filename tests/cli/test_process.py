@@ -717,6 +717,40 @@ class TestProcessDuplicateInitial:
         self._assert_failed_basic_qc(process_config_content, duplicate_id)
 
 
+class TestProcessDuplicateTanG:
+    """A submission fails when another submission already holds its tanG."""
+
+    FIRST_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_duplicate_tan_g_fails_before_processing(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A resubmission with the tanG of a processed submission fails as DUPLICATE_TANG before any file is downloaded."""
+        upload_submission_to_inbox(s3_buckets["inbox"], self.FIRST_ID)
+        result = _run_process(temp_process_config_file_path, self.FIRST_ID, working_dir_path / "first")
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # same tanG on a later date, and therefore another submission ID
+        duplicate_id = "260914050_2024-07-16_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], duplicate_id)
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        metadata["submission"]["submissionDate"] = "2024-07-16"
+        s3_buckets["inbox"].put_object(Key=f"{duplicate_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+
+        assert result.exit_code != 0
+        state = _latest_state(process_config_content, duplicate_id)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.DUPLICATE_TANG
+        assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], duplicate_id) == Counter()
+
+
 @pytest.fixture
 def rerun_config_file_path(tmp_path, process_config_content) -> Path:
     """Write a process config that selects submissions for detailed QC and keeps the staged files of a failed run."""
