@@ -35,16 +35,16 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
     def _run_validation_thread(self):
         try:
             self.report = self._invoke_grz_check()
-        except PipelineError as exception:
-            self.exception = exception
-        except Exception as exception:
-            error = DataValidationError(str(exception), stage=self.__class__.__name__, cause=exception)
-            error.__cause__ = exception  # keeps grz_check's traceback in the log
+        except PipelineError as e:
+            self.exception = e
+        except Exception as e:
+            error = DataValidationError(str(e), stage=self.__class__.__name__, cause=e)
+            error.__cause__ = e  # keeps grz_check's traceback in the log
             self.exception = error
-        except BaseException as exception:
+        except BaseException as e:
             # grz_check is a pyo3 extension, so a Rust panic arrives as a PanicException, which
             # derives from BaseException. The data is not at fault here, so it stays unwrapped.
-            self.exception = exception
+            self.exception = e
 
     def _raise_if_invalid(self) -> None:
         if self.report and not self.report.is_valid:
