@@ -229,3 +229,33 @@ def test_upload_rereuploads_file_after_failed_upload(
     assert upload_spy.call_count == expected, (
         f"Expected {expected} failed files to be retried, but only {upload_spy.call_count} were uploaded"
     )
+
+
+def test_upload_file_uploads_parts_in_parallel(
+    s3_config_model, remote_bucket, temp_upload_log_file_path, overlapping_s3_calls, tmp_path
+):
+    """With two threads, two parts of one file are uploaded at the same time."""
+    s3_options = s3_config_model.s3.model_copy(update={"multipart_chunksize": MULTIPART_MIN_PART_SIZE})
+    file_path = tmp_path / "three_parts.bin"
+    file_path.write_bytes(b"x" * (2 * MULTIPART_MIN_PART_SIZE + 1))
+    overlapped = overlapping_s3_calls("UploadPart", timeout=10)
+    upload_worker = S3BotoUploadWorker(s3_options=s3_options, status_file_path=temp_upload_log_file_path, threads=2)
+
+    upload_worker.upload_file(file_path, "three_parts.bin")
+
+    assert overlapped(), "two parts should have been uploaded at the same time"
+
+
+def test_upload_file_uploads_one_part_at_a_time_with_one_thread(
+    s3_config_model, remote_bucket, temp_upload_log_file_path, overlapping_s3_calls, tmp_path
+):
+    """With one thread, no two parts of a file are uploaded at the same time."""
+    s3_options = s3_config_model.s3.model_copy(update={"multipart_chunksize": MULTIPART_MIN_PART_SIZE})
+    file_path = tmp_path / "three_parts.bin"
+    file_path.write_bytes(b"x" * (2 * MULTIPART_MIN_PART_SIZE + 1))
+    overlapped = overlapping_s3_calls("UploadPart", timeout=0.5)
+    upload_worker = S3BotoUploadWorker(s3_options=s3_options, status_file_path=temp_upload_log_file_path, threads=1)
+
+    upload_worker.upload_file(file_path, "three_parts.bin")
+
+    assert not overlapped(), "one thread should upload one part after the other"

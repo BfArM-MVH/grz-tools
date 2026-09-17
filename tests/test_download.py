@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.download import DownloadError, S3BotoDownloadWorker
+from grz_common.workers.submission import EncryptedSubmission
 from grz_common.workers.worker import Worker
 
 
@@ -238,3 +239,44 @@ def test_worker_download_checks_metadata_version_before_files(
     assert checked_versions == [encrypted_submission.metadata.content.get_schema_version()]
     assert (tmp_path / "metadata" / "metadata.json").exists()
     assert not list((tmp_path / "encrypted_files").rglob("*.c4gh"))
+
+
+def _submission_in_the_bucket(remote_bucket, submission_metadata_dir: Path, tmp_path: Path) -> EncryptedSubmission:
+    """Put every encrypted file of the example submission into the bucket, to be downloaded to *tmp_path*."""
+    submission = EncryptedSubmission(submission_metadata_dir, tmp_path / "encrypted_files")
+    for file_metadata in submission.encrypted_files.values():
+        key = f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}"
+        remote_bucket.put_object(Key=key, Body=b"encrypted payload")
+    return submission
+
+
+def test_download_downloads_files_in_parallel(
+    s3_config_model, remote_bucket, submission_metadata_dir, temp_download_log_file_path, overlapping_s3_calls, tmp_path
+):
+    """With two threads, two files of a submission are downloaded at the same time."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    overlapped = overlapping_s3_calls("GetObject", timeout=10)
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3, status_file_path=temp_download_log_file_path, threads=2
+    )
+
+    download_worker.download(submission.submission_id, submission)
+
+    assert overlapped(), "two files should have been downloaded at the same time"
+    assert all(path.exists() for path in submission.encrypted_files)
+
+
+def test_download_downloads_one_file_at_a_time_with_one_thread(
+    s3_config_model, remote_bucket, submission_metadata_dir, temp_download_log_file_path, overlapping_s3_calls, tmp_path
+):
+    """With one thread, no two files of a submission are downloaded at the same time."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    overlapped = overlapping_s3_calls("GetObject", timeout=0.5)
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3, status_file_path=temp_download_log_file_path, threads=1
+    )
+
+    download_worker.download(submission.submission_id, submission)
+
+    assert not overlapped(), "one thread should download one file after the other"
+    assert all(path.exists() for path in submission.encrypted_files)

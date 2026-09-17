@@ -118,6 +118,7 @@ class S3BotoUploadWorker(UploadWorker):
                 self._s3_options.bucket,
                 s3_object_id,
                 part_size=calculate_s3_part_size(file_size, self._s3_options.multipart_chunksize),
+                max_threads=self._threads,
             )
 
             pipeline >> uploader

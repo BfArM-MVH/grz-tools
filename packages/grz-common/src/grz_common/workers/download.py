@@ -9,6 +9,7 @@ import logging
 import re
 from collections import OrderedDict
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
@@ -160,6 +161,7 @@ class S3BotoDownloadWorker:
         try:
             local_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
+            self.__log.info("Downloading file: '%s' -> '%s'", s3_object_id, str(local_file_path))
             self._download_with_progress(str(local_file_path), s3_object_id, file_metadata)
 
             self.__log.info(f"Download complete for {str(local_file_path)}.")
@@ -198,6 +200,7 @@ class S3BotoDownloadWorker:
         :param encrypted_submission: The encrypted submission to download.
         """
         progress_logger = FileProgressLogger[DownloadState](self._status_file_path)
+        pending: list[tuple[Path, str, SubmissionFileMetadata]] = []
 
         for local_file_path, file_metadata in encrypted_submission.encrypted_files.items():
             relative_encrypted_path = file_metadata.encrypted_file_path()
@@ -216,8 +219,23 @@ class S3BotoDownloadWorker:
                 )
                 continue
 
-            self.__log.info("Downloading file: '%s' -> '%s'", file_key, str(local_file_path))
-            self.download_file(local_file_path, file_key, progress_logger, file_metadata, submission_id)
+            pending.append((local_file_path, file_key, file_metadata))
+
+        # a single stream cannot be split, so the files are what runs in parallel
+        with ThreadPoolExecutor(max_workers=self._threads) as pool:
+            futures = [
+                pool.submit(
+                    self.download_file, local_file_path, file_key, progress_logger, file_metadata, submission_id
+                )
+                for local_file_path, file_key, file_metadata in pending
+            ]
+            try:
+                for future in as_completed(futures):
+                    future.result()
+            except Exception:
+                # the progress log records what finished, so a rerun picks the rest up
+                pool.shutdown(cancel_futures=True)
+                raise
 
 
 class InboxSubmissionState(enum.StrEnum):
