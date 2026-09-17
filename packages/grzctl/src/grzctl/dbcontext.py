@@ -240,6 +240,11 @@ class DbContext:
                 f"Expected any of '{self.expected_prior_states}' before updating to '{self.start_state.name}'."
             )
 
+        # The first state has no prior state to find in the history: expected_prior_states is
+        # {None} then, and no state log entry has state None, so the check below would always warn.
+        if None in self.expected_prior_states:
+            return
+
         history = submission.states
         found_in_history = any(entry.state in self.expected_prior_states for entry in history)
 

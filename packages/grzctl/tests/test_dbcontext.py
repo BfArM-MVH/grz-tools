@@ -1,3 +1,4 @@
+import logging
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -154,3 +155,40 @@ class TestDbContextFailureReason:
             SubmissionStateEnum.ENCRYPTED,
             grzctl_versions=mock.ANY,
         )
+
+
+class TestCheckPrerequisites:
+    @staticmethod
+    def _context(mock_db, start_state: SubmissionStateEnum, end_state: SubmissionStateEnum) -> DbContext:
+        context = DbContext(
+            configuration={},
+            submission_id="123_2025-01-01_00000000",
+            start_state=start_state,
+            end_state=end_state,
+            enabled=True,
+        )
+        context.db = mock_db  # bypass __enter__
+        return context
+
+    def test_first_state_does_not_warn_about_the_history(self, mock_db, caplog):
+        """Uploading a new submission has no prior state to find, so nothing is logged."""
+        mock_db.get_submission.return_value = None
+        mock_db.add_submission.return_value.get_latest_state.return_value = None
+        mock_db.add_submission.return_value.states = []
+        context = self._context(mock_db, SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED)
+
+        with caplog.at_level(logging.WARNING):
+            context._check_prerequisites()
+
+        assert caplog.records == []
+
+    def test_later_state_warns_when_the_history_lacks_the_prior_state(self, mock_db, caplog):
+        """The history check still runs for every state that has a prior state."""
+        mock_db.get_submission.return_value.get_latest_state.return_value = None
+        mock_db.get_submission.return_value.states = []
+        context = self._context(mock_db, SubmissionStateEnum.ENCRYPTING, SubmissionStateEnum.ENCRYPTED)
+
+        with caplog.at_level(logging.WARNING):
+            context._check_prerequisites()
+
+        assert "state history does not contain" in caplog.text
