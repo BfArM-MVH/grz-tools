@@ -238,6 +238,7 @@ class S3MultipartUploader(Observer):
 
         server_etag = resp["ETag"].strip('"')
         if server_etag != local_md5_hex:
+            self._delete_mismatched_object()
             raise DataIntegrityError(
                 f"Local checksum does not match remote one! Expected: {local_md5_hex}, Got: {server_etag}",
                 stage=self.__class__.__name__,
@@ -284,12 +285,23 @@ class S3MultipartUploader(Observer):
             UploadId=self._upload_id,
             MultipartUpload={"Parts": parts_payload},
         )
+        # the object exists from here on, so there is no upload left to abort
+        self._upload_id = None
 
         server_etag = complete.get("ETag", "").strip('"')
         if expected and server_etag != expected:
+            self._delete_mismatched_object()
             raise DataIntegrityError(
                 f"Final ETag mismatch! Exp: {expected}, Got: {server_etag}", stage=self.__class__.__name__
             )
+
+    def _delete_mismatched_object(self) -> None:
+        """Remove the stored object whose content does not match what was sent."""
+        try:
+            self.s3.delete_object(Bucket=self.bucket, Key=self.key)
+        except Exception as e:
+            # Don't let a failed delete hide the integrity error; just log it and move on.
+            log.warning(f"Could not delete {self.key} after its integrity check failed: {e}. It may still be there.")
 
     def _calc_etag(self, parts: list[dict[str, Any]]) -> str:
         digests = [p["local_md5"] for p in parts if "local_md5" in p]
