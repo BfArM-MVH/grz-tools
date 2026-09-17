@@ -603,6 +603,85 @@ def test_backfill_links_once_the_ambiguity_is_gone(db: SubmissionDb, metadata: G
     assert db.get_submission(sid).case_id is not None
 
 
+def _flip_a_donors_mv_consent(db: SubmissionDb, submission_id: str) -> tuple[str, bool]:
+    """Make one stored donor differ from metadata.json, and return its pseudonym and the stored value."""
+    donor = db.get_donors(submission_id)[0]
+    donor.mv_consented = not donor.mv_consented
+    db.update_donor(donor)
+    return donor.pseudonym, donor.mv_consented
+
+
+def test_backfill_holds_back_a_changed_donor_without_force(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    """A stored donor that differs from metadata.json is left alone, while missing values are still filled."""
+    _populate_full_row(db, submission_id, metadata)
+    pseudonym, stored = _flip_a_donors_mv_consent(db, submission_id)
+    db.modify_submission(submission_id, "submission_size", None)  # something additive to write
+
+    result = _backfill_submission(
+        current_submission=db.get_submission(submission_id),
+        raw_json=_metadata_json(metadata),
+        db_service=db,
+        dry_run=False,
+        force=False,
+        ignore_fields=set(),
+    )
+
+    assert result.status == _BackfillResult.UPDATED
+    assert db.get_submission(submission_id).submission_size == metadata.get_submission_size()
+    assert db.get_donors(submission_id, pseudonym)[0].mv_consented == stored, "the donor must not be overwritten"
+
+
+def test_backfill_force_overwrites_a_changed_donor(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    _populate_full_row(db, submission_id, metadata)
+    pseudonym, stored = _flip_a_donors_mv_consent(db, submission_id)
+
+    result = _backfill_submission(
+        current_submission=db.get_submission(submission_id),
+        raw_json=_metadata_json(metadata),
+        db_service=db,
+        dry_run=False,
+        force=True,
+        ignore_fields=set(),
+    )
+
+    assert result.status == _BackfillResult.UPDATED
+    assert db.get_donors(submission_id, pseudonym)[0].mv_consented == (not stored)
+
+
+def test_backfill_holds_back_the_whole_submission_when_the_case_link_changed(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+) -> None:
+    """A relinked submission keeps its case, and nothing else is written either.
+
+    Replacing the link would undo a deliberate relink. Unlike a field or a donor, a held-back link
+    holds back the whole submission, filled NULLs included.
+    """
+    initial_metadata = _as_initial(metadata)
+    sid = initial_metadata.submission_id
+    _populate_full_row(db, sid, initial_metadata)
+    other = db.create_case(initial_metadata.submission.submitter_id, "some-other-case")
+    db.set_submission_case(sid, other.id)
+    db.modify_submission(sid, "submission_size", None)  # something additive that must still wait
+
+    result = _backfill_submission(
+        current_submission=db.get_submission(sid),
+        raw_json=_metadata_json(initial_metadata),
+        db_service=db,
+        dry_run=False,
+        force=False,
+        ignore_fields=set(),
+    )
+
+    assert result.status == _BackfillResult.WOULD_OVERWRITE
+    persisted = db.get_submission(sid)
+    assert persisted.case_id == other.id
+    assert persisted.submission_size is None
+
+
 def _invoke_backfill_command(config_path: Path, submission_id: str) -> click.testing.Result:
     runner = click.testing.CliRunner()
     return runner.invoke(
