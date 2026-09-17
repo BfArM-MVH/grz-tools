@@ -200,11 +200,10 @@ handles the failure as above, with the failure reason `duplicate_initial`.
 
 ## Recovery and reruns
 
-Three progress logs live under `<output-dir>/logs/`:
+Two progress logs live under `<output-dir>/logs/`:
 
 | Log file | Written during | What a rerun does with it |
 | --- | --- | --- |
-| `progress_download.cjson` | Metadata download | Tracks the metadata download itself. |
 | `progress_staging.cjson` | Main pass (step 3) | Skips validating and staging a file whose re-encrypted copy is recorded and still in the interrogation bucket. The entry also keeps the file's read counts for the read-pair check of its partner. |
 | `progress_local.cjson` | Main pass (with a "yes" prediction) and the QC pass (step 6) | Skips writing a file whose decrypted copy is recorded and still on local storage. |
 

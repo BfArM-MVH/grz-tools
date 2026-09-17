@@ -46,7 +46,7 @@ from pathlib import Path
 import click
 import grz_common.cli as grzcli
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
-from grz_common.workers.download import S3BotoDownloadWorker
+from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError
 from grz_db.models.submission import SubmissionStateEnum
@@ -138,10 +138,8 @@ def process(  # noqa: PLR0913, PLR0917
 
     # first, download metadata to understand the submission structure
     log.info("Downloading metadata...")
-    download_worker = S3BotoDownloadWorker(
-        inbox.s3, status_file_path=log_dir / "progress_download.cjson", threads=threads
-    )
-    download_worker.download_metadata(submission_id, metadata_dir, metadata_file_name="metadata.json")
+    s3_client = init_s3_client(inbox.s3)
+    download_metadata_file(s3_client, inbox.s3.bucket, submission_id, metadata_dir)
     local_metadata_path = metadata_dir / "metadata.json"
 
     submission_metadata = SubmissionMetadata(local_metadata_path)
@@ -164,7 +162,6 @@ def process(  # noqa: PLR0913, PLR0917
         # Populate the DB record with parsed metadata (donors, files, dates, etc.)
         # so that downstream Prüfbericht generation can read the required fields.
         # A rejected write, such as a duplicate tanG, then records the ERROR state.
-        s3_client = init_s3_client(inbox.s3)
         submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
         # A case link set by hand, with ``db case relink``, outlives a rerun. Resolving the case from
         # the metadata key again would undo that repair, and populate refuses to without --force.

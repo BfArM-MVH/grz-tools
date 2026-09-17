@@ -43,6 +43,44 @@ class DownloadError(Exception):
     pass
 
 
+def download_metadata_file(
+    s3_client: Any,
+    bucket: str,
+    submission_id: str,
+    metadata_dir: Path,
+    metadata_file_name: str = "metadata.json",
+) -> None:
+    """
+    Download the metadata.json of a submission.
+
+    :param s3_client: The S3 client to read the object with
+    :param bucket: Name of the bucket holding the submission
+    :param submission_id: submission folder on S3 structure
+    :param metadata_dir: Path of the metadir folder
+    :param metadata_file_name: name of the metadata.json
+    :raises DownloadError: If the bucket holds no such metadata file
+    """
+    metadata_key = str(Path(submission_id) / metadata_dir.name / metadata_file_name)
+    metadata_file_path = metadata_dir / metadata_file_name
+
+    log.info("Downloading metadata file: '%s'", metadata_key)
+    try:
+        # Ensure the local target directory exists
+        metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+
+        s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
+        log.info("Metadata download complete.")
+    except botocore.exceptions.ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "404":
+            error_msg = f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
+            log.error(error_msg)
+            raise DownloadError(error_msg) from e
+        raise e
+    except Exception as e:
+        log.error("Download failed for metadata '%s'", metadata_key)
+        raise e
+
+
 class S3BotoDownloadWorker:
     """Implementation of a download worker using boto3 for S3"""
 
@@ -102,25 +140,9 @@ class S3BotoDownloadWorker:
         :param metadata_dir: Path of the metadir folder
         :param metadata_file_name: name of the metadata.json
         """
-        metadata_key = str(Path(submission_id) / metadata_dir.name / metadata_file_name)
-        metadata_file_path = metadata_dir / metadata_file_name
-
-        self.__log.info("Downloading metadata file: '%s'", metadata_key)
-        try:
-            # Ensure the local target directory exists
-            metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
-
-            self._s3_client.download_file(self._s3_options.bucket, metadata_key, str(metadata_file_path))
-            self.__log.info("Metadata download complete.")
-        except botocore.exceptions.ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                error_msg = f"Metadata file '{metadata_key}' not found in S3 bucket '{self._s3_options.bucket}'."
-                self.__log.error(error_msg)
-                raise DownloadError(error_msg) from e
-            raise e
-        except Exception as e:
-            self.__log.error("Download failed for metadata '%s'", metadata_key)
-            raise e
+        download_metadata_file(
+            self._s3_client, self._s3_options.bucket, submission_id, metadata_dir, metadata_file_name
+        )
 
     def _download_with_progress(self, local_file_path: str, s3_object_id: str, file_metadata: SubmissionFileMetadata):
         """
