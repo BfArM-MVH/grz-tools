@@ -20,6 +20,7 @@ import botocore.exceptions
 import click.testing
 import crypt4gh.keys
 import crypt4gh.lib
+import grz_db.models.author
 import grzctl.cli
 import pytest
 import responses
@@ -1282,3 +1283,31 @@ class TestProcessConsentRouting:
         assert result.exit_code == 0, f"Process failed: {result.output}"
         _assert_archived(s3_buckets["non_consented"], sid, MOCK_FILES_DIR / "archive_non_consented.sec")
         assert not {o.key for o in s3_buckets["consented"].objects.all()}
+
+
+class TestProcessAuthorKey:
+    """The author's key signs every state the run writes, and the run unlocks it once."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_the_run_asks_for_the_passphrase_once(
+        self,
+        s3_buckets,
+        monkeypatch,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A config without a passphrase leaves one prompt, however many states the run writes."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        del process_config_content["db"]["author"]["private_key_passphrase"]
+        config_file = tmp_path / "config.process.no-passphrase.yaml"
+        config_file.write_text(yaml.dump(process_config_content))
+        prompts = []
+        monkeypatch.setattr(grz_db.models.author, "getpass", lambda prompt=None: prompts.append(prompt) or "test")
+
+        result = _run_process(config_file, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert len(prompts) == 1, f"the run asked for the passphrase {len(prompts)} times: {prompts}"

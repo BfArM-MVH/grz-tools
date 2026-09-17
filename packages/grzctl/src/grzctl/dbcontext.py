@@ -1,7 +1,6 @@
 import logging
 import subprocess
 from functools import cached_property
-from pathlib import Path
 from typing import Any
 
 from grz_common.exceptions import (
@@ -11,7 +10,6 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
-from grz_common.models.base import get_secret_value
 from grz_common.pipeline.components import DataValidationError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
@@ -182,25 +180,10 @@ class DbContext:
 
         return True
 
-    @cached_property
+    @property
     def author(self) -> Author:
-        db_config = self.config.db
-
-        if not db_config.author:
-            raise ValueError("Author configuration is missing")
-
-        if db_config.author.private_key_path is None:
-            raise ValueError("Author private key path is required but was None")
-
-        key_path = Path(db_config.author.private_key_path)
-        if not key_path.exists():
-            raise FileNotFoundError(f"Author private key not found at: {key_path}")
-
-        return Author(
-            name=db_config.author.name,
-            private_key_bytes=key_path.read_bytes(),
-            private_key_passphrase=get_secret_value(db_config.author.private_key_passphrase),
-        )
+        # cached on the configuration, so the several contexts of one run share a single unlocked key
+        return self.config.db.signing_author
 
     def _map_exception_to_failure_reason(
         self, exc_type: type[BaseException], exc_val: BaseException | None

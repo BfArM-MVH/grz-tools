@@ -692,7 +692,7 @@ class SubmissionProcessor:
             Its ``__cause__`` is the first file error.
         """
         submission_run = self._new_run_state(submission_metadata)
-        db = SubmissionDb(self.config.db.database_url, self.config.db.author)  # type: ignore[arg-type]
+        db = SubmissionDb(self.config.db.database_url, self.config.db.signing_author)
         prefetch = self._predict_qc(db, submission_run.submission_id)
         if prefetch:
             log.info(
