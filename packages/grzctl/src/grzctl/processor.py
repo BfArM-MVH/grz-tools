@@ -187,9 +187,25 @@ class FilePipelineExecutor:
         stage: bool,
         write_local: bool,
     ) -> None:
+        """Stream one file of the submission into the outputs it is still missing.
+
+        Whatever goes wrong here fails this file alone. The error goes to the run's context, which
+        fails the run once every file is done and lets the other threads stop early. A file that is
+        done and a file that failed are both marked completed, because the read-pair check of the
+        partner file waits for that mark.
+
+        :param run_state: The submission's run state.
+        :param file_meta: The file's entry in the submission metadata.
+        :param threshold: The QC thresholds that apply to the file, if it has any.
+        :param pbar_global: The progress bar over all files of the submission.
+        :param stage: Validate the file and stage its re-encrypted copy in the interrogation bucket.
+        :param write_local: Write the file's decrypted copy to local storage.
+        """
         inbox_key = _inbox_file_key(run_state.submission_id, file_meta)
         file_path_str = str(file_meta.file_path)
 
+        # the size and the modification time of the inbox object tell a progress log record which
+        # version of the file it describes
         try:
             head = head_object(self._source_s3, self._source_bucket, inbox_key)
             s3_size = head["ContentLength"]
@@ -204,29 +220,38 @@ class FilePipelineExecutor:
                 },
             )
             run_state.context.add_error(e)
+            # the file could not be read, so neither its size nor its modification time is known
             failure: ProcessingState = {"processing_successful": False, "errors": [str(e)]}
             self._record(file_meta, failure, size=-1, mtime=-1.0, staging=stage, local=write_local)
             run_state.context.mark_completed(file_path_str)
             return
 
-        staging_record = self._staging_record(run_state, file_meta, s3_size, s3_mtime) if stage else None
-        if staging_record is not None:
-            # the read-pair check of this file's partner compares these stats
-            run_state.context.record_stats(file_path_str, staging_record.get("stats", {}))
-        needs_staging = stage and staging_record is None
-        needs_local_copy = write_local and not self._has_local_copy(run_state, file_meta, s3_size, s3_mtime)
-
-        if not needs_staging and not needs_local_copy:
-            log.info(f"Skipping {file_meta.file_path}, already processed.")
-            with TqdmObserver.lock:
-                pbar_global.update(file_meta.file_size_in_bytes)
-            run_state.context.mark_completed(file_path_str)
-            return
-
-        if run_state.context.has_errors:
-            return
+        # the except clause below records the failure for these outputs, also when a lookup fails
+        needs_staging = stage
+        needs_local_copy = write_local
 
         try:
+            # an earlier run may have written some of this file's outputs already
+            staging_record = self._staging_record(run_state, file_meta, s3_size, s3_mtime) if stage else None
+            if staging_record is not None:
+                # the read-pair check of this file's partner compares these stats
+                run_state.context.record_stats(file_path_str, staging_record.get("stats", {}))
+            needs_staging = stage and staging_record is None
+            needs_local_copy = write_local and not self._has_local_copy(run_state, file_meta, s3_size, s3_mtime)
+
+            if not needs_staging and not needs_local_copy:
+                # every output this run asks for is there, so only the progress bar moves
+                log.info(f"Skipping {file_meta.file_path}, already processed.")
+                with TqdmObserver.lock:
+                    pbar_global.update(file_meta.file_size_in_bytes)
+                run_state.context.mark_completed(file_path_str)
+                return
+
+            if run_state.context.has_errors:
+                # another file failed and the run fails with it, so this one is not transferred
+                return
+
+            # download, decrypt, validate, and write the outputs that are missing
             self._stream_file(
                 run_state,
                 file_meta,
@@ -238,6 +263,8 @@ class FilePipelineExecutor:
             )
 
             if needs_staging and not run_state.consistency_validator.check(file_meta.file_path):
+                # a read pair is compared once both files are marked completed, so whichever of the
+                # two finishes second is the one that reports a mismatch
                 raise DataValidationError(
                     f"Consistency Check Failed: {file_meta.file_path}", stage="ReadPairConsistencyValidator"
                 )
@@ -262,6 +289,7 @@ class FilePipelineExecutor:
                 },
             )
             run_state.context.add_error(e)
+            # the outputs this run was going to write are recorded as failed, so a rerun redoes them
             failure = {"processing_successful": False, "errors": [str(e)]}
             self._record(
                 file_meta, failure, size=s3_size, mtime=s3_mtime, staging=needs_staging, local=needs_local_copy

@@ -500,6 +500,8 @@ class S3Requests:
     requests: list[tuple[str, str, str]] = field(default_factory=list)
     unavailable_bucket: str | None = None
     """Writes to this bucket fail, as if the bucket were unavailable."""
+    failing_head_bucket: str | None = None
+    """``HeadObject`` on this bucket fails with a server error, as if the endpoint were overloaded."""
     failing_repeat_downloads: set[str] = field(default_factory=set)
     """Every download of these keys after the first fails, as if the object had been deleted in between."""
 
@@ -525,6 +527,9 @@ def s3_requests(monkeypatch) -> S3Requests:
         recorder.requests.append((operation_name, bucket, key))
         if bucket == recorder.unavailable_bucket and operation_name in S3_WRITE_OPERATIONS:
             error = {"Error": {"Code": "ServiceUnavailable", "Message": "simulated outage"}}
+            raise botocore.exceptions.ClientError(error, operation_name)
+        if bucket == recorder.failing_head_bucket and operation_name == "HeadObject":
+            error = {"Error": {"Code": "ServiceUnavailable", "Message": "simulated overload"}}
             raise botocore.exceptions.ClientError(error, operation_name)
         repeat_download = operation_name == "GetObject" and recorder.requests.count((operation_name, bucket, key)) > 1
         if repeat_download and key in recorder.failing_repeat_downloads:
@@ -934,3 +939,39 @@ class TestProcessRerun:
         assert downloads[self.READ1] == (0 if keep_failed else 1)
         assert downloads[self.READ2] == 1
         _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
+
+
+class TestProcessStagingCheckFailure:
+    """A rerun asks the interrogation bucket whether a file is still staged, and that question can fail."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_failing_staging_check_fails_the_run_as_a_file_error(
+        self,
+        s3_buckets,
+        s3_requests,
+        rerun_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """An interrogation bucket that answers the check with a server error fails the run as a file error."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        # the first run stages every file and then fails while copying to the archive
+        s3_requests.unavailable_bucket = s3_buckets["consented"].name
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, "the first run should fail while copying to the archive"
+
+        s3_requests.unavailable_bucket = None
+        s3_requests.failing_head_bucket = s3_buckets["interrogation"].name
+
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"the rerun should fail: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        recorded_error = (state.data or {}).get("error", "")
+        assert recorded_error.startswith("Processing failed with "), (
+            f"the rerun should report the failure as a file error, got: {recorded_error}"
+        )
