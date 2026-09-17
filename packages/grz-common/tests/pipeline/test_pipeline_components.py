@@ -1,9 +1,11 @@
 """Tests for the modular pipeline components."""
 
 import array
+import contextlib
 import gzip
 import hashlib
 import io
+import os
 from io import BytesIO
 
 import pytest
@@ -167,6 +169,19 @@ class TestFastqValidator:
                 FastqValidator(mean_read_length_threshold=12) as validator,
             ):
                 source >> validator
+
+    def test_invalid_fastq_error_reaches_the_writer(self):
+        """A FASTQ that fails validation while it is still being written raises the parse error from ``write``."""
+        data = gzip.compress(b"not a fastq record\n" + os.urandom(1024 * 1024))
+        validator = FastqValidator()
+        try:
+            # more writes than the validator queues, so the writer is blocked when grz_check stops
+            with pytest.raises(DataValidationError, match="invalid name prefix"):
+                for start in range(0, len(data), 4096):
+                    validator.write(data[start : start + 4096])
+        finally:
+            with contextlib.suppress(DataValidationError):
+                validator.close()
 
 
 class TestRawChecksumValidator:

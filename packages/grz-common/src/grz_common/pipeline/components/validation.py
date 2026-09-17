@@ -35,8 +35,12 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
     def _run_validation_thread(self):
         try:
             self.report = self._invoke_grz_check()
-        except Exception as exception:
+        except PipelineError as exception:
             self.exception = exception
+        except Exception as exception:
+            error = DataValidationError(str(exception), stage=self.__class__.__name__, cause=exception)
+            error.__cause__ = exception  # keeps grz_check's traceback in the log
+            self.exception = error
 
     def _raise_if_invalid(self) -> None:
         if self.report and not self.report.is_valid:
@@ -52,7 +56,8 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
                 self.adapter.queue.put(chunk, timeout=0.1)
                 return
             except queue.Full as e:
-                if self.validation_thread.is_alive():
+                if self.validation_thread.is_alive() or self.exception:
+                    # still running, or it failed while this put was waiting: the next loop raises its error
                     continue
                 self._raise_if_invalid()
                 raise PipelineError("Validation thread stopped unexpectedly", stage=self.__class__.__name__) from e
@@ -68,9 +73,7 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
             self.validation_thread.join()
 
             if self.exception:
-                if isinstance(self.exception, PipelineError):
-                    raise self.exception
-                raise DataValidationError(str(self.exception), stage=self.__class__.__name__, cause=self.exception)
+                raise self.exception
 
             if self.report:
                 self._raise_if_invalid()
