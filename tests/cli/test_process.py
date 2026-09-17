@@ -278,9 +278,10 @@ class TestGrzctlProcess:
         assert (working_dir_path / "metadata" / "metadata.json").is_file()
         assert (working_dir_path / "logs").is_dir()
 
-        # Check that progress logs were created
-        log_files = list((working_dir_path / "logs").glob("*.cjson"))
-        assert len(log_files) > 0, "No progress log files created"
+        # the staged copies are the only output of this run: it writes no local copy, and the
+        # metadata download records no progress
+        log_files = {path.name for path in (working_dir_path / "logs").glob("*.cjson")}
+        assert log_files == {"progress_staging.cjson"}
 
     def test_process_submission_multi_inbox(
         self,
@@ -389,6 +390,7 @@ class TestProcessValidationFailure:
     def test_checksum_mismatch_fails_processing(
         self,
         s3_buckets,
+        s3_requests,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
@@ -397,19 +399,20 @@ class TestProcessValidationFailure:
         submission_id = "260914050_2024-07-15_c64603a7"
         upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
 
-        # replace the metadata with a copy in which one file has a wrong checksum; the file is
-        # listed under several donors, so change every entry
+        # replace the metadata with a copy in which one file has a wrong checksum; the last file in
+        # metadata order is the one to pick, because the files before it are staged by the time the
+        # run fails, which is what leaves the cleanup something to delete
+        wrong_checksum_file = list(_metadata_file_checksums())[-1]
         metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
         for donor in metadata["donors"]:
             for lab_datum in donor["labData"]:
                 for file in lab_datum.get("sequenceData", {}).get("files", []):
-                    if file["filePath"] == "target_regions.bed":
+                    if file["filePath"] == wrong_checksum_file:
                         file["fileChecksum"] = "0" * 64
         s3_buckets["inbox"].put_object(
             Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode()
         )
 
-        # with two threads, a second file gets staged while the first one fails, so the cleanup is tested
         result = _run_process(temp_process_config_file_path, submission_id, working_dir_path, "--threads", "2")
 
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
@@ -419,6 +422,10 @@ class TestProcessValidationFailure:
         assert state.state == SubmissionStateEnum.ERROR
         assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
 
+        staged = s3_requests.per_file(
+            {"PutObject", "CompleteMultipartUpload"}, s3_buckets["interrogation"], submission_id
+        )
+        assert staged, "the run should have staged files, so that the empty bucket below means they were cleaned up"
         for bucket in ("consented", "non_consented", "interrogation"):
             keys = {o.key for o in s3_buckets[bucket].objects.all()}
             assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
