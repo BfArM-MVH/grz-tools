@@ -1460,6 +1460,31 @@ def test_assert_no_duplicate_initial_names_the_submission_holding_the_slot(db: S
     assert holder in str(excinfo.value)
 
 
+def test_assert_no_duplicate_initial_asks_about_the_case_the_submission_is_linked_to(db: SubmissionDb, metadata):
+    """A relinked submission is judged by its own case, not by the case its metadata key names.
+
+    Moving a submission to a case of its own is how an operator separates two patients whose key
+    the submitter reused. Judging it by the key afterwards reports that separation as a duplicate.
+    """
+    initial_metadata = _with_submission_type(metadata, "initial")
+    submitter = initial_metadata.submission.submitter_id
+    local_case_id = initial_metadata.submission.local_case_id
+
+    holder = _sid(submitter, "0000cc01")
+    _add(db, holder, SubmissionType.initial)
+    db.assign_case(holder, submitter_id=submitter, local_case_id=local_case_id, submission_type=SubmissionType.initial)
+    _record_basic_qc(db, holder, True)
+
+    rival = _sid(submitter, "0000cc02")
+    _add(db, rival, SubmissionType.initial)
+    own_case = db.create_case(submitter_id=submitter, local_case_id="another-patient")
+    db.set_submission_case(rival, own_case.id)
+
+    db.assert_no_duplicate_initial(
+        rival, submitter_id=submitter, local_case_id=local_case_id, submission_type=SubmissionType.initial
+    )
+
+
 def test_assert_no_duplicate_initial_does_not_swallow_a_resolution_failure(db: SubmissionDb, metadata):
     """Answering "not a duplicate" when the question could not be answered is how one gets through.
 

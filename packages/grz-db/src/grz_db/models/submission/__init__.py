@@ -2063,21 +2063,23 @@ class SubmissionDb:
         psn: str | None = None,
         submission_type: SubmissionType,
     ) -> None:
-        """Ask, before writing anything, whether this would be a case's second QC-passed initial.
+        """Check whether this submission would be a case's second QC-passed initial.
 
-        A case may have at most one ``initial`` submission that passed basic QC, and
-        ``ux_submissions_one_initial_per_case`` is what enforces it. Linking is deliberately
-        permissive, so :meth:`resolve_case` never flags a duplicate and the rejection lands only
-        when a second initial submission tries to *pass* basic QC. Finding out that late means
-        having validated a submission that cannot be accepted, so a caller about to spend that
-        effort can ask here instead.
+        A case may have at most one ``initial`` submission that passed basic QC. Linking is
+        permissive, so the database rejects a submission only when it tries to *pass* basic QC.
 
-        The case and its QC-passed initial submission are read in one transaction, which is what
-        makes the answer one answer: asked separately, a competing initial can pass basic QC in
-        between and this would report a submission as clear that the index is about to reject.
+        This check reads ``case_id``, the column that rejection is based on. A submission without
+        a ``case_id`` is looked up by the resolution keys instead. The two can differ, because
+        ``db case relink`` moves a submission to another case while the keys still find the old
+        one. Reading the keys would then report the moved submission as a duplicate of the case
+        it left.
 
-        Answering costs up to four queries, so callers that are going to write anyway should let
-        the index speak instead.
+        The case and its QC-passed initial submission are read in one transaction. Asked
+        separately, a competing initial can pass basic QC in between, and this would report a
+        submission as clear that the database is about to reject.
+
+        Answering costs up to four queries, so callers that are going to write anyway can let the
+        database reject the write instead.
 
         :param submission_id: ID of the submission about to be validated. A case whose QC-passed
             initial submission *is* this one is not a duplicate.
@@ -2095,19 +2097,32 @@ class SubmissionDb:
             return
 
         with self.transaction() as session:
-            case = self.resolve_case(
-                submission_id,
-                submitter_id=submitter_id,
-                local_case_id=local_case_id,
-                psn=psn,
-                submission_type=submission_type,
-                session=session,
-            )
-            if case is None or case.id is None:
-                return
-            qc_passed_initial = self._qc_passed_initial_of(session, case.id)
-            if qc_passed_initial is not None and qc_passed_initial.id != submission_id:
-                raise DuplicateInitialSubmissionError(case.id, qc_passed_initial.id)
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+
+            case_id = submission.case_id
+            if case_id is None:
+                # not linked yet, so the resolution keys say which case to check
+                case = self.resolve_case(
+                    submission_id,
+                    submitter_id=submitter_id,
+                    local_case_id=local_case_id,
+                    psn=psn,
+                    submission_type=submission_type,
+                    session=session,
+                )
+                if case is None or case.id is None:
+                    # no case matches the keys, so no slot is taken
+                    return
+                case_id = case.id
+
+            # check which submission holds this case's one-initial slot, if the case has one
+            qc_passed_initial_submission = self._qc_passed_initial_of(session, case_id)
+            # the slot holder can be this submission, which is not a duplicate of itself
+            if qc_passed_initial_submission is not None and qc_passed_initial_submission.id != submission_id:
+                # another submission holds the slot, so this one cannot pass basic QC
+                raise DuplicateInitialSubmissionError(case_id, qc_passed_initial_submission.id)
 
     def list_submissions(
         self,

@@ -128,6 +128,7 @@ grzctl db case delete 7
 
 - `--allow-overwrite` cannot name the case link. Replacing an existing link would undo a deliberate `db case relink`, so it holds the whole submission back until `--force` is passed.
 - `--ignore-field case_id` skips case resolution altogether.
+- `grzctl process` skips it by itself once a submission has a link, so a rerun after `db case relink` keeps the repair. The duplicate initial check then asks about the linked case, not about the metadata key.
 
 A case that cannot be resolved does not cost the submission the rest of its metadata. Everything else is written, and `backfill` reports the submission under its own counter:
 

@@ -45,6 +45,7 @@ $ grzctl --config $CONFIG_PATH process \
 ```
 1. download metadata.json from inbox
    add + populate submission's DB row;
+   a case link set by `db case relink` is kept;
    tanG already held by another submission?
    state = ERROR (duplicate_tang); STOP
    case already has a QC-passed initial submission?

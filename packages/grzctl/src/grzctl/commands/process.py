@@ -166,12 +166,22 @@ def process(  # noqa: PLR0913, PLR0917
         # A rejected write, such as a duplicate tanG, then records the ERROR state.
         s3_client = init_s3_client(inbox.s3)
         submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
+        # A case link set by hand, with ``db case relink``, outlives a rerun. Resolving the case from
+        # the metadata key again would undo that repair, and populate refuses to without --force.
+        stored = dbcontext_inst.db.get_submission(submission_id)
+        stored_case_id = stored.case_id if stored else None
+        if stored_case_id is not None:
+            log.warning(
+                f"Submission '{submission_id}' keeps its case link (case {stored_case_id}); "
+                "its metadata is not resolved to a case again."
+            )
         dbcontext_inst.db.populate(
             submission_id,
             submission_metadata.content,
             submission_date,
             force=False,
             on_missing="create",
+            ignore_fields={"case_id"} if stored_case_id is not None else None,
         )
         try:
             _check_duplicate_initial(dbcontext_inst.db, submission_metadata.content)

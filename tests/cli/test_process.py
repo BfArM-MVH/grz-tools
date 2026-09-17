@@ -442,6 +442,20 @@ def _upload_initial_submission_to_inbox(inbox_bucket, submission_id: str) -> Non
     inbox_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
 
 
+def _relink_to_new_case(config_file_path: Path, submission_id: str, local_case_id: str) -> int:
+    """Create a case and move the submission to it, as an operator repairing a case link would."""
+    cli = grzctl.cli.build_cli()
+    runner = click.testing.CliRunner()
+    case_args = ["--config", str(config_file_path), "db", "case"]
+    result = runner.invoke(cli, [*case_args, "create", "260914050", local_case_id])
+    assert result.exit_code == 0, result.output
+    cases = json.loads(runner.invoke(cli, [*case_args, "list", "--json"]).stdout)
+    case_id = next(case["id"] for case in cases if case["local_case_id"] == local_case_id)
+    result = runner.invoke(cli, [*case_args, "relink", submission_id, str(case_id)])
+    assert result.exit_code == 0, result.output
+    return case_id
+
+
 def _qc_files(process_config_content: dict, submission_id: str) -> set[str]:
     files_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / submission_id / "files"
     return {p.relative_to(files_dir).as_posix() for p in files_dir.rglob("*") if p.is_file()}
@@ -715,6 +729,58 @@ class TestProcessDuplicateInitial:
 
         assert result.exit_code != 0
         self._assert_failed_basic_qc(process_config_content, duplicate_id)
+
+    def test_a_relinked_duplicate_can_be_processed(
+        self, s3_buckets, temp_process_config_file_path, process_config_content, working_dir_path
+    ):
+        """Moving the rejected submission to a case of its own is the repair, and the rerun then archives it."""
+        duplicate_id = self._process_first_and_upload_duplicate(
+            s3_buckets["inbox"], temp_process_config_file_path, working_dir_path
+        )
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+        assert result.exit_code != 0
+        other_case_id = _relink_to_new_case(temp_process_config_file_path, duplicate_id, "another-patient")
+
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        submission = db.get_submission(duplicate_id)
+        assert submission.case_id == other_case_id
+        assert submission.basic_qc_passed is True
+        assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{duplicate_id}/")} != set()
+
+
+class TestProcessRerunAfterRelink:
+    """A rerun keeps the case link that ``grzctl db case relink`` set by hand."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_rerun_keeps_the_relinked_case(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """After a failed run and a relink, the rerun processes the submission and leaves it in the relinked case."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        # the first run links the submission to the case of its metadata, then fails
+        s3_requests.unavailable_bucket = s3_buckets["interrogation"].name
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+
+        other_case_id = _relink_to_new_case(temp_process_config_file_path, sid, "another-patient")
+        s3_requests.unavailable_bucket = None
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _latest_state(process_config_content, sid).state == SubmissionStateEnum.PROCESSED
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        assert db.get_submission(sid).case_id == other_case_id
 
 
 class TestProcessDuplicateTanG:
