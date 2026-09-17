@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import json
 import os
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -21,8 +22,10 @@ import crypt4gh.keys
 import crypt4gh.lib
 import grzctl.cli
 import pytest
+import responses
 import yaml
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
+from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 # Path to test fixtures
 MOCK_FILES_DIR = Path(__file__).parent.parent / "mock_files"
@@ -1110,3 +1113,82 @@ class TestProcessDetailedQcAutoRun:
             assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
         inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
         assert inbox_keys, "a failed run leaves the files in the inbox"
+
+
+@pytest.fixture
+def bfarm_api():
+    """Fake the BfArM token endpoint, and record every request the run makes."""
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.post(
+            "https://bfarm.localhost/token",
+            json={"access_token": "my_token", "expires_in": 300, "token_type": "Bearer"},
+        )
+        yield mock
+
+
+def _submitted_tans(bfarm_api) -> list[str]:
+    """The tanGs of the Prüfbericht submissions that reached the fake BfArM endpoint."""
+    return [
+        json.loads(call.request.body)["SubmittedCase"]["tan"]
+        for call in bfarm_api.calls
+        if call.request.url.endswith("/api/upload")
+    ]
+
+
+def _tan_g_of_the_valid_submission() -> str:
+    return json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())["submission"]["tanG"]
+
+
+class TestProcessPruefbericht:
+    """``--submit-pruefbericht`` sends the Prüfbericht to BfArM and records the reporting states."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_submitted_pruefbericht_is_recorded_as_reported(
+        self,
+        s3_buckets,
+        bfarm_api,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """BfArM receives the tanG, while the copy in the logs carries the redacted one."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--submit-pruefbericht")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _states(process_config_content, sid)[-2:] == [
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.REPORTED,
+        ]
+        assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()]
+        saved = json.loads((working_dir_path / "logs" / "pruefbericht.json").read_text())
+        assert saved["SubmittedCase"]["tan"] == REDACTED_TAN, "the copy in the logs must not carry the tanG"
+
+    def test_a_failed_submission_is_sent_again(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A submission that BfArM rejects once is sent again after the backoff."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        # the backoff starts at 30 seconds, which the test records instead of waiting it out
+        waits: list[float] = []
+        monkeypatch.setattr(time, "sleep", waits.append)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--submit-pruefbericht")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()] * 2
+        assert waits == [30.0]
+        assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.REPORTED
