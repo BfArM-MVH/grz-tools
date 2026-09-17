@@ -23,11 +23,11 @@ and checked at a synchronisation point after all files have been processed.
 This is necessary because some validation checks (e.g. paired-end read-count
 consistency) require information from all relevant parts before they can pass.
 
-If the DB is enabled (``--update-db``), the submission state transitions
-through ``PROCESSING → PROCESSED`` (or ``ERROR`` on failure).  The DB record
-is also *populated* with metadata so that downstream Prüfbericht generation
-can read the required fields.  If ``--submit-pruefbericht`` is used, a
-separate ``REPORTING → REPORTED`` transition is recorded.
+The submission state transitions through ``PROCESSING → PROCESSED`` (or
+``ERROR`` on failure).  The DB record is also *populated* with metadata so
+that downstream Prüfbericht generation can read the required fields.  If
+``--submit-pruefbericht`` is used, a separate ``REPORTING → REPORTED``
+transition is recorded.
 
 Recovery
 --------
@@ -71,7 +71,6 @@ log = logging.getLogger(__name__)
 @grzcli.submission_id
 @grzcli.output_dir
 @grzcli.threads
-@grzcli.update_db
 @click.option(
     "--submit-pruefbericht/--no-submit-pruefbericht",
     default=False,
@@ -109,7 +108,6 @@ def process(  # noqa: PLR0913, PLR0917
     submission_id: str,
     output_dir: str,
     threads: int,
-    update_db: bool,
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
     redact_pruefbericht: bool,
@@ -125,9 +123,9 @@ def process(  # noqa: PLR0913, PLR0917
     (needed to determine consent status, file list, etc.) and then the full
     pipeline processes each file concurrently.
 
-    When ``--update-db`` is enabled the DB record is populated with the parsed
-    metadata so that downstream Prüfbericht generation can read the required
-    fields (submission date, donor info, etc.).
+    The DB record is populated with the parsed metadata so that downstream
+    Prüfbericht generation can read the required fields (submission date,
+    donor info, etc.).
 
     On success the submission state is set to ``PROCESSED``; on failure it is set
     to ``ERROR`` with the associated error message.  Files are processed
@@ -149,28 +147,27 @@ def process(  # noqa: PLR0913, PLR0917
 
     submission_metadata = SubmissionMetadata(local_metadata_path)
 
-    # register and populate submission in DB if enabled
-    if update_db:
-        db_service = get_submission_db_instance(configuration.db.database_url)
-        try:
-            if not db_service.get_submission(submission_id):
-                db_service.add_submission(submission_id)
-        except (DuplicateSubmissionError, DuplicateTanGError) as e:
-            raise click.ClickException(f"Submission '{submission_id}' already exists in the database. Aborting.") from e
-        except Exception as e:
-            raise click.ClickException(f"Failed to add submission: {e}") from e
+    # register and populate submission in DB
+    db_service = get_submission_db_instance(configuration.db.database_url)
+    try:
+        if not db_service.get_submission(submission_id):
+            db_service.add_submission(submission_id)
+    except (DuplicateSubmissionError, DuplicateTanGError) as e:
+        raise click.ClickException(f"Submission '{submission_id}' already exists in the database. Aborting.") from e
+    except Exception as e:
+        raise click.ClickException(f"Failed to add submission: {e}") from e
 
-        # Populate the DB record with parsed metadata (donors, files, dates, etc.)
-        # so that downstream Prüfbericht generation can read the required fields.
-        s3_client = init_s3_client(inbox.s3)
-        submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
-        db_service.populate(
-            submission_id,
-            submission_metadata.content,
-            submission_date,
-            force=False,
-            on_missing="create",
-        )
+    # Populate the DB record with parsed metadata (donors, files, dates, etc.)
+    # so that downstream Prüfbericht generation can read the required fields.
+    s3_client = init_s3_client(inbox.s3)
+    submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
+    db_service.populate(
+        submission_id,
+        submission_metadata.content,
+        submission_date,
+        force=False,
+        on_missing="create",
+    )
 
     processor = SubmissionProcessor(
         configuration=configuration,
@@ -179,7 +176,6 @@ def process(  # noqa: PLR0913, PLR0917
         threads=threads,
         max_concurrent_uploads=concurrent_uploads,
         clean_inbox=clean_inbox,
-        update_db=update_db,
     )
 
     with DbContext(
@@ -187,16 +183,14 @@ def process(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.PROCESSING,
         end_state=SubmissionStateEnum.PROCESSED,
-        enabled=update_db,
     ) as dbcontext_inst:
-        if update_db:
-            try:
-                _check_duplicate_initial(dbcontext_inst.db, submission_metadata.content)
-            except DuplicateInitialSubmissionError as e:
-                # fail basic QC before any file is streamed, as ``grzctl validate`` does
-                log.warning(f"{e} Failing basic QC for submission '{submission_id}' without processing.")
-                dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", False)
-                raise
+        try:
+            _check_duplicate_initial(dbcontext_inst.db, submission_metadata.content)
+        except DuplicateInitialSubmissionError as e:
+            # fail basic QC before any file is streamed, as ``grzctl validate`` does
+            log.warning(f"{e} Failing basic QC for submission '{submission_id}' without processing.")
+            dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", False)
+            raise
         processor.run(submission_metadata)
 
     _handle_pruefbericht(
@@ -206,7 +200,6 @@ def process(  # noqa: PLR0913, PLR0917
         submit_pruefbericht=submit_pruefbericht,
         save_pruefbericht=save_pruefbericht,
         redact_pruefbericht=redact_pruefbericht,
-        update_db=update_db,
     )
 
 
@@ -229,7 +222,6 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     submit_pruefbericht: bool,
     save_pruefbericht: str | None,
     redact_pruefbericht: bool,
-    update_db: bool,
 ) -> None:
     """Generate and optionally submit Prüfbericht to BfArM.
 
@@ -265,7 +257,6 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
             submission_id=submission_id,
             start_state=SubmissionStateEnum.REPORTING,
             end_state=SubmissionStateEnum.REPORTED,
-            enabled=update_db,
         ):
             # The submission already succeeded above; the DbContext just records
             # the state transition.  If the state transition itself fails we

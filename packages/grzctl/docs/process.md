@@ -3,8 +3,8 @@
 `grzctl process` runs a submission through the whole pipeline in a single streaming
 pass: download the metadata, validate and re-encrypt each file, stage the result in
 the *interrogation bucket*, decide whether the submission goes through detailed QC,
-then commit everything to the target archive bucket and clean up the inbox. With
-`--update-db` it also drives the submission's database state and its QC selection.
+then commit everything to the target archive bucket and clean up the inbox. It also
+drives the submission's database state and its QC selection.
 
 The one thing to know as an operator: the pipeline guesses the detailed-QC decision
 early, before the real decision exists, and prefetches a decrypted copy of every
@@ -37,20 +37,19 @@ A basic invocation:
 ```console
 $ grzctl --config $CONFIG_PATH process \
     --submission-id $submission_id \
-    --output-dir ./out \
-    --update-db
+    --output-dir ./out
 ```
 
 ## The pipeline
 
 ```
 1. download metadata.json from inbox
-   --update-db: add + populate submission's DB row;
-                case already has a QC-passed initial submission?
-                basic_qc_passed = false, state = ERROR (duplicate_initial); STOP
+   add + populate submission's DB row;
+   case already has a QC-passed initial submission?
+   basic_qc_passed = false, state = ERROR (duplicate_initial); STOP
                      │
                      ▼
-2. predict detailed QC (--update-db and detailed_qc.target_percentage > 0 only)
+2. predict detailed QC (detailed_qc.target_percentage > 0 only)
    db.should_qc(predict=True): skips the basic-QC check, stores nothing,
    returns an already-stored decision if there is one
                      │
@@ -69,12 +68,12 @@ $ grzctl --config $CONFIG_PATH process \
               any file failed? ───────────────────────────────────┐
                      │ no                                          │ yes
                      ▼                                             ▼
-5. --update-db: basic_qc_passed = true              4. delete prefetched local copies;
+5. basic_qc_passed = true                           4. delete prefetched local copies;
    (submission enters the QC queue)                     delete staged objects from
                      │                                   interrogation bucket (unless
                      ▼                                   keep_failed); state = ERROR
-6. decide detailed QC (--update-db and                   with --update-db; STOP
-   target_percentage > 0 only)
+6. decide detailed QC                                    STOP
+   (target_percentage > 0 only)
    db.should_qc(): reads submitter's QC queue and
    stores selected_for_qc, one decision at a time
    (database-wide lock)
@@ -98,20 +97,18 @@ $ grzctl --config $CONFIG_PATH process \
 9. --clean-inbox (default on): remove submission from inbox
    (DB states CLEANING → CLEANED)
                      ▼
-        state = PROCESSED (--update-db)
+        state = PROCESSED
                      ▼
    generate Prüfbericht, optionally save (--save-pruefbericht) and
    submit (--submit-pruefbericht, with retries)
 ```
 
-The duplicate-initial check in step 1 and steps 2-9 run inside the DB state transition `PROCESSING → PROCESSED` (or `ERROR`
-on failure) when `--update-db` is set.
+The duplicate-initial check in step 1 and steps 2-9 run inside the DB state transition
+`PROCESSING → PROCESSED` (or `ERROR` on failure).
 
 ## Detailed QC: prediction and decision
 
-Detailed QC only runs when `--update-db` is set and `detailed_qc.target_percentage`
-is greater than `0`. With `--no-update-db` there is no detailed QC at all: the
-selection itself writes to the database, so it is skipped outright.
+Detailed QC only runs when `detailed_qc.target_percentage` is greater than `0`.
 
 **Prediction (step 2)** happens before the main pass, so the pipeline can decide
 whether to prefetch a decrypted copy of each file while it is already streaming
@@ -190,9 +187,9 @@ If any file fails in the main pass (step 3), the pipeline:
 1. deletes the prefetched local copies, if a prediction had written them,
 2. deletes the staged objects from the interrogation bucket, unless
    `archives.interrogation.keep_failed` is `true`,
-3. fails the run; with `--update-db`, the DB state becomes `ERROR`.
+3. fails the run; the DB state becomes `ERROR`.
 
-With `--update-db`, step 5 can fail the same way. If another initial submission of
+Step 5 can fail the same way. If another initial submission of
 the same case passed basic QC during the main pass, the database rejects
 `basic_qc_passed = true`. The pipeline then stores `basic_qc_passed = false` and
 handles the failure as above, with the failure reason `duplicate_initial`.
@@ -218,7 +215,6 @@ whose local copy is gone is written again, by the main pass if the prediction is
 
 | Option | Default | Effect on this flow |
 | --- | --- | --- |
-| `--update-db` / `--no-update-db` | `--update-db` | Turns the DB row, `basic_qc_passed`, the detailed-QC prediction and decision, and the `PROCESSING`/`PROCESSED`/`ERROR` state transitions on or off. With `--no-update-db`, detailed QC never runs, and duplicate initial submissions are not detected. |
 | `--threads` | `min(cpu_count, 4)` | Number of files processed concurrently in the thread pool (step 3 and the QC pass). |
 | `--concurrent-uploads` | `4` | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. |
 | `--inbox-bucket` | `None` | Selects which inbox to read from, if the submitter has more than one configured. |

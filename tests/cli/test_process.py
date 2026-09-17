@@ -204,7 +204,7 @@ class TestGrzctlProcess:
         assert any("files/" in key and ".c4gh" in key for key in inbox_keys)
 
         # Run grzctl process
-        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path, "--no-update-db")
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
 
@@ -233,7 +233,7 @@ class TestGrzctlProcess:
         custom_log = logs_dir / "custom.log"
         custom_log.write_text(f"tan={tan}\nlocalCaseId={local_case_id}\n", encoding="utf-8")
 
-        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path, "--no-update-db")
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
         assert result.exit_code == 0, f"Process failed: {result.output}"
 
         archived_key = f"{submission_id}/logs/custom.log"
@@ -261,7 +261,7 @@ class TestGrzctlProcess:
         upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
 
         # Run grzctl process
-        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path, "--no-update-db")
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
 
@@ -313,9 +313,7 @@ class TestGrzctlProcess:
             yaml.dump(config_content, fd)
 
         # Run grzctl process with --inbox-bucket inbox-b
-        result = _run_process(
-            config_file, submission_id, working_dir_path, "--inbox-bucket", "inbox-b", "--no-update-db"
-        )
+        result = _run_process(config_file, submission_id, working_dir_path, "--inbox-bucket", "inbox-b")
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
 
@@ -325,7 +323,7 @@ class TestGrzctlProcess:
         assert any("metadata/metadata.json" in key for key in consented_keys)
 
         # Test failure if --inbox-bucket is missing when multiple are available
-        result = _run_process(config_file, submission_id, working_dir_path / "fail", "--no-update-db")
+        result = _run_process(config_file, submission_id, working_dir_path / "fail")
         assert result.exit_code != 0
         assert "Multiple inboxes found" in result.output
 
@@ -366,7 +364,7 @@ class TestProcessValidationFailure:
             Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode()
         )
 
-        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path, "--no-update-db")
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
 
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
         logs = [path.read_text() for path in (working_dir_path / "logs").iterdir()]
@@ -399,9 +397,7 @@ class TestProcessValidationFailure:
         )
 
         # with two threads, a second file gets staged while the first one fails, so the cleanup is tested
-        result = _run_process(
-            temp_process_config_file_path, submission_id, working_dir_path, "--no-update-db", "--threads", "2"
-        )
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path, "--threads", "2")
 
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
         logs = [path.read_text() for path in (working_dir_path / "logs").iterdir()]
@@ -519,7 +515,7 @@ class TestProcessDetailedQc:
         """When the guess is right, each file is downloaded once, and the QC pass finds it already in QC storage."""
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
 
-        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path, "--update-db")
+        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         checksums = _metadata_file_checksums()
@@ -545,22 +541,7 @@ class TestProcessDetailedQc:
         # guess "selected", then decide "not selected"
         monkeypatch.setattr(SubmissionDb, "should_qc", lambda self, *args, predict=False, **kwargs: predict)
 
-        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path, "--update-db")
-
-        assert result.exit_code == 0, f"Process failed: {result.output}"
-        assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
-
-    def test_no_update_db_skips_qc_selection(
-        self,
-        s3_buckets,
-        qc_process_config_file_path,
-        process_config_content,
-        working_dir_path,
-    ):
-        """The selection stores its decision in the DB, so ``--no-update-db`` runs without detailed QC."""
-        _upload_initial_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
-
-        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path, "--no-update-db")
+        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
@@ -573,9 +554,9 @@ class TestProcessDuplicateInitial:
     DUPLICATE_TAN_G = "bbbbbbbb00000000bbbbbbbb00000000bbbbbbbb00000000bbbbbbbb00000000"
 
     def _process_first_and_upload_duplicate(self, inbox_bucket, config_file_path: Path, working_dir_path: Path) -> str:
-        """Process an initial submission with ``--update-db``, then upload a second initial submission of its case."""
+        """Process an initial submission, then upload a second initial submission of its case."""
         _upload_initial_submission_to_inbox(inbox_bucket, self.FIRST_ID)
-        result = _run_process(config_file_path, self.FIRST_ID, working_dir_path / "first", "--update-db")
+        result = _run_process(config_file_path, self.FIRST_ID, working_dir_path / "first")
         assert result.exit_code == 0, f"Process failed: {result.output}"
 
         # same submitter and local case ID, but its own tanG and therefore its own submission ID
@@ -609,9 +590,7 @@ class TestProcessDuplicateInitial:
             s3_buckets["inbox"], temp_process_config_file_path, working_dir_path
         )
 
-        result = _run_process(
-            temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate", "--update-db"
-        )
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
 
         assert result.exit_code != 0
         assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], duplicate_id) == Counter()
@@ -631,9 +610,7 @@ class TestProcessDuplicateInitial:
         )
         monkeypatch.setattr(SubmissionDb, "assert_no_duplicate_initial", lambda self, *args, **kwargs: None)
 
-        result = _run_process(
-            temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate", "--update-db"
-        )
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
 
         assert result.exit_code != 0
         self._assert_failed_basic_qc(process_config_content, duplicate_id)
@@ -686,7 +663,7 @@ class TestProcessRerun:
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
 
         s3_requests.unavailable_bucket = s3_buckets["consented"].name
-        result = _run_process(rerun_config_file_path, sid, working_dir_path, "--update-db")
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
         s3_requests.unavailable_bucket = None
         assert result.exit_code != 0, "the first run should fail while copying to the archive"
         staged_keys = {o.key for o in s3_buckets["interrogation"].objects.filter(Prefix=f"{sid}/files/")}
@@ -701,7 +678,7 @@ class TestProcessRerun:
             os.utime(path, ns=(0, 0))  # a local copy the rerun writes gets a newer modification time
         s3_requests.requests.clear()
 
-        result = _run_process(rerun_config_file_path, sid, working_dir_path, "--update-db")
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
 
         assert result.exit_code == 0, f"Rerun failed: {result.output}"
         outputs_missing = not (staged and on_local_storage)
@@ -740,7 +717,7 @@ class TestProcessRerun:
         s3_buckets["inbox"].Object(read2_key).delete()
 
         # with one thread, read1 comes before read2; the second assertion checks that it did
-        result = _run_process(config_file_path, sid, working_dir_path, "--no-update-db", "--threads", "1")
+        result = _run_process(config_file_path, sid, working_dir_path, "--threads", "1")
         assert result.exit_code != 0, "the first run should fail on the missing read2"
         downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
         assert downloads[self.READ1] == 1, "the first run should download read1"
@@ -749,7 +726,7 @@ class TestProcessRerun:
             Filename=str(VALID_SUBMISSION_DIR / "encrypted_files" / f"{self.READ2}.c4gh"), Key=read2_key
         )
         s3_requests.requests.clear()
-        result = _run_process(config_file_path, sid, working_dir_path, "--no-update-db", "--threads", "1")
+        result = _run_process(config_file_path, sid, working_dir_path, "--threads", "1")
 
         assert result.exit_code == 0, f"Rerun failed: {result.output}"
         downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)

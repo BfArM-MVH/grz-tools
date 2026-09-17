@@ -416,7 +416,6 @@ class SubmissionProcessor:
         clean_inbox: bool = True,
         max_concurrent_uploads: int = 1,
         threads: int = 1,
-        update_db: bool = True,
     ):
         """
         Initialize the SubmissionProcessor with necessary configuration.
@@ -433,12 +432,10 @@ class SubmissionProcessor:
         :param clean_inbox: Whether to remove files from the inbox after successful processing.
         :param max_concurrent_uploads: Number of threads used for S3 multipart uploads _per file_.
         :param threads: Number of files to process concurrently.
-        :param update_db: Whether to update the central database state during processing.
         """
         self.config = configuration
         self.inbox = inbox
         self._source_s3_options = inbox.s3
-        self._update_db = update_db
         self._clean_inbox = clean_inbox
         self._log_dir = log_dir
 
@@ -489,8 +486,7 @@ class SubmissionProcessor:
         return run_state
 
     def _qc_selection_enabled(self) -> bool:
-        # The selection stores its decision in the DB, so it needs --update-db.
-        return self._update_db and self.config.detailed_qc.target_percentage > 0.0
+        return self.config.detailed_qc.target_percentage > 0.0
 
     def _predict_qc(self, db: SubmissionDb, submission_id: str) -> bool:
         """Guess the detailed QC decision before basic QC has passed."""
@@ -541,7 +537,6 @@ class SubmissionProcessor:
             run_state.submission_id,
             start_state=SubmissionStateEnum.CLEANING,
             end_state=SubmissionStateEnum.CLEANED,
-            enabled=self._update_db,
         ):
             bucket_name = self._source_s3_options.bucket
             _clean_submission_from_bucket(
@@ -666,17 +661,16 @@ class SubmissionProcessor:
                 raise PipelineValidationError("Submission failed consistency checks or validation.")
 
             # validation passed, so mark basic QC as passed in the database.
-            if self._update_db:
-                try:
-                    db.modify_submission(submission_run.submission_id, "basic_qc_passed", True)
-                except DuplicateInitialSubmissionError as e:
-                    # another initial submission of this case passed basic QC while this one was processed
-                    log.warning(
-                        f"Submission '{submission_run.submission_id}' data validated, but {e} "
-                        "Failing basic QC for this submission."
-                    )
-                    db.modify_submission(submission_run.submission_id, "basic_qc_passed", False)
-                    raise
+            try:
+                db.modify_submission(submission_run.submission_id, "basic_qc_passed", True)
+            except DuplicateInitialSubmissionError as e:
+                # another initial submission of this case passed basic QC while this one was processed
+                log.warning(
+                    f"Submission '{submission_run.submission_id}' data validated, but {e} "
+                    "Failing basic QC for this submission."
+                )
+                db.modify_submission(submission_run.submission_id, "basic_qc_passed", False)
+                raise
 
             # determine whether to perform detailed QC (now that basic QC is marked as passed).
             selected_for_qc = self._determine_qc_flag(db, submission_run.submission_id)
