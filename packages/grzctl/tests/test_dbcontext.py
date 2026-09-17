@@ -1,3 +1,4 @@
+import subprocess
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -115,6 +116,7 @@ class TestMapExceptionToFailureReason:
                 DuplicateTanGError(),
                 DuplicateInitialSubmissionError(1),
                 IncompleteSubmissionError(),
+                subprocess.CalledProcessError(returncode=3, cmd="the detailed QC workflow"),
                 validation_exc,
             ]
         }

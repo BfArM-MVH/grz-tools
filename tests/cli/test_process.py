@@ -1102,6 +1102,7 @@ class TestProcessDetailedQcAutoRun:
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
         state = _latest_state(process_config_content, sid)
         assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.DETAILED_QC_ERROR
         recorded_error = (state.data or {}).get("error", "")
         assert "non-zero exit status 3" in recorded_error, f"the QC command should be the cause, got: {recorded_error}"
         for bucket in ("consented", "non_consented", "interrogation"):

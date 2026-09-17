@@ -138,7 +138,8 @@ So decisions are serialized, also across processes.
 - **Selected**: the QC pass downloads, decrypts, and checksum-checks into local storage
   only the files without a local copy (none, if the prediction was right). It then writes
   `<local_storage>/<submission_id>/metadata/metadata.json`. If `detailed_qc.auto_run`
-  is true, it runs `detailed_qc.shell_command`.
+  is true, it runs `detailed_qc.shell_command`. A command that exits non-zero fails the
+  run, with the failure reason `detailed_qc_error`.
 - **Not selected**: the prefetched local copies are deleted.
 - If a later step fails after a positive decision, the local QC data is kept; a
   rerun does not write it again.

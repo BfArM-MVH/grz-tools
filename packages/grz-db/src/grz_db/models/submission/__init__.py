@@ -645,6 +645,7 @@ class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     FILE_NOT_FOUND = "file_not_found"
     ENCRYPTION_ERROR = "encryption_error"
     UPLOAD_ERROR = "upload_error"
+    DETAILED_QC_ERROR = "detailed_qc_error"
     UNKNOWN = "unknown"
 
 
