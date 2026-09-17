@@ -306,7 +306,7 @@ class GrzctlConfig(IgnoringBaseSettings):
             available_buckets = ", ".join(entry.inbox_buckets.keys())
             raise click.ClickException(
                 f"Multiple inboxes found for {self._describe_le(submitter_id, entry)} "
-                f"({available_buckets}). Please specify --inbox."
+                f"({available_buckets}). Please specify --inbox-bucket."
             )
 
         inbox_cfg = entry.inbox_buckets[bucket_name]
