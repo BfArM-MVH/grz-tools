@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 from grz_db.errors import DuplicateTanGError
-from grz_db.models.submission import OutdatedDatabaseSchemaError, Submission, SubmissionDb
+from grz_db.models.submission import OutdatedDatabaseSchemaError, Submission, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import (
     REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
@@ -53,6 +53,16 @@ def test_submission_metadata_json_roundtrip(db: SubmissionDb, submission) -> Non
     result = db.get_submission(SUBMISSION_ID)
     assert result is not None
     assert result.submission_metadata == metadata
+
+
+@pytest.mark.parametrize("state", list(SubmissionStateEnum))
+def test_every_submission_state_can_be_stored(db: SubmissionDb, submission, state: SubmissionStateEnum) -> None:
+    """Every state must exist in the database's state type, which is a native enum on PostgreSQL."""
+    db.update_submission_state(SUBMISSION_ID, state)
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.get_latest_state().state == state
 
 
 def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata) -> None:
