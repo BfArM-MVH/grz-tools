@@ -31,9 +31,11 @@ separate ``REPORTING → REPORTED`` transition is recorded.
 
 Recovery
 --------
-The ``progress_processing.cjson`` log tracks per-file completion.  Re-running
-the command after a failure will skip files that were already processed
-successfully, making the pipeline effectively idempotent.
+Each output of a file has its own progress log: ``progress_staging.cjson`` for
+the validated copy staged in the interrogation bucket, ``progress_local.cjson``
+for the decrypted copy on local storage.  Re-running the command after a
+failure streams each file only into the outputs that are not recorded or whose
+copy is gone, making the pipeline effectively idempotent.
 """
 
 import json
@@ -170,12 +172,10 @@ def process(  # noqa: PLR0913, PLR0917
             on_missing="create",
         )
 
-    status_file_path = log_dir / "progress_processing.cjson"
-
     processor = SubmissionProcessor(
         configuration=configuration,
         inbox=inbox,
-        status_file_path=status_file_path,
+        log_dir=log_dir,
         threads=threads,
         max_concurrent_uploads=concurrent_uploads,
         clean_inbox=clean_inbox,

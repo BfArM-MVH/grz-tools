@@ -9,10 +9,11 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from botocore.exceptions import ClientError
 from crypt4gh.keys import get_public_key
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.models.base import get_secret_value
-from grz_common.pipeline.components import ObserverWithMetrics, Tee, TqdmObserver
+from grz_common.pipeline.components import DevNullSink, ObserverWithMetrics, Tee, TqdmObserver
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from grz_common.pipeline.components.perf import StreamMetricsRegistry
 from grz_common.pipeline.components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
@@ -79,10 +80,6 @@ class SubmissionRunState:
     Encapsulates the resolved S3 clients/buckets for the interrogation (staging)
     and final archive, the target re-encryption key, and the per-submission
     pipeline ``context`` that components share as they stream files through.
-
-    ``qc_prefetch_log`` is set when the submission is likely to be selected for
-    detailed QC. The main pass then also writes the decrypted files to QC storage
-    and records each file in that log, so the QC pass can skip it.
     """
 
     submission_metadata: SubmissionMetadata
@@ -93,7 +90,6 @@ class SubmissionRunState:
     final_bucket: str
     target_public_key: bytes
     context: SubmissionContext = field(default_factory=SubmissionContext)
-    qc_prefetch_log: FileProgressLogger[ProcessingState] | None = None
     consistency_validator: ReadPairConsistencyValidator = field(init=False)
 
     def __post_init__(self) -> None:
@@ -106,11 +102,15 @@ class SubmissionRunState:
 
 
 class FilePipelineExecutor:
-    """Executes the streaming file pipeline for a single submission.
+    """Streams a submission's files from the inbox into their outputs.
 
-    Coordinates the fixed pipeline stages (download → decrypt → validate →
-    encrypt → upload) and the QC pass, using a brand-new S3 connection on each
-    call so a fresh source inbox is always used.
+    Each file has two outputs, each with its own progress log:
+
+    - its validated, re-encrypted copy, staged in the interrogation bucket (``staging_log``)
+    - its decrypted copy on local storage for detailed QC (``local_log``)
+
+    An output counts as done while its log records it and its copy is still there. A call to
+    :meth:`process_files` streams each file at most once, into the outputs it is missing.
     """
 
     def __init__(  # noqa: PLR0913, PLR0917
@@ -122,6 +122,8 @@ class FilePipelineExecutor:
         threads: int,
         max_concurrent_uploads: int,
         qc_local_storage: str,
+        staging_log: FileProgressLogger[ProcessingState],
+        local_log: FileProgressLogger[ProcessingState],
     ):
         self._source_s3 = source_s3
         self._source_bucket = source_bucket
@@ -130,6 +132,8 @@ class FilePipelineExecutor:
         self._threads = threads
         self._max_concurrent_uploads = max_concurrent_uploads
         self._qc_local_storage = qc_local_storage
+        self._staging_log = staging_log
+        self._local_log = local_log
 
     @staticmethod
     def get_thresholds(submission_metadata: SubmissionMetadata) -> dict[str, Thresholds]:
@@ -144,63 +148,48 @@ class FilePipelineExecutor:
 
         return thresholds
 
-    def process_submission_files(
-        self,
-        run_state: SubmissionRunState,
-        progress_logger: FileProgressLogger[ProcessingState],
-        qc_only: bool = False,
-    ) -> None:
+    def process_files(self, run_state: SubmissionRunState, stage: bool, write_local: bool) -> None:
+        """Stream each file of the submission into the requested outputs it is missing.
+
+        :param run_state: The submission's run state.
+        :param stage: Validate each file and stage its re-encrypted copy in the interrogation bucket.
+        :param write_local: Write each file's decrypted copy to local storage.
+        """
         files_map = run_state.submission_metadata.files
         total_bytes = sum(f.file_size_in_bytes for f in files_map.values())
         thresholds = self.get_thresholds(run_state.submission_metadata)
 
-        if qc_only:
-            log.info(f"Downloading {len(files_map)} files for QC ({total_bytes / (1024**3):.2f} GB)...")
-            self._process_files_concurrent(run_state, progress_logger, files_map, thresholds, qc_only=True)
-        else:
-            log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
-            with tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global:  # type: ignore[call-overload]
-                self._process_files_concurrent(
-                    run_state, progress_logger, files_map, thresholds, pbar_global=pbar_global
-                )
-
-    def _process_files_concurrent(  # noqa: PLR0913, PLR0917
-        self,
-        run_state: SubmissionRunState,
-        progress_logger: FileProgressLogger[ProcessingState],
-        files_map: dict[Path, File],
-        thresholds: dict[str, Thresholds],
-        qc_only: bool = False,
-        pbar_global: Any = None,
-    ) -> None:
-        with ThreadPoolExecutor(max_workers=self._threads) as pool:
+        log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
+        with (
+            tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global,  # type: ignore[call-overload]
+            ThreadPoolExecutor(max_workers=self._threads) as pool,
+        ):
             futures: list[Future] = [
                 pool.submit(
-                    self._process_one_file,
+                    self._process_file,
                     run_state=run_state,
-                    progress_logger=progress_logger,
                     file_meta=file_meta,
                     threshold=thresholds.get(file_meta.file_path),
                     pbar_global=pbar_global,
-                    qc_only=qc_only,
+                    stage=stage,
+                    write_local=write_local,
                 )
                 for file_meta in files_map.values()
             ]
             for future in futures:
                 future.result()
 
-    def _process_one_file(  # noqa: PLR0913, PLR0917
+    def _process_file(  # noqa: PLR0913, PLR0917
         self,
         run_state: SubmissionRunState,
-        progress_logger: FileProgressLogger[ProcessingState],
         file_meta: File,
         threshold: Thresholds | None,
         pbar_global: Any,
-        qc_only: bool = False,
+        stage: bool,
+        write_local: bool,
     ) -> None:
         inbox_key = _inbox_file_key(run_state.submission_id, file_meta)
         file_path_str = str(file_meta.file_path)
-        file_name = file_path_str.rsplit("/", maxsplit=1)[-1]
 
         try:
             head = self._source_s3.head_object(Bucket=self._source_bucket, Key=inbox_key)
@@ -216,22 +205,22 @@ class FilePipelineExecutor:
                 },
             )
             run_state.context.add_error(f"Source access failed: {inbox_key}")
-            progress_logger.set_state(
-                file_path_str,
-                file_meta,
-                {"processing_successful": False, "errors": [str(e)]},
-                size=-1,
-                mtime=-1.0,
-            )
+            failure: ProcessingState = {"processing_successful": False, "errors": [str(e)]}
+            self._record(file_meta, failure, size=-1, mtime=-1.0, staging=stage, local=write_local)
             run_state.context.mark_completed(file_path_str)
             return
 
-        state = progress_logger.get_state(file_path_str, file_meta, size=s3_size, mtime=s3_mtime)
-        if state and state.get("processing_successful"):
+        staging_record = self._staging_record(run_state, file_meta, s3_size, s3_mtime) if stage else None
+        if staging_record is not None:
+            # the read-pair check of this file's partner compares these stats
+            run_state.context.record_stats(file_path_str, staging_record.get("stats", {}))
+        needs_staging = stage and staging_record is None
+        needs_local_copy = write_local and not self._has_local_copy(run_state, file_meta, s3_size, s3_mtime)
+
+        if not needs_staging and not needs_local_copy:
             log.info(f"Skipping {file_meta.file_path}, already processed.")
-            if pbar_global is not None:
-                with TqdmObserver.lock:
-                    pbar_global.update(file_meta.file_size_in_bytes)
+            with TqdmObserver.lock:
+                pbar_global.update(file_meta.file_size_in_bytes)
             run_state.context.mark_completed(file_path_str)
             return
 
@@ -239,26 +228,26 @@ class FilePipelineExecutor:
             return
 
         try:
-            self._run_pipeline(run_state, file_meta, inbox_key, threshold, pbar_global, file_name, qc_only=qc_only)
+            self._stream_file(
+                run_state,
+                file_meta,
+                inbox_key,
+                threshold,
+                pbar_global,
+                stage=needs_staging,
+                write_local=needs_local_copy,
+            )
 
-            if not qc_only and not run_state.consistency_validator.check(file_meta.file_path):
+            if needs_staging and not run_state.consistency_validator.check(file_meta.file_path):
                 raise RuntimeError(f"Consistency Check Failed: {file_meta.file_path}")
 
-            if not qc_only and run_state.qc_prefetch_log is not None:
-                run_state.qc_prefetch_log.set_state(
-                    file_path_str,
-                    file_meta,
-                    {"processing_successful": True, "errors": []},
-                    size=s3_size,
-                    mtime=s3_mtime,
-                )
-
-            progress_logger.set_state(
-                file_path_str,
-                file_meta,
-                {"processing_successful": True, "errors": []},
-                size=s3_size,
-                mtime=s3_mtime,
+            success: ProcessingState = {
+                "processing_successful": True,
+                "errors": [],
+                "stats": run_state.context.get_stats(file_path_str),
+            }
+            self._record(
+                file_meta, success, size=s3_size, mtime=s3_mtime, staging=needs_staging, local=needs_local_copy
             )
             run_state.context.mark_completed(file_path_str)
 
@@ -272,14 +261,42 @@ class FilePipelineExecutor:
                 },
             )
             run_state.context.add_error(str(e))
-            progress_logger.set_state(
-                file_path_str,
-                file_meta,
-                {"processing_successful": False, "errors": [str(e)]},
-                size=s3_size,
-                mtime=s3_mtime,
+            failure = {"processing_successful": False, "errors": [str(e)]}
+            self._record(
+                file_meta, failure, size=s3_size, mtime=s3_mtime, staging=needs_staging, local=needs_local_copy
             )
             run_state.context.mark_completed(file_path_str)
+
+    def _record(  # noqa: PLR0913
+        self, file_meta: File, state: ProcessingState, *, size: int, mtime: float, staging: bool, local: bool
+    ) -> None:
+        """Record ``state`` of a file in the progress logs of the selected outputs."""
+        for progress_log, selected in ((self._staging_log, staging), (self._local_log, local)):
+            if selected:
+                progress_log.set_state(str(file_meta.file_path), file_meta, state, size=size, mtime=mtime)
+
+    def _staging_record(
+        self, run_state: SubmissionRunState, file_meta: File, s3_size: int, s3_mtime: float
+    ) -> ProcessingState | None:
+        """Return the staging record of a file whose staged copy is still in the interrogation bucket."""
+        state = self._staging_log.get_state(str(file_meta.file_path), file_meta, size=s3_size, mtime=s3_mtime)
+        if not state or not state.get("processing_successful"):
+            return None
+        try:
+            run_state.interrogation_s3.head_object(
+                Bucket=run_state.interrogation_bucket, Key=_archive_file_key(run_state.submission_id, file_meta)
+            )
+        except ClientError:
+            log.info(f"The staged copy of {file_meta.file_path} is gone, staging it again.")
+            return None
+        return state
+
+    def _has_local_copy(self, run_state: SubmissionRunState, file_meta: File, s3_size: int, s3_mtime: float) -> bool:
+        """Whether a file's decrypted copy is recorded and still on local storage."""
+        state = self._local_log.get_state(str(file_meta.file_path), file_meta, size=s3_size, mtime=s3_mtime)
+        if not state or not state.get("processing_successful"):
+            return False
+        return _qc_file_path(self._qc_local_storage, run_state.submission_id, file_meta).is_file()
 
     @staticmethod
     def build_format_validator(
@@ -296,27 +313,25 @@ class FilePipelineExecutor:
 
         return format_validator
 
-    def _run_pipeline(  # noqa: PLR0913, PLR0917
+    def _stream_file(  # noqa: PLR0913, PLR0917
         self,
         run_state: SubmissionRunState,
         file_meta: File,
         inbox_key: str,
         threshold: Thresholds | None,
         pbar_global: Any,
-        file_name: str,
-        qc_only: bool = False,
+        stage: bool,
+        write_local: bool,
     ) -> None:
-        if qc_only:
-            self._run_qc_pipeline(run_state, file_meta, inbox_key)
-            return
+        """Download and decrypt one file, check its checksum, and write it into the requested outputs.
 
+        :param stage: Also validate the file's format and stage its re-encrypted copy in the interrogation bucket.
+        :param write_local: Also write the decrypted copy to local storage.
+        """
         metrics = StreamMetricsRegistry()
 
         checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
-        format_validator = self.build_format_validator(
-            file_meta=file_meta,
-            threshold=threshold,
-        )
+        format_validator = self.build_format_validator(file_meta=file_meta, threshold=threshold) if stage else None
 
         validation_chain = checksum_validator | metrics.measure("3a_Checksum")
         if format_validator:
@@ -326,7 +341,7 @@ class FilePipelineExecutor:
             tqdm(  # type: ignore[call-overload]
                 total=file_meta.file_size_in_bytes,
                 desc="Processing",
-                postfix={"file": file_name},
+                postfix={"file": str(file_meta.file_path).rsplit("/", maxsplit=1)[-1]},
                 leave=False,
                 **TQDM_DEFAULTS,
             ) as pbar_local,
@@ -341,43 +356,42 @@ class FilePipelineExecutor:
                 | metrics.measure("2_Decrypt")
             )
 
-            # tee to local QC storage if the submission is likely to be selected for detailed QC
-            if run_state.qc_prefetch_log is not None:
+            # tee to local storage for detailed QC
+            if write_local:
                 path = _qc_file_path(self._qc_local_storage, run_state.submission_id, file_meta)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 writer = stack.enter_context(open(path, "wb"))
                 pipeline |= Tee(metrics.measure("2b_Write")(writer))
 
-            # add validation chain
             pipeline |= Tee(validation_chain)
 
-            # re-encrypt
-            pipeline = (
-                pipeline
-                | Crypt4GHEncryptor(
-                    recipient_pubkey=run_state.target_public_key,
-                    sender_privkey=self._sender_private_key,
+            if not stage:
+                pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]))
+                pipeline >> DevNullSink()
+            else:
+                # re-encrypt
+                pipeline = (
+                    pipeline
+                    | Crypt4GHEncryptor(
+                        recipient_pubkey=run_state.target_public_key,
+                        sender_privkey=self._sender_private_key,
+                    )
+                    | metrics.measure("4_Encrypt")
                 )
-                | metrics.measure("4_Encrypt")
-            )
+                pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]))
 
-            # progress bar
-            pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]))
-
-            # upload to the interrogation bucket, under the file's archive key.
-            # Size the parts by the inbox object: the re-encrypted object has the same payload and a
-            # one-packet header, the smallest header an inbox object can have, so it is never larger.
-            uploader = S3MultipartUploader(
-                run_state.interrogation_s3,
-                run_state.interrogation_bucket,
-                _archive_file_key(run_state.submission_id, file_meta),
-                part_size=calculate_s3_part_size(source.length, run_state.interrogation_part_size),
-                max_threads=self._max_concurrent_uploads,
-                content_type="application/octet-stream",
-            )
-
-            # run the whole pipeline
-            pipeline >> uploader
+                # upload to the interrogation bucket, under the file's archive key.
+                # Size the parts by the inbox object: the re-encrypted object has the same payload and a
+                # one-packet header, the smallest header an inbox object can have, so it is never larger.
+                uploader = S3MultipartUploader(
+                    run_state.interrogation_s3,
+                    run_state.interrogation_bucket,
+                    _archive_file_key(run_state.submission_id, file_meta),
+                    part_size=calculate_s3_part_size(source.length, run_state.interrogation_part_size),
+                    max_threads=self._max_concurrent_uploads,
+                    content_type="application/octet-stream",
+                )
+                pipeline >> uploader
 
         stats = checksum_validator.metrics
         if format_validator:
@@ -385,30 +399,7 @@ class FilePipelineExecutor:
 
         log.info(f"Performance for {file_meta.file_path}: {metrics.report()}")
 
-        run_state.context.record_stats(file_meta.file_path, stats)
-
-    def _run_qc_pipeline(
-        self,
-        run_state: SubmissionRunState,
-        file_meta: File,
-        inbox_key: str,
-    ) -> None:
-        """Download, decrypt, checksum-validate, and write to local QC storage."""
-        dest_path = _qc_file_path(self._qc_local_storage, run_state.submission_id, file_meta)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-        checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
-
-        pipeline = (
-            S3Downloader(self._source_s3, self._source_bucket, inbox_key)
-            | Crypt4GHDecryptor(private_key=self._private_key)
-            | Tee(checksum_validator)
-        )
-
-        with open(dest_path, "wb") as f:
-            pipeline >> f
-
-        run_state.context.record_stats(str(file_meta.file_path), checksum_validator.metrics)
+        run_state.context.record_stats(str(file_meta.file_path), stats)
 
 
 class SubmissionProcessor:
@@ -421,7 +412,7 @@ class SubmissionProcessor:
         self,
         configuration: GrzctlConfig,
         inbox: InboxTarget,
-        status_file_path: Path,
+        log_dir: Path,
         clean_inbox: bool = True,
         max_concurrent_uploads: int = 1,
         threads: int = 1,
@@ -438,7 +429,7 @@ class SubmissionProcessor:
 
         :param configuration: Global processing configuration (DB, Archives, etc.).
         :param inbox: Specific inbox target configuration (S3 credentials, keys).
-        :param status_file_path: Path to the local file used for tracking processing state.
+        :param log_dir: Directory for the progress logs, which are archived with the submission.
         :param clean_inbox: Whether to remove files from the inbox after successful processing.
         :param max_concurrent_uploads: Number of threads used for S3 multipart uploads _per file_.
         :param threads: Number of files to process concurrently.
@@ -449,9 +440,7 @@ class SubmissionProcessor:
         self._source_s3_options = inbox.s3
         self._update_db = update_db
         self._clean_inbox = clean_inbox
-        self._log_dir = status_file_path.parent
-        self._progress_logger = FileProgressLogger[ProcessingState](status_file_path)
-        self._qc_log_path = self._log_dir / "progress_qc.cjson"
+        self._log_dir = log_dir
 
         log.debug("Loading crypt4gh keys...")
         self._consented_pub_key = get_public_key(configuration.archives.consented.public_key_path)
@@ -474,6 +463,8 @@ class SubmissionProcessor:
             threads=threads,
             max_concurrent_uploads=max_concurrent_uploads,
             qc_local_storage=self.config.detailed_qc.local_storage,
+            staging_log=FileProgressLogger[ProcessingState](log_dir / "progress_staging.cjson"),
+            local_log=FileProgressLogger[ProcessingState](log_dir / "progress_local.cjson"),
         )
 
     def _new_run_state(self, submission_metadata: SubmissionMetadata) -> SubmissionRunState:
@@ -523,7 +514,7 @@ class SubmissionProcessor:
         return should_qc
 
     def _discard_qc_prefetch(self, run_state: SubmissionRunState) -> None:
-        """Delete the decrypted files that the main pass wrote to QC storage, and their log."""
+        """Delete the decrypted files that the main pass wrote to local storage."""
         log.info(f"Deleting the files prefetched for detailed QC of {run_state.submission_id}...")
         for file_meta in run_state.submission_metadata.files.values():
             path = _qc_file_path(self.config.detailed_qc.local_storage, run_state.submission_id, file_meta)
@@ -531,7 +522,6 @@ class SubmissionProcessor:
                 path.unlink(missing_ok=True)
             except OSError as e:
                 log.warning(f"Could not delete prefetched QC file {path}: {e}")
-        self._qc_log_path.unlink(missing_ok=True)
 
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata, run_state: SubmissionRunState) -> None:
         redacted_metadata = submission_metadata.content.to_redacted_dict()
@@ -660,17 +650,16 @@ class SubmissionProcessor:
         """
         submission_run = self._new_run_state(submission_metadata)
         db = SubmissionDb(self.config.db.database_url, self.config.db.author)  # type: ignore[arg-type]
-        qc_logger = FileProgressLogger[ProcessingState](self._qc_log_path)
-        if self._predict_qc(db, submission_run.submission_id):
+        prefetch = self._predict_qc(db, submission_run.submission_id)
+        if prefetch:
             log.info(
                 f"Submission {submission_run.submission_id} is likely to be selected for detailed QC, "
                 "writing its decrypted files to QC storage during processing."
             )
-            submission_run.qc_prefetch_log = qc_logger
 
         selected_for_qc = False
         try:
-            self._pipeline_executor.process_submission_files(submission_run, self._progress_logger)
+            self._pipeline_executor.process_files(submission_run, stage=True, write_local=prefetch)
 
             if submission_run.context.has_errors:
                 log.error(f"Pipeline errors: {submission_run.context.errors}")
@@ -691,15 +680,15 @@ class SubmissionProcessor:
 
             # determine whether to perform detailed QC (now that basic QC is marked as passed).
             selected_for_qc = self._determine_qc_flag(db, submission_run.submission_id)
-            if not selected_for_qc and submission_run.qc_prefetch_log is not None:
+            if not selected_for_qc and prefetch:
                 self._discard_qc_prefetch(submission_run)
 
             if selected_for_qc:
                 log.info(f"Running detailed QC pass for {submission_run.submission_id}...")
                 detailed_qc = self.config.detailed_qc
 
-                # skips the files that the main pass already wrote to QC storage
-                self._pipeline_executor.process_submission_files(submission_run, qc_logger, qc_only=True)
+                # writes only the local copies that the main pass did not write
+                self._pipeline_executor.process_files(submission_run, stage=False, write_local=True)
 
                 # write metadata to local storage for the QC workflow
                 submission_basepath = Path(detailed_qc.local_storage) / submission_run.submission_id
@@ -734,6 +723,6 @@ class SubmissionProcessor:
             # way, clean up the staged files so they don't linger.
             self._handle_interrogation_failure(submission_run)
             # Decrypted files stay only for a submission that is selected for detailed QC.
-            if not selected_for_qc and submission_run.qc_prefetch_log is not None:
+            if not selected_for_qc and prefetch:
                 self._discard_qc_prefetch(submission_run)
             raise

@@ -55,23 +55,24 @@ $ grzctl --config $CONFIG_PATH process \
    returns an already-stored decision if there is one
                      │
                      ▼
-3. main pass, per file, in a thread pool (--threads files at once):
+3. main pass, per file, in a thread pool (--threads files at once),
+   skipping outputs that are recorded and still there (see Recovery and reruns):
      inbox object ─► decrypt ─► [predicted yes: write decrypted file to
                                  detailed_qc.local_storage/<submission_id>/files/...]
                   ─► validate (checksum; FASTQ/BAM format)
                   ─► re-encrypt (consented/non-consented key, by consent at run time)
                   ─► upload to interrogation bucket (archive key; multipart upload)
-   each file that succeeds is recorded in logs/progress_processing.cjson;
-   with the prediction, also in logs/progress_qc.cjson
+   each staged file is recorded in logs/progress_staging.cjson,
+   each local copy in logs/progress_local.cjson
                      │
                      ▼
               any file failed? ───────────────────────────────────┐
                      │ no                                          │ yes
                      ▼                                             ▼
-5. --update-db: basic_qc_passed = true              4. delete prefetched local copies +
-   (submission enters the QC queue)                     progress_qc.cjson; delete staged
-                     │                                   objects from interrogation bucket
-                     ▼                                   (unless keep_failed); state = ERROR
+5. --update-db: basic_qc_passed = true              4. delete prefetched local copies;
+   (submission enters the QC queue)                     delete staged objects from
+                     │                                   interrogation bucket (unless
+                     ▼                                   keep_failed); state = ERROR
 6. decide detailed QC (--update-db and                   with --update-db; STOP
    target_percentage > 0 only)
    db.should_qc(): reads submitter's QC queue and
@@ -81,8 +82,8 @@ $ grzctl --config $CONFIG_PATH process \
         ┌────────────┴─────────────┐
         ▼ selected                 ▼ not selected
    QC pass: download/decrypt/     delete prefetched local copies
-   checksum-check only files      + progress_qc.cjson
-   not yet in progress_qc.cjson
+   checksum-check only files
+   without a local copy
    into local storage; write
    local_storage/<submission_id>/
    metadata/metadata.json;
@@ -134,14 +135,13 @@ stores `selected_for_qc` in one transaction, under a database-wide lock:
 
 So decisions are serialized, also across processes.
 
-- **Selected**: the QC pass downloads, decrypts, and checksum-checks only the files
-  not yet recorded in `progress_qc.cjson` (none, if the prediction was right and
-  nothing was skipped) into local storage. It then writes
+- **Selected**: the QC pass downloads, decrypts, and checksum-checks into local storage
+  only the files without a local copy (none, if the prediction was right). It then writes
   `<local_storage>/<submission_id>/metadata/metadata.json`. If `detailed_qc.auto_run`
   is true, it runs `detailed_qc.shell_command`.
-- **Not selected**: the prefetched local copies and `progress_qc.cjson` are deleted.
+- **Not selected**: the prefetched local copies are deleted.
 - If a later step fails after a positive decision, the local QC data is kept; a
-  rerun skips the files already recorded in `progress_qc.cjson`.
+  rerun does not write it again.
 
 ## Parallel instances
 
@@ -171,7 +171,6 @@ same month, where nobody has been selected for QC yet:
      │                             │     store selected_for_qc = false
      │                             │───── false, release lock ─►│
      │                             │   not selected: delete local copies
-     │                             │                + progress_qc.cjson
 ```
 
 Both instances predict "yes" and both prefetch. The two decisions still run one
@@ -188,8 +187,7 @@ itself takes only milliseconds.
 
 If any file fails in the main pass (step 3), the pipeline:
 
-1. deletes the prefetched local copies and `progress_qc.cjson`, if a prediction had
-   written them,
+1. deletes the prefetched local copies, if a prediction had written them,
 2. deletes the staged objects from the interrogation bucket, unless
    `archives.interrogation.keep_failed` is `true`,
 3. fails the run; with `--update-db`, the DB state becomes `ERROR`.
@@ -206,14 +204,15 @@ Three progress logs live under `<output-dir>/logs/`:
 | Log file | Written during | What a rerun does with it |
 | --- | --- | --- |
 | `progress_download.cjson` | Metadata download | Tracks the metadata download itself. |
-| `progress_processing.cjson` | Main pass (step 3) | Files already recorded as processed are skipped, and are not written to local storage again. |
-| `progress_qc.cjson` | Main pass (with a "yes" prediction) and the QC pass (step 6) | The QC pass only re-downloads and re-checks files not yet recorded here. |
+| `progress_staging.cjson` | Main pass (step 3) | Skips validating and staging a file whose re-encrypted copy is recorded and still in the interrogation bucket. The entry also keeps the file's read counts for the read-pair check of its partner. |
+| `progress_local.cjson` | Main pass (with a "yes" prediction) and the QC pass (step 6) | Skips writing a file whose decrypted copy is recorded and still on local storage. |
 
 Re-running the command after a partial failure is therefore idempotent at the file
-level: already-completed files are skipped in both the main pass and, if selected,
-the QC pass. `progress_qc.cjson` is deleted whenever the submission's local QC copy
-is deleted (failure, or a "not selected" decision), so a later rerun starts QC
-prefetching from scratch if it is picked again.
+level: each pass downloads a file only for the outputs it is missing, and leaves the
+outputs that are still there untouched. A file whose staged copy is gone, for example
+after a failed run with `keep_failed: false`, is validated and staged again. A file
+whose local copy is gone is written again, by the main pass if the prediction is
+"yes", otherwise by the QC pass.
 
 ## CLI options
 
