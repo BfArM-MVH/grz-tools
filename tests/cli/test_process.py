@@ -982,3 +982,65 @@ class TestProcessStagingCheckFailure:
         assert recorded_error.startswith("Processing failed with "), (
             f"the rerun should report the failure as a file error, got: {recorded_error}"
         )
+
+
+def _states(process_config_content: dict, submission_id: str) -> list[SubmissionStateEnum]:
+    """Return the states of a submission, in the order the run recorded them."""
+    db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+    submission = db.get_submission(submission_id)
+    assert submission is not None
+    return [state.state for state in submission.states]
+
+
+class TestProcessInboxCleanup:
+    """A processed submission is cleaned from the inbox, unless the operator says otherwise."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_processed_submission_is_cleaned_from_the_inbox(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Cleaning leaves the marker and an empty metadata file, and records its own two states."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
+        assert keys == {f"{sid}/metadata/metadata.json", f"{sid}/cleaned"}
+        metadata = s3_buckets["inbox"].Object(f"{sid}/metadata/metadata.json").get()["Body"].read()
+        assert metadata == b"", "the metadata in the inbox holds the tanG, so cleaning has to empty it"
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.CLEANED,
+            SubmissionStateEnum.PROCESSED,
+        ]
+
+    def test_no_clean_inbox_leaves_the_submission_in_the_inbox(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """With ``--no-clean-inbox`` the inbox keeps every file, and the run records no cleaning."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
+        assert keys == {f"{sid}/metadata/metadata.json"} | {
+            f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()
+        }
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+        ]
