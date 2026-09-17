@@ -1192,3 +1192,27 @@ class TestProcessPruefbericht:
         assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()] * 2
         assert waits == [30.0]
         assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.REPORTED
+
+    def test_a_submission_that_never_gets_through_is_recorded_as_an_error(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A Prüfbericht that BfArM rejects on every attempt leaves the reporting attempt in the states."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
+        monkeypatch.setattr(time, "sleep", lambda _: None)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--submit-pruefbericht")
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert len(_submitted_tans(bfarm_api)) == 10, "the run should have used its ten attempts"
+        assert _states(process_config_content, sid)[-2:] == [
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.ERROR,
+        ]

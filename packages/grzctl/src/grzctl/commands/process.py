@@ -27,7 +27,7 @@ The submission state transitions through ``PROCESSING → PROCESSED`` (or
 ``ERROR`` on failure).  The DB record is also *populated* with metadata so
 that downstream Prüfbericht generation can read the required fields.  If
 ``--submit-pruefbericht`` is used, a separate ``REPORTING → REPORTED``
-transition is recorded.
+transition is recorded, or ``REPORTING → ERROR`` if BfArM never accepts it.
 
 Recovery
 --------
@@ -243,20 +243,16 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     _save_pruefbericht(pruefbericht, log_dir, save_pruefbericht, redact_pruefbericht)
 
     if submit_pruefbericht:
-        # Retry *before* opening the DbContext so we don't hold a DB transaction
-        # open for the entire exponential-backoff window (which could be hours).
-        _submit_pruefbericht_with_retries(pruefbericht, configuration.pruefbericht)
-
-        # Only open the DbContext for the successful state transition.
+        # Entering the context writes REPORTING and commits it, so the retries below hold no
+        # transaction open. A Prüfbericht that never gets through is recorded as an error, and a
+        # later ``grzctl pruefbericht submit`` records the reporting states again.
         with DbContext(
             configuration=configuration,
             submission_id=submission_id,
             start_state=SubmissionStateEnum.REPORTING,
             end_state=SubmissionStateEnum.REPORTED,
         ):
-            # The submission already succeeded above; the DbContext just records
-            # the state transition.  If the state transition itself fails we
-            # log it but don't lose the fact that the Prüfbericht was accepted.
+            _submit_pruefbericht_with_retries(pruefbericht, configuration.pruefbericht)
             log.info("Prüfbericht submitted successfully!")
 
 

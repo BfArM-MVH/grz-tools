@@ -104,6 +104,7 @@ $ grzctl --config $CONFIG_PATH process \
                      ▼
    generate Prüfbericht, optionally save (--save-pruefbericht) and
    submit (--submit-pruefbericht, with retries)
+   (DB states REPORTING → REPORTED, or ERROR if BfArM never accepts it)
 ```
 
 The duplicate-initial check in step 1 and steps 2-9 run inside the DB state transition
