@@ -9,6 +9,7 @@ from grz_common.exceptions import (
     NetworkError,
     UploadError,
 )
+from grz_common.pipeline.components import DataValidationError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError
 from grz_db.models.submission import FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext
@@ -51,6 +52,7 @@ class TestMapExceptionToFailureReason:
             (EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
             (NetworkError("failed"), FailureReasonEnum.NETWORK_ERROR),
             (UploadError("failed"), FailureReasonEnum.UPLOAD_ERROR),
+            (DataValidationError("failed"), FailureReasonEnum.VALIDATION_ERROR),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
             (IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
             (RuntimeError("unexpected"), FailureReasonEnum.UNKNOWN),
@@ -74,6 +76,13 @@ class TestMapExceptionToFailureReason:
         except ValidationError as e:
             result = db_context._map_exception_to_failure_reason(type(e), e)
             assert result == FailureReasonEnum.VALIDATION_ERROR
+
+    def test_maps_a_cause_of_an_unmapped_exception(self, db_context: DbContext):
+        """An exception raised ``from`` a mapped one gets the failure reason of its cause."""
+        with pytest.raises(RuntimeError) as exc_info:
+            raise RuntimeError("processing failed") from UploadError("upload failed")
+        result = db_context._map_exception_to_failure_reason(exc_info.type, exc_info.value)
+        assert result == FailureReasonEnum.UPLOAD_ERROR
 
     def test_none_exception_returns_unknown(self, db_context: DbContext):
         result = db_context._map_exception_to_failure_reason(type(None), None)

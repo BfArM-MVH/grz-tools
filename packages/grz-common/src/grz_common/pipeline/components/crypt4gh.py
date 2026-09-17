@@ -59,7 +59,7 @@ class Crypt4GHDecryptor(Transformer):
         del self._buffer[: self.CIPHER_SEGMENT_SIZE]
 
         if len(ciphersegment) <= self.CIPHER_DIFF:
-            raise ValueError("Truncated cipher segment")
+            raise DecryptionError("Truncated cipher segment")
 
         nonce = ciphersegment[: self.NONCE_LENGTH]
         ciphertext = memoryview(ciphersegment)[self.NONCE_LENGTH :]
@@ -74,6 +74,8 @@ class Crypt4GHDecryptor(Transformer):
         raise DecryptionError(f"Decryption failed: {errors}")
 
     def _read_header(self) -> None:
+        # crypt4gh raises ValueError for a malformed header or a key that decrypts no header packet;
+        # other errors, such as a failed read from the source, propagate unchanged
         try:
             keys = [(0, self._private_key, None)]
             # Decrypt header to extract session keys using crypt4gh library
@@ -87,8 +89,8 @@ class Crypt4GHDecryptor(Transformer):
 
             self._ciphers = [ChaCha20Poly1305(bytes(key)) for key in session_keys]
             self._header_parsed = True
-        except Exception as e:
-            raise OSError(f"Crypt4GH Header Error: {e}") from e
+        except ValueError as e:
+            raise DecryptionError(f"Crypt4GH header error: {e}") from e
 
 
 class Crypt4GHEncryptor(Transformer):

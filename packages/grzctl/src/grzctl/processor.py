@@ -9,14 +9,13 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from botocore.exceptions import ClientError
 from crypt4gh.keys import get_public_key
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.models.base import get_secret_value
-from grz_common.pipeline.components import DevNullSink, ObserverWithMetrics, Tee, TqdmObserver
+from grz_common.pipeline.components import DataValidationError, DevNullSink, ObserverWithMetrics, Tee, TqdmObserver
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from grz_common.pipeline.components.perf import StreamMetricsRegistry
-from grz_common.pipeline.components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size
+from grz_common.pipeline.components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size, head_object
 from grz_common.pipeline.components.validation import (
     BamValidator,
     ChecksumValidator,
@@ -40,7 +39,7 @@ from .models.config import GrzctlConfig, InboxTarget
 
 
 class PipelineValidationError(Exception):
-    """Raised when submission fails consistency checks or validation."""
+    """Raised when processing a submission's files fails."""
 
     pass
 
@@ -192,7 +191,7 @@ class FilePipelineExecutor:
         file_path_str = str(file_meta.file_path)
 
         try:
-            head = self._source_s3.head_object(Bucket=self._source_bucket, Key=inbox_key)
+            head = head_object(self._source_s3, self._source_bucket, inbox_key)
             s3_size = head["ContentLength"]
             s3_mtime = head["LastModified"].timestamp()
         except Exception as e:
@@ -204,7 +203,7 @@ class FilePipelineExecutor:
                     "src_key": inbox_key,
                 },
             )
-            run_state.context.add_error(f"Source access failed: {inbox_key}")
+            run_state.context.add_error(e)
             failure: ProcessingState = {"processing_successful": False, "errors": [str(e)]}
             self._record(file_meta, failure, size=-1, mtime=-1.0, staging=stage, local=write_local)
             run_state.context.mark_completed(file_path_str)
@@ -239,7 +238,9 @@ class FilePipelineExecutor:
             )
 
             if needs_staging and not run_state.consistency_validator.check(file_meta.file_path):
-                raise RuntimeError(f"Consistency Check Failed: {file_meta.file_path}")
+                raise DataValidationError(
+                    f"Consistency Check Failed: {file_meta.file_path}", stage="ReadPairConsistencyValidator"
+                )
 
             success: ProcessingState = {
                 "processing_successful": True,
@@ -260,7 +261,7 @@ class FilePipelineExecutor:
                     "src_key": inbox_key,
                 },
             )
-            run_state.context.add_error(str(e))
+            run_state.context.add_error(e)
             failure = {"processing_successful": False, "errors": [str(e)]}
             self._record(
                 file_meta, failure, size=s3_size, mtime=s3_mtime, staging=needs_staging, local=needs_local_copy
@@ -283,10 +284,12 @@ class FilePipelineExecutor:
         if not state or not state.get("processing_successful"):
             return None
         try:
-            run_state.interrogation_s3.head_object(
-                Bucket=run_state.interrogation_bucket, Key=_archive_file_key(run_state.submission_id, file_meta)
+            head_object(
+                run_state.interrogation_s3,
+                run_state.interrogation_bucket,
+                _archive_file_key(run_state.submission_id, file_meta),
             )
-        except ClientError:
+        except FileNotFoundError:
             log.info(f"The staged copy of {file_meta.file_path} is gone, staging it again.")
             return None
         return state
@@ -615,6 +618,22 @@ class SubmissionProcessor:
             except Exception as e:
                 log.warning(f"Failed to delete {key} from interrogation bucket during cleanup: {e}")
 
+    @staticmethod
+    def _raise_on_file_errors(run_state: SubmissionRunState, message: str) -> None:
+        """Log the file errors of a pass and raise them as one error.
+
+        :param run_state: The submission's run state.
+        :param message: What failed, such as ``"Processing failed"``.
+        :raises PipelineValidationError: If the pass recorded a file error. Its ``__cause__`` is the first one.
+        """
+        errors = run_state.context.errors
+        if not errors:
+            return
+        log.error(f"{message}: {'; '.join(map(str, errors))}")
+        raise PipelineValidationError(
+            f"{message} with {len(errors)} file error(s), the first: {errors[0]}"
+        ) from errors[0]
+
     def run(self, submission_metadata: SubmissionMetadata) -> None:
         """
         Execute the processing pipeline for a single submission.
@@ -641,7 +660,8 @@ class SubmissionProcessor:
         recommended to automatically clean up orphaned files from incomplete transfers.
 
         :param submission_metadata: The parsed metadata object containing donor and file information.
-        :raises PipelineValidationError: If consistency checks fail or any file fails validation.
+        :raises PipelineValidationError: If processing a file fails, in the main pass or in the detailed QC pass.
+            Its ``__cause__`` is the first file error.
         """
         submission_run = self._new_run_state(submission_metadata)
         db = SubmissionDb(self.config.db.database_url, self.config.db.author)  # type: ignore[arg-type]
@@ -656,9 +676,7 @@ class SubmissionProcessor:
         try:
             self._pipeline_executor.process_files(submission_run, stage=True, write_local=prefetch)
 
-            if submission_run.context.has_errors:
-                log.error(f"Pipeline errors: {submission_run.context.errors}")
-                raise PipelineValidationError("Submission failed consistency checks or validation.")
+            self._raise_on_file_errors(submission_run, "Processing failed")
 
             # validation passed, so mark basic QC as passed in the database.
             try:
@@ -683,6 +701,7 @@ class SubmissionProcessor:
 
                 # writes only the local copies that the main pass did not write
                 self._pipeline_executor.process_files(submission_run, stage=False, write_local=True)
+                self._raise_on_file_errors(submission_run, "Writing the files for detailed QC failed")
 
                 # write metadata to local storage for the QC workflow
                 submission_basepath = Path(detailed_qc.local_storage) / submission_run.submission_id

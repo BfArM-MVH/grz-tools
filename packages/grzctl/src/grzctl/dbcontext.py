@@ -11,6 +11,7 @@ from grz_common.exceptions import (
     UploadError,
 )
 from grz_common.models.base import get_secret_value
+from grz_common.pipeline.components import DataValidationError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
@@ -203,10 +204,15 @@ class DbContext:
     def _map_exception_to_failure_reason(
         self, exc_type: type[BaseException], exc_val: BaseException | None
     ) -> FailureReasonEnum:
-        """Maps an exception to the closest FailureReasonEnum value."""
+        """Maps an exception to the closest FailureReasonEnum value.
+
+        Checks ``exc_val``, then its ``__cause__``, then the cause's ``__cause__``, and so on.
+        The first exception whose type is mapped decides the failure reason.
+        """
         exception_map: dict[type[BaseException], FailureReasonEnum] = {
             FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
             ValidationError: FailureReasonEnum.VALIDATION_ERROR,
+            DataValidationError: FailureReasonEnum.VALIDATION_ERROR,
             DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
             EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
             NetworkError: FailureReasonEnum.NETWORK_ERROR,
@@ -215,9 +221,15 @@ class DbContext:
             DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
         }
-        for exc_class, failure_reason in exception_map.items():
-            if isinstance(exc_val, exc_class):
-                return failure_reason
+        seen: set[int] = set()
+        exc = exc_val
+        # a cause can form a cycle, as in ``raise e from e``
+        while exc is not None and id(exc) not in seen:
+            for exc_class, failure_reason in exception_map.items():
+                if isinstance(exc, exc_class):
+                    return failure_reason
+            seen.add(id(exc))
+            exc = exc.__cause__
         return FailureReasonEnum.UNKNOWN
 
     def _check_prerequisites(self):

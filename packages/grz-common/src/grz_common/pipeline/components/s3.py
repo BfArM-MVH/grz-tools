@@ -2,10 +2,14 @@ import base64
 import hashlib
 import logging
 import math
+from collections.abc import Iterator
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from typing import Any
 
+from botocore.exceptions import BotoCoreError, ClientError
 from grz_common.constants import MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MAX_PARTS, MULTIPART_MIN_PART_SIZE
+from grz_common.exceptions import NetworkError, UploadError
 
 from . import DataIntegrityError, Observer, ReadStream
 
@@ -26,11 +30,40 @@ def calculate_s3_part_size(file_size: int | None, preferred_part_size: int = MUL
     return part_size
 
 
+def _is_missing_object(error: Exception) -> bool:
+    """Whether ``error`` is S3's response for an object that does not exist."""
+    if not isinstance(error, ClientError):
+        return False
+    return error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}
+
+
+def head_object(s3_client: Any, bucket: str, key: str) -> dict[str, Any]:
+    """Return the ``head_object`` response of an S3 object.
+
+    :param s3_client: boto3 S3 client.
+    :param bucket: Name of the bucket.
+    :param key: Key of the object.
+    :returns: The ``head_object`` response.
+    :raises FileNotFoundError: If the object does not exist.
+    """
+    try:
+        return s3_client.head_object(Bucket=bucket, Key=key)
+    except ClientError as e:
+        if _is_missing_object(e):
+            raise FileNotFoundError(f"s3://{bucket}/{key} does not exist") from e
+        raise
+
+
 class S3Downloader(ReadStream):
     """Reading from S3 is the Source of the pipeline."""
 
     def __init__(self, s3_client: Any, bucket: str, key: str):
-        self.response = s3_client.get_object(Bucket=bucket, Key=key)
+        try:
+            self.response = s3_client.get_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_missing_object(e):
+                raise FileNotFoundError(f"s3://{bucket}/{key} does not exist") from e
+            raise
         # S3 Body is already a buffered stream, but we wrap it to be Pipeable
         super().__init__(self.response["Body"])
         self.length: int = self.response.get("ContentLength", 0)
@@ -39,7 +72,7 @@ class S3Downloader(ReadStream):
         try:
             return super().read(size)
         except Exception as e:
-            raise OSError(f"S3 Read Error: {e}") from e
+            raise NetworkError(f"S3 read error: {e}") from e
 
 
 class S3MultipartUploader(Observer):
@@ -97,6 +130,14 @@ class S3MultipartUploader(Observer):
             self._cleanup()
             raise
 
+    @contextmanager
+    def _upload_errors(self) -> Iterator[None]:
+        """Raise S3 client errors as an :class:`UploadError`."""
+        try:
+            yield
+        except (ClientError, BotoCoreError) as e:
+            raise UploadError(f"Upload to s3://{self.bucket}/{self.key} failed: {e}") from e
+
     def observe(self, chunk: bytes) -> None:
         """
         Buffers incoming bytes and submits uploads when part_size is reached.
@@ -106,18 +147,19 @@ class S3MultipartUploader(Observer):
         if not chunk:
             return
 
-        if not self._upload_id:
-            self._start_multipart_upload()
+        with self._upload_errors():
+            if not self._upload_id:
+                self._start_multipart_upload()
 
-        self._check_futures()
+            self._check_futures()
 
-        self._buffer.extend(chunk)
-        while len(self._buffer) >= self.part_size:
-            self._throttle_uploads()
-            part_data = self._buffer[: self.part_size]
-            del self._buffer[: self.part_size]
-            self._submit_part(bytes(part_data), self._part_number)
-            self._part_number += 1
+            self._buffer.extend(chunk)
+            while len(self._buffer) >= self.part_size:
+                self._throttle_uploads()
+                part_data = self._buffer[: self.part_size]
+                del self._buffer[: self.part_size]
+                self._submit_part(bytes(part_data), self._part_number)
+                self._part_number += 1
 
     def _throttle_uploads(self):
         """
@@ -142,21 +184,22 @@ class S3MultipartUploader(Observer):
         self._closed = True
 
         try:
-            if not self._upload_id:
-                # nothing was written: an empty object needs a PUT
-                self._put_object(bytes(self._buffer))
-                self._buffer.clear()
-            else:
-                # upload remaining data
-                if self._buffer:
-                    self._submit_part(bytes(self._buffer), self._part_number)
+            with self._upload_errors():
+                if not self._upload_id:
+                    # nothing was written: an empty object needs a PUT
+                    self._put_object(bytes(self._buffer))
                     self._buffer.clear()
+                else:
+                    # upload remaining data
+                    if self._buffer:
+                        self._submit_part(bytes(self._buffer), self._part_number)
+                        self._buffer.clear()
 
-                for f in self._futures:
-                    self._parts.append(f.result())
+                    for f in self._futures:
+                        self._parts.append(f.result())
 
-                self._parts.sort(key=lambda x: x["PartNumber"])
-                self._complete_upload()
+                    self._parts.sort(key=lambda x: x["PartNumber"])
+                    self._complete_upload()
 
         except Exception as e:
             log.error(f"Upload failed: {e}")

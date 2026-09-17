@@ -14,6 +14,8 @@ from collections.abc import Buffer
 from types import TracebackType
 from typing import Any, Protocol, Self, runtime_checkable
 
+from grz_common.exceptions import UploadError
+
 log = logging.getLogger(__name__)
 
 READ_CHUNK_SIZE = 8 * 1024 * 1024
@@ -49,7 +51,7 @@ class DataValidationError(PipelineError):
     pass
 
 
-class DataIntegrityError(PipelineError):
+class DataIntegrityError(PipelineError, UploadError):
     """Raised when transfer integrity fails (e.g., S3 ETag mismatch)."""
 
     pass

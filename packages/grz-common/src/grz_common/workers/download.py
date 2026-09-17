@@ -169,20 +169,15 @@ class S3BotoDownloadWorker:
                 state=DownloadState(download_successful=True, submission_id=submission_id),
             )
 
-        except botocore.exceptions.ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                error_msg = f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
-                exc = DownloadError(error_msg)
-            else:
-                error_msg = f"S3 client error for '{s3_object_id}': {e}"
-                exc = e  # type: ignore[assignment]
+        except FileNotFoundError as e:
+            error_msg = f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
             self.__log.error(error_msg)
             progress_logger.set_state(
                 local_file_path,
                 file_metadata,
-                state=DownloadState(download_successful=False, errors=[str(exc)], submission_id=submission_id),
+                state=DownloadState(download_successful=False, errors=[error_msg], submission_id=submission_id),
             )
-            raise exc from e
+            raise DownloadError(error_msg) from e
         except Exception as e:
             self.__log.error("Download failed for '%s': %s", str(local_file_path), e)
             progress_logger.set_state(

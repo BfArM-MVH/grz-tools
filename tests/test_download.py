@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from grz_common.utils.checksums import calculate_sha256
-from grz_common.workers.download import S3BotoDownloadWorker
+from grz_common.workers.download import DownloadError, S3BotoDownloadWorker
 from grz_common.workers.worker import Worker
 
 
@@ -74,6 +74,34 @@ def test_boto_download(
     assert calculate_sha256(files_dir / "small_test_file.txt") == temp_small_file_sha256sum, (
         "Text file SHA256 mismatch."
     )
+
+
+def test_download_file_fails_for_missing_key(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    tmp_path,
+):
+    """A key that is not in the bucket fails with a DownloadError."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
+
+    with pytest.raises(DownloadError):
+        download_worker.download_file(
+            tmp_path / "files" / file_path.name,
+            f"{encrypted_submission.submission_id}/files/missing.c4gh",
+            progress_logger,
+            file_metadata,
+            encrypted_submission.submission_id,
+        )
 
 
 def test_download_skips_file_already_downloaded_for_same_submission(

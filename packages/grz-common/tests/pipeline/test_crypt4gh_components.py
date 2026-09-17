@@ -127,6 +127,21 @@ class TestCrypt4GHDecryptor:
         ):
             decryptor.read(-1)
 
+    def test_decrypt_with_the_wrong_key_fails(self):
+        """A private key that decrypts no header packet fails as a decryption error."""
+        sender_private, _ = generate_keypair()
+        _, recipient_public = generate_keypair()
+        other_private, _ = generate_keypair()
+        encrypted = BytesIO()
+        crypt4gh.lib.encrypt([(0, sender_private, recipient_public)], BytesIO(os.urandom(1000)), encrypted)
+
+        with (
+            BytesIO(encrypted.getvalue()) as f,
+            Crypt4GHDecryptor(f, private_key=other_private) as decryptor,
+            pytest.raises(DecryptionError),
+        ):
+            decryptor.read(-1)
+
 
 class TestCrypt4GHInterop:
     """The components encrypt segments themselves, so they must stay compatible with the reference crypt4gh."""
