@@ -32,19 +32,34 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
         """Prefix for error messages."""
         pass
 
-    def _run_validation_thread(self):
+    def _run_validation_thread(self) -> None:
+        """Keep whatever grz_check produced, a report or an error, for the caller to pick up."""
         try:
-            self.report = self._invoke_grz_check()
-        except PipelineError as e:
-            self.exception = e
-        except Exception as e:
-            error = DataValidationError(str(e), stage=self.__class__.__name__, cause=e)
-            error.__cause__ = e  # keeps grz_check's traceback in the log
-            self.exception = error
+            self.report = self._validate()
         except BaseException as e:
-            # grz_check is a pyo3 extension, so a Rust panic arrives as a PanicException, which
-            # derives from BaseException. The data is not at fault here, so it stays unwrapped.
             self.exception = e
+
+    def _validate(self) -> Any:
+        """Run grz_check, raising a DataValidationError for the failures the data causes.
+
+        Anything that is not an ``Exception`` keeps its own type. grz_check is a pyo3
+        extension, so a Rust panic arrives as a ``PanicException``, and that is the tool
+        breaking rather than the data being wrong.
+
+        :returns: The report grz_check produced.
+        :raises DataValidationError: If grz_check rejected the data.
+        """
+        try:
+            return self._invoke_grz_check()
+        except PipelineError:
+            raise
+        except Exception as e:
+            raise DataValidationError(str(e), stage=self.__class__.__name__, cause=e) from e
+
+    def _check_worker(self) -> None:
+        """Raise what grz_check hit, if it hit anything."""
+        if self.exception:
+            raise self.exception
 
     def _raise_if_invalid(self) -> None:
         if self.report and not self.report.is_valid:
@@ -54,15 +69,14 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
     def _enqueue_chunk(self, chunk: bytes | None):
         """Push a chunk to the adapter queue, monitoring thread health."""
         while True:
-            if self.exception:
-                raise self.exception
+            self._check_worker()
             try:
                 self.adapter.queue.put(chunk, timeout=0.1)
                 return
             except queue.Full as e:
-                if self.validation_thread.is_alive() or self.exception:
-                    # still running, or it failed while this put was waiting: the next loop raises its error
+                if self.validation_thread.is_alive():
                     continue
+                self._check_worker()  # it failed while this put was waiting
                 self._raise_if_invalid()
                 raise PipelineError("Validation thread stopped unexpectedly", stage=self.__class__.__name__) from e
 
@@ -71,13 +85,12 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
             return
 
         try:
-            if not self.exception and self.validation_thread.is_alive():
+            if self.validation_thread.is_alive():
                 self._enqueue_chunk(None)  # signal EOF
 
             self.validation_thread.join()
 
-            if self.exception:
-                raise self.exception
+            self._check_worker()
 
             if self.report is None:
                 # never pass the data as validated: the thread left neither a report nor an error
