@@ -8,6 +8,7 @@ import io
 import os
 from io import BytesIO
 
+import grz_check
 import pytest
 from grz_common.pipeline.components import (
     DataValidationError,
@@ -210,6 +211,28 @@ class TestRawChecksumValidator:
                 ChecksumValidator(expected_checksum="0" * 64) as validator,
             ):
                 source >> validator
+
+
+class TestValidatorWorkerDeath:
+    """A validator whose grz_check call dies must not let the data pass as validated."""
+
+    def test_a_panicking_grz_check_reaches_the_caller(self, monkeypatch):
+        """grz_check is a pyo3 extension, so a Rust panic arrives as a BaseException."""
+
+        class _Panic(BaseException):
+            """Stands in for pyo3's PanicException, which derives from BaseException."""
+
+        def panic(*args, **kwargs):
+            raise _Panic("simulated panic in grz_check")
+
+        monkeypatch.setattr(grz_check, "validate_fastq", panic)
+        # small enough that the validator queue never fills, so nothing else notices the dead worker
+        fastq = gzip.compress(b"@read1\nACGT\n+\nIIII\n")
+
+        pipeline = ReadStream(BytesIO(fastq)) | Tee(FastqValidator())
+
+        with pytest.raises(_Panic):
+            pipeline >> BytesIO()
 
 
 class TestCloseErrors:

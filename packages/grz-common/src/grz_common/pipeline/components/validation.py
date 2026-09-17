@@ -18,7 +18,7 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
         super().__init__()
         self.adapter = PushToPullAdapter()
         self.report: grz_check.ValidationReport | None = None
-        self.exception = None
+        self.exception: BaseException | None = None
         self.validation_thread = threading.Thread(target=self._run_validation_thread, daemon=True)
         self.validation_thread.start()
 
@@ -41,6 +41,10 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
             error = DataValidationError(str(exception), stage=self.__class__.__name__, cause=exception)
             error.__cause__ = exception  # keeps grz_check's traceback in the log
             self.exception = error
+        except BaseException as exception:
+            # grz_check is a pyo3 extension, so a Rust panic arrives as a PanicException, which
+            # derives from BaseException. The data is not at fault here, so it stays unwrapped.
+            self.exception = exception
 
     def _raise_if_invalid(self) -> None:
         if self.report and not self.report.is_valid:
@@ -75,11 +79,14 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
             if self.exception:
                 raise self.exception
 
-            if self.report:
-                self._raise_if_invalid()
-                for warning in self.report.warnings:
-                    prefix = self._format_error_prefix().split()[0]
-                    log.warning(f"{prefix} Warning: {warning}")
+            if self.report is None:
+                # never pass the data as validated: the thread left neither a report nor an error
+                raise PipelineError("Validation thread stopped without a report", stage=self.__class__.__name__)
+
+            self._raise_if_invalid()
+            for warning in self.report.warnings:
+                prefix = self._format_error_prefix().split()[0]
+                log.warning(f"{prefix} Warning: {warning}")
 
         finally:
             super().close()
