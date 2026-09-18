@@ -22,6 +22,7 @@ class SubmissionContext:
             self._completed_files.add(file_path)
 
     def mark_completed(self, file_path: str) -> None:
+        """Mark a file as finished correctly, which lets the read-pair check compare it with its partner."""
         with self._lock:
             self._completed_files.add(file_path)
 

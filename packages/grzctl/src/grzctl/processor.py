@@ -209,9 +209,9 @@ class FilePipelineExecutor:
         """Stream one file of the submission into the outputs it is still missing.
 
         Whatever goes wrong here fails this file alone. The error goes to the run's context, which
-        fails the run once every file is done and lets the other threads stop early. A file that is
-        done and a file that failed are both marked completed, because the read-pair check of the
-        partner file waits for that mark.
+        fails the run once every file is done and lets the other threads stop early. Only a file that
+        finished correctly is marked completed. The read-pair check compares a pair once both files
+        are completed, so it leaves the partner of a failed file unchecked.
 
         :param run_state: The submission's run state.
         :param file_meta: The file's entry in the submission metadata.
@@ -242,7 +242,6 @@ class FilePipelineExecutor:
             # the file could not be read, so neither its size nor its modification time is known
             failure: ProcessingState = {"processing_successful": False, "errors": [str(e)]}
             self._record(file_meta, failure, size=-1, mtime=-1.0, staging=stage, local=write_local)
-            run_state.context.mark_completed(file_path_str)
             return
 
         # the except clause below records the failure for these outputs, also when a lookup fails
@@ -313,7 +312,6 @@ class FilePipelineExecutor:
             self._record(
                 file_meta, failure, size=s3_size, mtime=s3_mtime, staging=needs_staging, local=needs_local_copy
             )
-            run_state.context.mark_completed(file_path_str)
 
     def _record(  # noqa: PLR0913
         self, file_meta: File, state: ProcessingState, *, size: int, mtime: float, staging: bool, local: bool

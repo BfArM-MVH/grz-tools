@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import json
 import os
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ import crypt4gh.keys
 import crypt4gh.lib
 import grz_db.models.author
 import grzctl.cli
+import grzctl.processor
 import pytest
 import responses
 import yaml
@@ -948,6 +950,70 @@ class TestProcessRerun:
         assert result.exit_code == 0, f"Rerun failed: {result.output}"
         downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
         assert downloads[self.READ1] == (0 if keep_failed else 1)
+        assert downloads[self.READ2] == 1
+        _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
+
+    def test_a_file_that_fails_alongside_its_partner_leaves_the_partner_processed(
+        self,
+        s3_buckets,
+        s3_requests,
+        monkeypatch,
+        tmp_path,
+        process_config_content,
+        crypt4gh_grz_private_key_file_path,
+        working_dir_path,
+    ):
+        """read2 fails while read1 streams, and the rerun still does not download read1 again.
+
+        The first run is steered into the order in which read1 could trip over read2: read2 fails
+        once read1 is downloading, and read1 finishes its upload only after read2 is done failing.
+        """
+        sid = self.SUBMISSION_ID
+        process_config_content["archives"]["interrogation"]["keep_failed"] = True
+        config_file_path = tmp_path / "config.process.yaml"
+        config_file_path.write_text(yaml.dump(process_config_content))
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        read1_key = f"{sid}/files/{self.READ1}.c4gh"
+        read2_key = f"{sid}/files/{self.READ2}.c4gh"
+        read1_downloading = threading.Event()
+        read2_done = threading.Event()
+
+        make_api_call = botocore.client.BaseClient._make_api_call
+
+        def steer(client, operation_name, api_params):
+            bucket, key = api_params.get("Bucket"), api_params.get("Key")
+            if operation_name == "GetObject" and key == read1_key:
+                read1_downloading.set()
+            if operation_name == "GetObject" and key == read2_key and not read2_done.is_set():
+                read1_downloading.wait(timeout=30)
+                error = {"Error": {"Code": "InternalError", "Message": "simulated failure"}}
+                raise botocore.exceptions.ClientError(error, operation_name)
+            uploads = {"PutObject", "CompleteMultipartUpload"}
+            if operation_name in uploads and bucket == s3_buckets["interrogation"].name and key == read1_key:
+                read2_done.wait(timeout=30)
+            return make_api_call(client, operation_name, api_params)
+
+        process_file = grzctl.processor.FilePipelineExecutor._process_file
+
+        def process_file_then_signal(executor, **kwargs):
+            process_file(executor, **kwargs)
+            if kwargs["file_meta"].file_path == self.READ2:
+                read2_done.set()
+
+        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", steer)
+        monkeypatch.setattr(grzctl.processor.FilePipelineExecutor, "_process_file", process_file_then_signal)
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, "the first run should fail on read2"
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert downloads[self.READ1] == 1, "the first run should download read1"
+
+        s3_requests.requests.clear()
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert downloads[self.READ1] == 0, "read1 passed in the first run, so the rerun must not stream it again"
         assert downloads[self.READ2] == 1
         _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
 
