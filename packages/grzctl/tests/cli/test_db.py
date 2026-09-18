@@ -5,6 +5,7 @@ Tests for grzctl db subcommand
 import datetime
 import hashlib
 import json
+import os
 import random
 from datetime import date
 from operator import attrgetter
@@ -376,6 +377,109 @@ def test_populate_qc(migrated_database_config_path: Path, tmp_path: Path, test_m
     assert len(results) == 3
     father_result = next(r for r in results if r.lab_datum_id == "father1_germline0")
     assert not father_result.mean_depth_of_coverage_passed_qc
+
+
+def test_populate_qc_is_atomic(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    """A partial populate-qc failure rolls everything back instead of leaving rows behind."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_header = (
+        "sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,"
+        "meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,"
+        "meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,"
+        "percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,"
+        "percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,"
+        "targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,"
+        "targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus"
+    )
+    indexed_row = (
+        "index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,"
+        "-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS"
+    )
+    father_row = (
+        "father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,"
+        "wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,"
+        "3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS"
+    )
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent(f"""\
+            {report_header}
+            {indexed_row}
+            """)
+        )
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # Re-run against a report that repeats an already-stored row before a brand-new one:
+    # the unique primary key must reject the rerun, and the new row must not survive it.
+    # Reuse the first report's mtime so the duplicate row hits the same primary key,
+    # which includes the timestamp.
+    first_report_mtime = Path(report_csv_path).stat().st_mtime
+    rerun_report_csv_path = tmp_path / "rerun-report.csv"
+    with open(rerun_report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent(f"""\
+            {report_header}
+            {father_row}
+            {indexed_row}
+            """)
+        )
+    os.utime(rerun_report_csv_path, (first_report_mtime, first_report_mtime))
+
+    with pytest.raises(sqlalchemy.exc.IntegrityError):
+        runner.invoke(
+            cli,
+            [
+                *args_common,
+                "submission",
+                "populate-qc",
+                metadata.submission_id,
+                str(rerun_report_csv_path),
+                "--no-confirm",
+                "--qc-workflow-version",
+                "v1.0.0",
+            ],
+        )
+
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert {result.lab_datum_id for result in results} == {"index0_germline0"}
 
 
 def test_populate_qc_with_qc_workflow_version_flag(

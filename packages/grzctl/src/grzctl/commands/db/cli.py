@@ -1350,8 +1350,7 @@ def populate_qc(
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?", default=False, show_default=True
     ):
-        for result in results:
-            db_service.add_detailed_qc_result(result)
+        db_service.add_detailed_qc_results(results)
 
 
 def _lab_datum_id(donor_index: int, donor: Donor, lab_datum_index: int, lab_datum: LabDatum) -> str:

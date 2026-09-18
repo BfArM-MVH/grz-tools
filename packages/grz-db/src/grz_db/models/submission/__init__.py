@@ -1461,6 +1461,17 @@ class SubmissionDb:
             session.flush()
             return result
 
+    def add_detailed_qc_results(self, results: Sequence[DetailedQCResult]) -> tuple[DetailedQCResult, ...]:
+        """Add detailed QC results atomically: either every row is committed or none is.
+
+        A single transaction around all rows keeps a failure from leaving a partial
+        import behind; every row is only ever visible once the whole set is in.
+        """
+        with self.transaction() as session:
+            session.add_all(results)
+            session.flush()
+        return tuple(results)
+
     def add_change_request(  # noqa: PLR0913
         self,
         submission_id: str,
