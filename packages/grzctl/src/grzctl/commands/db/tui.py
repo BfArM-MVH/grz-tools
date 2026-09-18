@@ -276,7 +276,7 @@ class DatabaseBrowser(App):
     def __init__(
         self,
         database: SubmissionDb,
-        public_keys: dict[str, Ed25519PublicKey],
+        public_keys: dict[str, list[Ed25519PublicKey]],
         quarter: int | None = None,
         year: int | None = None,
         **kwargs,
