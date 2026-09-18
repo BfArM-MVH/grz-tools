@@ -1,4 +1,4 @@
-"""Command for publishing the bundled version.json policy to every configured inbox bucket."""
+"""Operations on inbox buckets."""
 
 import logging
 import sys
@@ -14,9 +14,14 @@ from ..models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 
-@click.command()
+@click.group()
+def inbox():
+    """Operations on configured inbox buckets."""
+
+
+@inbox.command("push-version")
 @grzctl_configuration
-def version_push(configuration: GrzctlConfig, **kwargs):
+def push_version(configuration: GrzctlConfig, **kwargs):
     """Publish the bundled grz-cli version-compatibility policy to every configured inbox bucket."""
     content = VersionFile.read_bundled_text()
 

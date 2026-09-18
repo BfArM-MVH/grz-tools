@@ -1,4 +1,4 @@
-"""Tests for `grzctl version-push`."""
+"""Tests for `grzctl inbox push-version`."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -8,7 +8,7 @@ import boto3
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
-from grz_common.models.version import VersionFile
+from grz_common.models.version import VERSION_FILE_KEY, VersionFile
 from grzctl.models.config import GrzctlConfig
 from moto import mock_aws
 
@@ -49,25 +49,25 @@ def config_path(tmp_path: Path) -> Path:
     return _write_config(tmp_path, _two_inbox_config())
 
 
-def test_version_push_publishes_to_every_inbox(s3_client_mock, config_path):
+def test_push_version_publishes_to_every_inbox(s3_client_mock, config_path):
     """Publishes the bundled version.json to every configured LE/inbox, not just one."""
     runner = CliRunner()
     cli = grzctl.cli.build_cli()
-    result = runner.invoke(cli, ["--config", str(config_path), "version-push"])
+    result = runner.invoke(cli, ["--config", str(config_path), "inbox", "push-version"])
 
     assert result.exit_code == 0, result.output
 
     bundled = VersionFile.read_bundled_text()
     for bucket in (BUCKET_A, BUCKET_B):
-        uploaded = s3_client_mock.get_object(Bucket=bucket, Key="version.json")
+        uploaded = s3_client_mock.get_object(Bucket=bucket, Key=VERSION_FILE_KEY)
         assert uploaded["Body"].read().decode("utf-8") == bundled
 
 
-def test_version_push_reports_failure_for_missing_bucket(config_path):
+def test_push_version_reports_failure_for_missing_bucket(config_path):
     """A missing/unreachable bucket is reported and fails the command, without a real S3 backend."""
     with mock_aws():
         runner = CliRunner()
         cli = grzctl.cli.build_cli()
-        result = runner.invoke(cli, ["--config", str(config_path), "version-push"])
+        result = runner.invoke(cli, ["--config", str(config_path), "inbox", "push-version"])
 
     assert result.exit_code != 0
