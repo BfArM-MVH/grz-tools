@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from crypt4gh.keys import get_public_key
 from grz_common.constants import TQDM_DEFAULTS
+from grz_common.exceptions import DetailedQCError
 from grz_common.models.base import get_secret_value
 from grz_common.pipeline.components import (
     DataValidationError,
@@ -768,7 +769,10 @@ class SubmissionProcessor:
                         submission_id=submission_run.submission_id,
                     )
                     log.info(f"Running detailed QC workflow: {shell_command}")
-                    subprocess.run(shell_command, shell=True, check=True)  # noqa: S602
+                    try:
+                        subprocess.run(shell_command, shell=True, check=True)  # noqa: S602
+                    except subprocess.CalledProcessError as e:
+                        raise DetailedQCError(f"Detailed QC workflow failed: {e}") from e
                     log.info(f"Detailed QC workflow completed for {submission_run.submission_id}.")
 
             self._upload_final_metadata(submission_metadata, submission_run)

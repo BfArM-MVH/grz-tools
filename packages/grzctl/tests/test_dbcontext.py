@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from grz_common.exceptions import (
     DecryptionError,
+    DetailedQCError,
     EncryptionError,
     IncompleteSubmissionError,
     NetworkError,
@@ -57,6 +58,8 @@ class TestMapExceptionToFailureReason:
             (DataValidationError("failed"), FailureReasonEnum.VALIDATION_ERROR),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
             (IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
+            (DetailedQCError("failed"), FailureReasonEnum.DETAILED_QC_ERROR),
+            (subprocess.CalledProcessError(returncode=3, cmd="some other command"), FailureReasonEnum.UNKNOWN),
             (RuntimeError("unexpected"), FailureReasonEnum.UNKNOWN),
             (Exception("generic"), FailureReasonEnum.UNKNOWN),
             (ValueError("some value error"), FailureReasonEnum.UNKNOWN),
@@ -117,7 +120,7 @@ class TestMapExceptionToFailureReason:
                 DuplicateTanGError(),
                 DuplicateInitialSubmissionError(1),
                 IncompleteSubmissionError(),
-                subprocess.CalledProcessError(returncode=3, cmd="the detailed QC workflow"),
+                DetailedQCError(),
                 validation_exc,
             ]
         }

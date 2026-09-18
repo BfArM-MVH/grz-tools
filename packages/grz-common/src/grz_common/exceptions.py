@@ -30,5 +30,9 @@ class UploadError(Exception):
     """Raised when uploading a submission file fails."""
 
 
+class DetailedQCError(Exception):
+    """Raised when the detailed QC workflow fails."""
+
+
 class IncompleteSubmissionError(Exception):
     """Raised when a submission is missing required files or metadata."""

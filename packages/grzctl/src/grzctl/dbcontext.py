@@ -1,10 +1,10 @@
 import logging
-import subprocess
 from functools import cached_property
 from typing import Any
 
 from grz_common.exceptions import (
     DecryptionError,
+    DetailedQCError,
     EncryptionError,
     IncompleteSubmissionError,
     NetworkError,
@@ -210,8 +210,7 @@ class DbContext:
             EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
             NetworkError: FailureReasonEnum.NETWORK_ERROR,
             UploadError: FailureReasonEnum.UPLOAD_ERROR,
-            # the only subprocess grzctl runs is the detailed QC workflow
-            subprocess.CalledProcessError: FailureReasonEnum.DETAILED_QC_ERROR,
+            DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
             DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
             DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
