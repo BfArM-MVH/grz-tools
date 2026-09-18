@@ -936,7 +936,7 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to modify submission: {e}") from e
 
 
 _ignore_field_option = click.option(
@@ -1071,7 +1071,7 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to load submission: {e}") from e
 
     with open(metadata_path) as fd:
         metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
@@ -1663,7 +1663,7 @@ def change_request(  # noqa: PLR0913, PLR0917
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to register change request: {e}") from e
 
 
 def _research_consented_now(submission: Submission) -> bool | None:
