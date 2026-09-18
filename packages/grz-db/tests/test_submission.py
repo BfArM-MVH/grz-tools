@@ -4,12 +4,19 @@ from collections.abc import Callable
 
 import pytest
 from grz_db.errors import DuplicateTanGError
-from grz_db.models.submission import OutdatedDatabaseSchemaError, Submission, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import (
+    OutdatedDatabaseSchemaError,
+    Submission,
+    SubmissionDb,
+    SubmissionStateEnum,
+    SubmissionStateLog,
+)
 from grz_pydantic_models.submission.metadata import (
     REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
     GrzSubmissionMetadata,
 )
+from sqlmodel import Session
 
 TWO_TB = 2 * 1024**4  # 2,199,023,255,552 bytes
 SUBMISSION_ID = "123456789_2024-01-01_abcdef01"
@@ -63,6 +70,27 @@ def test_every_submission_state_can_be_stored(db: SubmissionDb, submission, stat
     result = db.get_submission(SUBMISSION_ID)
     assert result is not None
     assert result.get_latest_state().state == state
+
+
+def test_get_latest_state_breaks_timestamp_ties_by_id(db: SubmissionDb, submission) -> None:
+    """State logs sharing a timestamp must resolve to the highest id, like the SQL tie-breaker."""
+    fixed_timestamp = datetime.datetime(2025, 1, 1, 12, 0, tzinfo=datetime.UTC)
+    with Session(db.engine) as session:
+        for state in (SubmissionStateEnum.UPLOADED, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.FINISHED):
+            session.add(
+                SubmissionStateLog(
+                    submission_id=SUBMISSION_ID,
+                    state=state,
+                    timestamp=fixed_timestamp,
+                    author_name="alice",
+                    signature="dummy",
+                )
+            )
+        session.commit()
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.get_latest_state().state == SubmissionStateEnum.FINISHED
 
 
 def test_added_submission_reads_its_relationships(db: SubmissionDb) -> None:

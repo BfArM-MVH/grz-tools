@@ -297,7 +297,7 @@ class Submission(SubmissionBase, table=True):
 
     def get_latest_state(self, filter_to_type: SubmissionStateEnum | None = None) -> Optional["SubmissionStateLog"]:
         states = filter(lambda state: state.state == filter_to_type, self.states) if filter_to_type else self.states
-        states = sorted(states, key=attrgetter("timestamp"))
+        states = sorted(states, key=attrgetter("timestamp", "id"))
         return states[-1] if states else None
 
     @classmethod
