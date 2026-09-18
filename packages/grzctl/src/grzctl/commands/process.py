@@ -280,7 +280,10 @@ def _save_pruefbericht(
 
 
 def _submit_pruefbericht_with_retries(pruefbericht: Pruefbericht, pruefbericht_config: PruefberichtModel) -> None:
-    """Submit the Prüfbericht, retrying with exponential backoff; re-raise the last error."""
+    """Submit the Prüfbericht, retrying with exponential backoff; re-raise the last error.
+
+    Every attempt requests a new token, because the backoff outlasts a token's lifetime.
+    """
     auth_url, client_id, client_secret, api_base_url = _get_submission_credentials(pruefbericht_config)
 
     log.info("Submitting Prüfbericht to BfArM...")
@@ -297,6 +300,7 @@ def _submit_pruefbericht_with_retries(pruefbericht: Pruefbericht, pruefbericht_c
                 auth_url=auth_url,
                 client_id=client_id,
                 client_secret=client_secret,
+                # without a token, the attempt requests a new one
                 token="",
             )
             return

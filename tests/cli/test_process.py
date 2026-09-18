@@ -6,6 +6,7 @@ This tests the full streaming pipeline with mocked S3 buckets (inbox + archive).
 
 import gzip
 import hashlib
+import itertools
 import json
 import os
 import threading
@@ -1184,11 +1185,19 @@ class TestProcessDetailedQcAutoRun:
 
 @pytest.fixture
 def bfarm_api():
-    """Fake the BfArM token endpoint, and record every request the run makes."""
+    """Fake the BfArM token endpoint, and record every request the run makes.
+
+    Every token request gets a token of its own, ``token-1``, ``token-2`` and so on.
+    """
+    issued = itertools.count(1)
+
+    def issue_token(_request):
+        token = {"access_token": f"token-{next(issued)}", "expires_in": 300, "token_type": "Bearer"}
+        return 200, {}, json.dumps(token)
+
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.post(
-            "https://bfarm.localhost/token",
-            json={"access_token": "my_token", "expires_in": 300, "token_type": "Bearer"},
+        mock.add_callback(
+            responses.POST, "https://bfarm.localhost/token", callback=issue_token, content_type="application/json"
         )
         yield mock
 
@@ -1197,6 +1206,15 @@ def _submitted_tans(bfarm_api) -> list[str]:
     """The tanGs of the Prüfbericht submissions that reached the fake BfArM endpoint."""
     return [
         json.loads(call.request.body)["SubmittedCase"]["tan"]
+        for call in bfarm_api.calls
+        if call.request.url.endswith("/api/upload")
+    ]
+
+
+def _submission_tokens(bfarm_api) -> list[str]:
+    """The tokens that the Prüfbericht submissions to the fake BfArM endpoint carried."""
+    return [
+        call.request.headers["Authorization"].removeprefix("bearer ")
         for call in bfarm_api.calls
         if call.request.url.endswith("/api/upload")
     ]
@@ -1244,7 +1262,10 @@ class TestProcessPruefbericht:
         process_config_content,
         working_dir_path,
     ):
-        """A submission that BfArM rejects once is sent again after the backoff."""
+        """A submission that BfArM rejects once is sent again after the backoff, with a new token.
+
+        The backoff can outlast a token's lifetime, so no attempt may reuse the token of an earlier one.
+        """
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
         bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
@@ -1257,6 +1278,7 @@ class TestProcessPruefbericht:
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()] * 2
+        assert _submission_tokens(bfarm_api) == ["token-1", "token-2"]
         assert waits == [30.0]
         assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.REPORTED
 
