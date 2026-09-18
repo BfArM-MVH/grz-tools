@@ -1262,9 +1262,12 @@ def populate_qc(
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
 
-    with open(report_csv_path, encoding="utf-8", newline="") as report_csv_file:
+    with open(report_csv_path, encoding="utf-8-sig", newline="") as report_csv_file:
         reader = csv.reader(report_csv_file)
-        header = next(reader)
+        try:
+            header = next(reader)
+        except StopIteration:
+            raise click.ClickException(f"QC report '{report_csv_path}' is empty.") from None
         reports = []
         for row in reader:
             reports.append(QCReportRow(**dict(zip(header, row, strict=True))))
