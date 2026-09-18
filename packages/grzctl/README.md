@@ -15,6 +15,7 @@ Command-line tool for internal GRZ operations.
 
 - [Registering change requests](docs/change-requests.md) — recording that a submission must be modified, deleted, or transferred, with the who/when/what audit trail.
 - [Processing a submission](docs/process.md): the `grzctl process` streaming pipeline, detailed QC prediction and selection, and recovery from partial failures.
+- [Error handling](docs/error-handling.md): what a failed step records, the failure reasons and who acts on each, and how to raise errors.
 
 ## S3 permissions for `grzctl process`
 

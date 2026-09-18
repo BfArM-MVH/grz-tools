@@ -199,6 +199,8 @@ the same case passed basic QC during the main pass, the database rejects
 `basic_qc_passed = true`. The pipeline then stores `basic_qc_passed = false` and
 handles the failure as above, with the failure reason `duplicate_initial`.
 
+[Error handling](error-handling.md) lists every failure reason and who acts on it.
+
 ## Recovery and reruns
 
 Two progress logs live under `<output-dir>/logs/`:
