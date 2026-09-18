@@ -37,6 +37,10 @@ class DecryptionError(SubmissionRejectedError):
     """A submission file cannot be decrypted."""
 
 
+class DuplicateUploadError(SubmissionRejectedError):
+    """The bucket already holds a submission with this ID, so its tanG was used before."""
+
+
 class IncompleteSubmissionError(GrzError):
     """A step ran before an earlier step had passed for every file of the submission."""
 
@@ -51,6 +55,14 @@ class TransferError(GrzError):
 
 class DownloadError(TransferError):
     """Reading from S3 failed."""
+
+
+class MissingObjectError(DownloadError):
+    """S3 holds no object under the key.
+
+    Only the caller knows whose object it is, so it turns a missing submission file into a
+    :class:`MissingSubmissionFileError`.
+    """
 
 
 class UploadError(TransferError):

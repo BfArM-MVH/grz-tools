@@ -46,6 +46,7 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
+from grz_common.exceptions import ConfigurationError, ReportingError
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
@@ -135,7 +136,7 @@ def process(  # noqa: PLR0913, PLR0917
         # a credential missing from the config would otherwise surface only after the submission is archived
         try:
             _get_submission_credentials(configuration.pruefbericht)
-        except ValueError as e:
+        except ConfigurationError as e:
             raise click.UsageError(f"{e}. Pass --no-submit-pruefbericht to process without submitting.") from e
 
     le_id = submission_id.split("_", maxsplit=1)[0]
@@ -290,7 +291,9 @@ def _save_pruefbericht(
 def _submit_pruefbericht_with_retries(pruefbericht: Pruefbericht, pruefbericht_config: PruefberichtModel) -> None:
     """Submit the Prüfbericht, retrying with exponential backoff; re-raise the last error.
 
-    Every attempt requests a new token, because the backoff outlasts a token's lifetime.
+    Only a :class:`ReportingError` is retried. Credentials that BfArM refuses fail at once, since
+    waiting does not change them. Every attempt requests a new token, because the backoff outlasts
+    a token's lifetime.
     """
     auth_url, client_id, client_secret, api_base_url = _get_submission_credentials(pruefbericht_config)
 
@@ -312,7 +315,7 @@ def _submit_pruefbericht_with_retries(pruefbericht: Pruefbericht, pruefbericht_c
                 token="",
             )
             return
-        except Exception as e:
+        except ReportingError as e:
             if attempt == max_attempts:
                 log.error(f"Prüfbericht submission failed after {max_attempts} attempts.")
                 raise

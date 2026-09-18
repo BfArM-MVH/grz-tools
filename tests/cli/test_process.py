@@ -610,6 +610,26 @@ class TestProcessS3Failure:
         inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
         assert inbox_keys == {f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()}
 
+    def test_a_failed_copy_to_the_archive_fails_as_a_transfer_error(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """An archive that refuses the copy fails the run as a transfer error."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.unavailable_bucket = s3_buckets["consented"].name
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+
 
 class TestProcessDetailedQc:
     """Tests for the detailed QC prefetch: the main pass writes the QC copy when a selection is likely."""
@@ -1311,6 +1331,32 @@ class TestProcessPruefbericht:
             SubmissionStateEnum.REPORTING,
             SubmissionStateEnum.ERROR,
         ]
+        assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.REPORTING_ERROR
+
+    def test_refused_credentials_fail_at_once_as_a_configuration_error(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Credentials that BfArM refuses are not retried, since waiting does not change them."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.replace(responses.POST, "https://bfarm.localhost/token", json={"error": "invalid_client"}, status=401)
+        waits: list[float] = []
+        monkeypatch.setattr(time, "sleep", waits.append)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert waits == [], "the run should not wait for a retry"
+        assert _submitted_tans(bfarm_api) == [], "no Prüfbericht should reach BfArM without a token"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.CONFIGURATION_ERROR
 
     def test_a_missing_credential_stops_the_run_before_it_starts(
         self,

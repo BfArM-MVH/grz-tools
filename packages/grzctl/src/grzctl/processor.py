@@ -2,16 +2,16 @@ import json
 import logging
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from crypt4gh.keys import get_public_key
 from grz_common.constants import TQDM_DEFAULTS
-from grz_common.exceptions import DetailedQCError
+from grz_common.exceptions import DetailedQCError, MissingObjectError, MissingSubmissionFileError, UploadError
 from grz_common.models.base import get_secret_value
 from grz_common.pipeline.components import (
     DataValidationError,
@@ -24,7 +24,13 @@ from grz_common.pipeline.components import (
 )
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from grz_common.pipeline.components.perf import StreamMetricsRegistry
-from grz_common.pipeline.components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size, head_object
+from grz_common.pipeline.components.s3 import (
+    S3Downloader,
+    S3MultipartUploader,
+    calculate_s3_part_size,
+    head_object,
+    s3_errors,
+)
 from grz_common.pipeline.components.validation import (
     BamValidator,
     ChecksumValidator,
@@ -70,6 +76,15 @@ if TYPE_CHECKING:
     from types_boto3_s3.client import S3Client
 else:
     S3Client = Any
+
+
+@contextmanager
+def _inbox_file(file_meta: File) -> Iterator[None]:
+    """Raise a missing inbox object in the body as the submitter's missing file."""
+    try:
+        yield
+    except MissingObjectError as e:
+        raise MissingSubmissionFileError(f"The inbox lacks {file_meta.file_path}: {e}") from e
 
 
 def _inbox_file_key(submission_id: str, file_meta: File) -> str:
@@ -227,7 +242,8 @@ class FilePipelineExecutor:
         # the size and the modification time of the inbox object tell a progress log record which
         # version of the file it describes
         try:
-            head = head_object(self._source_s3, self._source_bucket, inbox_key)
+            with _inbox_file(file_meta):
+                head = head_object(self._source_s3, self._source_bucket, inbox_key)
             s3_size = head["ContentLength"]
             s3_mtime = head["LastModified"].timestamp()
         except Exception as e:
@@ -335,7 +351,7 @@ class FilePipelineExecutor:
                 run_state.interrogation_bucket,
                 _archive_file_key(run_state.submission_id, file_meta),
             )
-        except FileNotFoundError:
+        except MissingObjectError:
             log.info(f"The staged copy of {file_meta.file_path} is gone, staging it again.")
             return None
         return state
@@ -390,7 +406,8 @@ class FilePipelineExecutor:
             ExitStack() as stack,
         ):
             # download and decrypt
-            source = S3Downloader(self._source_s3, self._source_bucket, inbox_key)
+            with _inbox_file(file_meta):
+                source = S3Downloader(self._source_s3, self._source_bucket, inbox_key)
 
             # A validator runs a thread from the moment it is built, so it is built once the
             # download has opened and registered for closing straight away. Leaving the run before
@@ -493,8 +510,8 @@ class SubmissionProcessor:
         self._log_dir = log_dir
 
         log.debug("Loading crypt4gh keys...")
-        self._consented_pub_key = get_public_key(configuration.archives.consented.public_key_path)
-        self._non_consented_pub_key = get_public_key(configuration.archives.non_consented.public_key_path)
+        self._consented_pub_key = Crypt4GH.retrieve_public_key(configuration.archives.consented.public_key_path)
+        self._non_consented_pub_key = Crypt4GH.retrieve_public_key(configuration.archives.non_consented.public_key_path)
 
         self._s3_pool_size = max(10, threads * (1 + max_concurrent_uploads) + 1)
         log.debug(f"Configuring S3 client pool size: {self._s3_pool_size}")
@@ -575,11 +592,11 @@ class SubmissionProcessor:
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata, run_state: SubmissionRunState) -> None:
         redacted_metadata = submission_metadata.content.to_redacted_dict()
 
-        run_state.interrogation_s3.put_object(
-            Bucket=run_state.interrogation_bucket,
-            Key=_archive_metadata_key(run_state.submission_id),
-            Body=json.dumps(redacted_metadata).encode("utf-8"),
-        )
+        key = _archive_metadata_key(run_state.submission_id)
+        with s3_errors(f"Upload to s3://{run_state.interrogation_bucket}/{key}", UploadError):
+            run_state.interrogation_s3.put_object(
+                Bucket=run_state.interrogation_bucket, Key=key, Body=json.dumps(redacted_metadata).encode("utf-8")
+            )
 
     def _maybe_cleanup_inbox(self, run_state: SubmissionRunState) -> None:
         if not self._clean_inbox:
@@ -621,7 +638,8 @@ class SubmissionProcessor:
             else:
                 body = file_path.read_bytes()
 
-            run_state.interrogation_s3.put_object(Bucket=run_state.interrogation_bucket, Key=dest_key, Body=body)
+            with s3_errors(f"Upload to s3://{run_state.interrogation_bucket}/{dest_key}", UploadError):
+                run_state.interrogation_s3.put_object(Bucket=run_state.interrogation_bucket, Key=dest_key, Body=body)
 
     def _get_expected_keys(self, run_state: SubmissionRunState) -> set[str]:
         keys = {_archive_metadata_key(run_state.submission_id)}
@@ -645,15 +663,17 @@ class SubmissionProcessor:
         log.info(f"Copying {len(expected_keys)} files from interrogation bucket to final archive...")
         for key in tqdm(expected_keys, desc="Copying to final archive", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
             log.debug(f"Copying {key}...")
-            run_state.final_s3.copy(
-                CopySource={"Bucket": run_state.interrogation_bucket, "Key": key},
-                Bucket=run_state.final_bucket,
-                Key=key,
-            )
+            with s3_errors(f"Copy of {key} to s3://{run_state.final_bucket}", UploadError):
+                run_state.final_s3.copy(
+                    CopySource={"Bucket": run_state.interrogation_bucket, "Key": key},
+                    Bucket=run_state.final_bucket,
+                    Key=key,
+                )
 
         log.info("Copy complete. Removing files from interrogation bucket...")
         for key in tqdm(expected_keys, desc="Cleaning staging area", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
-            run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
+            with s3_errors(f"Removal of s3://{run_state.interrogation_bucket}/{key}"):
+                run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
         log.info("Finished removing temporary files from interrogation bucket.")
 
     def _handle_interrogation_failure(self, run_state: SubmissionRunState) -> None:

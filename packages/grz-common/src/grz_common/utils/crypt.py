@@ -15,6 +15,7 @@ from grz_common.pipeline.components import ReadStream, Tee, TqdmObserver
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
+from ..exceptions import ConfigurationError
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class Crypt4GH:
                 format=serialization.PrivateFormat.Raw,
                 encryption_algorithm=serialization.NoEncryption(),
             )
-        keys = ((0, sk, crypt4gh.keys.get_public_key(recipient_key_file_path)),)
+        keys = ((0, sk, Crypt4GH.retrieve_public_key(recipient_key_file_path)),)
         return keys
 
     @staticmethod
@@ -96,6 +97,21 @@ class Crypt4GH:
             pipeline >> out_fd
 
     @staticmethod
+    def retrieve_public_key(pubkey_path: str | PathLike) -> bytes:
+        """
+        Read Crypt4GH public key from specified path.
+
+        :param pubkey_path: Path to the public key
+        :returns: Public key bytes
+        :raises ConfigurationError: If the key is missing or cannot be read.
+        """
+        try:
+            return crypt4gh.keys.get_public_key(os.path.expanduser(str(pubkey_path)))
+        except (OSError, ValueError, NotImplementedError) as e:
+            # crypt4gh raises NotImplementedError for a file in no key format it knows
+            raise ConfigurationError(f"Public key {pubkey_path} cannot be read: {e}") from e
+
+    @staticmethod
     def retrieve_private_key(seckey_path: str | PathLike, passphrase: str | None = None) -> bytes:
         """
         Read Crypt4GH private key from specified path.
@@ -103,10 +119,11 @@ class Crypt4GH:
         :param seckey_path: Path to the private key
         :param passphrase: Passphrase for the private key. If None, will check C4GH_PASSPHRASE envvar, if that is also undefined, will prompt for user input.
         :returns: Private key bytes
+        :raises ConfigurationError: If the key is missing, or cannot be read with the passphrase.
         """
         seckeypath = os.path.expanduser(str(seckey_path))
         if not os.path.exists(seckeypath):
-            raise ValueError(f"Secret key not found: {seckey_path}")
+            raise ConfigurationError(f"Secret key not found: {seckey_path}")
 
         if passphrase:
             passphrase_callback = lambda: passphrase
@@ -115,7 +132,13 @@ class Crypt4GH:
         else:
             passphrase_callback = partial(getpass, prompt=f"Passphrase for {seckey_path}: ")
 
-        return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
+        try:
+            return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
+        except SystemExit as e:
+            # crypt4gh exits the process for a key or a passphrase that it cannot use
+            raise ConfigurationError(f"Secret key {seckey_path} cannot be read with the given passphrase") from e
+        except (OSError, ValueError, NotImplementedError) as e:
+            raise ConfigurationError(f"Secret key {seckey_path} cannot be read: {e}") from e
 
     @staticmethod
     def decrypt_file(

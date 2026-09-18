@@ -12,6 +12,7 @@ from io import BytesIO
 import grz_check
 import pytest
 from botocore.exceptions import ClientError
+from grz_common.exceptions import MissingObjectError
 from grz_common.pipeline.components import (
     DataValidationError,
     Observer,
@@ -276,7 +277,7 @@ class TestFailedConstruction:
             def get_object(self, **_kwargs):
                 raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(MissingObjectError):
             S3Downloader(_MissingObject(), "bucket", "key")
 
         gc.collect()

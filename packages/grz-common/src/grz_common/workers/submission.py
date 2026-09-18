@@ -30,7 +30,10 @@ from pydantic import ValidationError
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
-from ..exceptions import SubmissionValidationError  # noqa: F401  (callers import it from here)
+from ..exceptions import (
+    ConfigurationError,
+    SubmissionValidationError,  # noqa: F401  (callers import it from here)
+)
 from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
@@ -523,13 +526,13 @@ class Submission:
         if not Path(recipient_public_key_path).expanduser().is_file():
             msg = f"Public key file does not exist: {recipient_public_key_path}"
             self.__log.error(msg)
-            raise FileNotFoundError(msg)
+            raise ConfigurationError(msg)
         if not submitter_private_key_path:
             self.__log.warning("No submitter private key provided, skipping signing.")
         elif not Path(submitter_private_key_path).expanduser().is_file():
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
-            raise FileNotFoundError(msg)
+            raise ConfigurationError(msg)
 
         try:
             public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path, submitter_private_key_path or None)

@@ -21,10 +21,10 @@ from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
-from ..exceptions import DownloadError
+from ..exceptions import DownloadError, MissingObjectError, MissingSubmissionFileError
 from ..models.s3 import S3Options
 from ..pipeline.components import Tee, TqdmObserver
-from ..pipeline.components.s3 import S3Downloader
+from ..pipeline.components.s3 import S3Downloader, s3_errors
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
 
@@ -53,7 +53,9 @@ def download_metadata_file(
     :param submission_id: submission folder on S3 structure
     :param metadata_dir: Path of the metadir folder
     :param metadata_file_name: name of the metadata.json
-    :raises DownloadError: If the bucket holds no such metadata file
+    :raises MissingSubmissionFileError: If the bucket holds no such metadata file.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
     """
     metadata_key = str(Path(submission_id) / metadata_dir.name / metadata_file_name)
     metadata_file_path = metadata_dir / metadata_file_name
@@ -63,17 +65,19 @@ def download_metadata_file(
         # Ensure the local target directory exists
         metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-        s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
+        with s3_errors(f"Download of s3://{bucket}/{metadata_key}", DownloadError):
+            try:
+                s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
+            except botocore.exceptions.ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "404":
+                    raise MissingSubmissionFileError(
+                        f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
+                    ) from e
+                raise
         log.info("Metadata download complete.")
-    except botocore.exceptions.ClientError as e:
-        if e.response.get("Error", {}).get("Code") == "404":
-            error_msg = f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
-            log.error(error_msg)
-            raise DownloadError(error_msg) from e
-        raise e
     except Exception as e:
-        log.error("Download failed for metadata '%s'", metadata_key)
-        raise e
+        log.error("Download failed for metadata '%s': %s", metadata_key, e)
+        raise
 
 
 class S3BotoDownloadWorker:
@@ -159,9 +163,13 @@ class S3BotoDownloadWorker:
                 ) as pbar,
                 open(local_file_path, "wb") as f,
             ):
-                pipeline = S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id) | Tee(
-                    TqdmObserver(pbar)
-                )
+                try:
+                    source = S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id)
+                except MissingObjectError as e:
+                    raise MissingSubmissionFileError(
+                        f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
+                    ) from e
+                pipeline = source | Tee(TqdmObserver(pbar))
                 pipeline >> f
         except Exception:
             # a later step reads whatever lies in the target directory and would take an
@@ -198,15 +206,6 @@ class S3BotoDownloadWorker:
                 state=DownloadState(download_successful=True, submission_id=submission_id),
             )
 
-        except FileNotFoundError as e:
-            error_msg = f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
-            self.__log.error(error_msg)
-            progress_logger.set_state(
-                local_file_path,
-                file_metadata,
-                state=DownloadState(download_successful=False, errors=[error_msg], submission_id=submission_id),
-            )
-            raise DownloadError(error_msg) from e
         except Exception as e:
             self.__log.error("Download failed for '%s': %s", str(local_file_path), e)
             progress_logger.set_state(

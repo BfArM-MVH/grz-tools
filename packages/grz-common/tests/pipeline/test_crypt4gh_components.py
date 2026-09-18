@@ -8,7 +8,7 @@ import pytest
 from crypt4gh import SEGMENT_SIZE
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-from grz_common.exceptions import DecryptionError
+from grz_common.exceptions import DecryptionError, EncryptionError
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 
 
@@ -61,6 +61,32 @@ class TestCrypt4GHEncryptor:
 
         assert encrypted[:8] == b"crypt4gh"
         assert len(encrypted) > len(plaintext)
+
+    def test_an_unusable_recipient_key_fails_as_an_encryption_error(self):
+        """The keys are all the encryptor adds, so a key crypt4gh cannot use fails as its error."""
+        private_key, _ = generate_keypair()
+
+        with (
+            BytesIO(b"Hello, World!") as f,
+            Crypt4GHEncryptor(f, sender_privkey=private_key, recipient_pubkey=b"not a key") as encryptor,
+            pytest.raises(EncryptionError),
+        ):
+            encryptor.read(-1)
+
+    def test_an_error_of_the_source_passes_through(self):
+        """What the upstream stage raises is its failure, not the encryptor's."""
+        private_key, public_key = generate_keypair()
+
+        class _Undecryptable(BytesIO):
+            def read(self, size=-1):
+                raise DecryptionError("Decryption failed")
+
+        with (
+            _Undecryptable() as f,
+            Crypt4GHEncryptor(f, sender_privkey=private_key, recipient_pubkey=public_key) as encryptor,
+            pytest.raises(DecryptionError),
+        ):
+            encryptor.read(-1)
 
 
 class TestCrypt4GHDecryptor:

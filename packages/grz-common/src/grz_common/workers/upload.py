@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import botocore.handlers
-from grz_common.exceptions import UploadError
+from grz_common.exceptions import DuplicateUploadError, IncompleteSubmissionError
 from grz_pydantic_models.submission.metadata import redact_metadata_dict
 from tqdm.auto import tqdm
 
@@ -145,7 +145,7 @@ class S3BotoUploadWorker(UploadWorker):
     def _upload_logged_files(self, encrypted_submission, progress_logger, files_to_upload):
         for file_path in files_to_upload:
             if not Path(file_path).exists():
-                raise UploadError(f"File {file_path} does not exist")
+                raise IncompleteSubmissionError(f"File {file_path} does not exist")
 
         for file_path, file_metadata in encrypted_submission.encrypted_files.items():
             logged_state = progress_logger.get_state(file_path, file_metadata)
@@ -211,7 +211,9 @@ class S3BotoUploadWorker(UploadWorker):
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
         if self._remote_id_exists(metadata_s3_object_id):
-            raise UploadError("Submission already uploaded. Corrections, additions, and followups require a new tanG.")
+            raise DuplicateUploadError(
+                "Submission already uploaded. Corrections, additions, and followups require a new tanG."
+            )
 
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id
@@ -232,7 +234,7 @@ class S3BotoUploadWorker(UploadWorker):
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
         if self._remote_id_exists(metadata_s3_object_id):
-            raise UploadError("Submission already archived.")
+            raise DuplicateUploadError("Submission already archived.")
 
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id

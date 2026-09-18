@@ -4,12 +4,21 @@ import logging
 import math
 from collections.abc import Iterator
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
-from botocore.exceptions import BotoCoreError, ClientError
+from boto3.exceptions import Boto3Error
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, PartialCredentialsError
 from grz_common.constants import MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MAX_PARTS, MULTIPART_MIN_PART_SIZE
-from grz_common.exceptions import NetworkError, UploadError
+from grz_common.exceptions import (
+    ConfigurationError,
+    DownloadError,
+    GrzError,
+    MissingObjectError,
+    NetworkError,
+    TransferError,
+    UploadError,
+)
 
 from . import Observer, ReadStream, UploadIntegrityError
 
@@ -30,6 +39,46 @@ def calculate_s3_part_size(file_size: int | None, preferred_part_size: int = MUL
     return part_size
 
 
+S3_CLIENT_ERRORS = (ClientError, BotoCoreError, Boto3Error)
+"""What boto3 and botocore raise for a failed request."""
+
+_SETUP_ERROR_CODES = frozenset({"InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket"})
+"""S3 error codes that only a faulty setup causes.
+
+``AccessDenied`` is not among them: S3 also answers it for a missing object if the credentials
+may not list the bucket.
+"""
+
+
+def s3_error(error: Exception, action: str, transfer_error: type[TransferError] = TransferError) -> GrzError:
+    """Classify an error of the S3 client as the failure it stands for.
+
+    :param error: What the S3 client raised.
+    :param action: What failed, such as ``"Upload to s3://bucket/key"``.
+    :param transfer_error: The class for a failed transfer.
+    :returns: A :class:`ConfigurationError` if only a faulty setup causes ``error``, otherwise a ``transfer_error``.
+    """
+    code = error.response.get("Error", {}).get("Code") if isinstance(error, ClientError) else None
+    faulty_setup = code in _SETUP_ERROR_CODES or isinstance(error, NoCredentialsError | PartialCredentialsError)
+    error_class = ConfigurationError if faulty_setup else transfer_error
+    return error_class(f"{action} failed: {error}")
+
+
+@contextmanager
+def s3_errors(action: str, transfer_error: type[TransferError] = TransferError) -> Iterator[None]:
+    """Raise an error of the S3 client in the body as the failure it stands for.
+
+    :param action: What the body does, such as ``"Upload to s3://bucket/key"``.
+    :param transfer_error: The class for a failed transfer.
+    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
+    :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
+    """
+    try:
+        yield
+    except S3_CLIENT_ERRORS as e:
+        raise s3_error(e, action, transfer_error) from e
+
+
 def _is_missing_object(error: Exception) -> bool:
     """Whether ``error`` is S3's response for an object that does not exist."""
     if not isinstance(error, ClientError):
@@ -44,14 +93,17 @@ def head_object(s3_client: Any, bucket: str, key: str) -> dict[str, Any]:
     :param bucket: Name of the bucket.
     :param key: Key of the object.
     :returns: The ``head_object`` response.
-    :raises FileNotFoundError: If the object does not exist.
+    :raises MissingObjectError: If the object does not exist.
+    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
+    :raises DownloadError: For any other error of the S3 client.
     """
-    try:
-        return s3_client.head_object(Bucket=bucket, Key=key)
-    except ClientError as e:
-        if _is_missing_object(e):
-            raise FileNotFoundError(f"s3://{bucket}/{key} does not exist") from e
-        raise
+    with s3_errors(f"Reading s3://{bucket}/{key}", DownloadError):
+        try:
+            return s3_client.head_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_missing_object(e):
+                raise MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
+            raise
 
 
 class S3Downloader(ReadStream):
@@ -60,12 +112,13 @@ class S3Downloader(ReadStream):
     def __init__(self, s3_client: Any, bucket: str, key: str):
         # Base first: a stage that raises before it runs is still finalized, and finalizing closes.
         super().__init__()
-        try:
-            self.response = s3_client.get_object(Bucket=bucket, Key=key)
-        except ClientError as e:
-            if _is_missing_object(e):
-                raise FileNotFoundError(f"s3://{bucket}/{key} does not exist") from e
-            raise
+        with s3_errors(f"Reading s3://{bucket}/{key}", DownloadError):
+            try:
+                self.response = s3_client.get_object(Bucket=bucket, Key=key)
+            except ClientError as e:
+                if _is_missing_object(e):
+                    raise MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
+                raise
         # S3 Body is already a buffered stream, but we wrap it to be Pipeable
         self._source = self.response["Body"]
         self.length: int = self.response.get("ContentLength", 0)
@@ -132,13 +185,9 @@ class S3MultipartUploader(Observer):
             self._cleanup()
             raise
 
-    @contextmanager
-    def _upload_errors(self) -> Iterator[None]:
-        """Raise S3 client errors as an :class:`UploadError`."""
-        try:
-            yield
-        except (ClientError, BotoCoreError) as e:
-            raise UploadError(f"Upload to s3://{self.bucket}/{self.key} failed: {e}") from e
+    def _upload_errors(self) -> AbstractContextManager[None]:
+        """Raise S3 client errors as an :class:`UploadError`, or as a :class:`ConfigurationError`."""
+        return s3_errors(f"Upload to s3://{self.bucket}/{self.key}", UploadError)
 
     def observe(self, chunk: bytes) -> None:
         """

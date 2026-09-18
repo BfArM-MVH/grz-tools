@@ -52,7 +52,7 @@ are an unreachable database and a missing BfArM credential.
 | `transfer_error`        | GRZ       | Moving data to or from S3 failed, or S3 stored other bytes than were sent. A rerun usually succeeds. If the failure repeats, the message names the S3 error code.              |
 | `encryption_error`      | GRZ       | Re-encrypting a file for the archive failed.                                                                                                                                   |
 | `detailed_qc_error`     | GRZ       | The detailed QC workflow exited with an error.                                                                                                                                 |
-| `reporting_error`       | GRZ       | The Prüfbericht could not be generated, or BfArM did not accept it.                                                                                                            |
+| `reporting_error`       | GRZ       | The Prüfbericht could not be generated, or BfArM did not accept it. `grzctl process` retries a submission that fails this way.                                                 |
 | `unknown`               | GRZ       | No code path expected this error. Treat it as a bug.                                                                                                                           |
 
 Older states can carry `network_error` or `upload_error`. Both mean what
@@ -82,11 +82,13 @@ GrzError
 ├── SubmissionRejectedError
 │   ├── MissingSubmissionFileError   file_not_found
 │   ├── SubmissionValidationError    validation_error
-│   └── DecryptionError              decryption_error
+│   ├── DecryptionError              decryption_error
+│   └── DuplicateUploadError         duplicate_tang
 ├── IncompleteSubmissionError        incomplete_submission
 ├── ConfigurationError               configuration_error
 ├── TransferError                    transfer_error
 │   ├── DownloadError
+│   │   └── MissingObjectError
 │   └── UploadError
 │       └── UploadIntegrityError
 ├── EncryptionError                  encryption_error
@@ -120,8 +122,11 @@ The S3 boundary sorts the error codes like this:
 | S3 answer                                                     | Raised as                    | Reason                |
 | ------------------------------------------------------------- | ---------------------------- | --------------------- |
 | 404 for an inbox object                                       | `MissingSubmissionFileError` | `file_not_found`      |
+| 404 for any other object                                      | `MissingObjectError`         | `transfer_error`      |
 | `InvalidAccessKeyId`, `SignatureDoesNotMatch`, `NoSuchBucket` | `ConfigurationError`         | `configuration_error` |
 | `AccessDenied` and anything else                              | `TransferError`              | `transfer_error`      |
+
+Missing credentials count as a configuration error as well.
 
 `AccessDenied` is not a configuration error. S3 also answers 403 for a missing object if
 the credentials lack the permission to list the bucket.

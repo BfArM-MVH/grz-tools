@@ -9,9 +9,11 @@ from grz_common.exceptions import (
     DecryptionError,
     DetailedQCError,
     DownloadError,
+    DuplicateUploadError,
     EncryptionError,
     GrzError,
     IncompleteSubmissionError,
+    MissingObjectError,
     MissingSubmissionFileError,
     NetworkError,
     ReportingError,
@@ -56,11 +58,13 @@ class TestMapExceptionToFailureReason:
     @pytest.mark.parametrize(
         "exception,expected",
         [
-            (FileNotFoundError("missing file"), FailureReasonEnum.FILE_NOT_FOUND),
+            (FileNotFoundError("missing file"), FailureReasonEnum.UNKNOWN),
             (DecryptionError("failed"), FailureReasonEnum.DECRYPTION_ERROR),
             (EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
             (MissingSubmissionFileError("failed"), FailureReasonEnum.FILE_NOT_FOUND),
             (DownloadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (MissingObjectError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (DuplicateUploadError("failed"), FailureReasonEnum.DUPLICATE_TANG),
             (NetworkError("failed"), FailureReasonEnum.TRANSFER_ERROR),
             (UploadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
             (UploadIntegrityError("failed"), FailureReasonEnum.TRANSFER_ERROR),
@@ -124,7 +128,7 @@ class TestMapExceptionToFailureReason:
         mapped_results = {
             db_context._map_exception_to_failure_reason(type(exc), exc)
             for exc in [
-                FileNotFoundError(),
+                MissingSubmissionFileError(),
                 DecryptionError(),
                 EncryptionError(),
                 TransferError(),
@@ -164,7 +168,7 @@ class TestMapExceptionToFailureReason:
 
 class TestDbContextFailureReason:
     def test_file_not_found_maps_correctly(self, ctx, mock_db):
-        exc = FileNotFoundError("missing file")
+        exc = MissingSubmissionFileError("missing file")
         ctx.__exit__(type(exc), exc, None)
         mock_db.update_submission_state.assert_called_once_with(
             ctx.submission_id,

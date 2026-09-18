@@ -6,6 +6,7 @@ from grz_common.exceptions import (
     ConfigurationError,
     DecryptionError,
     DetailedQCError,
+    DuplicateUploadError,
     EncryptionError,
     IncompleteSubmissionError,
     MissingSubmissionFileError,
@@ -208,6 +209,7 @@ class DbContext:
             MissingSubmissionFileError: FailureReasonEnum.FILE_NOT_FOUND,
             SubmissionValidationError: FailureReasonEnum.VALIDATION_ERROR,
             DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
+            DuplicateUploadError: FailureReasonEnum.DUPLICATE_TANG,
             DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
             DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
@@ -217,7 +219,6 @@ class DbContext:
             EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
             DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
             ReportingError: FailureReasonEnum.REPORTING_ERROR,
-            FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
             ValidationError: FailureReasonEnum.VALIDATION_ERROR,
         }
         seen: set[int] = set()

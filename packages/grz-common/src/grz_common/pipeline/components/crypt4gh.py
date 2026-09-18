@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 # Segments go through cryptography's ChaCha20Poly1305, not through crypt4gh's libsodium binding:
 # it releases the GIL while it computes, and it is faster.
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-from grz_common.exceptions import DecryptionError
+from grz_common.exceptions import DecryptionError, EncryptionError
 
 from . import StreamConfigurationError, Transformer
 
@@ -156,6 +156,9 @@ class Crypt4GHEncryptor(Transformer):
 
     def _compose_header(self) -> bytes:
         keys = [(0, self._sender_privkey, self._recipient_pubkey)]
-        header_content = crypt4gh.header.make_packet_data_enc(0, self._session_key)
-        header_packets = crypt4gh.header.encrypt(header_content, keys)
-        return crypt4gh.header.serialize(header_packets)
+        try:
+            header_content = crypt4gh.header.make_packet_data_enc(0, self._session_key)
+            header_packets = crypt4gh.header.encrypt(header_content, keys)
+            return crypt4gh.header.serialize(header_packets)
+        except Exception as e:
+            raise EncryptionError(f"Crypt4GH header cannot be encrypted: {e}") from e

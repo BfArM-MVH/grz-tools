@@ -3,8 +3,9 @@ import re
 import grz_cli.cli
 import grzctl.cli
 import pytest
+import yaml
 from click.testing import CliRunner
-from grz_common.exceptions import EncryptionError, IncompleteSubmissionError
+from grz_common.exceptions import ConfigurationError, EncryptionError, IncompleteSubmissionError
 from grz_common.progress import FileProgressLogger, ValidationState
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.submission import Submission
@@ -40,6 +41,30 @@ def test_encrypt_submission_protect_overwrite(
     (working_dir_path / "logs" / "progress_encrypt.cjson").unlink()
     with pytest.raises(EncryptionError, match=re.escape("already exists. Delete it or use --force to overwrite it.")):
         runner.invoke(cli, testargs, catch_exceptions=False)
+
+
+def test_encrypt_with_an_unreadable_public_key_fails_as_a_configuration_error(
+    working_dir_path, keys_config_content, tmp_path
+):
+    """A key that the setup cannot provide is not the file's encryption failing."""
+    copy_submission(working_dir_path, "files", "metadata")
+    not_a_key = tmp_path / "not_a_key.pub"
+    not_a_key.write_text("not a key")
+    keys_config_content["keys"]["grz_public_key_path"] = str(not_a_key)
+    config_file = tmp_path / "config.keys.yaml"
+    config_file.write_text(yaml.dump(keys_config_content))
+
+    testargs = [
+        "encrypt",
+        "--submission-dir",
+        str(working_dir_path),
+        "--config-file",
+        str(config_file),
+        "--no-check-validation-logs",
+    ]
+    result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs)
+
+    assert isinstance(result.exception, ConfigurationError), result.output
 
 
 def test_decrypt_submission(working_dir_path, temp_grzctl_keys_config_file_path):

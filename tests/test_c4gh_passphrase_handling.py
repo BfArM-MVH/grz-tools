@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import crypt4gh.keys.c4gh
 import pytest
+from grz_common.exceptions import ConfigurationError
 from grz_common.utils.crypt import Crypt4GH
 
 
@@ -56,9 +57,24 @@ def test_retrieve_private_key_missing_passphrase(encrypted_dummy_key, monkeypatc
     with patch("grz_common.utils.crypt.getpass") as mock_getpass:
         mock_getpass.side_effect = RuntimeError("Interactive prompt triggered in CI")
 
-        # crypt4gh now raises SystemExit...
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(ConfigurationError):
             Crypt4GH.retrieve_private_key(sec_key_path, passphrase=None)
-        assert exc_info.value.code == 2
 
         mock_getpass.assert_called_once()
+
+
+def test_a_missing_private_key_is_a_configuration_error(tmp_path):
+    with pytest.raises(ConfigurationError):
+        Crypt4GH.retrieve_private_key(tmp_path / "missing.sec", passphrase="irrelevant")
+
+
+def test_a_wrong_passphrase_is_a_configuration_error(encrypted_dummy_key):
+    sec_key_path, _ = encrypted_dummy_key
+
+    with pytest.raises(ConfigurationError):
+        Crypt4GH.retrieve_private_key(sec_key_path, passphrase="not the passphrase")
+
+
+def test_a_missing_public_key_is_a_configuration_error(tmp_path):
+    with pytest.raises(ConfigurationError):
+        Crypt4GH.retrieve_public_key(tmp_path / "missing.pub")

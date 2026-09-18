@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import botocore.client
 import pytest
-from grz_common.exceptions import DownloadError, NetworkError
+from grz_common.exceptions import MissingSubmissionFileError, NetworkError
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import EncryptedSubmission
@@ -104,7 +104,7 @@ def test_download_file_fails_for_missing_key(
     encrypted_submission,
     tmp_path,
 ):
-    """A key that is not in the bucket fails with a DownloadError."""
+    """A key that is not in the bucket fails as the submitter's missing file."""
     from grz_common.progress.progress_logging import FileProgressLogger
     from grz_common.progress.states import DownloadState
 
@@ -116,7 +116,7 @@ def test_download_file_fails_for_missing_key(
     progress_logger = FileProgressLogger[DownloadState](download_log_path)
     file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
 
-    with pytest.raises(DownloadError):
+    with pytest.raises(MissingSubmissionFileError):
         download_worker.download_file(
             tmp_path / "files" / file_path.name,
             f"{encrypted_submission.submission_id}/files/missing.c4gh",
@@ -145,7 +145,7 @@ def test_download_file_leaves_no_file_behind_for_a_missing_key(
     file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
     local_file_path = tmp_path / "files" / file_path.name
 
-    with pytest.raises(DownloadError):
+    with pytest.raises(MissingSubmissionFileError):
         download_worker.download_file(
             local_file_path,
             f"{encrypted_submission.submission_id}/files/missing.c4gh",
