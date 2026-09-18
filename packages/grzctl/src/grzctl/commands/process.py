@@ -49,7 +49,7 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError
-from grz_db.models.submission import SubmissionStateEnum
+from grz_db.models.submission import CASE_LINK_KEY, SubmissionStateEnum
 from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
@@ -178,7 +178,7 @@ def process(  # noqa: PLR0913, PLR0917
             submission_date,
             force=False,
             on_missing="create",
-            ignore_fields={"case_id"} if stored_case_id is not None else None,
+            ignore_fields={CASE_LINK_KEY} if stored_case_id is not None else None,
         )
         try:
             _check_duplicate_initial(dbcontext_inst.db, submission_metadata.content)

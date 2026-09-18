@@ -41,6 +41,8 @@ from grz_db.errors import (
 )
 from grz_db.models.author import Author
 from grz_db.models.submission import (
+    CASE_LINK_KEY,
+    DONORS_KEY,
     Case,
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -980,16 +982,18 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
 _ignore_field_option = click.option(
     "--ignore-field",
     "ignore_field",
-    type=click.Choice([*_MODIFIABLE_SUBMISSION_KEYS, "case_id"], case_sensitive=False),
+    type=click.Choice([*_MODIFIABLE_SUBMISSION_KEYS, CASE_LINK_KEY], case_sensitive=False),
     help="Do not populate the given field from the metadata to the database. Can be specified multiple times. "
     "Passing --ignore-field case_id skips case resolution and linking.",
     multiple=True,
 )
 
-#: What ``--allow-overwrite`` may name. ``"donors"`` releases every donor update and delete at once,
-#: since :meth:`SubmissionChangeSet.withhold_destructive` draws no finer line. The case link is
-#: absent on purpose: replacing one undoes a deliberate ``db case relink``, so it takes ``--force``.
-_ALLOW_OVERWRITE_CHOICES = [*_MODIFIABLE_SUBMISSION_KEYS, "donors"]
+_ALLOW_OVERWRITE_CHOICES = [*_MODIFIABLE_SUBMISSION_KEYS, DONORS_KEY]
+"""What ``--allow-overwrite`` may name.
+
+The case link is absent on purpose: replacing one undoes a deliberate ``db case relink``, so it
+takes ``--force``.
+"""
 
 
 def _prepare_submission_console_table(changes: "SubmissionChangeSet") -> rich.console.RenderableType:
@@ -1100,13 +1104,13 @@ def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite:
 
     :param changes: The pending change set, as :meth:`SubmissionDb.diff` computed it.
     :param allow_overwrite: What the operator permits; see
-        :meth:`SubmissionChangeSet.withhold_destructive`.
+        :meth:`SubmissionChangeSet.undeclared_destructive_changes`.
     :raises click.Abort: if a destructive change is not covered by *allow_overwrite*.
     """
-    _, withheld = changes.withhold_destructive(allow_overwrite)
-    if not withheld.has_pending:
+    undeclared = changes.undeclared_destructive_changes(allow_overwrite)
+    if not undeclared:
         return
-    console_err.print(f"[red]Refusing to overwrite or remove {', '.join(withheld.destructive_changes)}.[/red]")
+    console_err.print(f"[red]Refusing to overwrite or remove {', '.join(undeclared)}.[/red]")
     console_err.print(
         "Nothing was written. Re-run with --force to take every value from the metadata, "
         "--allow-overwrite to name what may be replaced, or --ignore-field to leave it alone."
@@ -1971,7 +1975,7 @@ def _fetch_metadata_json_from_archives(
     return found
 
 
-def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
+def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     current_submission: Submission,
     raw_json: str,
     db_service: SubmissionDb,
@@ -1985,13 +1989,13 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
     as ``grzctl db submission populate`` so that every derived field (not only
     *submission_size* and *submission_metadata*) is kept consistent, donor records are
-    synchronised, the case link is resolved and committed (``"case_id"`` in
+    synchronised, the case link is resolved and committed (:data:`CASE_LINK_KEY` in
     *ignore_fields* disables that), and already-up-to-date submissions are detected
     without a write.
 
-    When *force* is False, destructive changes (see
-    :attr:`SubmissionChangeSet.destructive_changes`) are held back instead of committed,
-    preserving manually-corrected values.
+    The submission is written whole or not at all. Without *force*, a destructive change that
+    *allow_overwrite* does not name skips it and preserves every manually-corrected value it
+    holds. The run carries on to the next submission either way.
 
     :param raw_json: The metadata.json content, from the one archive that holds it.
     """
@@ -2035,25 +2039,13 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
         return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved)
 
     # Filling a NULL destroys nothing, so it is always written. Replacing or removing a stored value
-    # needs saying so: --force permits every such change, --allow-overwrite only the fields it names,
-    # and anything else is held back and reported.
-    if not force:
-        changes, withheld = changes.withhold_destructive(allow_overwrite)
-        # --allow-overwrite cannot name the case link, see _ALLOW_OVERWRITE_CHOICES. Replacing one
-        # would undo a deliberate case relink, so a held-back link holds the whole submission back.
-        if withheld.case_link is not None:
-            console_err.print(
-                f"[dim]  {submission_id}: would overwrite {', '.join(withheld.destructive_changes)}. "
-                "A changed case link skips the whole submission (use --force to overwrite).[/dim]"
-            )
-            return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
-        if withheld.has_pending:
-            console_err.print(
-                f"[dim]  {submission_id}: not overwriting {', '.join(withheld.destructive_changes)} "
-                f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
-            )
-
-    if not changes.has_pending:
+    # needs saying so, with --force or --allow-overwrite. One that nobody asked for skips the
+    # submission whole: a row the run half-updated is harder to reason about than one it left alone.
+    if not force and (undeclared := changes.undeclared_destructive_changes(allow_overwrite)):
+        console_err.print(
+            f"[dim]  {submission_id}: would overwrite {', '.join(undeclared)}, skipping the whole "
+            f"submission (use --force for all, or --allow-overwrite for named fields).[/dim]"
+        )
         return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
 
     if dry_run:

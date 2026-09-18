@@ -124,9 +124,9 @@ grzctl db case delete 7
 
 ## Populate and backfill
 
-`populate` and `backfill` resolve the case from the metadata and write the link like any other missing value. Two rules differ from ordinary columns:
+`populate` and `backfill` resolve the case from the metadata and write the link like any other missing value. Three rules differ from ordinary columns:
 
-- `--allow-overwrite` cannot name the case link. Replacing an existing link would undo a deliberate `db case relink`, so it holds the whole submission back until `--force` is passed.
+- `--allow-overwrite` cannot name the case link, so replacing one takes `--force`. Undoing a deliberate `db case relink` should not ride along with a field overwrite.
 - `--ignore-field case_id` skips case resolution altogether.
 - `grzctl process` skips it by itself once a submission has a link, so a rerun after `db case relink` keeps the repair. The duplicate initial check then asks about the linked case, not about the metadata key.
 
