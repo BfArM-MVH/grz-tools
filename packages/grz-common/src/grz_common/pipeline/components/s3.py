@@ -58,6 +58,8 @@ class S3Downloader(ReadStream):
     """Reading from S3 is the Source of the pipeline."""
 
     def __init__(self, s3_client: Any, bucket: str, key: str):
+        # Base first: a stage that raises before it runs is still finalized, and finalizing closes.
+        super().__init__()
         try:
             self.response = s3_client.get_object(Bucket=bucket, Key=key)
         except ClientError as e:
@@ -65,7 +67,7 @@ class S3Downloader(ReadStream):
                 raise FileNotFoundError(f"s3://{bucket}/{key} does not exist") from e
             raise
         # S3 Body is already a buffered stream, but we wrap it to be Pipeable
-        super().__init__(self.response["Body"])
+        self._source = self.response["Body"]
         self.length: int = self.response.get("ContentLength", 0)
 
     def read(self, size: int | None = -1) -> bytes:

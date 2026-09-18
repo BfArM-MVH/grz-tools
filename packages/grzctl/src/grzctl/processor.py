@@ -3,7 +3,7 @@ import logging
 import subprocess
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -12,7 +12,15 @@ from typing import TYPE_CHECKING, Any
 from crypt4gh.keys import get_public_key
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.models.base import get_secret_value
-from grz_common.pipeline.components import DataValidationError, DevNullSink, ObserverWithMetrics, Tee, TqdmObserver
+from grz_common.pipeline.components import (
+    DataValidationError,
+    DevNullSink,
+    ObserverWithMetrics,
+    PipelineError,
+    Tee,
+    TqdmObserver,
+    WriteStream,
+)
 from grz_common.pipeline.components.crypt4gh import Crypt4GHDecryptor, Crypt4GHEncryptor
 from grz_common.pipeline.components.perf import StreamMetricsRegistry
 from grz_common.pipeline.components.s3 import S3Downloader, S3MultipartUploader, calculate_s3_part_size, head_object
@@ -42,6 +50,17 @@ class PipelineValidationError(Exception):
     """Raised when processing a submission's files fails."""
 
     pass
+
+
+def _close_undriven(stage: WriteStream) -> None:
+    """Close a stage that the pipeline may never have driven, ignoring what it reports.
+
+    Closing joins the validator's thread, which is the point of calling it. A stage the pipeline
+    drove was closed there already and reports nothing new. A stage it never reached saw no data,
+    so what it has to report is about that rather than about the file.
+    """
+    with suppress(PipelineError):
+        stage.close()
 
 
 log = logging.getLogger(__name__)
@@ -361,13 +380,6 @@ class FilePipelineExecutor:
         """
         metrics = StreamMetricsRegistry()
 
-        checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
-        format_validator = self.build_format_validator(file_meta=file_meta, threshold=threshold) if stage else None
-
-        validation_chain = checksum_validator | metrics.measure("3a_Checksum")
-        if format_validator:
-            validation_chain |= format_validator | metrics.measure("3b_Format")
-
         with (
             tqdm(  # type: ignore[call-overload]
                 total=file_meta.file_size_in_bytes,
@@ -380,6 +392,17 @@ class FilePipelineExecutor:
         ):
             # download and decrypt
             source = S3Downloader(self._source_s3, self._source_bucket, inbox_key)
+
+            # A validator runs a thread from the moment it is built, so it is built once the
+            # download has opened and registered for closing straight away. Leaving the run before
+            # the pipeline drives it would otherwise hold that thread until the process exits.
+            checksum_validator = ChecksumValidator(expected_checksum=file_meta.file_checksum)
+            format_validator = self.build_format_validator(file_meta=file_meta, threshold=threshold) if stage else None
+            validation_chain = checksum_validator | metrics.measure("3a_Checksum")
+            if format_validator:
+                validation_chain |= format_validator | metrics.measure("3b_Format")
+            stack.callback(_close_undriven, validation_chain)
+
             pipeline = (
                 source
                 | metrics.measure("1_Source")

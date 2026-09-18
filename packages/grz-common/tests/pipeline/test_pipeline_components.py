@@ -2,6 +2,7 @@
 
 import array
 import contextlib
+import gc
 import gzip
 import hashlib
 import io
@@ -10,6 +11,7 @@ from io import BytesIO
 
 import grz_check
 import pytest
+from botocore.exceptions import ClientError
 from grz_common.pipeline.components import (
     DataValidationError,
     Observer,
@@ -18,6 +20,7 @@ from grz_common.pipeline.components import (
     Tee,
     Transformer,
 )
+from grz_common.pipeline.components.s3 import S3Downloader
 from grz_common.pipeline.components.validation import ChecksumValidator, FastqValidator
 
 
@@ -260,6 +263,23 @@ class TestCloseErrors:
 
         with pytest.raises(OSError, match="source failed"):
             pipeline >> BytesIO()
+
+
+class TestFailedConstruction:
+    """A stage that cannot be built must leave nothing behind for the collector to trip over."""
+
+    @pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+    def test_a_download_that_cannot_open_is_finalized_quietly(self):
+        """S3Downloader runs its base constructor first, so the half-built stage still closes."""
+
+        class _MissingObject:
+            def get_object(self, **_kwargs):
+                raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+
+        with pytest.raises(FileNotFoundError):
+            S3Downloader(_MissingObject(), "bucket", "key")
+
+        gc.collect()
 
 
 class TestPushToPullAdapter:
