@@ -5,7 +5,7 @@ import logging
 import math
 import random
 import re
-from collections.abc import Generator, Sequence
+from collections.abc import Container, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum as PyEnum
@@ -2430,14 +2430,21 @@ class SubmissionDb:
         session: Session,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
+        ignore_fields: set[str],
     ) -> DonorsDiffCollection:
         """Diff all donors in *metadata* against the current database state.
 
         :param session: The transaction :meth:`diff` runs in.
         :param submission_id: Submission ID to look up donors for.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
-        :returns: A fully populated :class:`DonorDiff`.
+        :param ignore_fields: Field names skipped during the comparison. :data:`DONORS_KEY`
+            skips the donors whole, so the stored rows stay as they are.
+        :returns: A fully populated :class:`DonorDiff`, or an empty collection when the donors
+            are ignored.
         """
+        if DONORS_KEY in ignore_fields:
+            return DonorsDiffCollection()
+
         metadata_submission_date = metadata.submission.submission_date
         if isinstance(metadata_submission_date, datetime.datetime):
             metadata_submission_date = metadata_submission_date.date()
@@ -2485,7 +2492,8 @@ class SubmissionDb:
         :param submission_uploaded_date: The date when the submission process was finished.
             If None, the field will not be included in the comparison.
         :param ignore_fields: Optional set of field names to be ignored during the metadata
-            comparison. ``"case_id"`` skips case-link resolution.
+            comparison. :data:`CASE_LINK_KEY` skips case-link resolution, :data:`DONORS_KEY`
+            leaves the stored donor rows as they are.
         :param psn: RKI pseudonym to resolve the case with. Nothing in *metadata* carries one, a
             psn being assigned in the tanG trade rather than sent by the submitter, so a caller
             that has one has to pass it. Whether it is read at all is the resolver's call:
@@ -2527,7 +2535,7 @@ class SubmissionDb:
 
             return SubmissionChangeSet(
                 fields=self._diff_metadata(current_submission, metadata, submission_uploaded_date, ignore_fields),
-                donors=self._diff_donors(session, submission_id, metadata),
+                donors=self._diff_donors(session, submission_id, metadata, ignore_fields or set()),
                 case_link=case_link,
                 case_link_error=case_link_error,
             )
@@ -2642,6 +2650,7 @@ class SubmissionDb:
         submission_date: datetime.date | None,
         *,
         force: bool = False,
+        allow_overwrite: Container[str] = frozenset(),
         on_missing: Literal["create", "error"] = "error",
         ignore_fields: set[str] | None = None,
         psn: str | None = None,
@@ -2651,8 +2660,8 @@ class SubmissionDb:
         Rejects redacted ``tan_g`` or missing/redacted ``local_case_id`` via
         :meth:`assert_metadata_not_redacted` unless the corresponding key
         (``"tan_g"`` or ``"local_case_id"``) is in ``ignore_fields``. Computes diffs
-        via :meth:`diff`, rejects destructive changes unless ``force``, and
-        commits via :meth:`commit_changes`. Operational progress is logged via
+        via :meth:`diff`, rejects destructive changes that ``force`` or ``allow_overwrite``
+        does not cover, and commits via :meth:`commit_changes`. Operational progress is logged via
         the module-level logger; callers configure verbosity through
         ``logging.getLogger("grz_db.models.submission")``.
 
@@ -2664,6 +2673,9 @@ class SubmissionDb:
         :param metadata: Parsed submission metadata.
         :param submission_date: S3 last-modified date of the metadata file, if known.
         :param force: If ``True``, allow destructive updates/deletes of existing fields.
+        :param allow_overwrite: What may be overwritten or removed without ``force``. See
+            :meth:`SubmissionChangeSet.undeclared_destructive_changes` for how it names a
+            field, the donors and the case link.
         :param on_missing: What to do when ``submission_id`` is not yet in the
             database. ``"error"`` (default) raises :class:`SubmissionNotFoundError`.
             ``"create"`` calls :meth:`add_submission` first and then proceeds; the
@@ -2676,7 +2688,8 @@ class SubmissionDb:
             ``on_missing`` is ``"error"``.
         :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
             and the corresponding key is not in ``ignore_fields``.
-        :raises RuntimeError: if pending changes are destructive and ``force`` is False.
+        :raises RuntimeError: if a destructive change is covered by neither ``force`` nor
+            ``allow_overwrite``. Nothing is written when it raises.
         :raises SubmissionTypeAlreadySetError: if the stored type is set and *metadata* has a
             different one, whatever ``force`` says.
         """
@@ -2693,10 +2706,11 @@ class SubmissionDb:
 
         changes = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields, psn=psn)
 
-        if not force and changes.has_pending_destructive:
+        undeclared = changes.undeclared_destructive_changes(allow_overwrite)
+        if not force and undeclared:
             raise RuntimeError(
                 f"Would update/delete existing submission data "
-                f"({', '.join(changes.destructive_changes)}) in the database, "
+                f"({', '.join(undeclared)}) in the database, "
                 f"but `force` not set. submission_id={submission_id!r}"
             )
 
