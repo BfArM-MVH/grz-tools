@@ -938,7 +938,9 @@ def update(  # noqa: C901, PLR0913, PLR0917
 
 # Exactly what SubmissionDb.modify_submission accepts. The epilog and the KEY choices both build
 # from this, so --help always advertises what the command accepts. SubmissionBase, not Submission:
-# the table model adds case_id, which `db case relink` sets. Same set as --allow-overwrite.
+# the table model adds case_id, which `db case relink` sets. --ignore-field and --allow-overwrite
+# extend it, each by the one key it takes beyond the columns. Sorted, so --help lists the choices
+# in the same order every run.
 _MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields)
 
 
@@ -978,10 +980,7 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
 _ignore_field_option = click.option(
     "--ignore-field",
     "ignore_field",
-    type=click.Choice(
-        [*(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), "case_id"],
-        case_sensitive=False,
-    ),
+    type=click.Choice([*_MODIFIABLE_SUBMISSION_KEYS, "case_id"], case_sensitive=False),
     help="Do not populate the given field from the metadata to the database. Can be specified multiple times. "
     "Passing --ignore-field case_id skips case resolution and linking.",
     multiple=True,
@@ -990,7 +989,7 @@ _ignore_field_option = click.option(
 #: What ``--allow-overwrite`` may name. ``"donors"`` releases every donor update and delete at once,
 #: since :meth:`SubmissionChangeSet.withhold_destructive` draws no finer line. The case link is
 #: absent on purpose: replacing one undoes a deliberate ``db case relink``, so it takes ``--force``.
-_ALLOW_OVERWRITE_CHOICES = [*(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), "donors"]
+_ALLOW_OVERWRITE_CHOICES = [*_MODIFIABLE_SUBMISSION_KEYS, "donors"]
 
 
 def _prepare_submission_console_table(changes: "SubmissionChangeSet") -> rich.console.RenderableType:
