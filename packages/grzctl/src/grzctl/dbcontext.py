@@ -47,8 +47,9 @@ class DbContext:
       transition still proceeds (no hard failure).
     - If the submission **does not exist** in the DB:
 
-      - and ``None`` is in ``expected_prior_states``: the submission is
-        automatically created and the transition proceeds.
+      - for the entry states (``PROCESSING`` via ``grzctl process`` and
+        ``UPLOADING`` via ``grzctl upload``) the submission is automatically
+        created and the transition proceeds;
       - otherwise: ``SubmissionNotFoundError`` is raised immediately.
 
     Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError``) are
@@ -72,6 +73,11 @@ class DbContext:
     :param enabled: Set to ``False`` to skip all DB interactions (useful when no DB
         is configured).
     """
+
+    #: States at which a brand-new submission may be created: ``grzctl process`` starts
+    #: the streaming pipeline, ``grzctl upload`` the manual step-by-step flow.  These are
+    #: explicit because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
+    _SUBMISSION_ENTRY_STATES = frozenset({SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING})
 
     def __init__(
         self,
@@ -103,16 +109,17 @@ class DbContext:
 
     @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
-        # determine expected prior state based on order of enums
+        """Return the states the submission may be in before transitioning to ``start_state``.
+
+        The entry states start a new submission, so they expect no prior state at all.
+        Every other transition expects the previous ``SubmissionStateEnum`` member,
+        whose order mirrors the pipeline order.
+        """
+        if self.start_state in self._SUBMISSION_ENTRY_STATES:
+            return {None}
         members = list(SubmissionStateEnum)
         start_index = members.index(self.start_state)
-
-        if start_index == 0:
-            # first state in the enum, no prior state expected
-            return {None}
-        else:
-            # return previous state in the enum as expected prior state
-            return {members[start_index - 1]}
+        return {members[start_index - 1]}
 
     def __enter__(self):
         """Initializes DB connection, checks prerequisites, and sets the initial state."""
@@ -238,6 +245,11 @@ class DbContext:
                 f"Submission {self.submission_id} is currently in state '{current_state}'. "
                 f"Expected any of '{self.expected_prior_states}' before updating to '{self.start_state.name}'."
             )
+
+        # The entry states expect no prior state ({None}), and no state-log entry has
+        # state None, so the history check below would always warn for a new submission.
+        if None in self.expected_prior_states:
+            return
 
         history = submission.states
         found_in_history = any(entry.state in self.expected_prior_states for entry in history)

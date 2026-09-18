@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 import traceback
-from collections import Counter, namedtuple
+from collections import Counter
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
@@ -21,7 +21,8 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from cryptography.hazmat.primitives.serialization import load_ssh_public_key
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes, load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.models.base import get_secret_value
@@ -44,7 +45,6 @@ from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
-    DiffState,
     FailureReasonEnum,
     FieldDiff,
     Submission,
@@ -141,6 +141,35 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
+def _read_known_public_keys(path: str | Path) -> dict[str, list[SSHPublicKeyTypes]]:
+    """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
+
+    The comment names the key's owner, and signature checks look keys up by it. So the comment
+    is required, and it may contain spaces. Several keys may share a comment, for example across
+    a key rotation, and all of them are kept. Blank lines and lines starting with ``#`` are skipped.
+
+    :param path: Path to the known public keys file.
+    :returns: The public keys, grouped by their comment in file order.
+    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
+    """
+    public_keys: dict[str, list[SSHPublicKeyTypes]] = {}
+    with open(path) as f:
+        for line_number, line in enumerate(f, start=1):
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            parts = entry.split(maxsplit=2)
+            if len(parts) < 3:
+                raise DatabaseConfigurationError(
+                    f"{path}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
+                )
+            try:
+                public_keys.setdefault(parts[2], []).append(load_ssh_public_key(entry.encode()))
+            except (ValueError, UnsupportedAlgorithm) as e:
+                raise DatabaseConfigurationError(f"{path}:{line_number}: cannot load the public key: {e}") from e
+    return public_keys
+
+
 @click.group(help="Database operations")
 @grzctl_configuration
 @click.pass_context
@@ -165,14 +194,9 @@ def db(
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
-    KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])
-    with open(db_config.known_public_keys) as f:
-        public_key_list = list(map(lambda v: KnownKeyEntry(*v), map(lambda s: s.strip().split(), f.readlines())))
-        public_keys = {
-            comment: load_ssh_public_key(f"{fmt}\t{key}\t{comment}".encode()) for fmt, key, comment in public_key_list
-        }
-        for comment in public_keys:
-            log.debug(f"Found public key labeled '{comment}'")
+    public_keys = _read_known_public_keys(db_config.known_public_keys)
+    for comment, keys in public_keys.items():
+        log.debug(f"Found {len(keys)} public key(s) labeled '{comment}'")
 
     author = Author(
         name=author_name,
@@ -1862,17 +1886,38 @@ class _BackfillOutcome(NamedTuple):
     link_unresolved: bool = False
 
 
+def _fetch_metadata_json_from_archives(
+    submission_id: str, archive_targets: list[tuple[str, str, Any]]
+) -> dict[str, str] | None:
+    """Fetch the metadata.json for *submission_id* from every archive.
+
+    :param submission_id: Submission to fetch.
+    :param archive_targets: ``(label, bucket, s3_client)`` per archive.
+    :returns: The raw content per label of each archive that holds the file, or None when an
+        archive could not be read. An unread archive might hold a second copy.
+    """
+    found: dict[str, str] = {}
+    for label, bucket, client in archive_targets:
+        try:
+            raw_json = _fetch_metadata_json(client, bucket, submission_id)
+        except Exception as exc:
+            console_err.print(f"[red]  {submission_id}: S3 error in {label} archive: {exc}[/red]")
+            return None
+        if raw_json is not None:
+            found[label] = raw_json
+    return found
+
+
 def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     current_submission: Submission,
-    s3_client: Any,
-    bucket: str,
+    raw_json: str,
     db_service: SubmissionDb,
     dry_run: bool,
     force: bool,
     ignore_fields: set[str],
     allow_overwrite: frozenset[str] = frozenset(),
 ) -> _BackfillOutcome:
-    """Fetch metadata.json from S3 for one submission and commit a diff to the database.
+    """Commit the diff between one submission's metadata.json and the database.
 
     Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
     as ``grzctl db submission populate`` so that every derived field (not only
@@ -1881,23 +1926,13 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     *ignore_fields* disables that), and already-up-to-date submissions are detected
     without a write.
 
-    When *force* is False, a destructive diff (existing non-NULL field would change)
-    is skipped instead of committed, preserving manually-corrected values. The caller
-    is expected to pre-filter already-populated rows so re-runs do not re-pay the S3
-    network cost for them.
+    When *force* is False, destructive changes (see
+    :attr:`SubmissionChangeSet.destructive_changes`) are held back instead of committed,
+    preserving manually-corrected values.
+
+    :param raw_json: The metadata.json content, from the one archive that holds it.
     """
     submission_id = current_submission.id
-
-    try:
-        raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
-    except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: S3 error: {exc}[/red]")
-        return _BackfillOutcome(_BackfillResult.ERROR)
-
-    if raw_json is None:
-        # this is expected for submissions residing in the other consent bucket, so we do not explicitly log that here
-        # but still report them in the final stats
-        return _BackfillOutcome(_BackfillResult.NOT_FOUND)
 
     try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
@@ -1936,26 +1971,25 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
         return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved)
 
-    # Filling a field that was NULL destroys nothing, so it is always written. Replacing one that
-    # already has a value needs saying so: --force permits every such overwrite, --allow-overwrite
-    # only the fields it names, and anything else is held back and reported.
-    allowed = {diff.key for diff in changes.fields.pending} if force else allow_overwrite
-    changes.fields, withheld = changes.fields.withhold_destructive(allowed)
-    if withheld:
-        console_err.print(
-            f"[dim]  {submission_id}: not overwriting {', '.join(diff.key for diff in withheld)} "
-            f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
-        )
-
-    # --allow-overwrite is built from SubmissionBase, which has no case_id, so it cannot name the
-    # case link. Replacing one would undo a deliberate case relink, so an unpermitted change holds
-    # the whole submission back.
-    if not force and changes.case_link is not None and changes.case_link.state is DiffState.UPDATED:
-        console_err.print(
-            f"[dim]  {submission_id}: would overwrite the case link (case {changes.case_link.before}), "
-            "skipping (use --force to overwrite).[/dim]"
-        )
-        return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
+    # Filling a NULL destroys nothing, so it is always written. Replacing or removing a stored value
+    # needs saying so: --force permits every such change, --allow-overwrite only the fields it names,
+    # and anything else is held back and reported.
+    if not force:
+        changes, withheld = changes.withhold_destructive(allow_overwrite)
+        # --allow-overwrite is built from SubmissionBase, which has no case_id, so it cannot name the
+        # case link. Replacing one would undo a deliberate case relink, so a held-back link holds the
+        # whole submission back.
+        if withheld.case_link is not None:
+            console_err.print(
+                f"[dim]  {submission_id}: would overwrite {', '.join(withheld.destructive_changes)}. "
+                "A changed case link skips the whole submission (use --force to overwrite).[/dim]"
+            )
+            return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
+        if withheld.has_pending:
+            console_err.print(
+                f"[dim]  {submission_id}: not overwriting {', '.join(withheld.destructive_changes)} "
+                f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
+            )
 
     if not changes.has_pending:
         return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
@@ -1985,8 +2019,9 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
 @click.option(
     "--force/--no-force",
     default=False,
-    help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
-    "Without this flag, such fields are reported and left alone while the rest is still written.",
+    help="Overwrite or remove stored values that differ from metadata.json (destructive changes): "
+    "non-NULL fields, donors, and the case link. Without this flag, such changes are reported and "
+    "left alone while the rest is still written. A changed case link holds back the whole submission.",
 )
 @click.option(
     "--allow-overwrite",
@@ -2041,8 +2076,13 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     any other overwrite is reported and held back, so a submission is updated in part
     rather than skipped entirely.
 
-    Both the consented and non-consented archive buckets are always scanned.
-    If a submission's metadata.json is found in both, an error is raised.
+    A donor that is missing in the database is always added. Updating or deleting a stored
+    donor needs --force, which --allow-overwrite cannot grant. Without it, only the donor
+    changes are held back.
+
+    Both the consented and non-consented archive buckets are always scanned, before
+    anything is written. A submission whose metadata.json is found in both, or whose
+    lookup fails in either, is reported as an error and left unchanged.
 
     The case link is resolved and written like any other missing value, but --allow-overwrite
     cannot name it, so replacing an existing link holds the whole submission back until
@@ -2105,21 +2145,13 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     links_unresolved = 0
 
     for submission in tqdm(candidates):
-        # fetch from archive targets
-        results: dict[str, _BackfillOutcome] = {}
-        for label, bucket, client in archive_targets:
-            results[label] = _backfill_submission(
-                submission,
-                client,
-                bucket,
-                db_service,
-                dry_run,
-                force,
-                ignore_fields,
-                frozenset(allow_overwrite),
-            )
+        # Read both archives before writing anything. A metadata.json in both is an error, and
+        # committing the first copy found would already have changed the row.
+        found_in = _fetch_metadata_json_from_archives(submission.id, archive_targets)
 
-        found_in = [label for label, res in results.items() if res.status != _BackfillResult.NOT_FOUND]
+        if found_in is None:
+            counts[_BackfillResult.ERROR] += 1
+            continue
 
         if len(found_in) > 1:
             console_err.print(
@@ -2132,9 +2164,18 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             counts[_BackfillResult.NOT_FOUND] += 1
             continue
 
-        actual_archive = found_in[0]  # "consented" or "non_consented"
-        counts[results[actual_archive].status] += 1
-        links_unresolved += results[actual_archive].link_unresolved
+        actual_archive = next(iter(found_in))  # "consented" or "non_consented"
+        outcome = _backfill_submission(
+            submission,
+            found_in[actual_archive],
+            db_service,
+            dry_run,
+            force,
+            ignore_fields,
+            frozenset(allow_overwrite),
+        )
+        counts[outcome.status] += 1
+        links_unresolved += outcome.link_unresolved
 
         # check DB `consented` vs actual archive
         if submission.consented is not None:

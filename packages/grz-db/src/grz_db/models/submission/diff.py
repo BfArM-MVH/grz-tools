@@ -329,3 +329,48 @@ class SubmissionChangeSet:
     def has_pending_destructive(self) -> bool:
         """True if committing would overwrite or remove any existing database value."""
         return bool(self.destructive_changes)
+
+    def withhold_destructive(self, allowed: Container[str]) -> tuple[SubmissionChangeSet, SubmissionChangeSet]:
+        """Split off the changes that would overwrite or remove a stored value, unless ``allowed`` names them.
+
+        Draws the same line as :attr:`destructive_changes`. Additive changes always stay: a
+        filled field, a new donor, and a first case link destroy nothing.
+
+        :param allowed: What may be overwritten or removed. Fields match by key, updated and
+            deleted donors as ``"donors"``, and a changed case link as ``"case_id"``.
+        :returns: A change set with only what may be written, and one with what was held back.
+            The second one's :attr:`destructive_changes` names what was held back.
+        """
+        fields, withheld_field_diffs = self.fields.withhold_destructive(allowed)
+        withheld_fields = SubmissionDiffCollection()
+        for field_diff in withheld_field_diffs:
+            withheld_fields.append(field_diff)
+
+        if "donors" in allowed:
+            donors = DonorsDiffCollection(
+                added=list(self.donors.added),
+                updated=list(self.donors.updated),
+                deleted=list(self.donors.deleted),
+                unchanged=list(self.donors.unchanged),
+            )
+            withheld_donors = DonorsDiffCollection()
+        else:
+            donors = DonorsDiffCollection(added=list(self.donors.added), unchanged=list(self.donors.unchanged))
+            withheld_donors = DonorsDiffCollection(updated=list(self.donors.updated), deleted=list(self.donors.deleted))
+
+        link_withheld = (
+            self.case_link is not None and self.case_link.state is DiffState.UPDATED and "case_id" not in allowed
+        )
+
+        committable = SubmissionChangeSet(
+            fields=fields,
+            donors=donors,
+            case_link=None if link_withheld else self.case_link,
+            case_link_error=self.case_link_error,
+        )
+        withheld = SubmissionChangeSet(
+            fields=withheld_fields,
+            donors=withheld_donors,
+            case_link=self.case_link if link_withheld else None,
+        )
+        return committable, withheld

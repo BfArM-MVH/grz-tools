@@ -1,8 +1,9 @@
 # Backfill unit tests, see .vbw-planning/phases/02-implement-grzctl-db-backfill-command/02-02-PLAN.md
-"""Unit tests for `_backfill_submission`.
+"""Tests for `grzctl db backfill`.
 
-The tests target `_backfill_submission` directly with a real SubmissionDb on every supported
-backend and a moto-mocked S3. Live in `grzctl/tests/` (not `grz-db/tests/`) because `grzctl`
+Most tests target `_backfill_submission` directly with a real SubmissionDb on every supported
+backend. The tests at the end run the command against a moto-mocked S3 with both archives.
+Live in `grzctl/tests/` (not `grz-db/tests/`) because `grzctl`
 is not a dev/test dependency of `grz-db`, but `moto[s3]`, `pytest-postgresql`, and
 `grz-pydantic-models-testing` are all in `grzctl`'s [test] dependency group.
 """
@@ -11,21 +12,27 @@ import datetime
 import importlib.resources
 import json
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import boto3
+import click.testing
+import grzctl.cli
 import pytest
 import sqlalchemy
 from grz_db.models.submission import Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
-from grzctl.commands.db.cli import _backfill_submission, _BackfillOutcome, _BackfillResult
+from grzctl.commands.db.cli import (
+    _backfill_submission,
+    _BackfillOutcome,
+    _BackfillResult,
+    _fetch_metadata_json_from_archives,
+)
 from moto import mock_aws
 
-BUCKET = "test-backfill-bucket"
-# "us-east-1" is just a placeholder for the moto mock -- no real AWS or region is involved.
-# We pick it specifically because it's S3's default region, so create_bucket() works without
-# an extra CreateBucketConfiguration/LocationConstraint argument.
+#: The archive bucket names that ``tests/cli/conftest.py`` configures.
+ARCHIVE_BUCKETS = ("consented", "non_consented")
 REGION = "us-east-1"
 DIFFERENT_TAN_G = "b" * 64
 DIFFERENT_LOCAL_CASE_ID = "different-local-case-id"
@@ -47,22 +54,24 @@ def submission_id(metadata: GrzSubmissionMetadata) -> str:
 
 @pytest.fixture
 def s3_client_mock() -> Iterator[Any]:
-    """A moto-backed S3 client with a pre-created test bucket."""
+    """A moto-backed S3 client without buckets, so each test decides which archives exist."""
     with mock_aws():
-        client = boto3.client("s3", region_name=REGION)
-        client.create_bucket(Bucket=BUCKET)
-        yield client
+        yield boto3.client("s3", region_name=REGION)
 
 
-def _put_metadata(s3_client: Any, submission_id: str, metadata: GrzSubmissionMetadata) -> None:
-    """Write *metadata* unredacted, unlike archival, which redacts first.
+def _metadata_json(metadata: GrzSubmissionMetadata) -> str:
+    """Serialize *metadata* unredacted, unlike archival, which redacts first.
 
-    For the redacted shape backfill actually reads from the archive, use ``_archived`` instead.
+    For the redacted shape backfill actually reads from the archive, pass ``_archived(metadata)``.
     """
+    return json.dumps(metadata.get_raw_dict())
+
+
+def _put_metadata(s3_client: Any, bucket: str, submission_id: str, metadata: GrzSubmissionMetadata) -> None:
     s3_client.put_object(
-        Bucket=BUCKET,
+        Bucket=bucket,
         Key=f"{submission_id}/metadata/metadata.json",
-        Body=json.dumps(metadata.get_raw_dict()).encode("utf-8"),
+        Body=_metadata_json(metadata).encode("utf-8"),
     )
 
 
@@ -73,19 +82,15 @@ def _populate_full_row(db: SubmissionDb, submission_id: str, metadata: GrzSubmis
     return db.get_submission(submission_id)
 
 
-def test_backfill_submission_happy_path(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
-) -> None:
+def test_backfill_submission_happy_path(db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str) -> None:
     """A NULL row plus valid metadata.json in S3 yields one update with size + redacted metadata persisted."""
     current = db.add_submission(submission_id)
     assert current.submission_size is None
     assert current.submission_metadata is None
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -98,43 +103,13 @@ def test_backfill_submission_happy_path(
     assert persisted.submission_metadata == metadata.to_redacted_dict()
 
 
-def test_backfill_submission_returns_not_found_when_metadata_missing_in_s3(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
-) -> None:
-    """When metadata.json does not exist in S3, the submission is recorded as NOT_FOUND and the row stays NULL."""
-    current = db.add_submission(submission_id)
-
-    result = _backfill_submission(
-        current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
-        db_service=db,
-        dry_run=False,
-        force=False,
-        ignore_fields=set(),
-    )
-
-    assert result.status == _BackfillResult.NOT_FOUND
-    persisted = db.get_submission(submission_id)
-    assert persisted.submission_size is None
-    assert persisted.submission_metadata is None
-
-
-def test_backfill_submission_records_error_on_invalid_json(
-    db: SubmissionDb, s3_client_mock: Any, submission_id: str
-) -> None:
+def test_backfill_submission_records_error_on_invalid_json(db: SubmissionDb, submission_id: str) -> None:
     """A metadata.json that fails model_validate_json is recorded under errors and the row stays NULL."""
     current = db.add_submission(submission_id)
-    s3_client_mock.put_object(
-        Bucket=BUCKET,
-        Key=f"{submission_id}/metadata/metadata.json",
-        Body=b"{not json",
-    )
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json="{not json",
         db_service=db,
         dry_run=False,
         force=False,
@@ -148,16 +123,14 @@ def test_backfill_submission_records_error_on_invalid_json(
 
 
 def test_backfill_submission_returns_up_to_date_when_no_pending_diff(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """With force=True against an already-in-sync row, the diff path runs and reports UP_TO_DATE (no updates)."""
     current = _populate_full_row(db, submission_id, metadata)
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=True,
@@ -168,7 +141,7 @@ def test_backfill_submission_returns_up_to_date_when_no_pending_diff(
 
 
 def test_backfill_submission_holds_back_a_destructive_change_without_force(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """Without --force, a differing non-NULL field is left alone while the missing ones are filled.
 
@@ -180,12 +153,10 @@ def test_backfill_submission_holds_back_a_destructive_change_without_force(
     db.update_submission(current)
     current = db.get_submission(submission_id)
     assert current.submission_metadata is None, "the fixture must leave something additive to write"
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -199,17 +170,15 @@ def test_backfill_submission_holds_back_a_destructive_change_without_force(
 
 
 def test_backfill_submission_returns_would_overwrite_when_only_overwrites_are_pending(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """When every pending change is an overwrite and none is permitted, nothing is written."""
     db.add_submission(submission_id)
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     # bring the row up to date first, so the only difference afterwards is the one below
     _backfill_submission(
         current_submission=db.get_submission(submission_id),
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=True,
@@ -221,8 +190,7 @@ def test_backfill_submission_returns_would_overwrite_when_only_overwrites_are_pe
 
     result = _backfill_submission(
         current_submission=db.get_submission(submission_id),
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -234,19 +202,17 @@ def test_backfill_submission_returns_would_overwrite_when_only_overwrites_are_pe
 
 
 def test_backfill_submission_force_applies_destructive_changes(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """With --force, a submission whose non-NULL field differs from S3 is updated even though it overwrites data."""
     current = db.add_submission(submission_id)
     current.submission_size = 1  # non-NULL value that will differ from metadata
     db.update_submission(current)
     current = db.get_submission(submission_id)
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=True,
@@ -260,7 +226,7 @@ def test_backfill_submission_force_applies_destructive_changes(
 
 
 def test_backfill_force_reconciles_against_an_unredacted_copy(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """An unredacted copy is authoritative, so --force reconciles the database against it.
 
@@ -275,12 +241,10 @@ def test_backfill_force_reconciles_against_an_unredacted_copy(
     assert metadata.submission.tan_g != DIFFERENT_TAN_G
     assert metadata.submission.local_case_id != DIFFERENT_LOCAL_CASE_ID
     assert metadata.submission.submission_date != DIFFERENT_DATE
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=True,
@@ -298,7 +262,7 @@ def test_backfill_force_reconciles_against_an_unredacted_copy(
 
 
 def test_backfill_leaves_a_missing_upload_date_alone(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """A NULL upload date stays NULL, even with --force.
 
@@ -311,12 +275,10 @@ def test_backfill_leaves_a_missing_upload_date_alone(
     current = db.add_submission(submission_id)
     assert current.submission_uploaded_date is None
     assert metadata.submission.submission_date is not None
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=True,
@@ -328,7 +290,7 @@ def test_backfill_leaves_a_missing_upload_date_alone(
 
 
 def test_backfill_does_not_write_an_upload_date_from_a_stale_snapshot(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """A row corrected mid-run keeps the correction, not the value the run started with.
 
@@ -345,12 +307,10 @@ def test_backfill_does_not_write_an_upload_date_from_a_stale_snapshot(
 
     # the operator clears the column while the run is in flight
     db.modify_submission(submission_id, "submission_uploaded_date", None)
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=stale,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=True,
@@ -362,7 +322,7 @@ def test_backfill_does_not_write_an_upload_date_from_a_stale_snapshot(
 
 
 def test_backfill_submission_reads_a_consent_datetime_without_a_timezone(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """A submission accepted before FHIR's timezone rule was enforced is read, not skipped.
 
@@ -373,16 +333,10 @@ def test_backfill_submission_reads_a_consent_datetime_without_a_timezone(
     raw = json.loads(metadata.model_dump_json(by_alias=True))
     scope = raw["donors"][0]["researchConsents"][0]["scope"]
     scope["dateTime"] = "2020-09-01T14:37:22"  # as an older submission would have stated it
-    s3_client_mock.put_object(
-        Bucket=BUCKET,
-        Key=f"{submission_id}/metadata/metadata.json",
-        Body=json.dumps(raw).encode("utf-8"),
-    )
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=json.dumps(raw),
         db_service=db,
         dry_run=False,
         force=False,
@@ -396,7 +350,7 @@ def test_backfill_submission_reads_a_consent_datetime_without_a_timezone(
 
 
 def test_backfill_submission_allow_overwrite_writes_only_the_named_field(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """--allow-overwrite overwrites the field it names and holds every other overwrite back.
 
@@ -408,12 +362,10 @@ def test_backfill_submission_allow_overwrite_writes_only_the_named_field(
     current.submission_metadata = {"stale": True}  # non-NULL, differs, and IS allowed to change
     db.update_submission(current)
     current = db.get_submission(submission_id)
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -428,18 +380,16 @@ def test_backfill_submission_allow_overwrite_writes_only_the_named_field(
 
 
 def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothing_is_writable(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """When every pending change is an overwrite the allow-list does not cover, nothing is written."""
     db.add_submission(submission_id)
-    _put_metadata(s3_client_mock, submission_id, metadata)
 
     # Bring the row fully up to date first, so the only pending change afterwards is the one below.
     # A freshly added submission still has many NULL columns, and filling those is additive.
     _backfill_submission(
         current_submission=db.get_submission(submission_id),
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=True,
@@ -452,8 +402,7 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
 
     result = _backfill_submission(
         current_submission=db.get_submission(submission_id),
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -466,16 +415,15 @@ def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothin
 
 
 def test_backfill_never_overwrites_stored_values_with_placeholders(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """A redacted archive copy is restored from the row first, so the stored values survive."""
     db.add_submission(submission_id)
     db.modify_submission(submission_id, "tan_g", DIFFERENT_TAN_G)
     db.modify_submission(submission_id, "local_case_id", DIFFERENT_LOCAL_CASE_ID)
     current = db.get_submission(submission_id)
-    _put_metadata(s3_client_mock, submission_id, _archived(metadata))
 
-    assert _run_backfill(db, s3_client_mock, current).status == _BackfillResult.UPDATED
+    assert _run_backfill(db, _archived(metadata), current).status == _BackfillResult.UPDATED
 
     persisted = db.get_submission(submission_id)
     assert persisted.tan_g == DIFFERENT_TAN_G
@@ -490,9 +438,7 @@ def _as_initial(metadata: GrzSubmissionMetadata) -> GrzSubmissionMetadata:
     return GrzSubmissionMetadata.model_validate(raw)
 
 
-def test_backfill_submission_links_case_by_default(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata
-) -> None:
+def test_backfill_submission_links_case_by_default(db: SubmissionDb, metadata: GrzSubmissionMetadata) -> None:
     """Backfill links submissions to cases by default (skip via --ignore-field case_id)."""
     initial_metadata = _as_initial(metadata)
     sid = initial_metadata.submission_id
@@ -500,12 +446,10 @@ def test_backfill_submission_links_case_by_default(
     db.commit_changes(sid, db.diff(sid, initial_metadata, submission_uploaded_date=None, ignore_fields={"case_id"}))
     current = db.get_submission(sid)
     assert current.case_id is None
-    _put_metadata(s3_client_mock, sid, initial_metadata)
 
     result = _backfill_submission(
         current_submission=current,
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(initial_metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -516,8 +460,7 @@ def test_backfill_submission_links_case_by_default(
 
     result = _backfill_submission(
         current_submission=db.get_submission(sid),
-        s3_client=s3_client_mock,
-        bucket=BUCKET,
+        raw_json=_metadata_json(initial_metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -543,11 +486,10 @@ def _archived(metadata: GrzSubmissionMetadata) -> GrzSubmissionMetadata:
     return GrzSubmissionMetadata.model_validate(raw)
 
 
-def _run_backfill(db: SubmissionDb, s3_client: Any, current: Submission) -> _BackfillOutcome:
+def _run_backfill(db: SubmissionDb, metadata: GrzSubmissionMetadata, current: Submission) -> _BackfillOutcome:
     return _backfill_submission(
         current_submission=current,
-        s3_client=s3_client,
-        bucket=BUCKET,
+        raw_json=_metadata_json(metadata),
         db_service=db,
         dry_run=False,
         force=False,
@@ -555,9 +497,7 @@ def _run_backfill(db: SubmissionDb, s3_client: Any, current: Submission) -> _Bac
     )
 
 
-def test_backfill_keys_cases_on_the_stored_local_case_id(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata
-) -> None:
+def test_backfill_keys_cases_on_the_stored_local_case_id(db: SubmissionDb, metadata: GrzSubmissionMetadata) -> None:
     """Two patients whose archived metadata both read localCaseId "" must not share a case."""
     archived = _archived(metadata)
     submitter = metadata.submission.submitter_id
@@ -570,11 +510,10 @@ def test_backfill_keys_cases_on_the_stored_local_case_id(
         db.modify_submission(sid, "tan_g", tan_g)
         db.modify_submission(sid, "local_case_id", local_case_id)
         db.modify_submission(sid, "submission_type", "initial")
-        _put_metadata(s3_client_mock, sid, archived)
         rows.append(db.get_submission(sid))
 
     for row in rows:
-        assert _run_backfill(db, s3_client_mock, row).status == _BackfillResult.UPDATED
+        assert _run_backfill(db, archived, row).status == _BackfillResult.UPDATED
 
     assert {(case.submitter_id, case.local_case_id) for case, _count in db.list_cases()} == {
         (submitter, "patient-A"),
@@ -586,13 +525,12 @@ def test_backfill_keys_cases_on_the_stored_local_case_id(
 
 
 def test_backfill_without_a_stored_local_case_id_skips_the_case_link(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata, submission_id: str
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
     """Nothing to restore from, so the placeholders are ignored rather than written or keyed on."""
     current = db.add_submission(submission_id)
-    _put_metadata(s3_client_mock, submission_id, _archived(metadata))
 
-    assert _run_backfill(db, s3_client_mock, current).status == _BackfillResult.UPDATED
+    assert _run_backfill(db, _archived(metadata), current).status == _BackfillResult.UPDATED
 
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == metadata.get_submission_size()
@@ -619,7 +557,7 @@ def _second_case_for_the_same_key(db: SubmissionDb, submitter_id: str, local_cas
 
 
 def test_backfill_writes_everything_but_the_link_when_the_case_key_is_ambiguous(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
 ) -> None:
     """An ambiguous key needs an operator to merge the cases; the submission still gets recorded.
 
@@ -634,10 +572,9 @@ def test_backfill_writes_everything_but_the_link_when_the_case_key_is_ambiguous(
     db.add_submission(sid)
     db.modify_submission(sid, "local_case_id", "patient-A")
     current = db.get_submission(sid)
-    _put_metadata(s3_client_mock, sid, _archived(metadata))
 
     # link_unresolved=True: the key is ambiguous, not merely missing. See _BackfillOutcome.
-    assert _run_backfill(db, s3_client_mock, current) == _BackfillOutcome(_BackfillResult.UPDATED, True)
+    assert _run_backfill(db, _archived(metadata), current) == _BackfillOutcome(_BackfillResult.UPDATED, True)
 
     persisted = db.get_submission(sid)
     assert persisted.case_id is None
@@ -646,9 +583,7 @@ def test_backfill_writes_everything_but_the_link_when_the_case_key_is_ambiguous(
     assert db.get_donors(sid)
 
 
-def test_backfill_links_once_the_ambiguity_is_gone(
-    db: SubmissionDb, s3_client_mock: Any, metadata: GrzSubmissionMetadata
-) -> None:
+def test_backfill_links_once_the_ambiguity_is_gone(db: SubmissionDb, metadata: GrzSubmissionMetadata) -> None:
     """Re-running after an operator deletes the spurious duplicate case completes the link."""
     submitter = metadata.submission.submitter_id
     kept = db.create_case(submitter, "patient-A")
@@ -658,10 +593,169 @@ def test_backfill_links_once_the_ambiguity_is_gone(
     sid = f"{submitter}_2024-01-01_aaaaaaa1"
     db.add_submission(sid)
     db.modify_submission(sid, "local_case_id", "patient-A")
-    _put_metadata(s3_client_mock, sid, _archived(metadata))
-    assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillOutcome(_BackfillResult.UPDATED, True)
+    assert _run_backfill(db, _archived(metadata), db.get_submission(sid)) == _BackfillOutcome(
+        _BackfillResult.UPDATED, True
+    )
 
     db.delete_case(spare.id)
 
-    assert _run_backfill(db, s3_client_mock, db.get_submission(sid)) == _BackfillOutcome(_BackfillResult.UPDATED)
+    assert _run_backfill(db, _archived(metadata), db.get_submission(sid)) == _BackfillOutcome(_BackfillResult.UPDATED)
     assert db.get_submission(sid).case_id is not None
+
+
+def _flip_a_donors_mv_consent(db: SubmissionDb, submission_id: str) -> tuple[str, bool]:
+    """Make one stored donor differ from metadata.json, and return its pseudonym and the stored value."""
+    donor = db.get_donors(submission_id)[0]
+    donor.mv_consented = not donor.mv_consented
+    db.update_donor(donor)
+    return donor.pseudonym, donor.mv_consented
+
+
+def test_backfill_holds_back_a_changed_donor_without_force(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    """A stored donor that differs from metadata.json is left alone, while missing values are still filled."""
+    _populate_full_row(db, submission_id, metadata)
+    pseudonym, stored = _flip_a_donors_mv_consent(db, submission_id)
+    db.modify_submission(submission_id, "submission_size", None)  # something additive to write
+
+    result = _backfill_submission(
+        current_submission=db.get_submission(submission_id),
+        raw_json=_metadata_json(metadata),
+        db_service=db,
+        dry_run=False,
+        force=False,
+        ignore_fields=set(),
+    )
+
+    assert result.status == _BackfillResult.UPDATED
+    assert db.get_submission(submission_id).submission_size == metadata.get_submission_size()
+    assert db.get_donors(submission_id, pseudonym)[0].mv_consented == stored, "the donor must not be overwritten"
+
+
+def test_backfill_force_overwrites_a_changed_donor(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    _populate_full_row(db, submission_id, metadata)
+    pseudonym, stored = _flip_a_donors_mv_consent(db, submission_id)
+
+    result = _backfill_submission(
+        current_submission=db.get_submission(submission_id),
+        raw_json=_metadata_json(metadata),
+        db_service=db,
+        dry_run=False,
+        force=True,
+        ignore_fields=set(),
+    )
+
+    assert result.status == _BackfillResult.UPDATED
+    assert db.get_donors(submission_id, pseudonym)[0].mv_consented == (not stored)
+
+
+def test_backfill_holds_back_the_whole_submission_when_the_case_link_changed(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+) -> None:
+    """A relinked submission keeps its case, and nothing else is written either.
+
+    Replacing the link would undo a deliberate relink. Unlike a field or a donor, a held-back link
+    holds back the whole submission, filled NULLs included.
+    """
+    initial_metadata = _as_initial(metadata)
+    sid = initial_metadata.submission_id
+    _populate_full_row(db, sid, initial_metadata)
+    other = db.create_case(initial_metadata.submission.submitter_id, "some-other-case")
+    db.set_submission_case(sid, other.id)
+    db.modify_submission(sid, "submission_size", None)  # something additive that must still wait
+
+    result = _backfill_submission(
+        current_submission=db.get_submission(sid),
+        raw_json=_metadata_json(initial_metadata),
+        db_service=db,
+        dry_run=False,
+        force=False,
+        ignore_fields=set(),
+    )
+
+    assert result.status == _BackfillResult.WOULD_OVERWRITE
+    persisted = db.get_submission(sid)
+    assert persisted.case_id == other.id
+    assert persisted.submission_size is None
+
+
+def _invoke_backfill_command(config_path: Path, submission_id: str) -> click.testing.Result:
+    runner = click.testing.CliRunner()
+    return runner.invoke(
+        grzctl.cli.build_cli(),
+        ["--config", str(config_path), "db", "backfill", "--submission-id", submission_id],
+    )
+
+
+def test_fetch_from_archives_finds_nothing_when_no_archive_holds_the_metadata(
+    s3_client_mock: Any, submission_id: str
+) -> None:
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    archive_targets = [(bucket, bucket, s3_client_mock) for bucket in ARCHIVE_BUCKETS]
+
+    assert _fetch_metadata_json_from_archives(submission_id, archive_targets) == {}
+
+
+def test_backfill_writes_the_metadata_from_the_one_archive_that_holds_it(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    db.add_submission(submission_id)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    _put_metadata(s3_client_mock, "non_consented", submission_id, metadata)
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id)
+
+    assert result.exit_code == 0, result.stderr
+    assert db.get_submission(submission_id).submission_metadata == metadata.to_redacted_dict()
+
+
+def test_backfill_writes_nothing_when_both_archives_hold_the_metadata(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """A metadata.json in both archives is an error, and neither copy reaches the database.
+
+    A copy committed before the conflict is noticed cannot be repaired by a rerun, because the
+    rerun finds both copies again.
+    """
+    db.add_submission(submission_id)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+        _put_metadata(s3_client_mock, bucket, submission_id, metadata)
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id)
+
+    assert result.exit_code == 1, "any error fails the run"
+    assert "found in both" in result.stderr
+    assert db.get_submission(submission_id).submission_metadata is None
+
+
+def test_backfill_writes_nothing_when_an_archive_cannot_be_read(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """An archive that cannot be read might hold a second copy, so the copy found in the other one is not written."""
+    db.add_submission(submission_id)
+    s3_client_mock.create_bucket(Bucket="non_consented")  # no consented bucket, so reading it fails
+    _put_metadata(s3_client_mock, "non_consented", submission_id, metadata)
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id)
+
+    assert result.exit_code == 1, "any error fails the run"
+    assert "S3 error in consented archive" in result.stderr
+    assert db.get_submission(submission_id).submission_metadata is None

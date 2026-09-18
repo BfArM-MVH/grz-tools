@@ -1,3 +1,4 @@
+import logging
 import subprocess
 from unittest import mock
 from unittest.mock import MagicMock
@@ -11,7 +12,7 @@ from grz_common.exceptions import (
     UploadError,
 )
 from grz_common.pipeline.components import DataValidationError
-from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError
+from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.submission import FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext
 from pydantic import ValidationError
@@ -165,3 +166,64 @@ class TestDbContextFailureReason:
             SubmissionStateEnum.ENCRYPTED,
             grzctl_versions=mock.ANY,
         )
+
+
+class TestCheckPrerequisites:
+    @staticmethod
+    def _context(mock_db, start_state: SubmissionStateEnum, end_state: SubmissionStateEnum) -> DbContext:
+        context = DbContext(
+            configuration={},
+            submission_id="123_2025-01-01_00000000",
+            start_state=start_state,
+            end_state=end_state,
+            enabled=True,
+        )
+        context.db = mock_db  # bypass __enter__
+        return context
+
+    def test_first_state_does_not_warn_about_the_history(self, mock_db, caplog):
+        """A brand-new submission has no prior state to find, so nothing is logged."""
+        mock_db.get_submission.return_value = None
+        mock_db.add_submission.return_value.get_latest_state.return_value = None
+        mock_db.add_submission.return_value.states = []
+        context = self._context(mock_db, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING)
+
+        with caplog.at_level(logging.WARNING):
+            context._check_prerequisites()
+
+        assert caplog.records == []
+        mock_db.add_submission.assert_called_once()
+
+    def test_manual_upload_entry_starts_a_brand_new_submission(self, mock_db, caplog):
+        """The manual step-by-step flow starts at ``grzctl upload`` with no prior state either."""
+        mock_db.get_submission.return_value = None
+        mock_db.add_submission.return_value.get_latest_state.return_value = None
+        mock_db.add_submission.return_value.states = []
+        context = self._context(mock_db, SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED)
+
+        with caplog.at_level(logging.WARNING):
+            context._check_prerequisites()
+
+        assert caplog.records == []
+        mock_db.add_submission.assert_called_once()
+
+    def test_middle_state_raises_when_the_submission_does_not_exist(self, mock_db):
+        """A manual step needs the submission to exist; a missing one is a hard error."""
+        mock_db.get_submission.return_value = None
+        context = self._context(mock_db, SubmissionStateEnum.DOWNLOADING, SubmissionStateEnum.DOWNLOADED)
+
+        with pytest.raises(SubmissionNotFoundError):
+            context._check_prerequisites()
+
+        mock_db.add_submission.assert_not_called()
+
+    def test_later_state_warns_when_the_history_lacks_the_prior_state(self, mock_db, caplog):
+        """The history check still runs for every state that has a prior state."""
+        mock_db.get_submission.return_value.get_latest_state.return_value = None
+        mock_db.get_submission.return_value.states = []
+        context = self._context(mock_db, SubmissionStateEnum.ENCRYPTING, SubmissionStateEnum.ENCRYPTED)
+
+        with caplog.at_level(logging.WARNING):
+            context._check_prerequisites()
+
+        assert "state history does not contain" in caplog.text
