@@ -2574,8 +2574,8 @@ class SubmissionDb:
         """Emit info-level log lines summarising what is about to be committed."""
         sid = f"Submission: {submission_id}"
 
-        pending_keys = [d.key for d in changes.fields.pending]
-        unchanged_keys = [d.key for d in changes.fields.unchanged]
+        pending_keys = sorted(d.key for d in changes.fields.pending)
+        unchanged_keys = sorted(d.key for d in changes.fields.unchanged)
         if pending_keys:
             logger.info("%s - Updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in pending_keys))
         if unchanged_keys:

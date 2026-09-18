@@ -309,7 +309,7 @@ class SubmissionChangeSet:
             source = f"case {self.case_link.before}" if self.case_link.before is not None else "unlinked"
             target = f"case {self.case_link.after}" if self.case_link.after is not None else "new case"
             changes.append(f"case link ({source} -> {target})")
-        return changes
+        return sorted(changes)
 
     @property
     def destructive_changes(self) -> list[str]:
@@ -321,7 +321,7 @@ class SubmissionChangeSet:
         changes += [f"donor '{d.pseudonym}'" for d in (*self.donors.updated, *self.donors.deleted)]
         if self.case_link is not None and self.case_link.state is DiffState.UPDATED:
             changes.append(f"case link (case {self.case_link.before})")
-        return changes
+        return sorted(changes)
 
     @property
     def has_pending_destructive(self) -> bool:
