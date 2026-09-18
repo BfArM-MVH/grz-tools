@@ -1024,10 +1024,11 @@ def _prepare_donor_console_table(
 @_submission_id_argument
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
 @click.option(
-    "--submission_date",
+    "--submission-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
     default=None,
-    help="Submission date of the submission; overwrites submissionDate in metadata.json",
+    help="Submission upload date to store; overrides the stored one. Without it, "
+    "the stored submission upload date is kept.",
 )
 @click.option(
     "--confirm/--no-confirm",
@@ -1057,8 +1058,6 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
             raise RuntimeError(
                 f"Submission date ({submission_date.date()}) is set to a future date (today: {date.today()}) which is not allowed"
             )
-    else:
-        log.warning("Submission date from metadata.json is used")
 
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -1087,15 +1086,16 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
             "or use 'grzctl db submission modify' directly."
         ) from e
 
-    submission_uploaded_date = (
-        submission_date.date() if submission_date is not None else submission.submission_uploaded_date
-    )
-    if submission_date is None:
+    if submission_date is not None:
+        submission_uploaded_date = submission_date.date()
+    elif submission.submission_uploaded_date is not None:
+        submission_uploaded_date = submission.submission_uploaded_date
+    else:
         log.warning(
             "No submission date provided and submission date is missing in the database. "
-            "Will use submission date from metadata.json..."
+            "Leaving the submission upload date unset; pass --submission-date to record one."
         )
-        submission_uploaded_date = metadata.submission.submission_date
+        submission_uploaded_date = None
 
     try:
         changes = db_service.diff(

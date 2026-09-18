@@ -171,7 +171,7 @@ def test_populate_date(migrated_database_config_path: Path, test_metadata_path: 
             metadata.submission_id,
             str(test_metadata_path),
             "--no-confirm",
-            "--submission_date",
+            "--submission-date",
             changed_date.strftime("%Y-%m-%d"),
         ],
     )
@@ -187,6 +187,50 @@ def test_populate_date(migrated_database_config_path: Path, test_metadata_path: 
 
     submission = db.get_submission(metadata.submission_id)
     assert submission.submission_uploaded_date == changed_date
+
+
+def test_populate_preserves_stored_submission_date(migrated_database_config_path: Path, test_metadata_path: Path):
+    """Populate without --submission-date keeps the stored upload date instead of replacing it.
+
+    The column records when the upload finished, so the metadata's declared submission_date
+    must never stand in for it; only --submission-date may override the stored value.
+    """
+    db_args = ["--config", migrated_database_config_path, "db"]
+    stored_date = date(2026, 1, 1)
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+    assert metadata.submission.submission_date != stored_date
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*db_args, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *db_args,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            stored_date.strftime("%Y-%m-%d"),
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    result_repopulate = runner.invoke(
+        cli,
+        [*db_args, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"],
+    )
+    assert result_repopulate.exit_code == 0, result_repopulate.stderr
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+
+    submission = db.get_submission(metadata.submission_id)
+    assert submission.submission_uploaded_date == stored_date
 
 
 def test_populate_redacted(tmp_path: Path, migrated_database_config_path: Path, test_metadata_path: Path):
@@ -292,7 +336,7 @@ def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_me
             "tan_g",
             "--ignore-field",
             "local_case_id",
-            "--submission_date",
+            "--submission-date",
             changed_date.strftime("%Y-%m-%d"),
         ],
     )
@@ -915,7 +959,16 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
     # populate submission
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            metadata.submission.submission_date.isoformat(),
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
