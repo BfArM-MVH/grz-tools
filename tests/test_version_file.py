@@ -25,6 +25,13 @@ def test_versionfile_allows_empty_policy_list():
     assert len(vf.grzcli_version) == 0
 
 
+def test_bundled_version_file_is_valid():
+    """The version.json shipped with grz-common must always parse as a valid VersionFile."""
+    content = VersionFile.read_bundled_text()
+    vf = VersionFile.model_validate_json(content)
+    assert len(vf.grzcli_version) >= 1
+
+
 def test_multiple_policies_parsed():
     vf = VersionFile(
         grzcli_version=[
