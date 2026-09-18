@@ -45,6 +45,7 @@ test = [
     "pytest-cov",
     "pytest-mock",
     "pytest-sugar",
+    "pytest-xdist",
     "moto[s3]",
     "grz-pydantic-models-testing",
 ]
