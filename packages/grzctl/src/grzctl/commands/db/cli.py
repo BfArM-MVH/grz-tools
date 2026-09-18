@@ -995,6 +995,34 @@ The case link is absent on purpose: replacing one undoes a deliberate ``db case 
 takes ``--force``.
 """
 
+_force_option = click.option(
+    "--force/--no-force",
+    default=False,
+    help="Overwrite or remove stored values that differ from the metadata (destructive changes): "
+    "non-NULL fields, donors, and the case link. Without this flag, a submission carrying such a "
+    "change is left untouched.",
+)
+
+_allow_overwrite_option = click.option(
+    "--allow-overwrite",
+    "allow_overwrite",
+    type=click.Choice(_ALLOW_OVERWRITE_CHOICES, case_sensitive=False),
+    multiple=True,
+    help="Permit only what these names cover: a field by its key, or every donor update and delete "
+    "as 'donors' (may be repeated). Any other destructive change leaves the submission untouched. "
+    "Mutually exclusive with --force, which permits every overwrite.",
+)
+
+
+def _overwrite_allow_list(force: bool, allow_overwrite: tuple[str, ...]) -> frozenset[str]:
+    """Read the two overwrite options into the allow-list a change set understands.
+
+    :raises click.UsageError: if both are given, since ``--force`` already permits everything.
+    """
+    if force and allow_overwrite:
+        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
+    return frozenset(allow_overwrite)
+
 
 def _prepare_submission_console_table(changes: "SubmissionChangeSet") -> rich.console.RenderableType:
     """Build a Rich renderable that shows pending submission-level metadata changes.
@@ -1133,25 +1161,11 @@ def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite:
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
-@click.option(
-    "--force/--no-force",
-    default=False,
-    help="Overwrite or remove stored values that differ from the metadata (destructive changes): "
-    "non-NULL fields, donors, and the case link. Without this flag such a change stops the command "
-    "and nothing is written.",
-)
-@click.option(
-    "--allow-overwrite",
-    "allow_overwrite",
-    type=click.Choice(_ALLOW_OVERWRITE_CHOICES, case_sensitive=False),
-    multiple=True,
-    help="Permit only what these names cover: a field by its key, or every donor update and delete "
-    "as 'donors' (may be repeated). Any other destructive change still stops the command. "
-    "Mutually exclusive with --force.",
-)
+@_force_option
+@_allow_overwrite_option
 @_ignore_field_option
 @click.pass_context
-def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
+def populate(  # noqa: C901, PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     metadata_path: str,
@@ -1172,8 +1186,7 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     """
     log.debug("Ignored fields for populate: %s", ignore_field)
 
-    if force and allow_overwrite:
-        raise click.UsageError("--force and --allow-overwrite are mutually exclusive.")
+    allow_overwrite_keys = _overwrite_allow_list(force, allow_overwrite)
 
     if submission_date is not None:
         log.info("Submission date from provided option is used")
@@ -1232,7 +1245,7 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     _print_pending_changes(changes)
 
     if not force:
-        _refuse_destructive_changes(changes, frozenset(allow_overwrite))
+        _refuse_destructive_changes(changes, allow_overwrite_keys)
 
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?",
@@ -2029,7 +2042,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
         console_err.print(f"[red]  {submission_id}: diff failed: {exc}[/red]")
         return _BackfillOutcome(_BackfillResult.ERROR)
 
-    # See _BackfillOutcome: only the link is withheld, not the rest of the submission.
+    # See _BackfillOutcome: a link that cannot be resolved still lets the rest be written.
     link_unresolved = changes.case_link_error is not None
     if link_unresolved:
         console_err.print(f"[yellow]  {submission_id}: case link unresolved: {changes.case_link_error}[/yellow]")
@@ -2070,23 +2083,8 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     default=False,
     help="Preview which submissions would be updated without writing to the database.",
 )
-@click.option(
-    "--force/--no-force",
-    default=False,
-    help="Overwrite or remove stored values that differ from metadata.json (destructive changes): "
-    "non-NULL fields, donors, and the case link. Without this flag, such changes are reported and "
-    "left alone while the rest is still written. A changed case link holds back the whole submission.",
-)
-@click.option(
-    "--allow-overwrite",
-    "allow_overwrite",
-    type=click.Choice(_ALLOW_OVERWRITE_CHOICES, case_sensitive=False),
-    multiple=True,
-    help="Overwrite only what these names cover when the metadata.json value differs: a field by "
-    "its key, or every donor update and delete as 'donors' (may be repeated). Other destructive "
-    "changes are held back and the submission is updated in part. Mutually exclusive with --force, "
-    "which permits every overwrite.",
-)
+@_force_option
+@_allow_overwrite_option
 @click.option(
     "--submission-id",
     "submission_ids",
@@ -2156,9 +2154,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
-    if force and allow_overwrite:
-        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
-
+    allow_overwrite_keys = _overwrite_allow_list(force, allow_overwrite)
     ignore_fields = set(ignore_field)
 
     # ── Build S3 clients for both archive targets ────────────────────────────
@@ -2227,7 +2223,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             dry_run,
             force,
             ignore_fields,
-            frozenset(allow_overwrite),
+            allow_overwrite_keys,
         )
         counts[outcome.status] += 1
         links_unresolved += outcome.link_unresolved
