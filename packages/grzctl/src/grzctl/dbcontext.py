@@ -19,7 +19,6 @@ from grz_common.pipeline.context import FileError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
-from pydantic import ValidationError
 
 from . import get_versions
 from .commands.db.cli import get_submission_db_instance
@@ -41,7 +40,6 @@ _FAILURE_REASONS: dict[type[BaseException], FailureReasonEnum] = {
     EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
     DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
     ReportingError: FailureReasonEnum.REPORTING_ERROR,
-    ValidationError: FailureReasonEnum.VALIDATION_ERROR,
 }
 """The failure reason of each expected error. Any other exception records ``unknown``."""
 
@@ -255,7 +253,9 @@ class DbContext:
         if exc_type:
             error_state = SubmissionStateEnum.ERROR
             failure_reason, deciding = _classify(exc_val)
-            data: dict[str, Any] = {"error": str(deciding if deciding is not None else exc_val)}
+            recorded = deciding if deciding is not None else exc_val
+            # an interruption carries no message, so its type names it
+            data: dict[str, Any] = {"error": str(recorded) or type(recorded).__name__}
             files_failed = next((e for e in _causes(exc_val) if isinstance(e, FilesFailedError)), None)
             if files_failed is not None:
                 data["errors"] = [

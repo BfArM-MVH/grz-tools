@@ -141,10 +141,9 @@ class Worker:
                 raise SubmissionValidationError(error_msg)
             else:
                 self.__log.info("File validation successful!")
-        except KeyboardInterrupt as e:
-            error_msg = "Validation was cancelled by the user and is incomplete."
-            self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg) from e
+        except KeyboardInterrupt:
+            self.__log.error("Validation was cancelled by the user and is incomplete.")
+            raise
         except GrzError:
             raise
         except Exception as e:

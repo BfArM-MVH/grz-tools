@@ -3,12 +3,13 @@ CLI module for handling command-line interface operations for GRZ administrators
 """
 
 import logging
+import signal
 from pathlib import Path
 
 import click
 import platformdirs
 import yaml
-from grz_common.cli import FILE_R_E
+from grz_common.cli import FILE_R_E, OrderedGroup
 from grz_common.logging import setup_cli_logging
 
 from . import get_versions
@@ -32,16 +33,6 @@ from .models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
-
-
-class OrderedGroup(click.Group):
-    """
-    A click Group that keeps track of the order in which commands are added.
-    """
-
-    def list_commands(self, ctx):
-        """Return the list of commands in the order they were added."""
-        return list(self.commands.keys())
 
 
 def build_cli():
@@ -127,10 +118,16 @@ def dump_config(ctx: click.Context, reveal_secrets: bool):
     click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
 
 
+def _stop_on_sigterm() -> None:
+    """Let SIGTERM stop a run the way Ctrl-C does, so the running step records ``interrupted``."""
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+
+
 def main():
     """
     Main entry point for the CLI application.
     """
+    _stop_on_sigterm()
     cli = build_cli()
     cli()
 

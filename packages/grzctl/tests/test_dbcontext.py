@@ -23,6 +23,7 @@ from grz_common.exceptions import (
 )
 from grz_common.pipeline.components import DataValidationError, UploadIntegrityError
 from grz_common.pipeline.context import FileError
+from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext, FilesFailedError
@@ -87,18 +88,20 @@ class TestMapExceptionToFailureReason:
         result = db_context._map_exception_to_failure_reason(type(exception), exception)
         assert result == expected
 
-    def test_validation_error_maps_correctly(self, db_context: DbContext):
-        """ValidationError requires special construction so tested separately."""
-        from pydantic import BaseModel
+    def test_an_unwrapped_pydantic_error_maps_to_unknown(self, db_context: DbContext):
+        """Invalid metadata reaches DbContext as a SubmissionValidationError, so a bare pydantic error is a bug."""
+        exc = ValidationError.from_exception_data("test", [])
+        assert db_context._map_exception_to_failure_reason(type(exc), exc) == FailureReasonEnum.UNKNOWN
 
-        class DummyModel(BaseModel):
-            x: int
+    def test_invalid_metadata_maps_to_a_validation_error(self, db_context: DbContext, tmp_path):
+        metadata_file = tmp_path / "metadata.json"
+        metadata_file.write_text('{"submission": {}}')
 
-        try:
-            DummyModel(x="not_an_int")  # type: ignore
-        except ValidationError as e:
-            result = db_context._map_exception_to_failure_reason(type(e), e)
-            assert result == FailureReasonEnum.VALIDATION_ERROR
+        with pytest.raises(SubmissionValidationError) as excinfo:
+            SubmissionMetadata(metadata_file)
+
+        exc = excinfo.value
+        assert db_context._map_exception_to_failure_reason(type(exc), exc) == FailureReasonEnum.VALIDATION_ERROR
 
     def test_maps_a_cause_of_an_unmapped_exception(self, db_context: DbContext):
         """An exception raised ``from`` a mapped one gets the failure reason of its cause."""
@@ -113,20 +116,6 @@ class TestMapExceptionToFailureReason:
 
     def test_all_enum_values_are_covered(self, db_context: DbContext):
         """Ensures every FailureReasonEnum value except UNKNOWN is reachable via a mapped exception."""
-        from pydantic import BaseModel
-        from pydantic import ValidationError as PydanticValidationError
-
-        class _Dummy(BaseModel):
-            x: int
-
-        validation_exc = None
-        try:
-            _Dummy(x="not_an_int")  # type: ignore
-        except PydanticValidationError as e:
-            validation_exc = e
-
-        assert validation_exc is not None, "Failed to construct a ValidationError for testing"
-
         mapped_results = {
             db_context._map_exception_to_failure_reason(type(exc), exc)
             for exc in [
@@ -141,7 +130,7 @@ class TestMapExceptionToFailureReason:
                 DuplicateInitialSubmissionError(1),
                 IncompleteSubmissionError(),
                 DetailedQCError(),
-                validation_exc,
+                SubmissionValidationError(),
             ]
         }
         recorded = {e for e in FailureReasonEnum if e != FailureReasonEnum.UNKNOWN} - RETIRED_FAILURE_REASONS
@@ -231,14 +220,15 @@ class TestDbContextFailureReason:
             grzctl_versions=mock.ANY,
         )
 
-    def test_validation_error_maps_correctly(self, ctx, mock_db):
-        exc = ValidationError.from_exception_data("test", [])
+    def test_an_interruption_is_recorded_by_its_type(self, ctx, mock_db):
+        """A KeyboardInterrupt carries no message, so the recorded error names its type."""
+        exc = KeyboardInterrupt()
         ctx.__exit__(type(exc), exc, None)
         mock_db.update_submission_state.assert_called_once_with(
             ctx.submission_id,
             SubmissionStateEnum.ERROR,
-            data={"error": str(exc)},
-            failure_reason=FailureReasonEnum.VALIDATION_ERROR,
+            data={"error": "KeyboardInterrupt"},
+            failure_reason=FailureReasonEnum.INTERRUPTED,
             grzctl_versions=mock.ANY,
         )
 

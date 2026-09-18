@@ -28,8 +28,11 @@ import grzctl.processor
 import pytest
 import responses
 import yaml
+from grz_common.exceptions import MissingSubmissionFileError
+from grz_common.models.s3 import S3Options
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
+from grzctl.commands.clean import _clean_submission_from_bucket
 
 # Path to test fixtures
 MOCK_FILES_DIR = Path(__file__).parent.parent / "mock_files"
@@ -590,6 +593,25 @@ class TestProcessS3Failure:
         assert state.data["error"] == file_errors[0]["message"], "the recorded error is the one that set the reason"
         assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
 
+    def test_invalid_metadata_is_recorded_as_a_validation_error(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Metadata that breaks the specification fails the processing step, and the step records it."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_buckets["inbox"].put_object(Key=f"{sid}/metadata/metadata.json", Body=b'{"submission": {}}')
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
+
     def test_a_missing_metadata_leaves_no_trace_in_the_database(
         self,
         s3_buckets,
@@ -1139,6 +1161,20 @@ class TestProcessInboxCleanup:
             SubmissionStateEnum.CLEANING,
             SubmissionStateEnum.CLEANED,
         ]
+
+    def test_nothing_to_clean_is_a_missing_submission_file(self, s3_buckets):
+        """An inbox that holds only the metadata lacks every file that the metadata lists."""
+        sid = self.SUBMISSION_ID
+        s3_buckets["inbox"].put_object(Key=f"{sid}/metadata/metadata.json", Body=b"{}")
+        options = S3Options(
+            endpoint_url="https://s3.amazonaws.com",
+            bucket=s3_buckets["inbox"].name,
+            access_key="testing",
+            secret="testing",
+        )
+
+        with pytest.raises(MissingSubmissionFileError):
+            _clean_submission_from_bucket(options.bucket, options, sid, "inbox 'inbox'")
 
     def test_a_failed_cleanup_is_recorded_once_as_its_own_step(
         self,

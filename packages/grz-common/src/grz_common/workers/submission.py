@@ -32,7 +32,7 @@ from tqdm.auto import tqdm
 from ..constants import TQDM_DEFAULTS
 from ..exceptions import (
     ConfigurationError,
-    SubmissionValidationError,  # noqa: F401  (callers import it from here)
+    SubmissionValidationError,
 )
 from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
@@ -57,8 +57,7 @@ class SubmissionMetadata:
         Load, parse and validate the metadata file.
 
         :param metadata_file: path to the metadata.json file
-        :raises json.JSONDecodeError: if failed to read the metadata.json file
-        :raises jsonschema.exceptions.ValidationError: if metadata does not match expected schema
+        :raises SubmissionValidationError: if the file is no JSON, or the metadata breaks the specification
         """
         self.file_path = metadata_file
         self.content = self._read_metadata(self.file_path)
@@ -73,20 +72,17 @@ class SubmissionMetadata:
 
         :param file_path: Path to the metadata JSON file
         :return: Parsed metadata as a dictionary
-        :raises json.JSONDecodeError: if failed to read the metadata.json file
+        :raises SubmissionValidationError: if the file is no JSON, or the metadata breaks the specification
         """
         try:
             with open(file_path, encoding="utf-8") as jsonfile:
                 metadata = json.load(jsonfile)
-                try:
-                    metadata_model = GrzSubmissionMetadata(**metadata)
-                except ValidationError as ve:
-                    cls.__log.error("Invalid metadata format in metadata file: %s", file_path)
-                    raise SystemExit(ve) from ve
-                return metadata_model
         except json.JSONDecodeError as e:
-            cls.__log.error("Invalid JSON format in metadata file: %s", file_path)
-            raise e
+            raise SubmissionValidationError(f"Invalid JSON in metadata file {file_path}: {e}") from e
+        try:
+            return GrzSubmissionMetadata(**metadata)
+        except ValidationError as ve:
+            raise SubmissionValidationError(f"Invalid metadata in {file_path}: {ve}") from ve
 
     @property
     def transaction_id(self) -> str:

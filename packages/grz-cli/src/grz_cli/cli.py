@@ -12,7 +12,7 @@ from textwrap import dedent
 
 import click
 import grz_pydantic_models.submission.metadata
-from grz_common.cli import config_file
+from grz_common.cli import OrderedGroup, config_file
 from grz_common.cli.dump_config import dump_config
 from grz_common.logging import setup_cli_logging
 
@@ -23,16 +23,6 @@ from .commands.upload import upload
 from .commands.validate import validate
 
 log = logging.getLogger(__name__)
-
-
-class OrderedGroup(click.Group):
-    """
-    A click Group that keeps track of the order in which commands are added.
-    """
-
-    def list_commands(self, ctx):
-        """Return the list of commands in the order they were added."""
-        return list(self.commands.keys())
 
 
 def build_cli():

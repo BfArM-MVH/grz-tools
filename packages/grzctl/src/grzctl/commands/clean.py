@@ -5,6 +5,7 @@ import sys
 
 import click
 import grz_common.cli as grzcli
+from grz_common.exceptions import MissingSubmissionFileError
 from grz_common.pipeline.components.s3 import s3_errors
 from grz_common.transfer import init_s3_resource
 from grz_db.models.submission import SubmissionStateEnum
@@ -77,7 +78,9 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options, submission_id, i
                 _ = obj.delete()
                 num_deleted += 1
         if not num_deleted:
-            sys.exit(f"No objects with prefix '{prefix}' in inbox {inbox_desc} found for deletion.")
+            raise MissingSubmissionFileError(
+                f"No objects with prefix '{prefix}' in inbox {inbox_desc} found for deletion."
+            )
 
         log.info(f"Successfully deleted {num_deleted} objects.")
 
