@@ -209,9 +209,11 @@ class DonorDiff(Diff["DbDonor"]):
 
         if donor.state != DiffState.UNCHANGED:
             for f in sorted(DbDonor.model_fields.keys() - {"submission_id", "pseudonym"}):
-                donor.changes.append(
-                    FieldDiff.classify_field(str(f), getattr(old_value, str(f), None), getattr(new_value, str(f), None))
+                field_diff = FieldDiff.classify_field(
+                    str(f), getattr(old_value, str(f), None), getattr(new_value, str(f), None)
                 )
+                if field_diff.diff.state != DiffState.UNCHANGED:
+                    donor.changes.append(field_diff)
 
         match (old_value, new_value):
             case (None, None):

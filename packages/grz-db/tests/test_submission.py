@@ -5,16 +5,19 @@ from collections.abc import Callable
 import pytest
 from grz_db.errors import DuplicateTanGError
 from grz_db.models.submission import (
+    Donor,
     OutdatedDatabaseSchemaError,
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
     SubmissionStateLog,
 )
+from grz_db.models.submission.diff import DiffState, DonorDiff
 from grz_pydantic_models.submission.metadata import (
     REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
     GrzSubmissionMetadata,
+    Relation,
 )
 from sqlmodel import Session
 
@@ -91,6 +94,28 @@ def test_get_latest_state_breaks_timestamp_ties_by_id(db: SubmissionDb, submissi
     result = db.get_submission(SUBMISSION_ID)
     assert result is not None
     assert result.get_latest_state().state == SubmissionStateEnum.FINISHED
+
+
+def _donor(submission_id: str, pseudonym: str, mv_consented: bool) -> Donor:
+    """A Donor row filled with constant values except for ``mv_consented``."""
+    return Donor(
+        submission_id=submission_id,
+        pseudonym=pseudonym,
+        relation=Relation.brother,
+        library_types=set(),
+        sequence_types=set(),
+        sequence_subtypes=set(),
+        mv_consented=mv_consented,
+        research_consented=True,
+    )
+
+
+def test_donor_diff_changes_exclude_unchanged_fields() -> None:
+    """DonorDiff.changes must list only the fields whose value differs, per its docstring."""
+    donor_diff = DonorDiff.classify(_donor(SUBMISSION_ID, "P001", True), _donor(SUBMISSION_ID, "P001", False))
+
+    assert donor_diff.state == DiffState.UPDATED
+    assert [field_diff.key for field_diff in donor_diff.changes] == ["mv_consented"]
 
 
 def test_added_submission_reads_its_relationships(db: SubmissionDb) -> None:
