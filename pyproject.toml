@@ -270,4 +270,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    # Pass -n0 to turn this off, which a debugger needs and which restores per-test output order.
+    "-n", "auto",
 ]
