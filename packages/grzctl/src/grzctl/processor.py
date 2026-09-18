@@ -14,7 +14,6 @@ from grz_common.constants import TQDM_DEFAULTS
 from grz_common.exceptions import DetailedQCError, MissingObjectError, MissingSubmissionFileError, UploadError
 from grz_common.models.base import get_secret_value
 from grz_common.pipeline.components import (
-    DataValidationError,
     DevNullSink,
     ObserverWithMetrics,
     PipelineError,
@@ -49,14 +48,8 @@ from grz_pydantic_models.submission.thresholds import Thresholds
 from tqdm.auto import tqdm
 
 from .commands.clean import _clean_submission_from_bucket
-from .dbcontext import DbContext
+from .dbcontext import DbContext, FilesFailedError
 from .models.config import GrzctlConfig, InboxTarget
-
-
-class PipelineValidationError(Exception):
-    """Raised when processing a submission's files fails."""
-
-    pass
 
 
 def _close_undriven(stage: WriteStream) -> None:
@@ -255,7 +248,7 @@ class FilePipelineExecutor:
                     "src_key": inbox_key,
                 },
             )
-            run_state.context.add_error(e)
+            run_state.context.add_error(file_path_str, e)
             # the file could not be read, so neither its size nor its modification time is known
             failure: ProcessingState = {"processing_successful": False, "errors": [str(e)]}
             self._record(file_meta, failure, size=-1, mtime=-1.0, staging=stage, local=write_local)
@@ -297,12 +290,10 @@ class FilePipelineExecutor:
                 write_local=needs_local_copy,
             )
 
-            if needs_staging and not run_state.consistency_validator.check(file_meta.file_path):
+            if needs_staging:
                 # a read pair is compared once both files are marked completed, so whichever of the
                 # two finishes second is the one that reports a mismatch
-                raise DataValidationError(
-                    f"Consistency Check Failed: {file_meta.file_path}", stage="ReadPairConsistencyValidator"
-                )
+                run_state.consistency_validator.check(file_meta.file_path)
 
             success: ProcessingState = {
                 "processing_successful": True,
@@ -323,7 +314,7 @@ class FilePipelineExecutor:
                     "src_key": inbox_key,
                 },
             )
-            run_state.context.add_error(e)
+            run_state.context.add_error(file_path_str, e)
             # the outputs this run was going to write are recorded as failed, so a rerun redoes them
             failure = {"processing_successful": False, "errors": [str(e)]}
             self._record(
@@ -694,15 +685,15 @@ class SubmissionProcessor:
 
         :param run_state: The submission's run state.
         :param message: What failed, such as ``"Processing failed"``.
-        :raises PipelineValidationError: If the pass recorded a file error. Its ``__cause__`` is the first one.
+        :raises FilesFailedError: If the pass recorded a file error. Its ``__cause__`` is the decisive one.
         """
-        errors = run_state.context.errors
-        if not errors:
+        metadata_order = {str(f.file_path): i for i, f in enumerate(run_state.submission_metadata.files.values())}
+        file_errors = sorted(run_state.context.errors, key=lambda file_error: metadata_order[file_error.file])
+        if not file_errors:
             return
-        log.error(f"{message}: {'; '.join(map(str, errors))}")
-        raise PipelineValidationError(
-            f"{message} with {len(errors)} file error(s), the first: {errors[0]}"
-        ) from errors[0]
+        log.error(f"{message}: {'; '.join(f'{file_error.file}: {file_error.error}' for file_error in file_errors)}")
+        error = FilesFailedError(message, file_errors)
+        raise error from error.decisive.error
 
     def run(self, submission_metadata: SubmissionMetadata) -> None:
         """
@@ -730,7 +721,7 @@ class SubmissionProcessor:
         recommended to automatically clean up orphaned files from incomplete transfers.
 
         :param submission_metadata: The parsed metadata object containing donor and file information.
-        :raises PipelineValidationError: If processing a file fails, in the main pass or in the detailed QC pass.
+        :raises FilesFailedError: If processing a file fails, in the main pass or in the detailed QC pass.
             Its ``__cause__`` is the first file error.
         """
         submission_run = self._new_run_state(submission_metadata)

@@ -585,6 +585,9 @@ class TestProcessS3Failure:
         state = _latest_state(process_config_content, sid)
         assert state.state == SubmissionStateEnum.ERROR
         assert state.failure_reason == FailureReasonEnum.FILE_NOT_FOUND
+        file_errors = (state.data or {}).get("errors", [])
+        assert [(error["file"], error["reason"]) for error in file_errors] == [(self.VCF, "file_not_found")]
+        assert state.data["error"] == file_errors[0]["message"], "the recorded error is the one that set the reason"
         assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
 
     def test_upload_failure_fails_processing(
@@ -1075,10 +1078,12 @@ class TestProcessStagingCheckFailure:
         assert result.exit_code != 0, f"the rerun should fail: {result.output}"
         state = _latest_state(process_config_content, sid)
         assert state.state == SubmissionStateEnum.ERROR
-        recorded_error = (state.data or {}).get("error", "")
-        assert recorded_error.startswith("Processing failed with "), (
-            f"the rerun should report the failure as a file error, got: {recorded_error}"
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+        file_errors = (state.data or {}).get("errors", [])
+        assert {error["file"] for error in file_errors} == set(_metadata_file_checksums()), (
+            "the rerun should report the failure as an error of each file"
         )
+        assert {error["reason"] for error in file_errors} == {FailureReasonEnum.TRANSFER_ERROR.value}
 
 
 def _states(process_config_content: dict, submission_id: str) -> list[SubmissionStateEnum]:

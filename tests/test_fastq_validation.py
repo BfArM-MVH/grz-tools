@@ -85,9 +85,9 @@ def test_paired_end_differing_line_numbers_stream():
     context.record_stats(path1, stats1)
     context.record_stats(path2, stats2)
     consistency = ReadPairConsistencyValidator(context, {path1: path2, path2: path1})
-    is_valid_pair = consistency.check_pair(path1, path2)
 
-    assert is_valid_pair is False, "ConsistencyValidator should have rejected differing read counts"
+    with pytest.raises(DataValidationError, match="Read Count Mismatch"):
+        consistency.check_pair(path1, path2)
 
 
 def test_paired_end_all_checks_passed_stream():
@@ -107,14 +107,13 @@ def test_paired_end_all_checks_passed_stream():
     context.record_stats(path1, stats1)
     context.record_stats(path2, stats2)
     consistency = ReadPairConsistencyValidator(context, {path1: path2, path2: path1})
-    is_valid_pair = consistency.check_pair(path1, path2)
+    consistency.check_pair(path1, path2)
 
     # Verify line counts match
     assert stats1["line_count"] == stats2["line_count"]
-    assert is_valid_pair
 
     # verify partner_map
     assert consistency.partner_map.get(path1) == path2
     assert consistency.partner_map.get(path2) == path1
-    assert consistency.check(path1)
-    assert consistency.check(path2)
+    consistency.check(path1)
+    consistency.check(path2)

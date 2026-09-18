@@ -17,13 +17,15 @@ from grz_common.exceptions import (
     MissingSubmissionFileError,
     NetworkError,
     ReportingError,
+    SubmissionValidationError,
     TransferError,
     UploadError,
 )
 from grz_common.pipeline.components import DataValidationError, UploadIntegrityError
+from grz_common.pipeline.context import FileError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
-from grzctl.dbcontext import DbContext
+from grzctl.dbcontext import DbContext, FilesFailedError
 from pydantic import ValidationError
 
 
@@ -164,6 +166,57 @@ class TestMapExceptionToFailureReason:
             if reason in {FailureReasonEnum.UNKNOWN, *RETIRED_FAILURE_REASONS}
         }
         assert not wrong, f"These errors record no current failure reason: {wrong}"
+
+
+def _files_failed(*errors: BaseException) -> FilesFailedError:
+    return FilesFailedError("Processing failed", [FileError(f"file{i}", error) for i, error in enumerate(errors)])
+
+
+class TestFilesFailed:
+    """Several files fail in one run, and the most decisive of their errors sets the failure reason."""
+
+    @pytest.mark.parametrize(
+        "errors,expected",
+        [
+            ((TransferError("slow"), SubmissionValidationError("bad")), FailureReasonEnum.VALIDATION_ERROR),
+            ((TransferError("slow"), ConfigurationError("refused")), FailureReasonEnum.CONFIGURATION_ERROR),
+            ((EncryptionError("failed"), TransferError("slow")), FailureReasonEnum.TRANSFER_ERROR),
+            ((DecryptionError("failed"), SubmissionValidationError("bad")), FailureReasonEnum.DECRYPTION_ERROR),
+            ((RuntimeError("bug"), EncryptionError("failed")), FailureReasonEnum.UNKNOWN),
+        ],
+        ids=[
+            "submitter-before-transfer",
+            "configuration-before-transfer",
+            "transfer-before-other",
+            "first-of-equal-rank",
+            "first-of-other",
+        ],
+    )
+    def test_the_most_decisive_error_sets_the_reason(
+        self, db_context: DbContext, errors: tuple[BaseException, ...], expected: FailureReasonEnum
+    ):
+        exc = _files_failed(*errors)
+        assert db_context._map_exception_to_failure_reason(type(exc), exc) == expected
+
+    def test_every_file_error_is_recorded(self, ctx, mock_db):
+        """The decisive error is the recorded one, and every file error is listed with its own reason."""
+        exc = _files_failed(TransferError("slow"), SubmissionValidationError("bad"))
+
+        ctx.__exit__(type(exc), exc, None)
+
+        mock_db.update_submission_state.assert_called_once_with(
+            ctx.submission_id,
+            SubmissionStateEnum.ERROR,
+            data={
+                "error": "bad",
+                "errors": [
+                    {"file": "file0", "reason": "transfer_error", "message": "slow"},
+                    {"file": "file1", "reason": "validation_error", "message": "bad"},
+                ],
+            },
+            failure_reason=FailureReasonEnum.VALIDATION_ERROR,
+            grzctl_versions=mock.ANY,
+        )
 
 
 class TestDbContextFailureReason:

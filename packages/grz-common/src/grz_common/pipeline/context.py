@@ -1,6 +1,7 @@
 import logging
 import threading
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from grz_common.pipeline.components import DataValidationError
@@ -9,11 +10,19 @@ from grz_common.workers.submission import SubmissionMetadata
 log = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class FileError:
+    """A file whose processing failed, and the error that made it fail."""
+
+    file: str
+    error: BaseException
+
+
 class SubmissionContext:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._stats: dict[str, dict[str, Any]] = defaultdict(dict)
-        self._errors: list[BaseException] = []
+        self._errors: list[FileError] = []
         self._completed_files: set[str] = set()
 
     def record_stats(self, file_path: str, stats: dict[str, Any]) -> None:
@@ -34,9 +43,9 @@ class SubmissionContext:
         with self._lock:
             return self._stats.get(file_path, {}).copy()
 
-    def add_error(self, error: BaseException) -> None:
+    def add_error(self, file: str, error: BaseException) -> None:
         with self._lock:
-            self._errors.append(error)
+            self._errors.append(FileError(file, error))
 
     @property
     def has_errors(self) -> bool:
@@ -44,8 +53,8 @@ class SubmissionContext:
             return len(self._errors) > 0
 
     @property
-    def errors(self) -> list[BaseException]:
-        """Return a snapshot of all recorded errors."""
+    def errors(self) -> list[FileError]:
+        """Return a snapshot of all recorded file errors, in the order they were recorded."""
         with self._lock:
             return list(self._errors)
 
@@ -64,16 +73,16 @@ class ReadPairConsistencyValidator:
                 partner_map[fq2.file_path] = fq1.file_path
         return partner_map
 
-    def check_pair(self, path_a: str, path_b: str) -> bool:
-        """
-        Fail-Fast check: If both files are done, compare them.
-        Returns False if mismatch or if a completed partner is missing stats.
+    def check_pair(self, path_a: str, path_b: str) -> None:
+        """Compare the read counts of a pair, once both files are completed.
+
+        :raises DataValidationError: If a completed file lacks its stats, or the read counts differ.
         """
         # If the partner hasn't completed yet, nothing to check.
         a_done = self.context.is_completed(path_a)
         b_done = self.context.is_completed(path_b)
         if not a_done or not b_done:
-            return True
+            return
 
         stats_a = self.context.get_stats(path_a)
         stats_b = self.context.get_stats(path_b)
@@ -84,8 +93,7 @@ class ReadPairConsistencyValidator:
                 f"Partner file missing stats after completion: {path_a} ({'has stats' if stats_a else 'no stats'}), "
                 f"{path_b} ({'has stats' if stats_b else 'no stats'})"
             )
-            self.context.add_error(DataValidationError(msg, stage=self.__class__.__name__))
-            return False
+            raise DataValidationError(msg, stage=self.__class__.__name__)
 
         reads_a = stats_a.get("read_count")
         reads_b = stats_b.get("read_count")
@@ -93,13 +101,12 @@ class ReadPairConsistencyValidator:
         # Only compare if both successfully counted reads
         if reads_a is not None and reads_b is not None and reads_a != reads_b:
             msg = f"Read Count Mismatch: {path_a} ({reads_a}) != {path_b} ({reads_b})"
-            self.context.add_error(DataValidationError(msg, stage=self.__class__.__name__))
-            return False
-        return True
+            raise DataValidationError(msg, stage=self.__class__.__name__)
 
-    def check(self, path: str) -> bool:
+    def check(self, path: str) -> None:
+        """Compare a file with its read-pair partner, see :meth:`check_pair`."""
         partner = self.partner_map.get(path)
         if partner is None:
             log.debug(f"Partner for '{path}' not found")
-            return True
-        return self.check_pair(partner, path)
+            return
+        self.check_pair(partner, path)

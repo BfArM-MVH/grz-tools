@@ -19,8 +19,8 @@ When the step fails, it records `ERROR` with:
 
 - `failure_reason`: one of the [failure reasons](#failure-reasons).
 - `data.error`: the message of the failure that decided the reason.
-- `data.errors`: one entry per failed file, with `file`, `stage`, `reason` and
-  `message`. Only a step that streams files writes it.
+- `data.errors`: one entry per failed file, with `file`, `reason` and `message`. Only a
+  step that streams files writes it.
 
 Each step records its own outcome, and records it once. `grzctl process` runs three
 steps, one after another:
