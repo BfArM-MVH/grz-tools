@@ -167,7 +167,13 @@ def upload_submission_to_inbox(inbox_bucket, submission_id: str):
         )
 
 
-def _run_process(config_file_path: Path, submission_id: str, output_dir: Path, *extra_args: str):
+def _run_process(
+    config_file_path: Path, submission_id: str, output_dir: Path, *extra_args: str, submit_pruefbericht: bool = False
+):
+    """Run ``grzctl process``, which submits the Prüfbericht only with ``submit_pruefbericht``.
+
+    Submitting relies on the command's default, so the Prüfbericht tests cover that default.
+    """
     args = [
         "--config",
         str(config_file_path),
@@ -176,7 +182,7 @@ def _run_process(config_file_path: Path, submission_id: str, output_dir: Path, *
         submission_id,
         "--output-dir",
         str(output_dir),
-        "--no-submit-pruefbericht",
+        *([] if submit_pruefbericht else ["--no-submit-pruefbericht"]),
         *extra_args,
     ]
     return click.testing.CliRunner().invoke(grzctl.cli.build_cli(), args)
@@ -1225,7 +1231,7 @@ def _tan_g_of_the_valid_submission() -> str:
 
 
 class TestProcessPruefbericht:
-    """``--submit-pruefbericht`` sends the Prüfbericht to BfArM and records the reporting states."""
+    """By default, a run sends the Prüfbericht to BfArM and records the reporting states."""
 
     SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
 
@@ -1242,7 +1248,7 @@ class TestProcessPruefbericht:
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
         bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
 
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--submit-pruefbericht")
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert _states(process_config_content, sid)[-2:] == [
@@ -1274,7 +1280,7 @@ class TestProcessPruefbericht:
         waits: list[float] = []
         monkeypatch.setattr(time, "sleep", waits.append)
 
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--submit-pruefbericht")
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()] * 2
@@ -1297,7 +1303,7 @@ class TestProcessPruefbericht:
         bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
         monkeypatch.setattr(time, "sleep", lambda _: None)
 
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--submit-pruefbericht")
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
         assert len(_submitted_tans(bfarm_api)) == 10, "the run should have used its ten attempts"
@@ -1305,6 +1311,30 @@ class TestProcessPruefbericht:
             SubmissionStateEnum.REPORTING,
             SubmissionStateEnum.ERROR,
         ]
+
+    def test_a_missing_credential_stops_the_run_before_it_starts(
+        self,
+        s3_buckets,
+        s3_requests,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A run that is to submit, but lacks a credential to do so, fails before it touches S3 or the DB."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.requests.clear()
+        del process_config_content["pruefbericht"]["client_secret"]
+        config_file_path = tmp_path / "config.process.yaml"
+        config_file_path.write_text(yaml.dump(process_config_content))
+
+        result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert "pruefbericht.client_secret" in result.output
+        assert not s3_requests.requests, "the run should stop before it touches S3"
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        assert db.get_submission(sid) is None, "the run should stop before it records a state"
 
 
 def _config_with_distinct_archive_keys(tmp_path: Path, process_config_content: dict) -> Path:

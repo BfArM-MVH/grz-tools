@@ -103,7 +103,7 @@ $ grzctl --config $CONFIG_PATH process \
         state = PROCESSED
                      ▼
    generate Prüfbericht, optionally save (--save-pruefbericht) and
-   submit (--submit-pruefbericht, with retries)
+   submit (unless --no-submit-pruefbericht, with retries)
    (DB states REPORTING → REPORTED, or ERROR if BfArM never accepts it)
 ```
 
@@ -223,7 +223,7 @@ whose local copy is gone is written again, by the main pass if the prediction is
 | `--concurrent-uploads` | `4` | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. |
 | `--inbox-bucket` | `None` | Selects which inbox to read from, if the submitter has more than one configured. |
 | `--clean-inbox` / `--no-clean-inbox` | `--clean-inbox` | Whether step 9 removes the submission from the inbox after success. |
-| `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--no-submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing, with retries. |
+| `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing, with retries. A `pruefbericht` credential missing from the config then fails the run before anything is downloaded. |
 | `--save-pruefbericht PATH` | `None` | Also writes the generated Prüfbericht to `PATH`. A copy with redacted TAN always goes to `logs/pruefbericht.json`. |
 | `--redact-pruefbericht` / `--no-redact-pruefbericht` | `--redact-pruefbericht` | Whether the TAN is redacted in the file written by `--save-pruefbericht`. |
 

@@ -25,9 +25,10 @@ consistency) require information from all relevant parts before they can pass.
 
 The submission state transitions through ``PROCESSING → PROCESSED`` (or
 ``ERROR`` on failure).  The DB record is also *populated* with metadata so
-that downstream Prüfbericht generation can read the required fields.  If
-``--submit-pruefbericht`` is used, a separate ``REPORTING → REPORTED``
-transition is recorded, or ``REPORTING → ERROR`` if BfArM never accepts it.
+that downstream Prüfbericht generation can read the required fields.  Unless
+``--no-submit-pruefbericht`` is given, the Prüfbericht is then submitted to BfArM.
+Submitting records a separate ``REPORTING → REPORTED`` transition, or
+``REPORTING → ERROR`` if BfArM never accepts it.
 
 Recovery
 --------
@@ -72,7 +73,7 @@ log = logging.getLogger(__name__)
 @grzcli.threads
 @click.option(
     "--submit-pruefbericht/--no-submit-pruefbericht",
-    default=False,
+    default=True,
     help="Submit Prüfbericht to BfArM after successful processing.",
 )
 @click.option(
@@ -130,6 +131,13 @@ def process(  # noqa: PLR0913, PLR0917
     to ``ERROR`` with the associated error message.  Files are processed
     idempotently: re-running after a partial failure skips already-completed files.
     """
+    if submit_pruefbericht:
+        # a credential missing from the config would otherwise surface only after the submission is archived
+        try:
+            _get_submission_credentials(configuration.pruefbericht)
+        except ValueError as e:
+            raise click.UsageError(f"{e}. Pass --no-submit-pruefbericht to process without submitting.") from e
+
     le_id = submission_id.split("_", maxsplit=1)[0]
     inbox = configuration.resolve_inbox(submitter_id=le_id, inbox_name=inbox_bucket)
     _, metadata_dir, log_dir = _setup_directories(output_dir)
