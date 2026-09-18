@@ -595,7 +595,7 @@ class TestProcessS3Failure:
         process_config_content,
         working_dir_path,
     ):
-        """A failed upload to the interrogation bucket fails the run as UPLOAD_ERROR and leaves the inbox untouched."""
+        """A failed upload to the interrogation bucket fails the run as a transfer error and leaves the inbox untouched."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
         s3_requests.unavailable_bucket = s3_buckets["interrogation"].name
@@ -605,7 +605,7 @@ class TestProcessS3Failure:
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
         state = _latest_state(process_config_content, sid)
         assert state.state == SubmissionStateEnum.ERROR
-        assert state.failure_reason == FailureReasonEnum.UPLOAD_ERROR
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
         assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
         inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
         assert inbox_keys == {f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()}

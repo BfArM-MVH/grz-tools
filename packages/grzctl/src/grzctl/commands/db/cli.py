@@ -43,6 +43,7 @@ from grz_db.models.author import Author
 from grz_db.models.submission import (
     CASE_LINK_KEY,
     DONORS_KEY,
+    RETIRED_FAILURE_REASONS,
     Case,
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -864,7 +865,9 @@ def add(ctx: click.Context, submission_id: str):
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.option(
     "--failure-reason",
-    type=click.Choice(FailureReasonEnum.list(), case_sensitive=False),
+    type=click.Choice(
+        [reason.value for reason in FailureReasonEnum if reason not in RETIRED_FAILURE_REASONS], case_sensitive=False
+    ),
     help="Failure reason when state is ERROR.",
 )
 @click.option("--ignore-error-state/--confirm-error-state")

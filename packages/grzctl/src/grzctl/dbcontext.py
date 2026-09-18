@@ -3,14 +3,16 @@ from functools import cached_property
 from typing import Any
 
 from grz_common.exceptions import (
+    ConfigurationError,
     DecryptionError,
     DetailedQCError,
     EncryptionError,
     IncompleteSubmissionError,
-    NetworkError,
-    UploadError,
+    MissingSubmissionFileError,
+    ReportingError,
+    SubmissionValidationError,
+    TransferError,
 )
-from grz_common.pipeline.components import DataValidationError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
@@ -203,17 +205,20 @@ class DbContext:
         The first exception whose type is mapped decides the failure reason.
         """
         exception_map: dict[type[BaseException], FailureReasonEnum] = {
-            FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
-            ValidationError: FailureReasonEnum.VALIDATION_ERROR,
-            DataValidationError: FailureReasonEnum.VALIDATION_ERROR,
+            MissingSubmissionFileError: FailureReasonEnum.FILE_NOT_FOUND,
+            SubmissionValidationError: FailureReasonEnum.VALIDATION_ERROR,
             DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
-            EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
-            NetworkError: FailureReasonEnum.NETWORK_ERROR,
-            UploadError: FailureReasonEnum.UPLOAD_ERROR,
-            DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
             DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
             DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
             IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
+            KeyboardInterrupt: FailureReasonEnum.INTERRUPTED,
+            ConfigurationError: FailureReasonEnum.CONFIGURATION_ERROR,
+            TransferError: FailureReasonEnum.TRANSFER_ERROR,
+            EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
+            DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
+            ReportingError: FailureReasonEnum.REPORTING_ERROR,
+            FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
+            ValidationError: FailureReasonEnum.VALIDATION_ERROR,
         }
         seen: set[int] = set()
         exc = exc_val

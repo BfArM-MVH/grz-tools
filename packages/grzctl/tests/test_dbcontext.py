@@ -5,16 +5,22 @@ from unittest.mock import MagicMock
 
 import pytest
 from grz_common.exceptions import (
+    ConfigurationError,
     DecryptionError,
     DetailedQCError,
+    DownloadError,
     EncryptionError,
+    GrzError,
     IncompleteSubmissionError,
+    MissingSubmissionFileError,
     NetworkError,
+    ReportingError,
+    TransferError,
     UploadError,
 )
-from grz_common.pipeline.components import DataValidationError
+from grz_common.pipeline.components import DataValidationError, UploadIntegrityError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
-from grz_db.models.submission import FailureReasonEnum, SubmissionStateEnum
+from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext
 from pydantic import ValidationError
 
@@ -53,8 +59,14 @@ class TestMapExceptionToFailureReason:
             (FileNotFoundError("missing file"), FailureReasonEnum.FILE_NOT_FOUND),
             (DecryptionError("failed"), FailureReasonEnum.DECRYPTION_ERROR),
             (EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
-            (NetworkError("failed"), FailureReasonEnum.NETWORK_ERROR),
-            (UploadError("failed"), FailureReasonEnum.UPLOAD_ERROR),
+            (MissingSubmissionFileError("failed"), FailureReasonEnum.FILE_NOT_FOUND),
+            (DownloadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (NetworkError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (UploadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (UploadIntegrityError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (ConfigurationError("failed"), FailureReasonEnum.CONFIGURATION_ERROR),
+            (ReportingError("failed"), FailureReasonEnum.REPORTING_ERROR),
+            (KeyboardInterrupt(), FailureReasonEnum.INTERRUPTED),
             (DataValidationError("failed"), FailureReasonEnum.VALIDATION_ERROR),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
             (IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
@@ -87,7 +99,7 @@ class TestMapExceptionToFailureReason:
         with pytest.raises(RuntimeError) as exc_info:
             raise RuntimeError("processing failed") from UploadError("upload failed")
         result = db_context._map_exception_to_failure_reason(exc_info.type, exc_info.value)
-        assert result == FailureReasonEnum.UPLOAD_ERROR
+        assert result == FailureReasonEnum.TRANSFER_ERROR
 
     def test_none_exception_returns_unknown(self, db_context: DbContext):
         result = db_context._map_exception_to_failure_reason(type(None), None)
@@ -115,8 +127,10 @@ class TestMapExceptionToFailureReason:
                 FileNotFoundError(),
                 DecryptionError(),
                 EncryptionError(),
-                NetworkError(),
-                UploadError(),
+                TransferError(),
+                ConfigurationError(),
+                ReportingError(),
+                KeyboardInterrupt(),
                 DuplicateTanGError(),
                 DuplicateInitialSubmissionError(1),
                 IncompleteSubmissionError(),
@@ -124,8 +138,28 @@ class TestMapExceptionToFailureReason:
                 validation_exc,
             ]
         }
-        unmapped = {e for e in FailureReasonEnum if e != FailureReasonEnum.UNKNOWN} - mapped_results
+        recorded = {e for e in FailureReasonEnum if e != FailureReasonEnum.UNKNOWN} - RETIRED_FAILURE_REASONS
+        unmapped = recorded - mapped_results
         assert not unmapped, f"These FailureReasonEnum values have no exception mapping: {unmapped}"
+
+    def test_every_expected_failure_records_a_current_reason(self, db_context: DbContext):
+        """A GrzError that maps to ``unknown`` would be recorded as a bug, and a retired reason not at all."""
+
+        def leaves(cls: type[GrzError]) -> list[type[GrzError]]:
+            subclasses = cls.__subclasses__()
+            return [leaf for subclass in subclasses for leaf in leaves(subclass)] if subclasses else [cls]
+
+        reasons = {
+            cls.__name__: db_context._map_exception_to_failure_reason(cls, cls("failed")) for cls in leaves(GrzError)
+        }
+
+        assert DataValidationError.__name__ in reasons, "the pipeline's errors should be among the leaves"
+        wrong = {
+            name: reason
+            for name, reason in reasons.items()
+            if reason in {FailureReasonEnum.UNKNOWN, *RETIRED_FAILURE_REASONS}
+        }
+        assert not wrong, f"These errors record no current failure reason: {wrong}"
 
 
 class TestDbContextFailureReason:
