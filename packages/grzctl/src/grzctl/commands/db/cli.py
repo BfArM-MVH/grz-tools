@@ -987,6 +987,11 @@ _ignore_field_option = click.option(
     multiple=True,
 )
 
+#: What ``--allow-overwrite`` may name. ``"donors"`` releases every donor update and delete at once,
+#: since :meth:`SubmissionChangeSet.withhold_destructive` draws no finer line. The case link is
+#: absent on purpose: replacing one undoes a deliberate ``db case relink``, so it takes ``--force``.
+_ALLOW_OVERWRITE_CHOICES = [*(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), "donors"]
+
 
 def _prepare_submission_console_table(changes: "SubmissionChangeSet") -> rich.console.RenderableType:
     """Build a Rich renderable that shows pending submission-level metadata changes.
@@ -1056,6 +1061,60 @@ def _prepare_donor_console_table(
     return diff_table
 
 
+def _submission_upload_date(submission: Submission, override: datetime | None) -> date | None:
+    """Pick the upload date to store: *override* if given, else the one already stored.
+
+    :param submission: The stored submission row.
+    :param override: The date ``--submission-date`` named, if any.
+    :returns: The date to record, or ``None`` when neither source knows one.
+    """
+    if override is not None:
+        return override.date()
+    if submission.submission_uploaded_date is not None:
+        return submission.submission_uploaded_date
+    log.warning(
+        "No submission date provided and submission date is missing in the database. "
+        "Leaving the submission upload date unset; pass --submission-date to record one."
+    )
+    return None
+
+
+def _print_pending_changes(changes: "SubmissionChangeSet") -> None:
+    """Print the change set as one panel: the submission-level diff, then a table per donor."""
+    diff_tables: list[rich.console.RenderableType] = []
+    for donor_diff in changes.donors.added + changes.donors.updated:
+        diff_tables.append(
+            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
+        )
+    for donor_diff in changes.donors.deleted:
+        diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))
+    console.print(
+        rich.panel.Panel.fit(
+            rich.console.Group(_prepare_submission_console_table(changes), *diff_tables, fit=True),
+            title="Pending Changes",
+        )
+    )
+
+
+def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite: frozenset[str]) -> None:
+    """Stop the command before anything is written when a change would replace a stored value.
+
+    :param changes: The pending change set, as :meth:`SubmissionDb.diff` computed it.
+    :param allow_overwrite: What the operator permits; see
+        :meth:`SubmissionChangeSet.withhold_destructive`.
+    :raises click.Abort: if a destructive change is not covered by *allow_overwrite*.
+    """
+    _, withheld = changes.withhold_destructive(allow_overwrite)
+    if not withheld.has_pending:
+        return
+    console_err.print(f"[red]Refusing to overwrite or remove {', '.join(withheld.destructive_changes)}.[/red]")
+    console_err.print(
+        "Nothing was written. Re-run with --force to take every value from the metadata, "
+        "--allow-overwrite to name what may be replaced, or --ignore-field to leave it alone."
+    )
+    raise click.Abort()
+
+
 @submission.command()
 @_submission_id_argument
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
@@ -1071,6 +1130,22 @@ def _prepare_donor_console_table(
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
+@click.option(
+    "--force/--no-force",
+    default=False,
+    help="Overwrite or remove stored values that differ from the metadata (destructive changes): "
+    "non-NULL fields, donors, and the case link. Without this flag such a change stops the command "
+    "and nothing is written.",
+)
+@click.option(
+    "--allow-overwrite",
+    "allow_overwrite",
+    type=click.Choice(_ALLOW_OVERWRITE_CHOICES, case_sensitive=False),
+    multiple=True,
+    help="Permit only what these names cover: a field by its key, or every donor update and delete "
+    "as 'donors' (may be repeated). Any other destructive change still stops the command. "
+    "Mutually exclusive with --force.",
+)
 @_ignore_field_option
 @click.pass_context
 def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
@@ -1079,14 +1154,23 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     metadata_path: str,
     submission_date: datetime | None,
     confirm: bool,
+    force: bool,
+    allow_overwrite: tuple[str, ...],
     ignore_field: tuple[str, ...],
 ):
     """Populate a submission in the database based on the given metadata.json file.
 
     Also resolves and links the submission's case; an unresolved link is shown rather
     than blocking the rest of the diff.
+
+    Writes the whole change set or none of it. Filling a value the database does not have is
+    always allowed; replacing or removing one takes --force or --allow-overwrite, and otherwise
+    stops the command before anything is written.
     """
     log.debug("Ignored fields for populate: %s", ignore_field)
+
+    if force and allow_overwrite:
+        raise click.UsageError("--force and --allow-overwrite are mutually exclusive.")
 
     if submission_date is not None:
         log.info("Submission date from provided option is used")
@@ -1122,16 +1206,7 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
             "or use 'grzctl db submission modify' directly."
         ) from e
 
-    if submission_date is not None:
-        submission_uploaded_date = submission_date.date()
-    elif submission.submission_uploaded_date is not None:
-        submission_uploaded_date = submission.submission_uploaded_date
-    else:
-        log.warning(
-            "No submission date provided and submission date is missing in the database. "
-            "Leaving the submission upload date unset; pass --submission-date to record one."
-        )
-        submission_uploaded_date = None
+    submission_uploaded_date = _submission_upload_date(submission, submission_date)
 
     try:
         changes = db_service.diff(
@@ -1143,15 +1218,6 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     except SubmissionError as e:
         _abort(e)
 
-    # build donor diff and attach Rich tables for console preview in one pass
-    diff_tables: list[rich.console.RenderableType] = []
-    for donor_diff in changes.donors.added + changes.donors.updated:
-        diff_tables.append(
-            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
-        )
-    for donor_diff in changes.donors.deleted:
-        diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))
-
     if not changes.has_pending:
         console_err.print(
             f"[yellow]Case link unresolved: {changes.case_link_error}[/yellow]"
@@ -1160,12 +1226,10 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
         )
         return
 
-    console.print(
-        rich.panel.Panel.fit(
-            rich.console.Group(_prepare_submission_console_table(changes), *diff_tables, fit=True),
-            title="Pending Changes",
-        )
-    )
+    _print_pending_changes(changes)
+
+    if not force:
+        _refuse_destructive_changes(changes, frozenset(allow_overwrite))
 
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?",
@@ -1976,9 +2040,8 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     # and anything else is held back and reported.
     if not force:
         changes, withheld = changes.withhold_destructive(allow_overwrite)
-        # --allow-overwrite is built from SubmissionBase, which has no case_id, so it cannot name the
-        # case link. Replacing one would undo a deliberate case relink, so a held-back link holds the
-        # whole submission back.
+        # --allow-overwrite cannot name the case link, see _ALLOW_OVERWRITE_CHOICES. Replacing one
+        # would undo a deliberate case relink, so a held-back link holds the whole submission back.
         if withheld.case_link is not None:
             console_err.print(
                 f"[dim]  {submission_id}: would overwrite {', '.join(withheld.destructive_changes)}. "
@@ -2026,11 +2089,12 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
 @click.option(
     "--allow-overwrite",
     "allow_overwrite",
-    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
+    type=click.Choice(_ALLOW_OVERWRITE_CHOICES, case_sensitive=False),
     multiple=True,
-    help="Overwrite only these existing non-NULL fields when the metadata.json value differs "
-    "(may be repeated). Other destructive changes are held back and the submission is updated in "
-    "part. Mutually exclusive with --force, which permits every overwrite.",
+    help="Overwrite only what these names cover when the metadata.json value differs: a field by "
+    "its key, or every donor update and delete as 'donors' (may be repeated). Other destructive "
+    "changes are held back and the submission is updated in part. Mutually exclusive with --force, "
+    "which permits every overwrite.",
 )
 @click.option(
     "--submission-id",

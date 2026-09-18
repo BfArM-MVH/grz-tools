@@ -336,6 +336,11 @@ def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_me
             "tan_g",
             "--ignore-field",
             "local_case_id",
+            # the revoked consent replaces what the donor row and the stored dump already hold
+            "--allow-overwrite",
+            "donors",
+            "--allow-overwrite",
+            "submission_metadata",
             "--submission-date",
             changed_date.strftime("%Y-%m-%d"),
         ],
