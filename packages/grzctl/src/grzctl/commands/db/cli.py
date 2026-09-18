@@ -982,9 +982,9 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
 _ignore_field_option = click.option(
     "--ignore-field",
     "ignore_field",
-    type=click.Choice([*_MODIFIABLE_SUBMISSION_KEYS, CASE_LINK_KEY], case_sensitive=False),
-    help="Do not populate the given field from the metadata to the database. Can be specified multiple times. "
-    "Passing --ignore-field case_id skips case resolution and linking.",
+    type=click.Choice([*_MODIFIABLE_SUBMISSION_KEYS, DONORS_KEY, CASE_LINK_KEY], case_sensitive=False),
+    help="Do not populate the given field from the metadata to the database (may be repeated). "
+    "'case_id' skips case resolution and linking, 'donors' leaves the stored donor rows as they are.",
     multiple=True,
 )
 

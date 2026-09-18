@@ -17,7 +17,7 @@ import click.testing
 import grzctl.cli
 import pytest
 from grz_db.errors import SubmissionNotFoundError
-from grz_db.models.submission import SubmissionDb
+from grz_db.models.submission import DONORS_KEY, SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, SubmissionChangeSet
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
@@ -137,6 +137,37 @@ def test_populate_raises_without_force_on_donor_deletion(db_ctx: SimpleNamespace
     with patch.object(ctx.db, "diff", return_value=changes):
         with pytest.raises(RuntimeError, match="donor 'deleted_donor'"):
             ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=False)
+
+
+def _flip_a_donors_mv_consent(ctx: SimpleNamespace) -> bool:
+    """Make one stored donor differ from the metadata, and return the value the metadata still has."""
+    donor = ctx.db.get_donors(ctx.submission_id)[0]
+    from_metadata = donor.mv_consented
+    donor.mv_consented = not from_metadata
+    ctx.db.update_donor(donor)
+    return from_metadata
+
+
+def test_populate_leaves_the_donors_alone_when_they_are_ignored(db_ctx: SimpleNamespace):
+    """Ignoring the donors is how a caller writes the rest without deciding the donor question."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+    from_metadata = _flip_a_donors_mv_consent(ctx)
+
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, ignore_fields={DONORS_KEY})
+
+    assert ctx.db.get_donors(ctx.submission_id)[0].mv_consented == (not from_metadata)
+
+
+def test_populate_writes_a_donor_overwrite_that_allow_overwrite_names(db_ctx: SimpleNamespace):
+    """Naming the donors is how a caller settles it the other way, without permitting everything."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+    from_metadata = _flip_a_donors_mv_consent(ctx)
+
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, allow_overwrite={DONORS_KEY})
+
+    assert ctx.db.get_donors(ctx.submission_id)[0].mv_consented == from_metadata
 
 
 def test_populate_raises_on_redacted_tan_g(db_ctx: SimpleNamespace):
