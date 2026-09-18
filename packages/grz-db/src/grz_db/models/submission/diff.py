@@ -12,6 +12,20 @@ if TYPE_CHECKING:
     from grz_db.models.submission import Donor as DbDonor
 
 
+DONORS_KEY = "donors"
+"""Names every donor update and delete at once in an allow-list.
+
+A donor row is keyed by the pseudonym a change may itself be replacing, so there is no finer
+unit to name.
+"""
+
+CASE_LINK_KEY = "case_id"
+"""Names a changed case link, both in an allow-list and in ``ignore_fields``.
+
+It is the column the link is stored in, so operators name it the way they name a field.
+"""
+
+
 class DiffState(StrEnum):
     NEW = "new"
     UPDATED = "update"
@@ -150,29 +164,6 @@ class SubmissionDiffCollection:
         """True if any field needs to be written to the database (added, updated, or deleted)."""
         return len(self.added) > 0 or len(self.updated) > 0 or len(self.deleted) > 0
 
-    @property
-    def has_pending_destructive(self) -> bool:
-        """True if any field will overwrite or remove an existing database value (updated or deleted)."""
-        return len(self.updated) > 0 or len(self.deleted) > 0
-
-    def withhold_destructive(self, allowed: Container[str]) -> tuple[SubmissionDiffCollection, list[FieldDiff]]:
-        """Split off the destructive diffs whose field is not in ``allowed``.
-
-        Additive diffs are always safe to write, so they stay regardless. This lets a caller permit
-        overwriting a named field without permitting every other overwrite the same diff carries.
-
-        :param allowed: field names whose existing database value may be overwritten or removed.
-        :returns: a collection holding only what may be written, and the diffs held back.
-        """
-        committable = SubmissionDiffCollection(
-            added=list(self.added),
-            updated=[field_diff for field_diff in self.updated if field_diff.key in allowed],
-            deleted=[field_diff for field_diff in self.deleted if field_diff.key in allowed],
-            unchanged=list(self.unchanged),
-        )
-        withheld = [field_diff for field_diff in (*self.updated, *self.deleted) if field_diff.key not in allowed]
-        return committable, withheld
-
     def append(self, field_diff: FieldDiff):
         match field_diff.diff.state:
             case DiffState.UPDATED:
@@ -259,11 +250,6 @@ class DonorsDiffCollection:
         """True if any donor needs to be written to the database (added, updated, or deleted)."""
         return len(self.added) > 0 or len(self.updated) > 0 or len(self.deleted) > 0
 
-    @property
-    def has_pending_destructive(self) -> bool:
-        """True if any donor will overwrite or remove an existing database record (updated or deleted)."""
-        return len(self.updated) > 0 or len(self.deleted) > 0
-
     def append(self, donor_diff: DonorDiff):
         match donor_diff.state:
             case DiffState.UPDATED:
@@ -319,9 +305,23 @@ class SubmissionChangeSet:
 
         An existing case link counts: reverting it would undo a deliberate ``case relink``.
         """
-        changes = [d.key for d in (*self.fields.updated, *self.fields.deleted)]
-        changes += [f"donor '{d.pseudonym}'" for d in (*self.donors.updated, *self.donors.deleted)]
-        if self.case_link is not None and self.case_link.state is DiffState.UPDATED:
+        return self.undeclared_destructive_changes()
+
+    def undeclared_destructive_changes(self, allowed: Container[str] = frozenset()) -> list[str]:
+        """Names of the destructive changes ``allowed`` does not cover.
+
+        Additive changes never appear: a filled field, a new donor and a first case link destroy
+        nothing. An empty list means the whole change set may be committed as it stands.
+
+        :param allowed: What may be overwritten or removed. A field matches by key, every donor
+            update and delete together as :data:`DONORS_KEY`, and a changed case link as
+            :data:`CASE_LINK_KEY`.
+        :returns: One name per change, sorted.
+        """
+        changes = [d.key for d in (*self.fields.updated, *self.fields.deleted) if d.key not in allowed]
+        if DONORS_KEY not in allowed:
+            changes += [f"donor '{d.pseudonym}'" for d in (*self.donors.updated, *self.donors.deleted)]
+        if self.case_link is not None and self.case_link.state is DiffState.UPDATED and CASE_LINK_KEY not in allowed:
             changes.append(f"case link (case {self.case_link.before})")
         return sorted(changes)
 
@@ -329,48 +329,3 @@ class SubmissionChangeSet:
     def has_pending_destructive(self) -> bool:
         """True if committing would overwrite or remove any existing database value."""
         return bool(self.destructive_changes)
-
-    def withhold_destructive(self, allowed: Container[str]) -> tuple[SubmissionChangeSet, SubmissionChangeSet]:
-        """Split off the changes that would overwrite or remove a stored value, unless ``allowed`` names them.
-
-        Draws the same line as :attr:`destructive_changes`. Additive changes always stay: a
-        filled field, a new donor, and a first case link destroy nothing.
-
-        :param allowed: What may be overwritten or removed. Fields match by key, updated and
-            deleted donors as ``"donors"``, and a changed case link as ``"case_id"``.
-        :returns: A change set with only what may be written, and one with what was held back.
-            The second one's :attr:`destructive_changes` names what was held back.
-        """
-        fields, withheld_field_diffs = self.fields.withhold_destructive(allowed)
-        withheld_fields = SubmissionDiffCollection()
-        for field_diff in withheld_field_diffs:
-            withheld_fields.append(field_diff)
-
-        if "donors" in allowed:
-            donors = DonorsDiffCollection(
-                added=list(self.donors.added),
-                updated=list(self.donors.updated),
-                deleted=list(self.donors.deleted),
-                unchanged=list(self.donors.unchanged),
-            )
-            withheld_donors = DonorsDiffCollection()
-        else:
-            donors = DonorsDiffCollection(added=list(self.donors.added), unchanged=list(self.donors.unchanged))
-            withheld_donors = DonorsDiffCollection(updated=list(self.donors.updated), deleted=list(self.donors.deleted))
-
-        link_withheld = (
-            self.case_link is not None and self.case_link.state is DiffState.UPDATED and "case_id" not in allowed
-        )
-
-        committable = SubmissionChangeSet(
-            fields=fields,
-            donors=donors,
-            case_link=None if link_withheld else self.case_link,
-            case_link_error=self.case_link_error,
-        )
-        withheld = SubmissionChangeSet(
-            fields=withheld_fields,
-            donors=withheld_donors,
-            case_link=self.case_link if link_withheld else None,
-        )
-        return committable, withheld

@@ -72,6 +72,8 @@ from ...errors import (
 from ..author import Author
 from ..base import BaseSignablePayload, VerifiableLog
 from .diff import (  # noqa: F401
+    CASE_LINK_KEY,
+    DONORS_KEY,
     CaseLinkDiff,
     Diff,
     DiffState,
@@ -2388,7 +2390,7 @@ class SubmissionDb:
         :raises AmbiguousCaseError: if the metadata's case key matches more than one case.
         """
         if (
-            "case_id" in ignore_fields
+            CASE_LINK_KEY in ignore_fields
             or metadata.submission.submission_type == SubmissionType.test
             or is_redacted_local_case_id(metadata.submission.local_case_id)
         ):
