@@ -97,18 +97,21 @@ $ grzctl --config $CONFIG_PATH process \
                      ▼
 8. copy all staged objects to target archive bucket, delete from interrogation bucket
                      ▼
-9. --clean-inbox (default on): remove submission from inbox
-   (DB states CLEANING → CLEANED)
-                     ▼
         state = PROCESSED
                      ▼
-   generate Prüfbericht, optionally save (--save-pruefbericht) and
+9. generate Prüfbericht, optionally save (--save-pruefbericht) and
    submit (unless --no-submit-pruefbericht, with retries)
-   (DB states REPORTING → REPORTED, or ERROR if BfArM never accepts it)
+   (DB states REPORTING → REPORTED; ERROR if BfArM never accepts it, STOP)
+                     ▼
+10. --clean-inbox (default on): remove submission from inbox
+    (DB states CLEANING → CLEANED)
 ```
 
-The duplicate-initial check in step 1 and steps 2-9 run inside the DB state transition
-`PROCESSING → PROCESSED` (or `ERROR` on failure).
+Steps 1 to 8 run inside the DB state transition `PROCESSING → PROCESSED` (or `ERROR` on
+failure), except the download of `metadata.json`. Processing can create the submission in
+the database, so a mistyped submission ID has to fail before that. Steps 9 and 10 each
+record their own states, so a failure in them leaves `PROCESSED` in place. A Prüfbericht
+that BfArM does not accept keeps the submission in the inbox.
 
 ## Detailed QC: prediction and decision
 
@@ -224,7 +227,7 @@ whose local copy is gone is written again, by the main pass if the prediction is
 | `--threads` | `min(cpu_count, 4)` | Number of files processed concurrently in the thread pool (step 3 and the QC pass). |
 | `--concurrent-uploads` | `4` | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. |
 | `--inbox-bucket` | `None` | Selects which inbox to read from, if the submitter has more than one configured. |
-| `--clean-inbox` / `--no-clean-inbox` | `--clean-inbox` | Whether step 9 removes the submission from the inbox after success. |
+| `--clean-inbox` / `--no-clean-inbox` | `--clean-inbox` | Whether step 10 removes the submission from the inbox after success. |
 | `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing, with retries. A `pruefbericht` credential missing from the config then fails the run before anything is downloaded. |
 | `--save-pruefbericht PATH` | `None` | Also writes the generated Prüfbericht to `PATH`. A copy with redacted TAN always goes to `logs/pruefbericht.json`. |
 | `--redact-pruefbericht` / `--no-redact-pruefbericht` | `--redact-pruefbericht` | Whether the TAN is redacted in the file written by `--save-pruefbericht`. |

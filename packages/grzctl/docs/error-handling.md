@@ -27,7 +27,7 @@ steps, one after another:
 
 | Step       | States                     | Covers                                                                                                          |
 | ---------- | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Processing | `PROCESSING` → `PROCESSED` | metadata download and parsing, database population, duplicate checks, file streaming, detailed QC, archive copy |
+| Processing | `PROCESSING` → `PROCESSED` | metadata parsing, database population, duplicate checks, file streaming, detailed QC, archive copy               |
 | Reporting  | `REPORTING` → `REPORTED`   | generating and submitting the Prüfbericht                                                                       |
 | Cleaning   | `CLEANING` → `CLEANED`     | removing the submission from the inbox                                                                          |
 
@@ -35,7 +35,9 @@ A failed step ends the run, so the inbox keeps the submission until BfArM has ac
 its Prüfbericht.
 
 A failure before a step's context is open reaches only the console and the log. Examples
-are an unreachable database and a missing BfArM credential.
+are an unreachable database, a missing BfArM credential, and a metadata file missing from
+the inbox. Processing can create the submission in the database, so a mistyped submission
+ID leaves no trace there.
 
 ## Failure reasons
 

@@ -42,13 +42,12 @@ from grz_common.utils.crypt import Crypt4GH
 from grz_common.utils.redaction import redact_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError
-from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
 from tqdm.auto import tqdm
 
-from .commands.clean import _clean_submission_from_bucket
-from .dbcontext import DbContext, FilesFailedError
+from .dbcontext import FilesFailedError
 from .models.config import GrzctlConfig, InboxTarget
 
 
@@ -469,12 +468,11 @@ class SubmissionProcessor:
     Inbox -> Decrypt -> Validate -> Re-Encrypt -> Archive
     """
 
-    def __init__(  # noqa: PLR0913, PLR0917
+    def __init__(
         self,
         configuration: GrzctlConfig,
         inbox: InboxTarget,
         log_dir: Path,
-        clean_inbox: bool = True,
         max_concurrent_uploads: int = 1,
         threads: int = 1,
     ):
@@ -490,14 +488,12 @@ class SubmissionProcessor:
         :param configuration: Global processing configuration (DB, Archives, etc.).
         :param inbox: Specific inbox target configuration (S3 credentials, keys).
         :param log_dir: Directory for the progress logs, which are archived with the submission.
-        :param clean_inbox: Whether to remove files from the inbox after successful processing.
         :param max_concurrent_uploads: Number of threads used for S3 multipart uploads _per file_.
         :param threads: Number of files to process concurrently.
         """
         self.config = configuration
         self.inbox = inbox
         self._source_s3_options = inbox.s3
-        self._clean_inbox = clean_inbox
         self._log_dir = log_dir
 
         log.debug("Loading crypt4gh keys...")
@@ -587,24 +583,6 @@ class SubmissionProcessor:
         with s3_errors(f"Upload to s3://{run_state.interrogation_bucket}/{key}", UploadError):
             run_state.interrogation_s3.put_object(
                 Bucket=run_state.interrogation_bucket, Key=key, Body=json.dumps(redacted_metadata).encode("utf-8")
-            )
-
-    def _maybe_cleanup_inbox(self, run_state: SubmissionRunState) -> None:
-        if not self._clean_inbox:
-            return
-
-        with DbContext(
-            self.config,
-            run_state.submission_id,
-            start_state=SubmissionStateEnum.CLEANING,
-            end_state=SubmissionStateEnum.CLEANED,
-        ):
-            bucket_name = self._source_s3_options.bucket
-            _clean_submission_from_bucket(
-                bucket_name,
-                self._source_s3_options,
-                run_state.submission_id,
-                f"inbox '{bucket_name}'",
             )
 
     def _log_files(self, submission_id: str) -> dict[str, Path]:
@@ -793,11 +771,10 @@ class SubmissionProcessor:
             self._commit_to_archive(submission_run)
 
             log.info(f"Submission {submission_run.submission_id} processed successfully.")
-            self._maybe_cleanup_inbox(submission_run)
         except Exception:
             # Validation failed, or a step after the upload to the interrogation bucket did
-            # (copy to final archive, metadata upload, QC workflow, inbox cleanup). Either
-            # way, clean up the staged files so they don't linger.
+            # (copy to final archive, metadata upload, QC workflow). Either way, clean up the
+            # staged files so they don't linger.
             self._handle_interrogation_failure(submission_run)
             # Decrypted files stay only for a submission that is selected for detailed QC.
             if not selected_for_qc and prefetch:

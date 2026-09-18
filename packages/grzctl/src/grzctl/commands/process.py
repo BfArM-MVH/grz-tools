@@ -28,7 +28,9 @@ The submission state transitions through ``PROCESSING → PROCESSED`` (or
 that downstream Prüfbericht generation can read the required fields.  Unless
 ``--no-submit-pruefbericht`` is given, the Prüfbericht is then submitted to BfArM.
 Submitting records a separate ``REPORTING → REPORTED`` transition, or
-``REPORTING → ERROR`` if BfArM never accepts it.
+``REPORTING → ERROR`` if BfArM never accepts it.  Cleaning the inbox then records
+``CLEANING → CLEANED``.  A failed step ends the run, so the inbox keeps a submission
+until BfArM has accepted its Prüfbericht.
 
 Recovery
 --------
@@ -42,6 +44,7 @@ copy is gone, making the pipeline effectively idempotent.
 import json
 import logging
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import click
@@ -60,6 +63,7 @@ from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from ..models.pruefbericht import PruefberichtModel
 from ..processor import SubmissionProcessor
+from .clean import _clean_submission_from_bucket
 from .pruefbericht import _generate_pruefbericht_from_database, _get_submission_credentials
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
 from .validate import _check_duplicate_initial
@@ -128,9 +132,10 @@ def process(  # noqa: PLR0913, PLR0917
     Prüfbericht generation can read the required fields (submission date,
     donor info, etc.).
 
-    On success the submission state is set to ``PROCESSED``; on failure it is set
-    to ``ERROR`` with the associated error message.  Files are processed
-    idempotently: re-running after a partial failure skips already-completed files.
+    Processing records ``PROCESSED`` once the submission is archived. Reporting and
+    cleaning the inbox follow as steps of their own, and a failed step records ``ERROR``
+    with its failure reason.  Files are processed idempotently: re-running after a
+    partial failure skips already-completed files.
     """
     if submit_pruefbericht:
         # a credential missing from the config would otherwise surface only after the submission is archived
@@ -145,22 +150,11 @@ def process(  # noqa: PLR0913, PLR0917
 
     log.info(f"Starting streaming pipeline for submission: {submission_id}")
 
-    # first, download metadata to understand the submission structure
+    # Processing may create the submission in the database, so the metadata has to be there
+    # first: a mistyped submission ID then leaves no trace.
     log.info("Downloading metadata...")
     s3_client = init_s3_client(inbox.s3)
     download_metadata_file(s3_client, inbox.s3.bucket, submission_id, metadata_dir)
-    local_metadata_path = metadata_dir / "metadata.json"
-
-    submission_metadata = SubmissionMetadata(local_metadata_path)
-
-    processor = SubmissionProcessor(
-        configuration=configuration,
-        inbox=inbox,
-        log_dir=log_dir,
-        threads=threads,
-        max_concurrent_uploads=concurrent_uploads,
-        clean_inbox=clean_inbox,
-    )
 
     with DbContext(
         configuration=configuration,
@@ -168,6 +162,14 @@ def process(  # noqa: PLR0913, PLR0917
         start_state=SubmissionStateEnum.PROCESSING,
         end_state=SubmissionStateEnum.PROCESSED,
     ) as dbcontext_inst:
+        submission_metadata = SubmissionMetadata(metadata_dir / "metadata.json")
+        processor = SubmissionProcessor(
+            configuration=configuration,
+            inbox=inbox,
+            log_dir=log_dir,
+            threads=threads,
+            max_concurrent_uploads=concurrent_uploads,
+        )
         # Populate the DB record with parsed metadata (donors, files, dates, etc.)
         # so that downstream Prüfbericht generation can read the required fields.
         # A rejected write, such as a duplicate tanG, then records the ERROR state.
@@ -207,6 +209,15 @@ def process(  # noqa: PLR0913, PLR0917
         redact_pruefbericht=redact_pruefbericht,
     )
 
+    if clean_inbox:
+        with DbContext(
+            configuration=configuration,
+            submission_id=submission_id,
+            start_state=SubmissionStateEnum.CLEANING,
+            end_state=SubmissionStateEnum.CLEANED,
+        ):
+            _clean_submission_from_bucket(inbox.s3.bucket, inbox.s3, submission_id, f"inbox '{inbox.s3.bucket}'")
+
 
 def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
     """Create and return required directories."""
@@ -228,39 +239,31 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     save_pruefbericht: str | None,
     redact_pruefbericht: bool,
 ) -> None:
-    """Generate and optionally submit Prüfbericht to BfArM.
+    """Generate the Prüfbericht, save it, and submit it to BfArM if asked to.
 
-    Prüfbericht generation is only reached for submissions that passed basic QC
-    (validation succeeded).  If validation had failed, the pipeline would have
-    raised an error earlier and we would never get here, therefore ``failed`` is
-    always ``False`` at this point.
+    Submitting makes this the reporting step, so a Prüfbericht that cannot be generated fails that
+    step too.
     """
-    log.info("Generating Prüfbericht...")
-    try:
-        # The ``failed`` flag is always False here: Prüfbericht generation is only
-        # reached when the pipeline succeeded (basic QC passed).  The parameter is
-        # kept for API compatibility with ``_generate_pruefbericht_from_database``.
-        failed = False
-        pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed)
-        log.info("Prüfbericht generated successfully")
-    except Exception as e:
-        # the run archived the submission, so a Prüfbericht that cannot be generated is the one
-        # thing left undone, and swallowing it would report the run as complete
-        log.error(f"Failed to generate Prüfbericht: {e}")
-        raise
-
-    _save_pruefbericht(pruefbericht, log_dir, save_pruefbericht, redact_pruefbericht)
-
-    if submit_pruefbericht:
-        # Entering the context writes REPORTING and commits it, so the retries below hold no
-        # transaction open. A Prüfbericht that never gets through is recorded as an error, and a
-        # later ``grzctl pruefbericht submit`` records the reporting states again.
-        with DbContext(
+    # Entering the context writes REPORTING and commits it, so the retries below hold no
+    # transaction open. A Prüfbericht that never gets through is recorded as an error, and a
+    # later ``grzctl pruefbericht submit`` records the reporting states again.
+    reporting = (
+        DbContext(
             configuration=configuration,
             submission_id=submission_id,
             start_state=SubmissionStateEnum.REPORTING,
             end_state=SubmissionStateEnum.REPORTED,
-        ):
+        )
+        if submit_pruefbericht
+        else nullcontext()
+    )
+    with reporting:
+        log.info("Generating Prüfbericht...")
+        # only a submission that passed basic QC gets here, so its Prüfbericht reports a pass
+        pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed=False)
+        log.info("Prüfbericht generated successfully")
+        _save_pruefbericht(pruefbericht, log_dir, save_pruefbericht, redact_pruefbericht)
+        if submit_pruefbericht:
             _submit_pruefbericht_with_retries(pruefbericht, configuration.pruefbericht)
             log.info("Prüfbericht submitted successfully!")
 

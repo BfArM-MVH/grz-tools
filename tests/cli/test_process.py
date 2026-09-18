@@ -590,6 +590,22 @@ class TestProcessS3Failure:
         assert state.data["error"] == file_errors[0]["message"], "the recorded error is the one that set the reason"
         assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
 
+    def test_a_missing_metadata_leaves_no_trace_in_the_database(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A mistyped submission ID fails before processing could create the submission."""
+        sid = "260914050_2024-07-15_00000000"
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        assert db.get_submission(sid) is None
+
     def test_upload_failure_fails_processing(
         self,
         s3_buckets,
@@ -826,7 +842,7 @@ class TestProcessRerunAfterRelink:
         result = _run_process(temp_process_config_file_path, sid, working_dir_path)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
-        assert _latest_state(process_config_content, sid).state == SubmissionStateEnum.PROCESSED
+        assert SubmissionStateEnum.PROCESSED in _states(process_config_content, sid)[-3:]
         db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
         assert db.get_submission(sid).case_id == other_case_id
 
@@ -1119,10 +1135,34 @@ class TestProcessInboxCleanup:
         assert metadata == b"", "the metadata in the inbox holds the tanG, so cleaning has to empty it"
         assert _states(process_config_content, sid) == [
             SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
             SubmissionStateEnum.CLEANING,
             SubmissionStateEnum.CLEANED,
-            SubmissionStateEnum.PROCESSED,
         ]
+
+    def test_a_failed_cleanup_is_recorded_once_as_its_own_step(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """An archived submission stays processed, and only the cleaning records the failure."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.unavailable_bucket = s3_buckets["inbox"].name
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.ERROR,
+        ]
+        assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.TRANSFER_ERROR
 
     def test_no_clean_inbox_leaves_the_submission_in_the_inbox(
         self,
@@ -1276,9 +1316,13 @@ class TestProcessPruefbericht:
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
-        assert _states(process_config_content, sid)[-2:] == [
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
             SubmissionStateEnum.REPORTING,
             SubmissionStateEnum.REPORTED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.CLEANED,
         ]
         assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()]
         saved = json.loads((working_dir_path / "logs" / "pruefbericht.json").read_text())
@@ -1311,7 +1355,7 @@ class TestProcessPruefbericht:
         assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()] * 2
         assert _submission_tokens(bfarm_api) == ["token-1", "token-2"]
         assert waits == [30.0]
-        assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.REPORTED
+        assert _states(process_config_content, sid)[-3] == SubmissionStateEnum.REPORTED
 
     def test_a_submission_that_never_gets_through_is_recorded_as_an_error(
         self,
@@ -1337,6 +1381,8 @@ class TestProcessPruefbericht:
             SubmissionStateEnum.ERROR,
         ]
         assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.REPORTING_ERROR
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+        assert inbox_keys, "the inbox keeps a submission whose Prüfbericht BfArM did not accept"
 
     def test_refused_credentials_fail_at_once_as_a_configuration_error(
         self,
