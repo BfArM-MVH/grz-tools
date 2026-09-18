@@ -2504,7 +2504,7 @@ class SubmissionDb:
             submission_uploaded_date = metadata.submission.submission_date
 
             # Add submission date to ignore fields
-            ignore_fields = ignore_fields or set()
+            ignore_fields = set(ignore_fields or ())
             ignore_fields.add("submission_uploaded_date")
 
         # One transaction, so resolution and the field diff share the row read here. It is not

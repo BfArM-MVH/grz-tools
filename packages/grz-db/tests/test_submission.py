@@ -117,6 +117,16 @@ def test_donor_diff_changes_exclude_unchanged_fields() -> None:
     assert [field_diff.key for field_diff in donor_diff.changes] == ["mv_consented"]
 
 
+def test_diff_does_not_mutate_callers_ignore_fields(
+    db: SubmissionDb, submission, metadata: GrzSubmissionMetadata
+) -> None:
+    """diff() must leave the caller's ignore_fields set untouched when it extends its own."""
+    ignore_fields = {"tan_g"}
+    db.diff(SUBMISSION_ID, metadata, submission_uploaded_date=None, ignore_fields=ignore_fields)
+
+    assert ignore_fields == {"tan_g"}
+
+
 def test_added_submission_reads_its_relationships(db: SubmissionDb) -> None:
     """The submission from add_submission reads its state history, change requests and case after its session closed."""
     submission = db.add_submission(SUBMISSION_ID)
