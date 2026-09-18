@@ -3,10 +3,9 @@ import json
 from collections.abc import Callable
 
 import pytest
-from grz_db.errors import DuplicateTanGError
+from grz_db.errors import DuplicateTanGError, OutdatedDatabaseSchemaError
 from grz_db.models.submission import (
     Donor,
-    OutdatedDatabaseSchemaError,
     Submission,
     SubmissionDb,
     SubmissionStateEnum,

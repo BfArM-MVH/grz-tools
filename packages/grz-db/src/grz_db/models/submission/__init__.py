@@ -61,6 +61,7 @@ from ...errors import (
     DuplicatePsnError,
     DuplicateSubmissionError,
     DuplicateTanGError,
+    OutdatedDatabaseSchemaError,
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
     SubmissionNotFoundError,
@@ -86,10 +87,6 @@ logger = logging.getLogger(__name__)
 # Key of the PostgreSQL advisory lock that serializes QC selection. Any value works, as long as
 # nothing else uses it as an advisory lock key in the same database.
 _QC_SELECTION_LOCK_KEY = int.from_bytes(b"qcselect", "big")  # 8 bytes, so it fits a signed bigint
-
-
-class OutdatedDatabaseSchemaError(Exception):
-    pass
 
 
 class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]

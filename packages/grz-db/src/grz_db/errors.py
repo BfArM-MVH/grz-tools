@@ -13,6 +13,10 @@ class DatabaseError(GrzDbError):
     """Base class for database-related errors."""
 
 
+class OutdatedDatabaseSchemaError(DatabaseError):
+    """Exception for when the database schema is older than the latest Alembic revision."""
+
+
 class SubmissionNotFoundError(SubmissionError):
     """Exception for when a submission is not found in the database."""
 
