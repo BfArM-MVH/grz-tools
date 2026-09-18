@@ -8,7 +8,7 @@ import botocore.exceptions
 import pytest
 from grz_common.constants import MULTIPART_MIN_PART_SIZE
 from grz_common.exceptions import UploadError
-from grz_common.pipeline.components import DataIntegrityError, ReadStream
+from grz_common.pipeline.components import ReadStream, UploadIntegrityError
 from grz_common.pipeline.components.s3 import S3MultipartUploader
 from moto import mock_aws
 
@@ -101,7 +101,7 @@ def test_a_part_stored_differently_fails_the_upload(s3, wrong_etag_from):
     """A part whose ETag does not match what was sent fails as a data integrity error."""
     wrong_etag_from("UploadPart")
 
-    with pytest.raises(DataIntegrityError):
+    with pytest.raises(UploadIntegrityError):
         ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY)
 
     _assert_nothing_was_stored(s3)
@@ -111,7 +111,7 @@ def test_an_object_assembled_differently_fails_the_upload(s3, wrong_etag_from):
     """A completed object whose ETag does not match the parts fails as a data integrity error."""
     wrong_etag_from("CompleteMultipartUpload")
 
-    with pytest.raises(DataIntegrityError):
+    with pytest.raises(UploadIntegrityError):
         ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY)
 
     _assert_nothing_was_stored(s3)
@@ -122,7 +122,7 @@ def test_a_part_that_cannot_be_uploaded_fails_the_upload(s3, failing_upload_part
     with pytest.raises(UploadError) as exception:
         ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY)
 
-    assert not isinstance(exception.value, DataIntegrityError)
+    assert not isinstance(exception.value, UploadIntegrityError)
     _assert_nothing_was_stored(s3)
 
 
@@ -141,7 +141,7 @@ def test_an_empty_object_stored_differently_fails_the_upload(s3, wrong_etag_from
     """The PUT that stores an empty stream is checked the same way, and leaves nothing behind either."""
     wrong_etag_from("PutObject")
 
-    with pytest.raises(DataIntegrityError):
+    with pytest.raises(UploadIntegrityError):
         ReadStream(io.BytesIO(b"")) >> S3MultipartUploader(s3, BUCKET, KEY)
 
     _assert_nothing_was_stored(s3)

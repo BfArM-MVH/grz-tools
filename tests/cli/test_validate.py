@@ -4,7 +4,7 @@ import logging
 import grz_cli.cli
 import pytest
 from click.testing import CliRunner
-from grz_common.workers.submission import SubmissionValidationError
+from grz_common.exceptions import SubmissionValidationError
 
 from .common import copy_submission
 

@@ -11,7 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from grz_common.constants import MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MAX_PARTS, MULTIPART_MIN_PART_SIZE
 from grz_common.exceptions import NetworkError, UploadError
 
-from . import DataIntegrityError, Observer, ReadStream
+from . import Observer, ReadStream, UploadIntegrityError
 
 log = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ class S3MultipartUploader(Observer):
         server_etag = resp["ETag"].strip('"')
         if server_etag != local_md5_hex:
             self._delete_mismatched_object()
-            raise DataIntegrityError(
+            raise UploadIntegrityError(
                 f"Local checksum does not match remote one! Expected: {local_md5_hex}, Got: {server_etag}",
                 stage=self.__class__.__name__,
             )
@@ -270,7 +270,7 @@ class S3MultipartUploader(Observer):
 
         server_etag = resp["ETag"].strip('"')
         if server_etag != local_md5_hex:
-            raise DataIntegrityError(
+            raise UploadIntegrityError(
                 f"Local checksum for {part_num} does not match remote one! Expected: {local_md5_hex}, Got: {server_etag}",
                 stage=self.__class__.__name__,
             )
@@ -293,7 +293,7 @@ class S3MultipartUploader(Observer):
         server_etag = complete.get("ETag", "").strip('"')
         if expected and server_etag != expected:
             self._delete_mismatched_object()
-            raise DataIntegrityError(
+            raise UploadIntegrityError(
                 f"Final ETag mismatch! Exp: {expected}, Got: {server_etag}", stage=self.__class__.__name__
             )
 

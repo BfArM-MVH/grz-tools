@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
+from ..exceptions import DownloadError
 from ..models.s3 import S3Options
 from ..pipeline.components import Tee, TqdmObserver
 from ..pipeline.components.s3 import S3Downloader
@@ -35,12 +36,6 @@ log = logging.getLogger(__name__)
 # accept bucket names with ":" in the name
 # see: https://github.com/boto/boto3/discussions/4251
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")
-
-
-class DownloadError(Exception):
-    """Exception raised when an upload fails"""
-
-    pass
 
 
 def download_metadata_file(

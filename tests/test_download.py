@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import botocore.client
 import pytest
-from grz_common.exceptions import NetworkError
+from grz_common.exceptions import DownloadError, NetworkError
 from grz_common.utils.checksums import calculate_sha256
-from grz_common.workers.download import DownloadError, S3BotoDownloadWorker
+from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import EncryptedSubmission
 from grz_common.workers.worker import Worker
 

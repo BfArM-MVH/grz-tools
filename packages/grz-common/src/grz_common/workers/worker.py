@@ -11,6 +11,7 @@ from grz_common.exceptions import (
     DecryptionError,
     EncryptionError,
     IncompleteSubmissionError,
+    SubmissionValidationError,
     UploadError,
 )
 
@@ -18,7 +19,7 @@ from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
 from .download import S3BotoDownloadWorker
-from .submission import EncryptedSubmission, Submission, SubmissionValidationError
+from .submission import EncryptedSubmission, Submission
 from .upload import S3BotoUploadWorker
 
 log = logging.getLogger(__name__)

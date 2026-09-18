@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
+from ..exceptions import SubmissionValidationError  # noqa: F401  (callers import it from here)
 from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
@@ -785,9 +786,3 @@ class EncryptedSubmission:
             metadata_dir=self.metadata_dir,
             files_dir=files_dir,
         )
-
-
-class SubmissionValidationError(Exception):
-    """Exception raised when validation of a submission fails"""
-
-    pass

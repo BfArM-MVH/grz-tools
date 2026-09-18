@@ -14,7 +14,7 @@ from collections.abc import Buffer
 from types import TracebackType
 from typing import Any, Protocol, Self, runtime_checkable
 
-from grz_common.exceptions import UploadError
+from grz_common.exceptions import SubmissionValidationError, UploadError
 
 log = logging.getLogger(__name__)
 
@@ -45,14 +45,14 @@ class StreamConfigurationError(PipelineError):
     pass
 
 
-class DataValidationError(PipelineError):
+class DataValidationError(PipelineError, SubmissionValidationError):
     """Raised when data content fails validation (checksum, FASTQ/BAM format, etc.)."""
 
     pass
 
 
-class DataIntegrityError(PipelineError, UploadError):
-    """Raised when transfer integrity fails (e.g., S3 ETag mismatch)."""
+class UploadIntegrityError(PipelineError, UploadError):
+    """Raised when S3 stored other bytes than were sent, as its ETag shows."""
 
     pass
 
