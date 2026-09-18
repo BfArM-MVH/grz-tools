@@ -74,10 +74,12 @@ class DbContext:
         is configured).
     """
 
-    #: States at which a brand-new submission may be created: ``grzctl process`` starts
-    #: the streaming pipeline, ``grzctl upload`` the manual step-by-step flow.  These are
-    #: explicit because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
     _SUBMISSION_ENTRY_STATES = frozenset({SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING})
+    """States at which a brand-new submission may be created.
+
+    ``grzctl process`` starts the streaming pipeline, ``grzctl upload`` the manual step-by-step
+    flow. These are explicit because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
+    """
 
     def __init__(
         self,
