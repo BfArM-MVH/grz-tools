@@ -3,12 +3,13 @@ CLI module for handling command-line interface operations for GRZ administrators
 """
 
 import logging
+import signal
 from pathlib import Path
 
 import click
 import platformdirs
-import rich.pretty
-from grz_common.cli import FILE_R_E
+import yaml
+from grz_common.cli import FILE_R_E, OrderedGroup
 from grz_common.logging import setup_cli_logging
 
 from . import get_versions
@@ -22,6 +23,7 @@ from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.encrypt import encrypt
 from .commands.list_submissions import list_submissions
+from .commands.process import process
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
 from .commands.upload import upload
@@ -31,16 +33,6 @@ from .models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
-
-
-class OrderedGroup(click.Group):
-    """
-    A click Group that keeps track of the order in which commands are added.
-    """
-
-    def list_commands(self, ctx):
-        """Return the list of commands in the order they were added."""
-        return list(self.commands.keys())
 
 
 def build_cli():
@@ -99,6 +91,7 @@ def build_cli():
     cli.add_command(download)
     cli.add_command(decrypt)
     cli.add_command(archive)
+    cli.add_command(process)
     cli.add_command(clean)
     cli.add_command(consent)
     cli.add_command(pruefbericht)
@@ -112,17 +105,29 @@ def build_cli():
 
 
 @click.command()
+@click.option(
+    "--reveal-secrets",
+    is_flag=True,
+    help="Print secret values in plain text instead of '**********', so the output loads back as a config file.",
+)
 @click.pass_context
-def dump_config(ctx: click.Context):
-    """Dump the loaded grzctl configuration."""
+def dump_config(ctx: click.Context, reveal_secrets: bool):
+    """Dump the loaded grzctl configuration as YAML."""
     config: GrzctlConfig = ctx.obj["configuration"]
-    rich.pretty.pprint(config.model_dump(mode="json", exclude_none=True))
+    data = config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": reveal_secrets})
+    click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
+
+
+def _stop_on_sigterm() -> None:
+    """Let SIGTERM stop a run the way Ctrl-C does, so the running step records ``interrupted``."""
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
 
 
 def main():
     """
     Main entry point for the CLI application.
     """
+    _stop_on_sigterm()
     cli = build_cli()
     cli()
 

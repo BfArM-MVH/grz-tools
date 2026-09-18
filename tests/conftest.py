@@ -1,7 +1,10 @@
 """Fixtures for the tests."""
 
+import contextlib
 import json
 import os
+import threading
+from collections.abc import Callable
 from datetime import datetime
 from importlib.metadata import version
 from os import PathLike
@@ -9,6 +12,7 @@ from pathlib import Path
 from shutil import copyfile
 
 import boto3
+import botocore.client
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
@@ -351,6 +355,7 @@ def db_config_model(db_config_content, grzctl_keys_config, grzctl_identifiers_co
         pruefbericht={},
         keys=grzctl_keys_config,
         identifiers=grzctl_identifiers_config,
+        detailed_qc=_GRZCTL_DETAILED_QC_DUMMY,
     )
 
 
@@ -363,6 +368,7 @@ def migrated_db_config_model(migrated_db_config_content, grzctl_keys_config, grz
         pruefbericht={},
         keys=grzctl_keys_config,
         identifiers=grzctl_identifiers_config,
+        detailed_qc=_GRZCTL_DETAILED_QC_DUMMY,
     )
 
 
@@ -373,7 +379,9 @@ def identifiers_config_model(identifiers_config_content):
 
 @pytest.fixture
 def pruefbericht_config_model(pruefbericht_config_content):
-    return grzctl.models.config.PruefberichtConfig(**pruefbericht_config_content)
+    from grzctl.models.pruefbericht import PruefberichtModel
+
+    return PruefberichtModel(**pruefbericht_config_content)
 
 
 @pytest.fixture
@@ -434,6 +442,7 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
 
 # Shared building blocks for GrzctlConfig test fixtures
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
+_GRZCTL_DETAILED_QC_DUMMY = {"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0}
 
 
 @pytest.fixture()
@@ -463,11 +472,12 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+        "interrogation": {"s3": _s3("interrogation"), "keep_failed": False},
     }
 
 
 def _grzctl_config_dict(
-    *, leistungserbringer, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None
+    *, leistungserbringer, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None, detailed_qc=None
 ) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
 
@@ -487,6 +497,7 @@ def _grzctl_config_dict(
         },
         "pruefbericht": pruefbericht if pruefbericht is not None else {},
         "identifiers": identifiers if identifiers is not None else {"grz": "GRZK00007"},
+        "detailed_qc": detailed_qc if detailed_qc is not None else _GRZCTL_DETAILED_QC_DUMMY,
     }
 
 
@@ -498,6 +509,7 @@ def _grzctl_model(
     pruefbericht=None,
     identifiers=None,
     endpoint_url=None,
+    detailed_qc=None,
 ) -> grzctl.models.config.GrzctlConfig:
     """Build a GrzctlConfig model from the given sections."""
     return grzctl.models.config.GrzctlConfig(
@@ -508,6 +520,7 @@ def _grzctl_model(
             pruefbericht=pruefbericht,
             identifiers=identifiers,
             endpoint_url=endpoint_url,
+            detailed_qc=detailed_qc,
         )
     )
 
@@ -559,8 +572,10 @@ def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitt
 @pytest.fixture
 def aws_credentials(s3_config_model):
     """Mocked AWS Credentials for moto."""
+    from grz_common.models.base import get_secret_value
+
     os.environ["AWS_ACCESS_KEY_ID"] = s3_config_model.s3.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = s3_config_model.s3.secret
+    os.environ["AWS_SECRET_ACCESS_KEY"] = get_secret_value(s3_config_model.s3.secret)
     os.environ["MOTO_ALLOW_NONEXISTENT_REGION"] = "1"
     with mock_aws():
         yield
@@ -611,3 +626,30 @@ def working_dir(tmpdir_factory: pytest.TempdirFactory):
 @pytest.fixture
 def working_dir_path(working_dir) -> Path:
     return Path(working_dir.strpath)
+
+
+@pytest.fixture
+def overlapping_s3_calls(monkeypatch):
+    """Make S3 calls of one operation wait for each other, to see whether two ever run at once.
+
+    The returned function installs the wait for *operation* and reports afterwards whether a
+    second call arrived while the first one waited. A caller that expects no overlap passes a
+    short *timeout*, since every call waits that long before it gives up.
+    """
+
+    def install(operation: str, timeout: float) -> Callable[[], bool]:
+        started = threading.Barrier(2, timeout=timeout)
+        overlapped = threading.Event()
+        original_call = botocore.client.BaseClient._make_api_call
+
+        def wait_for_a_second_call(self, operation_name, kwargs):
+            if operation_name == operation and not overlapped.is_set():
+                with contextlib.suppress(threading.BrokenBarrierError):
+                    started.wait()
+                    overlapped.set()
+            return original_call(self, operation_name, kwargs)
+
+        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", wait_for_a_second_call)
+        return overlapped.is_set
+
+    return install

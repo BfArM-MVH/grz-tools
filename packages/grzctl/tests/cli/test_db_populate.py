@@ -1,9 +1,10 @@
 """
-Tests for SubmissionDb.populate.
+Tests for SubmissionDb.populate and for ``grzctl db submission populate``.
 
-Exercises the populate orchestration on grz-db directly. The S3 last-modified
+The grz-db half exercises the populate orchestration directly. The S3 last-modified
 date and the parsed metadata are passed in as arguments, so neither S3 nor
-filesystem I/O is involved in these tests.
+filesystem I/O is involved in those tests. The command half runs the CLI against the
+same database, since the two refuse a destructive change on their own paths.
 """
 
 import json
@@ -12,9 +13,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import click.testing
+import grzctl.cli
 import pytest
 from grz_db.errors import SubmissionNotFoundError
-from grz_db.models.submission import SubmissionDb
+from grz_db.models.submission import DONORS_KEY, SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, SubmissionChangeSet
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
@@ -136,6 +139,37 @@ def test_populate_raises_without_force_on_donor_deletion(db_ctx: SimpleNamespace
             ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=False)
 
 
+def _flip_a_donors_mv_consent(ctx: SimpleNamespace) -> bool:
+    """Make one stored donor differ from the metadata, and return the value the metadata still has."""
+    donor = ctx.db.get_donors(ctx.submission_id)[0]
+    from_metadata = donor.mv_consented
+    donor.mv_consented = not from_metadata
+    ctx.db.update_donor(donor)
+    return from_metadata
+
+
+def test_populate_leaves_the_donors_alone_when_they_are_ignored(db_ctx: SimpleNamespace):
+    """Ignoring the donors is how a caller writes the rest without deciding the donor question."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+    from_metadata = _flip_a_donors_mv_consent(ctx)
+
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, ignore_fields={DONORS_KEY})
+
+    assert ctx.db.get_donors(ctx.submission_id)[0].mv_consented == (not from_metadata)
+
+
+def test_populate_writes_a_donor_overwrite_that_allow_overwrite_names(db_ctx: SimpleNamespace):
+    """Naming the donors is how a caller settles it the other way, without permitting everything."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+    from_metadata = _flip_a_donors_mv_consent(ctx)
+
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, allow_overwrite={DONORS_KEY})
+
+    assert ctx.db.get_donors(ctx.submission_id)[0].mv_consented == from_metadata
+
+
 def test_populate_raises_on_redacted_tan_g(db_ctx: SimpleNamespace):
     """ValueError when ``tan_g`` is redacted and ``"tan_g"`` is not in ``ignore_fields``."""
     ctx = db_ctx
@@ -239,3 +273,109 @@ def test_populate_force_commits_destructive_changes(db_ctx: SimpleNamespace):
     assert original_pseudonym not in donor_pseudonyms, "Old donor pseudonym should be removed"
     assert renamed_pseudonym in donor_pseudonyms, "Renamed donor pseudonym should be present"
     assert len(donor_pseudonyms) == 2
+
+
+def _write_metadata(tmp_path: Path, metadata_raw: dict) -> Path:
+    """Write *metadata_raw* where the command can read it."""
+    path = tmp_path / "mutated.metadata.json"
+    path.write_text(json.dumps(metadata_raw))
+    return path
+
+
+def _invoke_populate(config_path: Path, submission_id: str, metadata_path: Path, *args: str):
+    """Invoke ``grzctl db submission populate`` against the database *config_path* names."""
+    runner = click.testing.CliRunner()
+    return runner.invoke(
+        grzctl.cli.build_cli(),
+        ["--config", str(config_path), "db", "submission", "populate", submission_id, str(metadata_path), *args],
+    )
+
+
+def test_populate_command_refuses_an_overwrite_and_writes_nothing(
+    db_ctx: SimpleNamespace, migrated_database_config_path: Path, tmp_path: Path
+):
+    """A value the database already holds stops the command, and the rest is not written either."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True, ignore_fields={"disease_type"})
+    stored_submitter_id = ctx.metadata.submission.submitter_id
+
+    ctx.metadata_raw["submission"]["submitterId"] = "999999999"
+    metadata_path = _write_metadata(tmp_path, ctx.metadata_raw)
+
+    result = _invoke_populate(migrated_database_config_path, ctx.submission_id, metadata_path, "--no-confirm")
+
+    assert result.exit_code != 0
+    assert "Refusing to overwrite or remove" in result.stderr
+    submission = ctx.db.get_submission(ctx.submission_id)
+    assert submission.submitter_id == stored_submitter_id
+    assert submission.disease_type is None, "the NULL the run could have filled is not written either"
+
+
+def test_populate_command_force_writes_the_overwrite(
+    db_ctx: SimpleNamespace, migrated_database_config_path: Path, tmp_path: Path
+):
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+
+    ctx.metadata_raw["submission"]["submitterId"] = "999999999"
+    metadata_path = _write_metadata(tmp_path, ctx.metadata_raw)
+
+    result = _invoke_populate(
+        migrated_database_config_path, ctx.submission_id, metadata_path, "--force", "--no-confirm"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert ctx.db.get_submission(ctx.submission_id).submitter_id == "999999999"
+
+
+def test_populate_command_allow_overwrite_writes_the_fields_it_names(
+    db_ctx: SimpleNamespace, migrated_database_config_path: Path, tmp_path: Path
+):
+    """The stored metadata.json dump carries submitterId too, so both have to be named."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+
+    ctx.metadata_raw["submission"]["submitterId"] = "999999999"
+    metadata_path = _write_metadata(tmp_path, ctx.metadata_raw)
+
+    result = _invoke_populate(
+        migrated_database_config_path,
+        ctx.submission_id,
+        metadata_path,
+        "--allow-overwrite",
+        "submitter_id",
+        "--allow-overwrite",
+        "submission_metadata",
+        "--no-confirm",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert ctx.db.get_submission(ctx.submission_id).submitter_id == "999999999"
+
+
+def test_populate_command_allow_overwrite_releases_donors(
+    db_ctx: SimpleNamespace, migrated_database_config_path: Path, tmp_path: Path
+):
+    """``donors`` releases a rename, which deletes one donor row and adds another."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+    original_pseudonym = ctx.metadata_raw["donors"][1]["donorPseudonym"]
+
+    ctx.metadata_raw["donors"][1]["donorPseudonym"] = "renamed_donor"
+    metadata_path = _write_metadata(tmp_path, ctx.metadata_raw)
+
+    result = _invoke_populate(
+        migrated_database_config_path,
+        ctx.submission_id,
+        metadata_path,
+        "--allow-overwrite",
+        "donors",
+        "--allow-overwrite",
+        "submission_metadata",
+        "--no-confirm",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    pseudonyms = {d.pseudonym for d in ctx.db.get_donors(ctx.submission_id)}
+    assert "renamed_donor" in pseudonyms
+    assert original_pseudonym not in pseudonyms

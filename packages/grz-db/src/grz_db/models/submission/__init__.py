@@ -5,7 +5,7 @@ import logging
 import math
 import random
 import re
-from collections.abc import Generator, Sequence
+from collections.abc import Container, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum as PyEnum
@@ -61,6 +61,7 @@ from ...errors import (
     DuplicatePsnError,
     DuplicateSubmissionError,
     DuplicateTanGError,
+    OutdatedDatabaseSchemaError,
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
     SubmissionNotFoundError,
@@ -71,6 +72,8 @@ from ...errors import (
 from ..author import Author
 from ..base import BaseSignablePayload, VerifiableLog
 from .diff import (  # noqa: F401
+    CASE_LINK_KEY,
+    DONORS_KEY,
     CaseLinkDiff,
     Diff,
     DiffState,
@@ -83,14 +86,15 @@ from .diff import (  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-
-class OutdatedDatabaseSchemaError(Exception):
-    pass
+# Key of the PostgreSQL advisory lock that serializes QC selection. Any value works, as long as
+# nothing else uses it as an advisory lock key in the same database.
+_QC_SELECTION_LOCK_KEY = int.from_bytes(b"qcselect", "big")  # 8 bytes, so it fits a signed bigint
 
 
 class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Submission state enum."""
 
+    PROCESSING = "Processing"
     UPLOADING = "Uploading"
     UPLOADED = "Uploaded"
     DOWNLOADING = "Downloading"
@@ -109,6 +113,7 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     QCED = "QCed"
     CLEANING = "Cleaning"
     CLEANED = "Cleaned"
+    PROCESSED = "Processed"
     FINISHED = "Finished"
     ERROR = "Error"
 
@@ -291,7 +296,7 @@ class Submission(SubmissionBase, table=True):
 
     def get_latest_state(self, filter_to_type: SubmissionStateEnum | None = None) -> Optional["SubmissionStateLog"]:
         states = filter(lambda state: state.state == filter_to_type, self.states) if filter_to_type else self.states
-        states = sorted(states, key=attrgetter("timestamp"))
+        states = sorted(states, key=attrgetter("timestamp", "id"))
         return states[-1] if states else None
 
     @classmethod
@@ -635,11 +640,24 @@ class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     INCOMPLETE_SUBMISSION = "incomplete_submission"
     DECRYPTION_ERROR = "decryption_error"
     NETWORK_ERROR = "network_error"
+    """Retired: older states carry it for what :attr:`TRANSFER_ERROR` means now."""
     VALIDATION_ERROR = "validation_error"
     FILE_NOT_FOUND = "file_not_found"
     ENCRYPTION_ERROR = "encryption_error"
     UPLOAD_ERROR = "upload_error"
+    """Retired: older states carry it for what :attr:`TRANSFER_ERROR` means now."""
+    DETAILED_QC_ERROR = "detailed_qc_error"
+    TRANSFER_ERROR = "transfer_error"
+    CONFIGURATION_ERROR = "configuration_error"
+    REPORTING_ERROR = "reporting_error"
+    INTERRUPTED = "interrupted"
     UNKNOWN = "unknown"
+
+
+RETIRED_FAILURE_REASONS: frozenset[FailureReasonEnum] = frozenset(
+    {FailureReasonEnum.NETWORK_ERROR, FailureReasonEnum.UPLOAD_ERROR}
+)
+"""Failure reasons that older states carry and that nothing records anymore."""
 
 
 class SubmissionStateLogBase(SQLModel):
@@ -1127,6 +1145,11 @@ class SubmissionDb:
 
             submission_create = SubmissionCreate(id=submission_id)
             db_submission = Submission.model_validate(submission_create)
+            # a new row has no states, change requests or case yet; assigning them marks them loaded,
+            # so they stay readable after the session closes, without another query
+            db_submission.states = []
+            db_submission.changes = []
+            db_submission.case = None
 
             session.add(db_submission)
             session.flush()
@@ -1253,9 +1276,11 @@ class SubmissionDb:
                 session.flush()
             return db_submission
 
-    def set_selected_for_qc(self, submission_id: str, selected_for_qc: bool) -> Submission:
+    def set_selected_for_qc(
+        self, submission_id: str, selected_for_qc: bool, session: Session | None = None
+    ) -> Submission:
         value = "true" if selected_for_qc else "false"
-        return self.modify_submission(submission_id, "selected_for_qc", value)
+        return self.modify_submission(submission_id, "selected_for_qc", value, session=session)
 
     def _submission_counts_as_selected_for_qc(self, submission: Submission) -> bool:
         if submission.selected_for_qc is True:
@@ -1267,9 +1292,10 @@ class SubmissionDb:
         submitter_id: SubmitterId | None,
         start_date: datetime.date,
         end_date: datetime.date,
+        session: Session | None = None,
     ) -> Sequence[Submission]:
-        with self.transaction() as session:
-            return session.exec(
+        with self.transaction(session) as active_session:
+            return active_session.exec(
                 select(Submission)
                 .options(selectinload(Submission.states))  # type: ignore[arg-type]
                 .join(QCQueueEntry, QCQueueEntry.submission_id == Submission.id)  # type: ignore[arg-type]
@@ -1446,6 +1472,17 @@ class SubmissionDb:
             session.flush()
             return result
 
+    def add_detailed_qc_results(self, results: Sequence[DetailedQCResult]) -> tuple[DetailedQCResult, ...]:
+        """Add detailed QC results atomically: either every row is committed or none is.
+
+        A single transaction around all rows keeps a failure from leaving a partial
+        import behind; every row is only ever visible once the whole set is in.
+        """
+        with self.transaction() as session:
+            session.add_all(results)
+            session.flush()
+        return tuple(results)
+
     def add_change_request(  # noqa: PLR0913
         self,
         submission_id: str,
@@ -1503,17 +1540,18 @@ class SubmissionDb:
             session.flush()
             return db_change_request_log
 
-    def get_submission(self, submission_id: str) -> Submission | None:
+    def get_submission(self, submission_id: str, session: Session | None = None) -> Submission | None:
         """Retrieve a submission and its state history.
 
         :param submission_id: Submission ID of the submission to retrieve.
+        :param session: Transaction to join; a fresh one is opened when absent.
         :returns: The :class:`Submission`, or ``None`` if no submission has that ID.
         """
-        with self.transaction() as session:
+        with self.transaction(session) as active_session:
             statement = (
                 select(Submission).where(Submission.id == submission_id).options(selectinload(Submission.states))  # type: ignore[arg-type]
             )
-            submission = session.exec(statement).first()
+            submission = active_session.exec(statement).first()
             return submission
 
     def get_submissions(self, submission_ids: Sequence[str]) -> list[Submission | None]:
@@ -2048,21 +2086,23 @@ class SubmissionDb:
         psn: str | None = None,
         submission_type: SubmissionType,
     ) -> None:
-        """Ask, before writing anything, whether this would be a case's second QC-passed initial.
+        """Check whether this submission would be a case's second QC-passed initial.
 
-        A case may have at most one ``initial`` submission that passed basic QC, and
-        ``ux_submissions_one_initial_per_case`` is what enforces it. Linking is deliberately
-        permissive, so :meth:`resolve_case` never flags a duplicate and the rejection lands only
-        when a second initial submission tries to *pass* basic QC. Finding out that late means
-        having validated a submission that cannot be accepted, so a caller about to spend that
-        effort can ask here instead.
+        A case may have at most one ``initial`` submission that passed basic QC. Linking is
+        permissive, so the database rejects a submission only when it tries to *pass* basic QC.
 
-        The case and its QC-passed initial submission are read in one transaction, which is what
-        makes the answer one answer: asked separately, a competing initial can pass basic QC in
-        between and this would report a submission as clear that the index is about to reject.
+        This check reads ``case_id``, the column that rejection is based on. A submission without
+        a ``case_id`` is looked up by the resolution keys instead. The two can differ, because
+        ``db case relink`` moves a submission to another case while the keys still find the old
+        one. Reading the keys would then report the moved submission as a duplicate of the case
+        it left.
 
-        Answering costs up to four queries, so callers that are going to write anyway should let
-        the index speak instead.
+        The case and its QC-passed initial submission are read in one transaction. Asked
+        separately, a competing initial can pass basic QC in between, and this would report a
+        submission as clear that the database is about to reject.
+
+        Answering costs up to four queries, so callers that are going to write anyway can let the
+        database reject the write instead.
 
         :param submission_id: ID of the submission about to be validated. A case whose QC-passed
             initial submission *is* this one is not a duplicate.
@@ -2080,19 +2120,32 @@ class SubmissionDb:
             return
 
         with self.transaction() as session:
-            case = self.resolve_case(
-                submission_id,
-                submitter_id=submitter_id,
-                local_case_id=local_case_id,
-                psn=psn,
-                submission_type=submission_type,
-                session=session,
-            )
-            if case is None or case.id is None:
-                return
-            qc_passed_initial = self._qc_passed_initial_of(session, case.id)
-            if qc_passed_initial is not None and qc_passed_initial.id != submission_id:
-                raise DuplicateInitialSubmissionError(case.id, qc_passed_initial.id)
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+
+            case_id = submission.case_id
+            if case_id is None:
+                # not linked yet, so the resolution keys say which case to check
+                case = self.resolve_case(
+                    submission_id,
+                    submitter_id=submitter_id,
+                    local_case_id=local_case_id,
+                    psn=psn,
+                    submission_type=submission_type,
+                    session=session,
+                )
+                if case is None or case.id is None:
+                    # no case matches the keys, so no slot is taken
+                    return
+                case_id = case.id
+
+            # check which submission holds this case's one-initial slot, if the case has one
+            qc_passed_initial_submission = self._qc_passed_initial_of(session, case_id)
+            # the slot holder can be this submission, which is not a duplicate of itself
+            if qc_passed_initial_submission is not None and qc_passed_initial_submission.id != submission_id:
+                # another submission holds the slot, so this one cannot pass basic QC
+                raise DuplicateInitialSubmissionError(case_id, qc_passed_initial_submission.id)
 
     def list_submissions(
         self,
@@ -2196,12 +2249,36 @@ class SubmissionDb:
             change_requests = session.exec(statement).all()
             return change_requests
 
-    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:  # noqa: C901
+    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None, predict: bool = False) -> bool:
         """
         Determines whether or not a submission should go through detailed QC or not.
+
+        The decision reads the submitter's QC queue and stores ``selected_for_qc`` in one
+        transaction, and only one decision runs at a time. A decision therefore sees every
+        decision made before it, also those made by other processes.
+
+        :param predict: Answer before basic QC has passed, as if it had: skip that check and
+            store nothing. While the submission is not in the QC queue, the answer never
+            includes a random selection.
         """
-        target_proportion = target_percentage / 100.0
-        submission = self.get_submission(submission_id)
+        with self.transaction() as session:
+            if not predict:
+                self._lock_qc_selection(session)
+            return self._decide_qc(session, submission_id, target_percentage / 100.0, salt, predict)
+
+    def _lock_qc_selection(self, session: Session) -> None:
+        """Block other QC selections until the transaction of *session* ends."""
+        dialect = self.engine.dialect.name
+        if dialect == "postgresql":
+            session.connection().execute(sa.select(sqlfn.pg_advisory_xact_lock(_QC_SELECTION_LOCK_KEY)))
+        elif dialect == "sqlite":
+            # SQLite has no advisory locks; taking the database write lock right away has the same effect
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+    def _decide_qc(  # noqa: C901
+        self, session: Session, submission_id: str, target_proportion: float, salt: str | None, predict: bool
+    ) -> bool:
+        submission = self.get_submission(submission_id, session=session)
 
         if submission is None:
             raise SubmissionNotFoundError(submission_id)
@@ -2214,7 +2291,7 @@ class SubmissionDb:
         if submission_type != SubmissionType.initial:
             # only initial submissions matter for detailed QC selection
             return False
-        if submission.basic_qc_passed is not True:
+        if submission.basic_qc_passed is not True and not predict:
             # only submissions that passed basic QC are eligible for detailed QC
             raise SubmissionBasicQCNotPassedError(submission_id)
         if submission.selected_for_qc is True:
@@ -2235,6 +2312,7 @@ class SubmissionDb:
             submitter_id=submission.submitter_id,
             start_date=datetime.date(year=submission_year, month=submission_month, day=1),
             end_date=datetime.date(year=submission_year, month=submission_month, day=days_in_submission_month),
+            session=session,
         )
         if self._is_under_qc_target(submitter_submissions_month, target_proportion, period_label="month"):
             should_select = True
@@ -2245,6 +2323,7 @@ class SubmissionDb:
                 submitter_id=submission.submitter_id,
                 start_date=submission_quarter_start,
                 end_date=submission_quarter_end,
+                session=session,
             )
             if self._is_under_qc_target(
                 submitter_submissions_quarter,
@@ -2262,7 +2341,8 @@ class SubmissionDb:
                 salt=salt,
             )
 
-        self.set_selected_for_qc(submission_id, should_select)
+        if not predict:
+            self.set_selected_for_qc(submission_id, should_select, session=session)
         return should_select
 
     @staticmethod
@@ -2322,7 +2402,7 @@ class SubmissionDb:
         :raises AmbiguousCaseError: if the metadata's case key matches more than one case.
         """
         if (
-            "case_id" in ignore_fields
+            CASE_LINK_KEY in ignore_fields
             or metadata.submission.submission_type == SubmissionType.test
             or is_redacted_local_case_id(metadata.submission.local_case_id)
         ):
@@ -2362,14 +2442,21 @@ class SubmissionDb:
         session: Session,
         submission_id: str,
         metadata: GrzSubmissionMetadata,
+        ignore_fields: set[str],
     ) -> DonorsDiffCollection:
         """Diff all donors in *metadata* against the current database state.
 
         :param session: The transaction :meth:`diff` runs in.
         :param submission_id: Submission ID to look up donors for.
         :param metadata: Parsed metadata from the submission's ``metadata.json``.
-        :returns: A fully populated :class:`DonorDiff`.
+        :param ignore_fields: Field names skipped during the comparison. :data:`DONORS_KEY`
+            skips the donors whole, so the stored rows stay as they are.
+        :returns: A fully populated :class:`DonorDiff`, or an empty collection when the donors
+            are ignored.
         """
+        if DONORS_KEY in ignore_fields:
+            return DonorsDiffCollection()
+
         metadata_submission_date = metadata.submission.submission_date
         if isinstance(metadata_submission_date, datetime.datetime):
             metadata_submission_date = metadata_submission_date.date()
@@ -2417,7 +2504,8 @@ class SubmissionDb:
         :param submission_uploaded_date: The date when the submission process was finished.
             If None, the field will not be included in the comparison.
         :param ignore_fields: Optional set of field names to be ignored during the metadata
-            comparison. ``"case_id"`` skips case-link resolution.
+            comparison. :data:`CASE_LINK_KEY` skips case-link resolution, :data:`DONORS_KEY`
+            leaves the stored donor rows as they are.
         :param psn: RKI pseudonym to resolve the case with. Nothing in *metadata* carries one, a
             psn being assigned in the tanG trade rather than sent by the submitter, so a caller
             that has one has to pass it. Whether it is read at all is the resolver's call:
@@ -2438,7 +2526,7 @@ class SubmissionDb:
             submission_uploaded_date = metadata.submission.submission_date
 
             # Add submission date to ignore fields
-            ignore_fields = ignore_fields or set()
+            ignore_fields = set(ignore_fields or ())
             ignore_fields.add("submission_uploaded_date")
 
         # One transaction, so resolution and the field diff share the row read here. It is not
@@ -2459,7 +2547,7 @@ class SubmissionDb:
 
             return SubmissionChangeSet(
                 fields=self._diff_metadata(current_submission, metadata, submission_uploaded_date, ignore_fields),
-                donors=self._diff_donors(session, submission_id, metadata),
+                donors=self._diff_donors(session, submission_id, metadata, ignore_fields or set()),
                 case_link=case_link,
                 case_link_error=case_link_error,
             )
@@ -2505,8 +2593,8 @@ class SubmissionDb:
         """Emit info-level log lines summarising what is about to be committed."""
         sid = f"Submission: {submission_id}"
 
-        pending_keys = [d.key for d in changes.fields.pending]
-        unchanged_keys = [d.key for d in changes.fields.unchanged]
+        pending_keys = sorted(d.key for d in changes.fields.pending)
+        unchanged_keys = sorted(d.key for d in changes.fields.unchanged)
         if pending_keys:
             logger.info("%s - Updating fields: %s in database", sid, ", ".join(f'"{k}"' for k in pending_keys))
         if unchanged_keys:
@@ -2574,6 +2662,7 @@ class SubmissionDb:
         submission_date: datetime.date | None,
         *,
         force: bool = False,
+        allow_overwrite: Container[str] = frozenset(),
         on_missing: Literal["create", "error"] = "error",
         ignore_fields: set[str] | None = None,
         psn: str | None = None,
@@ -2583,8 +2672,8 @@ class SubmissionDb:
         Rejects redacted ``tan_g`` or missing/redacted ``local_case_id`` via
         :meth:`assert_metadata_not_redacted` unless the corresponding key
         (``"tan_g"`` or ``"local_case_id"``) is in ``ignore_fields``. Computes diffs
-        via :meth:`diff`, rejects destructive changes unless ``force``, and
-        commits via :meth:`commit_changes`. Operational progress is logged via
+        via :meth:`diff`, rejects destructive changes that ``force`` or ``allow_overwrite``
+        does not cover, and commits via :meth:`commit_changes`. Operational progress is logged via
         the module-level logger; callers configure verbosity through
         ``logging.getLogger("grz_db.models.submission")``.
 
@@ -2596,6 +2685,9 @@ class SubmissionDb:
         :param metadata: Parsed submission metadata.
         :param submission_date: S3 last-modified date of the metadata file, if known.
         :param force: If ``True``, allow destructive updates/deletes of existing fields.
+        :param allow_overwrite: What may be overwritten or removed without ``force``. See
+            :meth:`SubmissionChangeSet.undeclared_destructive_changes` for how it names a
+            field, the donors and the case link.
         :param on_missing: What to do when ``submission_id`` is not yet in the
             database. ``"error"`` (default) raises :class:`SubmissionNotFoundError`.
             ``"create"`` calls :meth:`add_submission` first and then proceeds; the
@@ -2608,7 +2700,8 @@ class SubmissionDb:
             ``on_missing`` is ``"error"``.
         :raises ValueError: if ``tan_g`` or ``local_case_id`` is redacted/missing
             and the corresponding key is not in ``ignore_fields``.
-        :raises RuntimeError: if pending changes are destructive and ``force`` is False.
+        :raises RuntimeError: if a destructive change is covered by neither ``force`` nor
+            ``allow_overwrite``. Nothing is written when it raises.
         :raises SubmissionTypeAlreadySetError: if the stored type is set and *metadata* has a
             different one, whatever ``force`` says.
         """
@@ -2625,10 +2718,11 @@ class SubmissionDb:
 
         changes = self.diff(submission_id, metadata, submission_date, ignore_fields=ignore_fields, psn=psn)
 
-        if not force and changes.has_pending_destructive:
+        undeclared = changes.undeclared_destructive_changes(allow_overwrite)
+        if not force and undeclared:
             raise RuntimeError(
                 f"Would update/delete existing submission data "
-                f"({', '.join(changes.destructive_changes)}) in the database, "
+                f"({', '.join(undeclared)}) in the database, "
                 f"but `force` not set. submission_id={submission_id!r}"
             )
 

@@ -4,7 +4,8 @@ import logging
 import grz_cli.cli
 import pytest
 from click.testing import CliRunner
-from grz_common.workers.submission import SubmissionValidationError
+from grz_common.exceptions import SubmissionValidationError
+from grz_common.workers.submission import Submission
 
 from .common import copy_submission
 
@@ -77,3 +78,27 @@ def test_validate_submission_incorrect_grz_id(
     assert "does not match genomic data center identifier" in str(exc)
 
     assert result.exit_code == 1, result.output
+
+
+def test_an_interrupted_validation_stops_as_an_interruption(
+    temp_identifiers_config_file_path, working_dir_path, monkeypatch
+):
+    """Ctrl-C during validation is an interruption, not a submission that failed validation."""
+    copy_submission(working_dir_path, "files", "metadata")
+
+    def interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Submission, "validate_files", interrupt)
+    testargs = [
+        "validate",
+        "--config-file",
+        temp_identifiers_config_file_path,
+        "--submission-dir",
+        str(working_dir_path),
+    ]
+
+    result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs, catch_exceptions=False)
+
+    assert result.exit_code == 1
+    assert "Aborted!" in result.output, "click reports an interruption as aborted"

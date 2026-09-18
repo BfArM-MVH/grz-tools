@@ -1,4 +1,4 @@
-"""Module for downloading encrypted submissions to local storage"""
+"""Module for downloading encrypted submissions to local storage."""
 
 from __future__ import annotations
 
@@ -6,43 +6,78 @@ import datetime
 import enum
 import itertools
 import logging
-import math
 import re
 from collections import OrderedDict
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import botocore.handlers
-from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
+from ..exceptions import DownloadError, MissingObjectError, MissingSubmissionFileError
 from ..models.s3 import S3Options
+from ..pipeline.components import Tee, TqdmObserver
+from ..pipeline.components.s3 import S3Downloader, s3_errors
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import init_s3_client
-
-MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
-MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
-MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
     from .submission import EncryptedSubmission
 
 log = logging.getLogger(__name__)
 
-# see discussion: https://github.com/boto/boto3/discussions/4251 to accept bucket names with ":" in the name
+# accept bucket names with ":" in the name
+# see: https://github.com/boto/boto3/discussions/4251
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")
 
 
-class DownloadError(Exception):
-    """Exception raised when an upload fails"""
+def download_metadata_file(
+    s3_client: Any,
+    bucket: str,
+    submission_id: str,
+    metadata_dir: Path,
+    metadata_file_name: str = "metadata.json",
+) -> None:
+    """
+    Download the metadata.json of a submission.
 
-    pass
+    :param s3_client: The S3 client to read the object with
+    :param bucket: Name of the bucket holding the submission
+    :param submission_id: submission folder on S3 structure
+    :param metadata_dir: Path of the metadir folder
+    :param metadata_file_name: name of the metadata.json
+    :raises MissingSubmissionFileError: If the bucket holds no such metadata file.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    metadata_key = str(Path(submission_id) / metadata_dir.name / metadata_file_name)
+    metadata_file_path = metadata_dir / metadata_file_name
+
+    log.info("Downloading metadata file: '%s'", metadata_key)
+    try:
+        # Ensure the local target directory exists
+        metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+
+        with s3_errors(f"Download of s3://{bucket}/{metadata_key}", DownloadError):
+            try:
+                s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
+            except botocore.exceptions.ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "404":
+                    raise MissingSubmissionFileError(
+                        f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
+                    ) from e
+                raise
+        log.info("Metadata download complete.")
+    except Exception as e:
+        log.error("Download failed for metadata '%s': %s", metadata_key, e)
+        raise
 
 
 class S3BotoDownloadWorker:
@@ -104,59 +139,43 @@ class S3BotoDownloadWorker:
         :param metadata_dir: Path of the metadir folder
         :param metadata_file_name: name of the metadata.json
         """
-        metadata_key = str(Path(submission_id) / metadata_dir.name / metadata_file_name)
-        metadata_file_path = metadata_dir / metadata_file_name
+        download_metadata_file(
+            self._s3_client, self._s3_options.bucket, submission_id, metadata_dir, metadata_file_name
+        )
 
-        self.__log.info("Downloading metadata file: '%s'", metadata_key)
-        try:
-            # Ensure the local target directory exists
-            metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
-
-            self._s3_client.download_file(self._s3_options.bucket, metadata_key, str(metadata_file_path))
-            self.__log.info("Metadata download complete.")
-        except botocore.exceptions.ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                error_msg = f"Metadata file '{metadata_key}' not found in S3 bucket '{self._s3_options.bucket}'."
-                self.__log.error(error_msg)
-                raise DownloadError(error_msg) from e
-            raise e
-        except Exception as e:
-            self.__log.error("Download failed for metadata '%s'", metadata_key)
-            raise e
-
-    def _download_with_progress(self, local_file_path: str, s3_object_id: str):
+    def _download_with_progress(self, local_file_path: str, s3_object_id: str, file_metadata: SubmissionFileMetadata):
         """
-        Download a single file from S3 to local storage.
+        Download a single file from S3 to local storage using streaming pipeline.
+
+        A failed download leaves no file behind.
 
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
         """
-        s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
-        filesize = s3_object_meta["ContentLength"]
-
-        chunksize = (
-            math.ceil(filesize / MULTIPART_MAX_CHUNKS)
-            if filesize / MULTIPART_CHUNKSIZE > MULTIPART_MAX_CHUNKS
-            else MULTIPART_CHUNKSIZE
-        )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunks"
-        )
-
-        config = TransferConfig(
-            multipart_threshold=MULTIPART_THRESHOLD,
-            multipart_chunksize=chunksize,
-            max_concurrency=self._threads,
-        )
-
-        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        with tqdm(total=filesize, postfix=f"{s3_object_id}", **TQDM_DEFAULTS) as progress_bar:  # type: ignore[call-overload]
-            transfer.download_file(
-                self._s3_options.bucket,
-                s3_object_id,
-                local_file_path,
-                callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-            )
+        try:
+            with (
+                tqdm(  # type: ignore[call-overload]
+                    total=file_metadata.file_size_in_bytes,
+                    desc="DOWNLOAD",
+                    postfix={"file": local_file_path},
+                    leave=False,
+                    **TQDM_DEFAULTS,
+                ) as pbar,
+                open(local_file_path, "wb") as f,
+            ):
+                try:
+                    source = S3Downloader(self._s3_client, self._s3_options.bucket, s3_object_id)
+                except MissingObjectError as e:
+                    raise MissingSubmissionFileError(
+                        f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
+                    ) from e
+                pipeline = source | Tee(TqdmObserver(pbar))
+                pipeline >> f
+        except Exception:
+            # a later step reads whatever lies in the target directory and would take an
+            # incomplete file for a downloaded one; a rerun starts the file over anyway
+            Path(local_file_path).unlink(missing_ok=True)
+            raise
 
     def download_file(
         self,
@@ -177,7 +196,8 @@ class S3BotoDownloadWorker:
         try:
             local_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-            self._download_with_progress(str(local_file_path), s3_object_id)
+            self.__log.info("Downloading file: '%s' -> '%s'", s3_object_id, str(local_file_path))
+            self._download_with_progress(str(local_file_path), s3_object_id, file_metadata)
 
             self.__log.info(f"Download complete for {str(local_file_path)}.")
             progress_logger.set_state(
@@ -186,20 +206,6 @@ class S3BotoDownloadWorker:
                 state=DownloadState(download_successful=True, submission_id=submission_id),
             )
 
-        except botocore.exceptions.ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                error_msg = f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
-                exc = DownloadError(error_msg)
-            else:
-                error_msg = f"S3 client error for '{s3_object_id}': {e}"
-                exc = e  # type: ignore[assignment]
-            self.__log.error(error_msg)
-            progress_logger.set_state(
-                local_file_path,
-                file_metadata,
-                state=DownloadState(download_successful=False, errors=[str(exc)], submission_id=submission_id),
-            )
-            raise exc from e
         except Exception as e:
             self.__log.error("Download failed for '%s': %s", str(local_file_path), e)
             progress_logger.set_state(
@@ -220,6 +226,7 @@ class S3BotoDownloadWorker:
         :param encrypted_submission: The encrypted submission to download.
         """
         progress_logger = FileProgressLogger[DownloadState](self._status_file_path)
+        pending: list[tuple[Path, str, SubmissionFileMetadata]] = []
 
         for local_file_path, file_metadata in encrypted_submission.encrypted_files.items():
             relative_encrypted_path = file_metadata.encrypted_file_path()
@@ -238,8 +245,23 @@ class S3BotoDownloadWorker:
                 )
                 continue
 
-            self.__log.info("Downloading file: '%s' -> '%s'", file_key, str(local_file_path))
-            self.download_file(local_file_path, file_key, progress_logger, file_metadata, submission_id)
+            pending.append((local_file_path, file_key, file_metadata))
+
+        # a single stream cannot be split, so the files are what runs in parallel
+        with ThreadPoolExecutor(max_workers=self._threads) as pool:
+            futures = [
+                pool.submit(
+                    self.download_file, local_file_path, file_key, progress_logger, file_metadata, submission_id
+                )
+                for local_file_path, file_key, file_metadata in pending
+            ]
+            try:
+                for future in as_completed(futures):
+                    future.result()
+            except Exception:
+                # the progress log records what finished, so a rerun picks the rest up
+                pool.shutdown(cancel_futures=True)
+                raise
 
 
 class InboxSubmissionState(enum.StrEnum):

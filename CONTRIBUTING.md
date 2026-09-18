@@ -38,6 +38,9 @@ uv run tox
 Some packages have their own unit tests.
 Run `uv run tox` while inside a specific package directory to run that package's unit tests.
 
+Tests run across all cores by default, through pytest-xdist. Pass `-n0` to run them in one
+process, which a debugger needs and which restores per-test output order.
+
 ### Database tests
 
 Database tests should use the fixtures from `grz_db.testing` (`db` is the usual entry point) rather

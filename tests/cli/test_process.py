@@ -1,0 +1,1564 @@
+"""
+Integration tests for grzctl process command.
+
+This tests the full streaming pipeline with mocked S3 buckets (inbox + archive).
+"""
+
+import gzip
+import hashlib
+import itertools
+import json
+import os
+import threading
+import time
+from collections import Counter
+from dataclasses import dataclass, field
+from io import BytesIO
+from pathlib import Path
+
+import boto3
+import botocore.client
+import botocore.exceptions
+import click.testing
+import crypt4gh.keys
+import crypt4gh.lib
+import grz_db.models.author
+import grzctl.cli
+import grzctl.processor
+import pytest
+import responses
+import yaml
+from grz_common.exceptions import MissingSubmissionFileError
+from grz_common.models.s3 import S3Options
+from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
+from grz_pydantic_models.submission.metadata import REDACTED_TAN
+from grzctl.commands.clean import _clean_submission_from_bucket
+
+# Path to test fixtures
+MOCK_FILES_DIR = Path(__file__).parent.parent / "mock_files"
+VALID_SUBMISSION_DIR = MOCK_FILES_DIR / "submissions" / "valid_submission"
+
+
+@pytest.fixture
+def process_config_content(
+    crypt4gh_grz_private_key_file_path,
+    crypt4gh_grz_public_key_file_path,
+    migrated_db_config_content,
+    tmp_path,
+):
+    db_config = migrated_db_config_content["db"]
+    db_config["author"]["private_key_passphrase"] = "test"
+    local_storage_dir = tmp_path / "local_storage"
+    local_storage_dir.mkdir()
+
+    return {
+        "leistungserbringer": {
+            "260914050": {
+                "inbox_buckets": {
+                    "inbox": {
+                        "endpoint_url": "https://s3.amazonaws.com",
+                        "access_key": "testing",
+                        "secret": "testing",
+                        "private_key_path": str(crypt4gh_grz_private_key_file_path),
+                    }
+                }
+            }
+        },
+        "archives": {
+            "consented": {
+                "s3": {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "bucket": "consented-archive",
+                    "access_key": "testing",
+                    "secret": "testing",
+                },
+                "public_key_path": str(crypt4gh_grz_public_key_file_path),
+            },
+            "non_consented": {
+                "s3": {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "bucket": "non-consented-archive",
+                    "access_key": "testing",
+                    "secret": "testing",
+                },
+                "public_key_path": str(crypt4gh_grz_public_key_file_path),
+            },
+            "interrogation": {
+                "s3": {
+                    "endpoint_url": "https://s3.amazonaws.com",
+                    "bucket": "interrogation-archive",
+                    "access_key": "testing",
+                    "secret": "testing",
+                },
+                "keep_failed": False,
+            },
+        },
+        "pruefbericht": {
+            "authorization_url": "https://bfarm.localhost/token",
+            "api_base_url": "https://bfarm.localhost/api/",
+            "client_id": "pytest",
+            "client_secret": "pysecret",
+        },
+        "db": db_config,
+        "detailed_qc": {
+            "salt": "salty",
+            "target_percentage": "0.0",
+            "local_storage": str(local_storage_dir),
+            "auto_run": False,
+        },
+        "keys": {
+            "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
+            "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
+        },
+        "identifiers": {
+            "grz": "GRZT00000",
+        },
+    }
+
+
+@pytest.fixture
+def temp_process_config_file_path(tmp_path, process_config_content) -> Path:
+    """Write the process config to a YAML file."""
+    config_file = tmp_path / "config.process.yaml"
+    with open(config_file, "w") as fd:
+        yaml.dump(process_config_content, fd)
+    return config_file
+
+
+@pytest.fixture
+def s3_buckets(aws_credentials):
+    """Create the four S3 buckets needed for processing."""
+    conn = boto3.client("s3")
+
+    # Create inbox, consented-archive, non-consented-archive and interrogation-archive buckets
+    conn.create_bucket(Bucket="inbox")
+    conn.create_bucket(Bucket="consented-archive")
+    conn.create_bucket(Bucket="non-consented-archive")
+    conn.create_bucket(Bucket="interrogation-archive")
+
+    s3 = boto3.resource("s3")
+    return {
+        "inbox": s3.Bucket("inbox"),
+        "consented": s3.Bucket("consented-archive"),
+        "non_consented": s3.Bucket("non-consented-archive"),
+        "interrogation": s3.Bucket("interrogation-archive"),
+    }
+
+
+def upload_submission_to_inbox(inbox_bucket, submission_id: str):
+    """
+    Upload the valid submission's encrypted files and metadata to the inbox bucket.
+
+    The inbox structure is:
+        {submission_id}/
+            metadata/metadata.json
+            files/*.c4gh
+    """
+    # Upload metadata
+    metadata_path = VALID_SUBMISSION_DIR / "metadata" / "metadata.json"
+    inbox_bucket.upload_file(
+        Filename=str(metadata_path),
+        Key=f"{submission_id}/metadata/metadata.json",
+    )
+
+    # Upload encrypted files
+    encrypted_files_dir = VALID_SUBMISSION_DIR / "encrypted_files"
+    for encrypted_file in encrypted_files_dir.glob("*.c4gh"):
+        inbox_bucket.upload_file(
+            Filename=str(encrypted_file),
+            Key=f"{submission_id}/files/{encrypted_file.name}",
+        )
+
+
+def _run_process(
+    config_file_path: Path, submission_id: str, output_dir: Path, *extra_args: str, submit_pruefbericht: bool = False
+):
+    """Run ``grzctl process``, which submits the Prüfbericht only with ``submit_pruefbericht``.
+
+    Submitting relies on the command's default, so the Prüfbericht tests cover that default.
+    """
+    args = [
+        "--config",
+        str(config_file_path),
+        "process",
+        "--submission-id",
+        submission_id,
+        "--output-dir",
+        str(output_dir),
+        *([] if submit_pruefbericht else ["--no-submit-pruefbericht"]),
+        *extra_args,
+    ]
+    return click.testing.CliRunner().invoke(grzctl.cli.build_cli(), args)
+
+
+def _latest_state(process_config_content: dict, submission_id: str) -> SubmissionStateLog:
+    """Return the last state log of a submission from the database."""
+    db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+    submission = db.get_submission(submission_id)
+    assert submission is not None
+    return submission.states[-1]
+
+
+class TestGrzctlProcess:
+    """Integration tests for grzctl process command."""
+
+    def test_process_submission_basic(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        crypt4gh_grz_private_key_file_path,
+        working_dir_path,
+    ):
+        """
+        Test basic streaming pipeline processing.
+
+        This test:
+        1. Uploads a submission to the mock inbox bucket
+        2. Runs grzctl process
+        3. Verifies files are uploaded to the archive bucket
+        """
+        submission_id = "260914050_2024-07-15_c64603a7"
+
+        # Upload submission to inbox
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        # Verify inbox has files
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.all()}
+        assert f"{submission_id}/metadata/metadata.json" in inbox_keys
+        assert any("files/" in key and ".c4gh" in key for key in inbox_keys)
+
+        # Run grzctl process
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # Check that files were uploaded to the consented archive
+        # (the valid_submission has research consent)
+        consented_keys = {o.key for o in s3_buckets["consented"].objects.all()}
+        assert f"{submission_id}/metadata/metadata.json" in consented_keys
+        _assert_archived(s3_buckets["consented"], submission_id, crypt4gh_grz_private_key_file_path)
+
+    def test_process_archives_redacted_logs(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        working_dir_path,
+    ):
+        submission_id = "260914050_2024-07-15_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        metadata_path = VALID_SUBMISSION_DIR / "metadata" / "metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        tan = metadata["submission"]["tanG"]
+        local_case_id = metadata["submission"]["localCaseId"]
+
+        logs_dir = working_dir_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        custom_log = logs_dir / "custom.log"
+        custom_log.write_text(f"tan={tan}\nlocalCaseId={local_case_id}\n", encoding="utf-8")
+
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        archived_key = f"{submission_id}/logs/custom.log"
+        archived_keys = {o.key for o in s3_buckets["consented"].objects.all()}
+        assert archived_key in archived_keys
+
+        archived_log = s3_buckets["consented"].Object(archived_key).get()["Body"].read().decode("utf-8")
+        assert tan not in archived_log
+        assert local_case_id not in archived_log
+        assert "REDACTED_TAN_G" in archived_log
+        assert "REDACTED_LOCAL_CASE_ID" in archived_log
+
+    def test_process_creates_correct_directory_structure(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        working_dir_path,
+    ):
+        """
+        Test that grzctl process creates the expected local directory structure.
+        """
+        submission_id = "260914050_2024-07-15_c64603a7"
+
+        # Upload submission to inbox
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        # Run grzctl process
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # Check directory structure
+        assert (working_dir_path / "metadata").is_dir()
+        assert (working_dir_path / "metadata" / "metadata.json").is_file()
+        assert (working_dir_path / "logs").is_dir()
+
+        # the staged copies are the only output of this run: it writes no local copy, and the
+        # metadata download records no progress
+        log_files = {path.name for path in (working_dir_path / "logs").glob("*.cjson")}
+        assert log_files == {"progress_staging.cjson"}
+
+    def test_process_submission_multi_inbox(
+        self,
+        aws_credentials,
+        tmp_path,
+        working_dir_path,
+        process_config_content,
+    ):
+        """
+        Test multi-inbox selection logic.
+        """
+        conn = boto3.client("s3")
+        conn.create_bucket(Bucket="inbox-a")
+        conn.create_bucket(Bucket="inbox-b")
+        conn.create_bucket(Bucket="consented-archive")
+        conn.create_bucket(Bucket="non-consented-archive")
+        conn.create_bucket(Bucket="interrogation-archive")
+
+        s3_resource = boto3.resource("s3")
+        inbox_b = s3_resource.Bucket("inbox-b")
+
+        submission_id = "260914050_2024-07-15_c64603a7"
+        le_id = "260914050"
+
+        # Upload submission to inbox-b
+        upload_submission_to_inbox(inbox_b, submission_id)
+        config_content = process_config_content.copy()
+
+        base_inbox_config = config_content["leistungserbringer"][le_id]["inbox_buckets"]["inbox"]
+
+        config_content["leistungserbringer"][le_id]["inbox_buckets"] = {
+            "inbox-a": base_inbox_config.copy(),
+            "inbox-b": base_inbox_config.copy(),
+        }
+
+        config_file = tmp_path / "config.multi.yaml"
+        with open(config_file, "w") as fd:
+            yaml.dump(config_content, fd)
+
+        # Run grzctl process with --inbox-bucket inbox-b
+        result = _run_process(config_file, submission_id, working_dir_path, "--inbox-bucket", "inbox-b")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # Verify it worked (files should be in consented archive)
+        consented_bucket = s3_resource.Bucket("consented-archive")
+        consented_keys = {o.key for o in consented_bucket.objects.all()}
+        assert any("metadata/metadata.json" in key for key in consented_keys)
+
+        # Test failure if --inbox-bucket is missing when multiple are available
+        result = _run_process(config_file, submission_id, working_dir_path / "fail")
+        assert result.exit_code != 0
+        assert "Multiple inboxes found" in result.output
+
+
+class TestProcessValidationFailure:
+    """Tests for validation failure handling during processing."""
+
+    def test_validation_failure_aborts_upload(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        crypt4gh_grz_public_key_file_path,
+        crypt4gh_submitter_private_key_file_path,
+        working_dir_path,
+    ):
+        """A FASTQ file that fails format validation must fail the run and reach no archive."""
+        submission_id = "260914050_2024-07-15_c64603a7"
+        read1 = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz"
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        # replace read1 with a FASTQ whose only record lacks its quality line
+        invalid_fastq = gzip.compress(b"@read1\nACGT\n+\n")
+        sender_private_key = crypt4gh.keys.get_private_key(str(crypt4gh_submitter_private_key_file_path), lambda: None)
+        grz_public_key = crypt4gh.keys.get_public_key(str(crypt4gh_grz_public_key_file_path))
+        encrypted = BytesIO()
+        crypt4gh.lib.encrypt([(0, sender_private_key, grz_public_key)], BytesIO(invalid_fastq), encrypted)
+        s3_buckets["inbox"].put_object(Key=f"{submission_id}/files/{read1}.c4gh", Body=encrypted.getvalue())
+
+        # update its checksum and size, so that it fails format validation rather than the checksum check
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        for donor in metadata["donors"]:
+            for lab_datum in donor["labData"]:
+                for file in lab_datum.get("sequenceData", {}).get("files", []):
+                    if file["filePath"] == read1:
+                        file["fileChecksum"] = hashlib.sha256(invalid_fastq).hexdigest()
+                        file["fileSizeInBytes"] = len(invalid_fastq)
+        s3_buckets["inbox"].put_object(
+            Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode()
+        )
+
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        logs = [path.read_text() for path in (working_dir_path / "logs").iterdir()]
+        assert any("sequence length (4) does not match quality scores length (0)" in log for log in logs)
+        state = _latest_state(process_config_content, submission_id)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
+
+        for bucket in ("consented", "non_consented", "interrogation"):
+            keys = {o.key for o in s3_buckets[bucket].objects.all()}
+            assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
+
+    def test_checksum_mismatch_fails_processing(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A file whose content does not match its metadata checksum must fail the run and reach no archive."""
+        submission_id = "260914050_2024-07-15_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        # replace the metadata with a copy in which one file has a wrong checksum; the last file in
+        # metadata order is the one to pick, because the files before it are staged by the time the
+        # run fails, which is what leaves the cleanup something to delete
+        wrong_checksum_file = list(_metadata_file_checksums())[-1]
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        for donor in metadata["donors"]:
+            for lab_datum in donor["labData"]:
+                for file in lab_datum.get("sequenceData", {}).get("files", []):
+                    if file["filePath"] == wrong_checksum_file:
+                        file["fileChecksum"] = "0" * 64
+        s3_buckets["inbox"].put_object(
+            Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode()
+        )
+
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path, "--threads", "2")
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        logs = [path.read_text() for path in (working_dir_path / "logs").iterdir()]
+        assert any("Checksum mismatch" in log for log in logs)
+        state = _latest_state(process_config_content, submission_id)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
+
+        staged = s3_requests.per_file(
+            {"PutObject", "CompleteMultipartUpload"}, s3_buckets["interrogation"], submission_id
+        )
+        assert staged, "the run should have staged files, so that the empty bucket below means they were cleaned up"
+        for bucket in ("consented", "non_consented", "interrogation"):
+            keys = {o.key for o in s3_buckets[bucket].objects.all()}
+            assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
+
+
+@pytest.fixture
+def qc_process_config_file_path(tmp_path, process_config_content) -> Path:
+    """Write a process config that selects submissions for detailed QC."""
+    process_config_content["detailed_qc"]["target_percentage"] = "100.0"
+    config_file = tmp_path / "config.process.qc.yaml"
+    with open(config_file, "w") as fd:
+        yaml.dump(process_config_content, fd)
+    return config_file
+
+
+def _upload_initial_submission_to_inbox(inbox_bucket, submission_id: str) -> None:
+    """Upload the valid submission as an initial one, since only initial submissions are selected for QC."""
+    upload_submission_to_inbox(inbox_bucket, submission_id)
+    metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+    metadata["submission"]["submissionType"] = "initial"
+    inbox_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+
+
+def _relink_to_new_case(config_file_path: Path, submission_id: str, local_case_id: str) -> int:
+    """Create a case and move the submission to it, as an operator repairing a case link would."""
+    cli = grzctl.cli.build_cli()
+    runner = click.testing.CliRunner()
+    case_args = ["--config", str(config_file_path), "db", "case"]
+    result = runner.invoke(cli, [*case_args, "create", "260914050", local_case_id])
+    assert result.exit_code == 0, result.output
+    cases = json.loads(runner.invoke(cli, [*case_args, "list", "--json"]).stdout)
+    case_id = next(case["id"] for case in cases if case["local_case_id"] == local_case_id)
+    result = runner.invoke(cli, [*case_args, "relink", submission_id, str(case_id)])
+    assert result.exit_code == 0, result.output
+    return case_id
+
+
+def _qc_files(process_config_content: dict, submission_id: str) -> set[str]:
+    files_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / submission_id / "files"
+    return {p.relative_to(files_dir).as_posix() for p in files_dir.rglob("*") if p.is_file()}
+
+
+def _metadata_file_checksums() -> dict[str, str]:
+    """Map each file path in the valid submission's metadata to its SHA256 checksum."""
+    metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+    return {
+        file["filePath"]: file["fileChecksum"]
+        for donor in metadata["donors"]
+        for lab_datum in donor["labData"]
+        for file in lab_datum.get("sequenceData", {}).get("files", [])
+    }
+
+
+def _assert_archived(bucket, submission_id: str, private_key_path: Path) -> None:
+    """Assert that ``bucket`` holds every file of the submission, each decrypting to its metadata checksum.
+
+    Decrypts with the reference crypt4gh implementation rather than grzctl's own decryptor.
+    """
+    expected = _metadata_file_checksums()
+    archived_keys = {o.key for o in bucket.objects.filter(Prefix=f"{submission_id}/files/")}
+    assert archived_keys == {f"{submission_id}/files/{path}.c4gh" for path in expected}
+    private_key = crypt4gh.keys.get_private_key(str(private_key_path), lambda: None)
+    for path, checksum in expected.items():
+        encrypted = bucket.Object(f"{submission_id}/files/{path}.c4gh").get()["Body"].read()
+        decrypted = BytesIO()
+        crypt4gh.lib.decrypt([(0, private_key, None)], BytesIO(encrypted), decrypted)
+        assert hashlib.sha256(decrypted.getvalue()).hexdigest() == checksum, path
+
+
+S3_WRITE_OPERATIONS = frozenset(
+    {"PutObject", "CopyObject", "CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload"}
+)
+
+
+@dataclass
+class S3Requests:
+    """S3 requests as botocore sends them, whichever code in grzctl makes them."""
+
+    requests: list[tuple[str, str, str]] = field(default_factory=list)
+    unavailable_bucket: str | None = None
+    """Writes to this bucket fail, as if the bucket were unavailable."""
+    failing_head_bucket: str | None = None
+    """``HeadObject`` on this bucket fails with a server error, as if the endpoint were overloaded."""
+    failing_repeat_downloads: set[str] = field(default_factory=set)
+    """Every download of these keys after the first fails, as if the object had been deleted in between."""
+
+    def per_file(self, operations: set[str], bucket, submission_id: str) -> Counter[str]:
+        """Count the requests with one of ``operations`` on each of the submission's files in ``bucket``."""
+        prefix = f"{submission_id}/files/"
+        return Counter(
+            key.removeprefix(prefix).removesuffix(".c4gh")
+            for operation, bucket_name, key in self.requests
+            if operation in operations and bucket_name == bucket.name and key.startswith(prefix)
+        )
+
+
+@pytest.fixture
+def s3_requests(monkeypatch) -> S3Requests:
+    """Record every S3 request, and fail the requests that :class:`S3Requests` selects."""
+    recorder = S3Requests()
+    make_api_call = botocore.client.BaseClient._make_api_call
+
+    def record(client, operation_name, api_params):
+        bucket = api_params.get("Bucket", "")
+        key = api_params.get("Key", "")
+        recorder.requests.append((operation_name, bucket, key))
+        if bucket == recorder.unavailable_bucket and operation_name in S3_WRITE_OPERATIONS:
+            error = {"Error": {"Code": "ServiceUnavailable", "Message": "simulated outage"}}
+            raise botocore.exceptions.ClientError(error, operation_name)
+        if bucket == recorder.failing_head_bucket and operation_name == "HeadObject":
+            error = {"Error": {"Code": "ServiceUnavailable", "Message": "simulated overload"}}
+            raise botocore.exceptions.ClientError(error, operation_name)
+        repeat_download = operation_name == "GetObject" and recorder.requests.count((operation_name, bucket, key)) > 1
+        if repeat_download and key in recorder.failing_repeat_downloads:
+            error = {"Error": {"Code": "NoSuchKey", "Message": "simulated deletion"}}
+            raise botocore.exceptions.ClientError(error, operation_name)
+        return make_api_call(client, operation_name, api_params)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", record)
+    return recorder
+
+
+class TestProcessS3Failure:
+    """grzctl process fails when it cannot read a file from the inbox or write it to the interrogation bucket."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+    VCF = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf"
+
+    def test_missing_inbox_file_fails_processing(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A file missing from the inbox fails the run as FILE_NOT_FOUND and reaches no archive."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_buckets["inbox"].Object(f"{sid}/files/{self.VCF}.c4gh").delete()
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.FILE_NOT_FOUND
+        file_errors = (state.data or {}).get("errors", [])
+        assert [(error["file"], error["reason"]) for error in file_errors] == [(self.VCF, "file_not_found")]
+        assert state.data["error"] == file_errors[0]["message"], "the recorded error is the one that set the reason"
+        assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
+
+    def test_invalid_metadata_is_recorded_as_a_validation_error(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Metadata that breaks the specification fails the processing step, and the step records it."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_buckets["inbox"].put_object(Key=f"{sid}/metadata/metadata.json", Body=b'{"submission": {}}')
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
+
+    def test_a_missing_metadata_leaves_no_trace_in_the_database(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A mistyped submission ID fails before processing could create the submission."""
+        sid = "260914050_2024-07-15_00000000"
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        assert db.get_submission(sid) is None
+
+    def test_upload_failure_fails_processing(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A failed upload to the interrogation bucket fails the run as a transfer error and leaves the inbox untouched."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.unavailable_bucket = s3_buckets["interrogation"].name
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+        assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+        assert inbox_keys == {f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()}
+
+    def test_a_failed_copy_to_the_archive_fails_as_a_transfer_error(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """An archive that refuses the copy fails the run as a transfer error."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.unavailable_bucket = s3_buckets["consented"].name
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+
+
+class TestProcessDetailedQc:
+    """Tests for the detailed QC prefetch: the main pass writes the QC copy when a selection is likely."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_prefetch_replaces_the_qc_pass(
+        self,
+        s3_buckets,
+        s3_requests,
+        qc_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """When the guess is right, each file is downloaded once, and the QC pass finds it already in QC storage."""
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
+
+        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        checksums = _metadata_file_checksums()
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], self.SUBMISSION_ID)
+        assert downloads == Counter(dict.fromkeys(checksums, 1))
+        assert _qc_files(process_config_content, self.SUBMISSION_ID) == set(checksums)
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / self.SUBMISSION_ID
+        uploaded_metadata = {**metadata, "submission": {**metadata["submission"], "submissionType": "initial"}}
+        assert json.loads((qc_dir / "metadata" / "metadata.json").read_text()) == uploaded_metadata
+
+    def test_failed_qc_download_fails_the_run(
+        self,
+        s3_buckets,
+        s3_requests,
+        qc_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """A file that the QC pass cannot download fails the run, as a failure in the main pass does."""
+        sid = self.SUBMISSION_ID
+        vcf_key = f"{sid}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf.c4gh"
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        # guess "not selected", so that only the QC pass writes local copies, then decide "selected"
+        monkeypatch.setattr(SubmissionDb, "should_qc", lambda self, *args, predict=False, **kwargs: not predict)
+        # the main pass downloads the VCF, the QC pass fails to download it again
+        s3_requests.failing_repeat_downloads = {vcf_key}
+
+        result = _run_process(qc_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.FILE_NOT_FOUND
+        assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
+        assert vcf_key in {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+
+    def test_prefetched_files_are_deleted_when_not_selected(
+        self,
+        s3_buckets,
+        qc_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """A wrong guess leaves no decrypted files behind."""
+        upload_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
+
+        # guess "selected", then decide "not selected"
+        monkeypatch.setattr(SubmissionDb, "should_qc", lambda self, *args, predict=False, **kwargs: predict)
+
+        result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
+
+
+class TestProcessDuplicateInitial:
+    """An initial submission fails basic QC when its case already has a QC-passed initial submission."""
+
+    FIRST_ID = "260914050_2024-07-15_c64603a7"
+    DUPLICATE_TAN_G = "bbbbbbbb00000000bbbbbbbb00000000bbbbbbbb00000000bbbbbbbb00000000"
+
+    def _process_first_and_upload_duplicate(self, inbox_bucket, config_file_path: Path, working_dir_path: Path) -> str:
+        """Process an initial submission, then upload a second initial submission of its case."""
+        _upload_initial_submission_to_inbox(inbox_bucket, self.FIRST_ID)
+        result = _run_process(config_file_path, self.FIRST_ID, working_dir_path / "first")
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # same submitter and local case ID, but its own tanG and therefore its own submission ID
+        duplicate_id = f"260914050_2024-07-15_{hashlib.sha256(self.DUPLICATE_TAN_G.encode()).hexdigest()[:8]}"
+        upload_submission_to_inbox(inbox_bucket, duplicate_id)
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        metadata["submission"]["submissionType"] = "initial"
+        metadata["submission"]["tanG"] = self.DUPLICATE_TAN_G
+        inbox_bucket.put_object(Key=f"{duplicate_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+        return duplicate_id
+
+    @staticmethod
+    def _assert_failed_basic_qc(process_config_content: dict, submission_id: str) -> None:
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        submission = db.get_submission(submission_id)
+        assert submission is not None
+        assert submission.basic_qc_passed is False
+        assert submission.states[-1].state == SubmissionStateEnum.ERROR
+        assert submission.states[-1].failure_reason == FailureReasonEnum.DUPLICATE_INITIAL
+
+    def test_update_db_fails_basic_qc_before_processing(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """The pre-check rejects the duplicate before any of its files is downloaded."""
+        duplicate_id = self._process_first_and_upload_duplicate(
+            s3_buckets["inbox"], temp_process_config_file_path, working_dir_path
+        )
+
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+
+        assert result.exit_code != 0
+        assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], duplicate_id) == Counter()
+        self._assert_failed_basic_qc(process_config_content, duplicate_id)
+
+    def test_update_db_records_duplicate_detected_after_processing(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """The ``basic_qc_passed`` write catches a competing initial submission that the pre-check missed."""
+        duplicate_id = self._process_first_and_upload_duplicate(
+            s3_buckets["inbox"], temp_process_config_file_path, working_dir_path
+        )
+        monkeypatch.setattr(SubmissionDb, "assert_no_duplicate_initial", lambda self, *args, **kwargs: None)
+
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+
+        assert result.exit_code != 0
+        self._assert_failed_basic_qc(process_config_content, duplicate_id)
+
+    def test_a_relinked_duplicate_can_be_processed(
+        self, s3_buckets, temp_process_config_file_path, process_config_content, working_dir_path
+    ):
+        """Moving the rejected submission to a case of its own is the repair, and the rerun then archives it."""
+        duplicate_id = self._process_first_and_upload_duplicate(
+            s3_buckets["inbox"], temp_process_config_file_path, working_dir_path
+        )
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+        assert result.exit_code != 0
+        other_case_id = _relink_to_new_case(temp_process_config_file_path, duplicate_id, "another-patient")
+
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        submission = db.get_submission(duplicate_id)
+        assert submission.case_id == other_case_id
+        assert submission.basic_qc_passed is True
+        assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{duplicate_id}/")} != set()
+
+
+class TestProcessRerunAfterRelink:
+    """A rerun keeps the case link that ``grzctl db case relink`` set by hand."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_rerun_keeps_the_relinked_case(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """After a failed run and a relink, the rerun processes the submission and leaves it in the relinked case."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        # the first run links the submission to the case of its metadata, then fails
+        s3_requests.unavailable_bucket = s3_buckets["interrogation"].name
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+
+        other_case_id = _relink_to_new_case(temp_process_config_file_path, sid, "another-patient")
+        s3_requests.unavailable_bucket = None
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert SubmissionStateEnum.PROCESSED in _states(process_config_content, sid)[-3:]
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        assert db.get_submission(sid).case_id == other_case_id
+
+
+class TestProcessDuplicateTanG:
+    """A submission fails when another submission already holds its tanG."""
+
+    FIRST_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_duplicate_tan_g_fails_before_processing(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A resubmission with the tanG of a processed submission fails as DUPLICATE_TANG before any file is downloaded."""
+        upload_submission_to_inbox(s3_buckets["inbox"], self.FIRST_ID)
+        result = _run_process(temp_process_config_file_path, self.FIRST_ID, working_dir_path / "first")
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+
+        # same tanG on a later date, and therefore another submission ID
+        duplicate_id = "260914050_2024-07-16_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], duplicate_id)
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        metadata["submission"]["submissionDate"] = "2024-07-16"
+        s3_buckets["inbox"].put_object(Key=f"{duplicate_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+
+        result = _run_process(temp_process_config_file_path, duplicate_id, working_dir_path / "duplicate")
+
+        assert result.exit_code != 0
+        state = _latest_state(process_config_content, duplicate_id)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.DUPLICATE_TANG
+        assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], duplicate_id) == Counter()
+
+
+@pytest.fixture
+def rerun_config_file_path(tmp_path, process_config_content) -> Path:
+    """Write a process config that selects submissions for detailed QC and keeps the staged files of a failed run."""
+    process_config_content["detailed_qc"]["target_percentage"] = "100.0"
+    process_config_content["archives"]["interrogation"]["keep_failed"] = True
+    config_file = tmp_path / "config.process.rerun.yaml"
+    config_file.write_text(yaml.dump(process_config_content))
+    return config_file
+
+
+class TestProcessRerun:
+    """A rerun into the same output directory redoes exactly the work whose output is missing.
+
+    These tests observe only what an operator could: the exit code, the S3 requests, the buckets and
+    local storage. They do not depend on how grzctl tracks progress.
+    """
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+    VCF = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf"
+    READ1 = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz"
+    READ2 = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz"
+
+    @pytest.mark.parametrize("staged", [True, False], ids=["staged", "not-staged"])
+    @pytest.mark.parametrize("on_local_storage", [True, False], ids=["on-local-storage", "not-on-local-storage"])
+    def test_rerun_redoes_only_missing_outputs(
+        self,
+        s3_buckets,
+        s3_requests,
+        rerun_config_file_path,
+        process_config_content,
+        crypt4gh_grz_private_key_file_path,
+        working_dir_path,
+        staged,
+        on_local_storage,
+    ):
+        """A rerun downloads, stages and writes a file to local storage only as far as its outputs are missing.
+
+        The first run fails while copying to the archive. By then every file is staged in the
+        interrogation bucket and, since the submission is selected for detailed QC, on local storage.
+        The test then removes the staged copy, the local copy, or both, of one file.
+        """
+        sid = self.SUBMISSION_ID
+        checksums = _metadata_file_checksums()
+        local_files = Path(process_config_content["detailed_qc"]["local_storage"]) / sid / "files"
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        s3_requests.unavailable_bucket = s3_buckets["consented"].name
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+        s3_requests.unavailable_bucket = None
+        assert result.exit_code != 0, "the first run should fail while copying to the archive"
+        staged_keys = {o.key for o in s3_buckets["interrogation"].objects.filter(Prefix=f"{sid}/files/")}
+        assert staged_keys == {f"{sid}/files/{path}.c4gh" for path in checksums}
+        assert _qc_files(process_config_content, sid) == set(checksums)
+
+        if not staged:
+            s3_buckets["interrogation"].Object(f"{sid}/files/{self.VCF}.c4gh").delete()
+        if not on_local_storage:
+            (local_files / self.VCF).unlink()
+        for path in local_files.iterdir():
+            os.utime(path, ns=(0, 0))  # a local copy the rerun writes gets a newer modification time
+        s3_requests.requests.clear()
+
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        outputs_missing = not (staged and on_local_storage)
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert downloads == Counter({self.VCF: 1} if outputs_missing else {})
+        uploads = s3_requests.per_file({"PutObject", "CompleteMultipartUpload"}, s3_buckets["interrogation"], sid)
+        assert uploads == Counter({} if staged else {self.VCF: 1})
+        written = {path.name for path in local_files.iterdir() if path.stat().st_mtime_ns != 0}
+        assert written == (set() if on_local_storage else {self.VCF})
+        for path, checksum in checksums.items():
+            assert hashlib.sha256((local_files / path).read_bytes()).hexdigest() == checksum, path
+        _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
+
+    @pytest.mark.parametrize("keep_failed", [True, False], ids=["staged-files-kept", "staged-files-deleted"])
+    def test_rerun_completes_a_pair_whose_read2_failed(
+        self,
+        s3_buckets,
+        s3_requests,
+        tmp_path,
+        process_config_content,
+        crypt4gh_grz_private_key_file_path,
+        working_dir_path,
+        keep_failed,
+    ):
+        """The first run processes read1 and fails on the missing read2; the rerun completes the pair.
+
+        With ``keep_failed`` the staged read1 survives, so the rerun must not download it again, and
+        the read-pair check of read2 must still pass. Without it, the rerun downloads read1 again.
+        """
+        sid = self.SUBMISSION_ID
+        process_config_content["archives"]["interrogation"]["keep_failed"] = keep_failed
+        config_file_path = tmp_path / "config.process.yaml"
+        config_file_path.write_text(yaml.dump(process_config_content))
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        read2_key = f"{sid}/files/{self.READ2}.c4gh"
+        s3_buckets["inbox"].Object(read2_key).delete()
+
+        # with one thread, read1 comes before read2; the second assertion checks that it did
+        result = _run_process(config_file_path, sid, working_dir_path, "--threads", "1")
+        assert result.exit_code != 0, "the first run should fail on the missing read2"
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert downloads[self.READ1] == 1, "the first run should download read1"
+
+        s3_buckets["inbox"].upload_file(
+            Filename=str(VALID_SUBMISSION_DIR / "encrypted_files" / f"{self.READ2}.c4gh"), Key=read2_key
+        )
+        s3_requests.requests.clear()
+        result = _run_process(config_file_path, sid, working_dir_path, "--threads", "1")
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert downloads[self.READ1] == (0 if keep_failed else 1)
+        assert downloads[self.READ2] == 1
+        _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
+
+    def test_a_file_that_fails_alongside_its_partner_leaves_the_partner_processed(
+        self,
+        s3_buckets,
+        s3_requests,
+        monkeypatch,
+        tmp_path,
+        process_config_content,
+        crypt4gh_grz_private_key_file_path,
+        working_dir_path,
+    ):
+        """read2 fails while read1 streams, and the rerun still does not download read1 again.
+
+        The first run is steered into the order in which read1 could trip over read2: read2 fails
+        once read1 is downloading, and read1 finishes its upload only after read2 is done failing.
+        """
+        sid = self.SUBMISSION_ID
+        process_config_content["archives"]["interrogation"]["keep_failed"] = True
+        config_file_path = tmp_path / "config.process.yaml"
+        config_file_path.write_text(yaml.dump(process_config_content))
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        read1_key = f"{sid}/files/{self.READ1}.c4gh"
+        read2_key = f"{sid}/files/{self.READ2}.c4gh"
+        read1_downloading = threading.Event()
+        read2_done = threading.Event()
+
+        make_api_call = botocore.client.BaseClient._make_api_call
+
+        def steer(client, operation_name, api_params):
+            bucket, key = api_params.get("Bucket"), api_params.get("Key")
+            if operation_name == "GetObject" and key == read1_key:
+                read1_downloading.set()
+            if operation_name == "GetObject" and key == read2_key and not read2_done.is_set():
+                read1_downloading.wait(timeout=30)
+                error = {"Error": {"Code": "InternalError", "Message": "simulated failure"}}
+                raise botocore.exceptions.ClientError(error, operation_name)
+            uploads = {"PutObject", "CompleteMultipartUpload"}
+            if operation_name in uploads and bucket == s3_buckets["interrogation"].name and key == read1_key:
+                read2_done.wait(timeout=30)
+            return make_api_call(client, operation_name, api_params)
+
+        process_file = grzctl.processor.FilePipelineExecutor._process_file
+
+        def process_file_then_signal(executor, **kwargs):
+            process_file(executor, **kwargs)
+            if kwargs["file_meta"].file_path == self.READ2:
+                read2_done.set()
+
+        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", steer)
+        monkeypatch.setattr(grzctl.processor.FilePipelineExecutor, "_process_file", process_file_then_signal)
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, "the first run should fail on read2"
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert downloads[self.READ1] == 1, "the first run should download read1"
+
+        s3_requests.requests.clear()
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert downloads[self.READ1] == 0, "read1 passed in the first run, so the rerun must not stream it again"
+        assert downloads[self.READ2] == 1
+        _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
+
+
+class TestProcessStagingCheckFailure:
+    """A rerun asks the interrogation bucket whether a file is still staged, and that question can fail."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_failing_staging_check_fails_the_run_as_a_file_error(
+        self,
+        s3_buckets,
+        s3_requests,
+        rerun_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """An interrogation bucket that answers the check with a server error fails the run as a file error."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        # the first run stages every file and then fails while copying to the archive
+        s3_requests.unavailable_bucket = s3_buckets["consented"].name
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, "the first run should fail while copying to the archive"
+
+        s3_requests.unavailable_bucket = None
+        s3_requests.failing_head_bucket = s3_buckets["interrogation"].name
+
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"the rerun should fail: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+        file_errors = (state.data or {}).get("errors", [])
+        assert {error["file"] for error in file_errors} == set(_metadata_file_checksums()), (
+            "the rerun should report the failure as an error of each file"
+        )
+        assert {error["reason"] for error in file_errors} == {FailureReasonEnum.TRANSFER_ERROR.value}
+
+
+def _states(process_config_content: dict, submission_id: str) -> list[SubmissionStateEnum]:
+    """Return the states of a submission, in the order the run recorded them."""
+    db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+    submission = db.get_submission(submission_id)
+    assert submission is not None
+    return [state.state for state in submission.states]
+
+
+class TestProcessInboxCleanup:
+    """A processed submission is cleaned from the inbox, unless the operator says otherwise."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_processed_submission_is_cleaned_from_the_inbox(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Cleaning leaves the marker and an empty metadata file, and records its own two states."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
+        assert keys == {f"{sid}/metadata/metadata.json", f"{sid}/cleaned"}
+        metadata = s3_buckets["inbox"].Object(f"{sid}/metadata/metadata.json").get()["Body"].read()
+        assert metadata == b"", "the metadata in the inbox holds the tanG, so cleaning has to empty it"
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.CLEANED,
+        ]
+
+    def test_nothing_to_clean_is_a_missing_submission_file(self, s3_buckets):
+        """An inbox that holds only the metadata lacks every file that the metadata lists."""
+        sid = self.SUBMISSION_ID
+        s3_buckets["inbox"].put_object(Key=f"{sid}/metadata/metadata.json", Body=b"{}")
+        options = S3Options(
+            endpoint_url="https://s3.amazonaws.com",
+            bucket=s3_buckets["inbox"].name,
+            access_key="testing",
+            secret="testing",
+        )
+
+        with pytest.raises(MissingSubmissionFileError):
+            _clean_submission_from_bucket(options.bucket, options, sid, "inbox 'inbox'")
+
+    def test_a_failed_cleanup_is_recorded_once_as_its_own_step(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """An archived submission stays processed, and only the cleaning records the failure."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.unavailable_bucket = s3_buckets["inbox"].name
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.ERROR,
+        ]
+        assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.TRANSFER_ERROR
+
+    def test_no_clean_inbox_leaves_the_submission_in_the_inbox(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """With ``--no-clean-inbox`` the inbox keeps every file, and the run records no cleaning."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
+        assert keys == {f"{sid}/metadata/metadata.json"} | {
+            f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()
+        }
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+        ]
+
+
+def _auto_run_config(tmp_path: Path, process_config_content: dict, shell_command: str) -> Path:
+    """Write a process config that selects every submission for detailed QC and runs ``shell_command``."""
+    process_config_content["detailed_qc"]["target_percentage"] = "100.0"
+    process_config_content["detailed_qc"]["auto_run"] = True
+    process_config_content["detailed_qc"]["shell_command"] = shell_command
+    config_file = tmp_path / "config.process.auto-run.yaml"
+    config_file.write_text(yaml.dump(process_config_content))
+    return config_file
+
+
+class TestProcessDetailedQcAutoRun:
+    """With ``auto_run``, the run calls the configured QC workflow once the files are on local storage."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_the_qc_command_runs_with_the_paths_of_the_submission(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """The command is called with the submission's local storage path, its output path and its ID."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        config_file_path = _auto_run_config(
+            tmp_path,
+            process_config_content,
+            "mkdir -p '{output_basepath}' && printf '%s' '{submission_id}' > '{output_basepath}/ran.txt' "
+            "&& ls '{submission_basepath}' > '{output_basepath}/contents.txt'",
+        )
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / sid / "qc"
+        assert (qc_dir / "ran.txt").read_text() == sid
+        assert set((qc_dir / "contents.txt").read_text().split()) == {"files", "metadata", "qc"}
+
+    def test_a_failing_qc_command_fails_the_run(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A QC command that exits non-zero fails the run, and no file reaches an archive."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        config_file_path = _auto_run_config(tmp_path, process_config_content, "exit 3")
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.DETAILED_QC_ERROR
+        recorded_error = (state.data or {}).get("error", "")
+        assert "non-zero exit status 3" in recorded_error, f"the QC command should be the cause, got: {recorded_error}"
+        for bucket in ("consented", "non_consented", "interrogation"):
+            keys = {o.key for o in s3_buckets[bucket].objects.all()}
+            assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+        assert inbox_keys, "a failed run leaves the files in the inbox"
+
+
+@pytest.fixture
+def bfarm_api():
+    """Fake the BfArM token endpoint, and record every request the run makes.
+
+    Every token request gets a token of its own, ``token-1``, ``token-2`` and so on.
+    """
+    issued = itertools.count(1)
+
+    def issue_token(_request):
+        token = {"access_token": f"token-{next(issued)}", "expires_in": 300, "token_type": "Bearer"}
+        return 200, {}, json.dumps(token)
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.add_callback(
+            responses.POST, "https://bfarm.localhost/token", callback=issue_token, content_type="application/json"
+        )
+        yield mock
+
+
+def _submitted_tans(bfarm_api) -> list[str]:
+    """The tanGs of the Prüfbericht submissions that reached the fake BfArM endpoint."""
+    return [
+        json.loads(call.request.body)["SubmittedCase"]["tan"]
+        for call in bfarm_api.calls
+        if call.request.url.endswith("/api/upload")
+    ]
+
+
+def _submission_tokens(bfarm_api) -> list[str]:
+    """The tokens that the Prüfbericht submissions to the fake BfArM endpoint carried."""
+    return [
+        call.request.headers["Authorization"].removeprefix("bearer ")
+        for call in bfarm_api.calls
+        if call.request.url.endswith("/api/upload")
+    ]
+
+
+def _tan_g_of_the_valid_submission() -> str:
+    return json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())["submission"]["tanG"]
+
+
+class TestProcessPruefbericht:
+    """By default, a run sends the Prüfbericht to BfArM and records the reporting states."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_submitted_pruefbericht_is_recorded_as_reported(
+        self,
+        s3_buckets,
+        bfarm_api,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """BfArM receives the tanG, while the copy in the logs carries the redacted one."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.REPORTED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.CLEANED,
+        ]
+        assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()]
+        saved = json.loads((working_dir_path / "logs" / "pruefbericht.json").read_text())
+        assert saved["SubmittedCase"]["tan"] == REDACTED_TAN, "the copy in the logs must not carry the tanG"
+
+    def test_a_failed_submission_is_sent_again(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A submission that BfArM rejects once is sent again after the backoff, with a new token.
+
+        The backoff can outlast a token's lifetime, so no attempt may reuse the token of an earlier one.
+        """
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        # the backoff starts at 30 seconds, which the test records instead of waiting it out
+        waits: list[float] = []
+        monkeypatch.setattr(time, "sleep", waits.append)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()] * 2
+        assert _submission_tokens(bfarm_api) == ["token-1", "token-2"]
+        assert waits == [30.0]
+        assert _states(process_config_content, sid)[-3] == SubmissionStateEnum.REPORTED
+
+    def test_a_submission_that_never_gets_through_is_recorded_as_an_error(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A Prüfbericht that BfArM rejects on every attempt leaves the reporting attempt in the states."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
+        monkeypatch.setattr(time, "sleep", lambda _: None)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert len(_submitted_tans(bfarm_api)) == 10, "the run should have used its ten attempts"
+        assert _states(process_config_content, sid)[-2:] == [
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.ERROR,
+        ]
+        assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.REPORTING_ERROR
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+        assert inbox_keys, "the inbox keeps a submission whose Prüfbericht BfArM did not accept"
+
+    def test_refused_credentials_fail_at_once_as_a_configuration_error(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Credentials that BfArM refuses are not retried, since waiting does not change them."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.replace(responses.POST, "https://bfarm.localhost/token", json={"error": "invalid_client"}, status=401)
+        waits: list[float] = []
+        monkeypatch.setattr(time, "sleep", waits.append)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert waits == [], "the run should not wait for a retry"
+        assert _submitted_tans(bfarm_api) == [], "no Prüfbericht should reach BfArM without a token"
+        state = _latest_state(process_config_content, sid)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.CONFIGURATION_ERROR
+
+    def test_a_missing_credential_stops_the_run_before_it_starts(
+        self,
+        s3_buckets,
+        s3_requests,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A run that is to submit, but lacks a credential to do so, fails before it touches S3 or the DB."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.requests.clear()
+        del process_config_content["pruefbericht"]["client_secret"]
+        config_file_path = tmp_path / "config.process.yaml"
+        config_file_path.write_text(yaml.dump(process_config_content))
+
+        result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert "pruefbericht.client_secret" in result.output
+        assert not s3_requests.requests, "the run should stop before it touches S3"
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        assert db.get_submission(sid) is None, "the run should stop before it records a state"
+
+
+def _config_with_distinct_archive_keys(tmp_path: Path, process_config_content: dict) -> Path:
+    """Write a process config whose two archives have different keys, so their contents tell them apart."""
+    process_config_content["archives"]["consented"]["public_key_path"] = str(MOCK_FILES_DIR / "archive_consented.pub")
+    process_config_content["archives"]["non_consented"]["public_key_path"] = str(
+        MOCK_FILES_DIR / "archive_non_consented.pub"
+    )
+    config_file = tmp_path / "config.process.archive-keys.yaml"
+    config_file.write_text(yaml.dump(process_config_content))
+    return config_file
+
+
+def _upload_submission_without_research_consent(inbox_bucket, submission_id: str) -> None:
+    """Upload the valid submission with the first donor's research consent denied.
+
+    One donor without research consent makes the whole submission non-consented.
+    """
+    upload_submission_to_inbox(inbox_bucket, submission_id)
+    metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+    for consent in metadata["donors"][0]["researchConsents"]:
+        for provision in consent["scope"]["provision"]["provision"]:
+            provision["type"] = "deny"
+    inbox_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+
+
+class TestProcessConsentRouting:
+    """A submission reaches the archive of its consent status, encrypted with that archive's key."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_consented_submission_reaches_the_consented_archive(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Every file decrypts with the consented archive's key, and the other archive stays empty."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        config_file_path = _config_with_distinct_archive_keys(tmp_path, process_config_content)
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        _assert_archived(s3_buckets["consented"], sid, MOCK_FILES_DIR / "archive_consented.sec")
+        assert not {o.key for o in s3_buckets["non_consented"].objects.all()}
+
+    def test_a_non_consented_submission_reaches_the_non_consented_archive(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Every file decrypts with the non-consented archive's key, and the other archive stays empty."""
+        sid = self.SUBMISSION_ID
+        _upload_submission_without_research_consent(s3_buckets["inbox"], sid)
+        config_file_path = _config_with_distinct_archive_keys(tmp_path, process_config_content)
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        _assert_archived(s3_buckets["non_consented"], sid, MOCK_FILES_DIR / "archive_non_consented.sec")
+        assert not {o.key for o in s3_buckets["consented"].objects.all()}
+
+
+class TestProcessAuthorKey:
+    """The author's key signs every state the run writes, and the run unlocks it once."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_the_run_asks_for_the_passphrase_once(
+        self,
+        s3_buckets,
+        monkeypatch,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A config without a passphrase leaves one prompt, however many states the run writes."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        del process_config_content["db"]["author"]["private_key_passphrase"]
+        config_file = tmp_path / "config.process.no-passphrase.yaml"
+        config_file.write_text(yaml.dump(process_config_content))
+        prompts = []
+        monkeypatch.setattr(grz_db.models.author, "getpass", lambda prompt=None: prompts.append(prompt) or "test")
+
+        result = _run_process(config_file, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert len(prompts) == 1, f"the run asked for the passphrase {len(prompts)} times: {prompts}"

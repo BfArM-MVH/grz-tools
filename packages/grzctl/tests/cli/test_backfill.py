@@ -20,7 +20,7 @@ import click.testing
 import grzctl.cli
 import pytest
 import sqlalchemy
-from grz_db.models.submission import Submission, SubmissionDb
+from grz_db.models.submission import DONORS_KEY, Submission, SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.db.cli import (
@@ -140,13 +140,13 @@ def test_backfill_submission_returns_up_to_date_when_no_pending_diff(
     assert result.status == _BackfillResult.UP_TO_DATE
 
 
-def test_backfill_submission_holds_back_a_destructive_change_without_force(
+def test_backfill_submission_skips_a_submission_with_an_undeclared_overwrite(
     db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
-    """Without --force, a differing non-NULL field is left alone while the missing ones are filled.
+    """An overwrite nobody asked for skips the submission whole, NULLs it could have filled included.
 
-    Populating a field that was NULL destroys nothing, and refusing to do it because some other
-    column disagrees would defeat what this command is for.
+    A row the run updated in part is harder to reason about later than one it left alone, and the
+    next run fills those NULLs once the overwrite is settled.
     """
     current = db.add_submission(submission_id)
     current.submission_size = 1  # non-NULL value that will differ from metadata
@@ -163,10 +163,10 @@ def test_backfill_submission_holds_back_a_destructive_change_without_force(
         ignore_fields=set(),
     )
 
-    assert result.status == _BackfillResult.UPDATED
+    assert result.status == _BackfillResult.WOULD_OVERWRITE
     persisted = db.get_submission(submission_id)
     assert persisted.submission_size == 1, "an existing value must not be overwritten"
-    assert persisted.submission_metadata == metadata.to_redacted_dict(), "a NULL field must still be filled"
+    assert persisted.submission_metadata is None, "and the rest of the submission waits with it"
 
 
 def test_backfill_submission_returns_would_overwrite_when_only_overwrites_are_pending(
@@ -349,16 +349,15 @@ def test_backfill_submission_reads_a_consent_datetime_without_a_timezone(
     assert stored_scope["dateTime"] == "2020-09-01T14:37:22", "the submitted value must be stored as written"
 
 
-def test_backfill_submission_allow_overwrite_writes_only_the_named_field(
+def test_backfill_submission_allow_overwrite_writes_the_field_it_names(
     db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
-    """--allow-overwrite overwrites the field it names and holds every other overwrite back.
+    """Once --allow-overwrite covers the overwrite, the submission is written whole.
 
     Refreshing stored submission_metadata is the motivating case: it has to be rewritten from S3
-    without --force also reverting a manually corrected value in some other column.
+    without --force also permitting every other overwrite the same diff carries.
     """
     current = db.add_submission(submission_id)
-    current.submission_size = 1  # non-NULL, differs from metadata, and is NOT allowed to change
     current.submission_metadata = {"stale": True}  # non-NULL, differs, and IS allowed to change
     db.update_submission(current)
     current = db.get_submission(submission_id)
@@ -376,7 +375,7 @@ def test_backfill_submission_allow_overwrite_writes_only_the_named_field(
     assert result.status == _BackfillResult.UPDATED
     persisted = db.get_submission(submission_id)
     assert persisted.submission_metadata == metadata.to_redacted_dict(), "the named field must be refreshed"
-    assert persisted.submission_size == 1, "an overwrite outside --allow-overwrite must be held back"
+    assert persisted.submission_size == metadata.get_submission_size(), "the NULLs are filled with it"
 
 
 def test_backfill_submission_allow_overwrite_reports_would_overwrite_when_nothing_is_writable(
@@ -611,13 +610,13 @@ def _flip_a_donors_mv_consent(db: SubmissionDb, submission_id: str) -> tuple[str
     return donor.pseudonym, donor.mv_consented
 
 
-def test_backfill_holds_back_a_changed_donor_without_force(
+def test_backfill_skips_the_submission_when_a_donor_changed_without_force(
     db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
 ) -> None:
-    """A stored donor that differs from metadata.json is left alone, while missing values are still filled."""
+    """A stored donor that differs from metadata.json skips the submission, like any other overwrite."""
     _populate_full_row(db, submission_id, metadata)
     pseudonym, stored = _flip_a_donors_mv_consent(db, submission_id)
-    db.modify_submission(submission_id, "submission_size", None)  # something additive to write
+    db.modify_submission(submission_id, "submission_size", None)  # something additive that must wait
 
     result = _backfill_submission(
         current_submission=db.get_submission(submission_id),
@@ -628,9 +627,30 @@ def test_backfill_holds_back_a_changed_donor_without_force(
         ignore_fields=set(),
     )
 
-    assert result.status == _BackfillResult.UPDATED
-    assert db.get_submission(submission_id).submission_size == metadata.get_submission_size()
+    assert result.status == _BackfillResult.WOULD_OVERWRITE
+    assert db.get_submission(submission_id).submission_size is None
     assert db.get_donors(submission_id, pseudonym)[0].mv_consented == stored, "the donor must not be overwritten"
+
+
+def test_backfill_allow_overwrite_donors_writes_a_changed_donor(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, submission_id: str
+) -> None:
+    """``donors`` is how an operator permits donor overwrites without permitting every other one."""
+    _populate_full_row(db, submission_id, metadata)
+    pseudonym, stored = _flip_a_donors_mv_consent(db, submission_id)
+
+    result = _backfill_submission(
+        current_submission=db.get_submission(submission_id),
+        raw_json=_metadata_json(metadata),
+        db_service=db,
+        dry_run=False,
+        force=False,
+        ignore_fields=set(),
+        allow_overwrite=frozenset({DONORS_KEY}),
+    )
+
+    assert result.status == _BackfillResult.UPDATED
+    assert db.get_donors(submission_id, pseudonym)[0].mv_consented == (not stored)
 
 
 def test_backfill_force_overwrites_a_changed_donor(
@@ -657,8 +677,8 @@ def test_backfill_holds_back_the_whole_submission_when_the_case_link_changed(
 ) -> None:
     """A relinked submission keeps its case, and nothing else is written either.
 
-    Replacing the link would undo a deliberate relink. Unlike a field or a donor, a held-back link
-    holds back the whole submission, filled NULLs included.
+    Replacing the link would undo a deliberate relink, and --allow-overwrite cannot name it, so
+    only --force gets past this one.
     """
     initial_metadata = _as_initial(metadata)
     sid = initial_metadata.submission_id
