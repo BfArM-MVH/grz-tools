@@ -491,8 +491,20 @@ def init(ctx: click.Context):
     """Initializes the database schema using Alembic."""
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
-    console_err.print(f"[cyan]Initializing database {db}[/cyan]")
-    submission_db.initialize_schema()
+
+    try:
+        console_err.print(f"[cyan]Initializing database {db}[/cyan]")
+        submission_db.initialize_schema()
+        console_err.print("[green]Successfully initialized database![/green]")
+
+    except (DatabaseConfigurationError, RuntimeError) as e:
+        console_err.print(f"[red]Error during schema initialization: {e}[/red]")
+        if isinstance(e, RuntimeError):
+            console_err.print("[yellow]Ensure your database is running and accessible.[/yellow]")
+        raise click.ClickException(str(e)) from e
+    except Exception as e:
+        console_err.print(f"[red]An unexpected error occurred during 'db init': {type(e).__name__} - {e}[/red]")
+        raise click.ClickException(str(e)) from e
 
 
 @db.command()
