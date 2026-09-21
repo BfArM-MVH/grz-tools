@@ -1,3 +1,4 @@
+import logging
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -21,6 +22,8 @@ from pydantic_settings import PydanticBaseSettingsSource
 
 from .db import DbModel
 from .pruefbericht import PruefberichtModel
+
+log = logging.getLogger(__name__)
 
 _config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", default=None)
 
@@ -194,6 +197,25 @@ class ArchiveTarget(IgnoringBaseModel):
         raise grzexc.ConfigurationError("Neither public_key nor public_key_path is set.")
 
 
+class InterrogationConfig(IgnoringBaseModel):
+    """Configuration for the staging interrogation bucket.
+
+    This bucket acts as a staging area: processed files are uploaded here first,
+    then copied to the final archive on success. If processing fails, files are
+    either cleaned up or left here depending on the ``keep_failed`` setting.
+
+    A lifecycle rule is recommended on this bucket to automatically clean up
+    incomplete multipart uploads and orphaned files from failed transfers
+    (e.g. expire incomplete parts after 10 days).
+    """
+
+    s3: S3Options
+    """S3 connection details and bucket for the staging interrogation bucket."""
+
+    keep_failed: bool = False
+    """If true, leaves the failed submission files in the interrogation bucket. Otherwise deletes them."""
+
+
 class ArchivesConfig(IgnoringBaseModel):
     """Configuration for consented and non-consented archives."""
 
@@ -203,10 +225,38 @@ class ArchivesConfig(IgnoringBaseModel):
     non_consented: ArchiveTarget
     """Target definition for non-consented submissions."""
 
+    interrogation: InterrogationConfig
+    """Target definition for the intermediate interrogation bucket."""
+
+    @model_validator(mode="after")
+    def check_endpoints_match(self) -> "ArchivesConfig":
+        consented_endpoint = str(self.consented.s3.endpoint_url) if self.consented.s3.endpoint_url else None
+        non_consented_endpoint = str(self.non_consented.s3.endpoint_url) if self.non_consented.s3.endpoint_url else None
+        interrogation_endpoint = str(self.interrogation.s3.endpoint_url) if self.interrogation.s3.endpoint_url else None
+
+        if interrogation_endpoint != consented_endpoint:
+            log.warning(
+                "Interrogation bucket endpoint (%s) differs from consented archive endpoint (%s). "
+                "Server-side copying might be slow or fail.",
+                interrogation_endpoint,
+                consented_endpoint,
+            )
+
+        if interrogation_endpoint != non_consented_endpoint:
+            log.warning(
+                "Interrogation bucket endpoint (%s) differs from non-consented archive endpoint (%s). "
+                "Server-side copying might be slow or fail.",
+                interrogation_endpoint,
+                non_consented_endpoint,
+            )
+
+        return self
+
     @model_validator(mode="after")
     def check_buckets_are_unique(self) -> "ArchivesConfig":
-        if self.consented.s3.bucket == self.non_consented.s3.bucket:
-            raise ValueError("consented and non-consented buckets must be distinct.")
+        buckets = {self.consented.s3.bucket, self.non_consented.s3.bucket, self.interrogation.s3.bucket}
+        if len(buckets) != 3:
+            raise ValueError("consented, non-consented and interrogation buckets must be distinct.")
         return self
 
     def load_private_key(self, archive: Literal["consented", "non_consented"]) -> X25519PrivateKey:
@@ -231,6 +281,34 @@ class ArchivesConfig(IgnoringBaseModel):
             target.private_key_passphrase,
             key_name=f"archives.{archive}.private_key",
         )
+
+
+class DetailedQcModel(IgnoringBaseSettings):
+    local_storage: Annotated[str, Field(min_length=1)]
+    """Path to local storage for detailed QC staging."""
+
+    salt: str
+    """Salt to use for deterministic determination of submissions selected for detailed QC."""
+
+    target_percentage: Annotated[float, Field(ge=0.0, le=100.0)] = 2.0
+    """Target percentage of submissions selected for detailed QC per month."""
+
+    shell_command: Annotated[str, Field(min_length=1)] = (
+        "nextflow run main.nf -profile docker "
+        "--submission_basepath '{submission_basepath}' "
+        "--outdir '{output_basepath}/grzqc_output' "
+        "-work-dir '{output_basepath}/work'"
+    )
+    """Shell command template for invoking the GRZ QC workflow.
+
+    Available placeholders:
+      - {submission_basepath}: path to decrypted files (local_storage/submission_id)
+      - {output_basepath}: output directory for QC results (defaults to submission_basepath/qc)
+      - {submission_id}: the raw submission ID
+    """
+
+    auto_run: bool = False
+    """If true, automatically run the QC shell command after the QC pass completes."""
 
 
 class DictConfigSettingsSource(PydanticBaseSettingsSource):
@@ -277,6 +355,9 @@ class GrzctlConfig(IgnoringBaseSettings):
 
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
+
+    detailed_qc: DetailedQcModel
+    """Configuration for detailed QC selection and staging."""
 
     @model_validator(mode="after")
     def build_le_lookups(self) -> "GrzctlConfig":
@@ -358,6 +439,7 @@ class GrzctlConfig(IgnoringBaseSettings):
 
         inbox_cfg = entry.inbox_buckets[inbox_name]
         bucket = inbox_cfg.bucket or inbox_name
+
         return InboxTarget(
             submitter_id=submitter_id,
             inbox_name=inbox_name,

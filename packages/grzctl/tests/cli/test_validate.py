@@ -24,10 +24,12 @@ def grzctl_config_path(tmp_path, unread_file):
         "archives": {
             "consented": {"s3": {"bucket": "consented"}, "public_key_path": unread_file},
             "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": unread_file},
+            "interrogation": {"s3": {"bucket": "interrogation"}, "keep_failed": False},
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
         "pruefbericht": PRUEFBERICHT,
         "identifiers": {"grz": "GRZT00000"},
+        "detailed_qc": {"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0},
     }
     config_path = tmp_path / "config.yaml"
     with open(config_path, "w") as f:

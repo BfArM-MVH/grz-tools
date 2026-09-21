@@ -11,7 +11,7 @@ import click
 import grz_common.exceptions as grzexc
 import platformdirs
 import yaml
-from grz_common.cli import FILE_R_E
+from grz_common.cli import FILE_R_E, OrderedGroup
 from grz_common.interrupt import TerminateInterrupt
 from grz_common.logging import setup_cli_logging
 
@@ -27,6 +27,7 @@ from .commands.download import download
 from .commands.encrypt import encrypt
 from .commands.inbox import inbox
 from .commands.list_submissions import list_submissions
+from .commands.process import process
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
 from .commands.validate import validate
@@ -35,16 +36,6 @@ from .models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
-
-
-class OrderedGroup(click.Group):
-    """
-    A click Group that keeps track of the order in which commands are added.
-    """
-
-    def list_commands(self, ctx):
-        """Return the list of commands in the order they were added."""
-        return list(self.commands.keys())
 
 
 def build_cli():
@@ -102,6 +93,7 @@ def build_cli():
     cli.add_command(download)
     cli.add_command(decrypt)
     cli.add_command(archive)
+    cli.add_command(process)
     cli.add_command(clean)
     cli.add_command(consent)
     cli.add_command(pruefbericht)

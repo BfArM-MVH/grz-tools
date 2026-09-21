@@ -20,6 +20,7 @@ def _grzctl_archives(public_key_path: str, endpoint_url: str | None = None) -> d
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+        "interrogation": {"s3": _s3("interrogation"), "keep_failed": False},
     }
 
 
@@ -33,6 +34,12 @@ PRUEFBERICHT = {
     "api_base_url": "https://api.example.org",
 }
 """A ``pruefbericht`` config section with fake values, for tests that never reach BfArM."""
+
+INTERROGATION = {"s3": {"bucket": "interrogation"}, "keep_failed": False}
+"""An ``archives.interrogation`` config section, which every grzctl config needs."""
+
+DETAILED_QC = {"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0}
+"""A ``detailed_qc`` config section, which every grzctl config needs."""
 
 
 @pytest.fixture
@@ -117,6 +124,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
         },
         pruefbericht=PRUEFBERICHT,
         identifiers={"grz": "GRZK00007"},
+        detailed_qc=DETAILED_QC,
     )
 
 
