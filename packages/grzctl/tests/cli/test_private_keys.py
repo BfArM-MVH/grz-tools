@@ -11,10 +11,10 @@ import grz_common.exceptions as grzexc
 import pytest
 import yaml
 from grz_common.models.s3 import S3Options
-from grzctl.models.config import ArchivesConfig, ArchiveTarget, GrzctlConfig, InboxConfig
+from grzctl.models.config import ArchivesConfig, ArchiveTarget, GrzctlConfig, InboxConfig, InterrogationConfig
 from pydantic import ValidationError
 
-from .conftest import PRUEFBERICHT
+from .conftest import DETAILED_QC, INTERROGATION, PRUEFBERICHT
 
 PASSPHRASE = "grz-key-passphrase"
 
@@ -52,6 +52,7 @@ def test_inline_archive_private_key_is_named_by_its_config_location_in_errors(no
         non_consented=ArchiveTarget(
             s3=S3Options(bucket="non_consented"), public_key_path=unread_file, private_key="not a key"
         ),
+        interrogation=InterrogationConfig(s3=S3Options(bucket="interrogation")),
     )
 
     with pytest.raises(
@@ -80,11 +81,16 @@ def _other_sections(tmp_path: Path, unread_file: str) -> dict:
     """The sections of a config other than ``leistungserbringer``."""
     return {
         "archives": {
-            name: {"s3": {"bucket": name}, "public_key_path": unread_file} for name in ("consented", "non_consented")
+            **{
+                name: {"s3": {"bucket": name}, "public_key_path": unread_file}
+                for name in ("consented", "non_consented")
+            },
+            "interrogation": INTERROGATION,
         },
         "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
         "pruefbericht": PRUEFBERICHT,
         "identifiers": {"grz": "GRZK00007"},
+        "detailed_qc": DETAILED_QC,
     }
 
 
@@ -197,6 +203,8 @@ def test_yaml_anchors_share_one_key_between_two_inboxes(
         "  non_consented:\n"
         "    s3: {bucket: non_consented}\n"
         f"    public_key_path: {unread_file}\n"
+        "  interrogation:\n"
+        "    s3: {bucket: interrogation}\n"
         "db:\n"
         f"  database_url: sqlite:///{tmp_path / 'unused.sqlite'}\n"
         "  author: {name: test}\n"
@@ -206,6 +214,7 @@ def test_yaml_anchors_share_one_key_between_two_inboxes(
         "  client_secret: example-secret\n"
         "  api_base_url: https://api.example.org\n"
         "identifiers: {grz: GRZK00007}\n"
+        "detailed_qc: {local_storage: /tmp/qc, salt: test, target_percentage: 0.0}\n"
     )
 
     config = GrzctlConfig.from_path(config_path)
