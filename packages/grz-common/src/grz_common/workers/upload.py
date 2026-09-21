@@ -6,31 +6,26 @@ import abc
 import enum
 import json
 import logging
-import math
+import os
 import re
 import tempfile
 from importlib.metadata import version
 from os import PathLike
-from os.path import getsize
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import botocore.handlers
 import grz_common.exceptions as grzexc
-from boto3.exceptions import S3UploadFailedError  # type: ignore[import-untyped]
-from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
-from botocore.exceptions import ClientError
 from grz_pydantic_models.submission.metadata import redact_metadata_dict
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
+from ..pipeline.components import ReadStream, Tee, TqdmObserver
+from ..pipeline.components.s3 import S3MultipartUploader, calculate_s3_part_size
 from ..progress import FileProgressLogger, UploadState
-from ..transfer import head_object, init_s3_client, init_s3_resource, s3_errors
+from ..transfer import head_object, init_s3_client, init_s3_resource
 from ..utils.redaction import redact_file
-
-MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
-MULTIPART_MAX_CHUNKS = 1000  # CEPH S3 limit, AWS limit is 10000
 
 if TYPE_CHECKING:
     from .submission import EncryptedSubmission
@@ -115,48 +110,32 @@ class S3BotoUploadWorker(UploadWorker):
     @override
     def upload_file(self, local_file_path: str | PathLike, s3_object_id: str):
         """
-        Upload a single file to the specified object ID
+        Upload a single file to the specified object ID using streaming pipeline.
+
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
         :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
         :raises UploadError: For any other error of the S3 client.
         """
         self.__log.info(f"Uploading {local_file_path} to {s3_object_id}...")
+        file_size = os.stat(local_file_path).st_size
 
-        filesize = getsize(local_file_path)
-        multipart_chunksize = self._s3_options.multipart_chunksize
+        with (
+            tqdm(  # type: ignore[call-overload]
+                total=file_size, desc="UPLOAD  ", postfix={"file": local_file_path}, leave=False, **TQDM_DEFAULTS
+            ) as pbar,
+            open(local_file_path, "rb") as f,
+        ):
+            pipeline = ReadStream(f) | Tee(TqdmObserver(pbar))
+            uploader = S3MultipartUploader(
+                self._s3_client,
+                self._s3_options.bucket,
+                s3_object_id,
+                part_size=calculate_s3_part_size(file_size, self._s3_options.multipart_chunksize),
+                max_threads=self._threads,
+            )
 
-        chunksize = (
-            math.ceil(filesize / MULTIPART_MAX_CHUNKS)
-            if filesize / multipart_chunksize > MULTIPART_MAX_CHUNKS
-            else multipart_chunksize
-        )
-        self.__log.debug(
-            f"Using a chunksize of: {chunksize / 1024**2}MiB, results in {math.ceil(filesize / chunksize)} chunk(s)"
-        )
-
-        config = TransferConfig(
-            multipart_threshold=MULTIPART_THRESHOLD,
-            multipart_chunksize=chunksize,
-            max_concurrency=self._threads,
-            use_threads=self._threads > 1,
-        )
-
-        transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        progress_bar = tqdm(total=filesize, desc="UPLOAD  ", **TQDM_DEFAULTS, postfix=f"{s3_object_id}")  # type: ignore[call-overload]
-        with s3_errors(f"Upload to s3://{self._s3_options.bucket}/{s3_object_id}", grzexc.UploadError):
-            try:
-                transfer.upload_file(
-                    str(local_file_path),
-                    self._s3_options.bucket,
-                    s3_object_id,
-                    callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-                )
-            except S3UploadFailedError as e:
-                # S3Transfer replaces the ClientError that carries the error code
-                if not isinstance(e.__context__, ClientError):
-                    raise
-                raise e.__context__ from None
+            pipeline >> uploader
 
     def _remote_object_presence(self, s3_object_id: str) -> _ObjectPresence:
         """
