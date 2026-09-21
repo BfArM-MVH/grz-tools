@@ -1,9 +1,10 @@
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from functools import cached_property
 from typing import Any
 
 import grz_common.exceptions as grzexc
+from grz_common.pipeline.context import FileError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
@@ -33,6 +34,24 @@ _FAILURE_REASONS: dict[type[BaseException], FailureReasonEnum] = {
 }
 """The failure reason of each expected error. Any other exception records ``unknown``."""
 
+_RANKS: tuple[frozenset[FailureReasonEnum], ...] = (
+    frozenset(
+        {
+            FailureReasonEnum.FILE_NOT_FOUND,
+            FailureReasonEnum.VALIDATION_ERROR,
+            FailureReasonEnum.DECRYPTION_ERROR,
+            FailureReasonEnum.DUPLICATE_TANG,
+            FailureReasonEnum.DUPLICATE_INITIAL,
+        }
+    ),
+    frozenset({FailureReasonEnum.CONFIGURATION_ERROR}),
+    frozenset({FailureReasonEnum.TRANSFER_ERROR}),
+)
+"""Failure reasons from the most decisive on. Any other reason ranks after them.
+
+A rejected submission stays rejected after any rerun, so the reasons that reject it come first.
+"""
+
 
 def _causes(error: BaseException | None) -> Iterator[BaseException]:
     """Yield ``error``, then its ``__cause__``, then the cause's ``__cause__``, and so on."""
@@ -52,10 +71,36 @@ def _classify(error: BaseException | None) -> tuple[FailureReasonEnum, BaseExcep
     :returns: The failure reason and the deciding exception, or ``unknown`` and ``None``.
     """
     for exc in _causes(error):
+        if isinstance(exc, FilesFailedError):
+            return _classify(exc.decisive.error)
         for exc_class, failure_reason in _FAILURE_REASONS.items():
             if isinstance(exc, exc_class):
                 return failure_reason, exc
     return FailureReasonEnum.UNKNOWN, None
+
+
+def _rank(failure_reason: FailureReasonEnum) -> int:
+    return next((rank for rank, reasons in enumerate(_RANKS) if failure_reason in reasons), len(_RANKS))
+
+
+class FilesFailedError(Exception):
+    """Files of a submission failed, each for its own reason.
+
+    The most decisive of their errors sets the failure reason. Among errors of the same rank, the
+    first one in :attr:`file_errors` wins, which is why they come in metadata order.
+
+    :param message: What failed, such as ``"Processing failed"``.
+    :param file_errors: The failed files with their errors, in metadata order. At least one.
+    """
+
+    def __init__(self, message: str, file_errors: Sequence[FileError]):
+        super().__init__(f"{message} with {len(file_errors)} file error(s)")
+        self.file_errors = list(file_errors)
+
+    @property
+    def decisive(self) -> FileError:
+        """The file error that sets the failure reason."""
+        return min(self.file_errors, key=lambda file_error: _rank(_classify(file_error.error)[0]))
 
 
 class DbContext:
@@ -200,6 +245,16 @@ class DbContext:
             recorded = deciding if deciding is not None else exc_val
             # an interruption carries no message, so its type names it
             data: dict[str, Any] = {"error": str(recorded) or type(recorded).__name__}
+            files_failed = next((e for e in _causes(exc_val) if isinstance(e, FilesFailedError)), None)
+            if files_failed is not None:
+                data["errors"] = [
+                    {
+                        "file": file_error.file,
+                        "reason": _classify(file_error.error)[0].value,
+                        "message": str(file_error.error),
+                    }
+                    for file_error in files_failed.file_errors
+                ]
             log.error(f"Operation failed for {self.submission_id}. Updating DB to {error_state.name}.")
             try:
                 self.db.update_submission_state(
