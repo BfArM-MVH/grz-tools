@@ -21,6 +21,7 @@ import rich.console
 import sqlalchemy
 import yaml
 from grz_db.models.submission import (
+    RETIRED_FAILURE_REASONS,
     FailureReasonEnum,
     SubmissionBase,
     SubmissionDb,
@@ -2052,6 +2053,23 @@ def test_submission_show_json_includes_failure_reason(migrated_database_config_p
     assert error_state["failure_reason"] == "decryption_error"
     # No metadata stored for this submission -> current research consent cannot be evaluated.
     assert parsed["research_consented_now"] is None
+
+
+@pytest.mark.parametrize("retired", sorted(RETIRED_FAILURE_REASONS))
+def test_submission_update_refuses_a_retired_failure_reason(migrated_database_config_path: Path, retired: str):
+    """Older states keep a retired reason, but no new state records one."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    submission_id = "123456789_2025-01-01_00000000"
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_update = runner.invoke(
+        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", retired]
+    )
+
+    assert result_update.exit_code == click.UsageError.exit_code, result_update.output
 
 
 def test_modify_offers_exactly_the_keys_it_accepts():
