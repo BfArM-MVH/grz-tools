@@ -7,6 +7,7 @@ Where the failure happened goes into the state's data.
 
 - [What a failure records](#what-a-failure-records)
 - [Failure reasons](#failure-reasons)
+- [Several failures in one run](#several-failures-in-one-run)
 - [S3 errors](#s3-errors)
 - [BfArM errors](#bfarm-errors)
 
@@ -21,6 +22,8 @@ When the step fails, it records `ERROR` with:
 
 - `failure_reason`: one of the [failure reasons](#failure-reasons).
 - `data.error`: the message of the failure that decided the reason.
+- `data.errors`: one entry per failed file, with `file`, `reason` and `message`.
+  Only a step that streams files writes it.
 
 Each step records its own outcome, and records it once.
 
@@ -55,6 +58,20 @@ No grzctl step raises the error behind `detailed_qc_error` yet.
 Older states can carry `network_error` or `upload_error`.
 Both mean what `transfer_error` means.
 grzctl no longer writes them, and `grzctl db submission update` does not offer them.
+
+## Several failures in one run
+
+A step that streams files runs them in parallel, so one run can collect several file errors.
+The most decisive of them sets the reason, in this order:
+
+1. a reason for which the LE acts
+2. `configuration_error`
+3. `transfer_error`
+4. any other reason for which the GRZ acts
+
+A rejected submission stays rejected after any rerun, so its reason decides what happens next.
+Within the same rank, the first failed file in metadata order wins.
+`data.errors` lists every file error, whatever its reason.
 
 ## S3 errors
 
