@@ -149,6 +149,31 @@ pub struct PyValidationReport {
     pub is_valid: bool,
 }
 
+#[pymethods]
+impl PyValidationReport {
+    #[new]
+    #[pyo3(signature = (path=String::new(), num_records=None, mean_read_length=None, sha256=None, errors=vec![], warnings=vec![], is_valid=true))]
+    fn new(
+        path: String,
+        num_records: Option<u64>,
+        mean_read_length: Option<f64>,
+        sha256: Option<String>,
+        errors: Vec<String>,
+        warnings: Vec<String>,
+        is_valid: bool,
+    ) -> Self {
+        Self {
+            path,
+            num_records,
+            mean_read_length,
+            sha256,
+            errors,
+            warnings,
+            is_valid,
+        }
+    }
+}
+
 impl From<FileReport> for PyValidationReport {
     fn from(report: FileReport) -> Self {
         let is_valid = report.is_ok();
@@ -228,8 +253,10 @@ where
             f(&mut reader)?
         }
         StreamInput::FileLike(file_like) => {
+            // The gzip decoder reads 32 KiB at a time, and each Python read() call needs the
+            // GIL. A large buffer turns those into one Python call per STREAM_BUF_SIZE.
             let hash_reader = StreamHasher {
-                inner: file_like,
+                inner: BufReader::with_capacity(STREAM_BUF_SIZE, file_like),
                 hasher: hasher.clone(),
             };
             let (decompressed, _) = niffler::get_reader(Box::new(hash_reader))
