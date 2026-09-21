@@ -171,11 +171,11 @@ class TestCheckPrerequisites:
         return context
 
     def test_first_state_does_not_warn_about_the_history(self, mock_db, caplog):
-        """Uploading a new submission has no prior state to find, so nothing is logged."""
+        """A brand-new submission has no prior state to find, so nothing is logged."""
         mock_db.get_submission.return_value = None
         mock_db.add_submission.return_value.get_latest_state.return_value = None
         mock_db.add_submission.return_value.states = []
-        context = self._context(mock_db, SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED)
+        context = self._context(mock_db, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING)
 
         with caplog.at_level(logging.WARNING):
             context._check_prerequisites()

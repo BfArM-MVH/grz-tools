@@ -64,7 +64,7 @@ def test_cases_backfill_groups_by_submitter_and_local_case(db_test_connection: s
     with engine.begin() as conn:
         conn.execute(submissions.insert(), rows)
 
-    db.upgrade_schema(revision=CASES_REVISION)
+    db.upgrade_schema()
 
     upgraded_submissions = sqlalchemy.Table("submissions", sqlalchemy.MetaData(), autoload_with=engine)
     upgraded_columns = {column.name for column in upgraded_submissions.columns}
@@ -137,7 +137,7 @@ def test_cases_backfill_skips_keys_with_several_qc_passed_initials(db_test_conne
     with engine.begin() as conn:
         conn.execute(submissions.insert(), rows)
 
-    db.upgrade_schema(revision=CASES_REVISION)
+    db.upgrade_schema()
 
     assert db.get_submission(initial_a).case_id is None
     assert db.get_submission(initial_b).case_id is None
@@ -206,7 +206,7 @@ def test_cases_backfill_leaves_the_whole_untrusted_group_unlinked(db_test_connec
     with engine.begin() as conn:
         conn.execute(submissions.insert(), rows)
 
-    db.upgrade_schema(revision=CASES_REVISION)
+    db.upgrade_schema()
 
     assert [db.get_submission(sid).case_id for sid in reused] == [None] * len(reused)
     assert db.get_submission(clean).case_id is not None
@@ -257,7 +257,7 @@ def test_cases_backfill_links_competing_initials_that_did_not_all_pass_qc(db_tes
     with engine.begin() as conn:
         conn.execute(submissions.insert(), rows)
 
-    db.upgrade_schema(revision=CASES_REVISION)
+    db.upgrade_schema()
 
     case_ids = {db.get_submission(sid).case_id for sid in (failed, corrected, pending)}
     assert len(case_ids) == 1 and None not in case_ids

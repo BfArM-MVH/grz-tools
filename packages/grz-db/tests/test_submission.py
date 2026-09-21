@@ -3,13 +3,22 @@ import json
 from collections.abc import Callable
 
 import pytest
-from grz_db.errors import DuplicateTanGError
-from grz_db.models.submission import OutdatedDatabaseSchemaError, Submission, SubmissionDb
+from grz_db.errors import DuplicateTanGError, OutdatedDatabaseSchemaError
+from grz_db.models.submission import (
+    Donor,
+    Submission,
+    SubmissionDb,
+    SubmissionStateEnum,
+    SubmissionStateLog,
+)
+from grz_db.models.submission.diff import DiffState, DonorDiff
 from grz_pydantic_models.submission.metadata import (
     REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
     GrzSubmissionMetadata,
+    Relation,
 )
+from sqlmodel import Session
 
 TWO_TB = 2 * 1024**4  # 2,199,023,255,552 bytes
 SUBMISSION_ID = "123456789_2024-01-01_abcdef01"
@@ -53,6 +62,78 @@ def test_submission_metadata_json_roundtrip(db: SubmissionDb, submission) -> Non
     result = db.get_submission(SUBMISSION_ID)
     assert result is not None
     assert result.submission_metadata == metadata
+
+
+@pytest.mark.parametrize("state", list(SubmissionStateEnum))
+def test_every_submission_state_can_be_stored(db: SubmissionDb, submission, state: SubmissionStateEnum) -> None:
+    """Every state must exist in the database's state type, which is a native enum on PostgreSQL."""
+    db.update_submission_state(SUBMISSION_ID, state)
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.get_latest_state().state == state
+
+
+def test_get_latest_state_breaks_timestamp_ties_by_id(db: SubmissionDb, submission) -> None:
+    """State logs sharing a timestamp must resolve to the highest id, like the SQL tie-breaker."""
+    fixed_timestamp = datetime.datetime(2025, 1, 1, 12, 0, tzinfo=datetime.UTC)
+    with Session(db.engine) as session:
+        for state in (SubmissionStateEnum.UPLOADED, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.FINISHED):
+            session.add(
+                SubmissionStateLog(
+                    submission_id=SUBMISSION_ID,
+                    state=state,
+                    timestamp=fixed_timestamp,
+                    author_name="alice",
+                    signature="dummy",
+                )
+            )
+        session.commit()
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.get_latest_state().state == SubmissionStateEnum.FINISHED
+
+
+def _donor(submission_id: str, pseudonym: str, mv_consented: bool) -> Donor:
+    """A Donor row filled with constant values except for ``mv_consented``."""
+    return Donor(
+        submission_id=submission_id,
+        pseudonym=pseudonym,
+        relation=Relation.brother,
+        library_types=set(),
+        sequence_types=set(),
+        sequence_subtypes=set(),
+        mv_consented=mv_consented,
+        research_consented=True,
+    )
+
+
+def test_donor_diff_changes_exclude_unchanged_fields() -> None:
+    """DonorDiff.changes must list only the fields whose value differs, per its docstring."""
+    donor_diff = DonorDiff.classify(_donor(SUBMISSION_ID, "P001", True), _donor(SUBMISSION_ID, "P001", False))
+
+    assert donor_diff.state == DiffState.UPDATED
+    assert [field_diff.key for field_diff in donor_diff.changes] == ["mv_consented"]
+
+
+def test_diff_does_not_mutate_callers_ignore_fields(
+    db: SubmissionDb, submission, metadata: GrzSubmissionMetadata
+) -> None:
+    """diff() must leave the caller's ignore_fields set untouched when it extends its own."""
+    ignore_fields = {"tan_g"}
+    db.diff(SUBMISSION_ID, metadata, submission_uploaded_date=None, ignore_fields=ignore_fields)
+
+    assert ignore_fields == {"tan_g"}
+
+
+def test_added_submission_reads_its_relationships(db: SubmissionDb) -> None:
+    """The submission from add_submission reads its state history, change requests and case after its session closed."""
+    submission = db.add_submission(SUBMISSION_ID)
+
+    assert submission.get_latest_state() is None
+    assert submission.changes == []
+    assert submission.pseudonym is None
 
 
 def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata) -> None:
