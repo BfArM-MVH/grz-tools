@@ -12,7 +12,7 @@ import pytest
 from grzctl.models.config import GrzctlConfig
 from moto import mock_aws
 
-from .conftest import PRUEFBERICHT
+from .conftest import DETAILED_QC, INTERROGATION, PRUEFBERICHT
 
 SUBMITTER_ID = "260914050"
 SUBMISSION_ID = "260914050_2024-01-01_abcdef01"
@@ -27,7 +27,8 @@ def _clear_inbox_listing_cache() -> None:
 
 def _config(tmp_path, unread_file: str, inbox_names: list[str]) -> GrzctlConfig:
     archives = {
-        name: {"s3": {"bucket": name}, "public_key_path": unread_file} for name in ("consented", "non_consented")
+        **{name: {"s3": {"bucket": name}, "public_key_path": unread_file} for name in ("consented", "non_consented")},
+        "interrogation": INTERROGATION,
     }
     return GrzctlConfig.from_configuration(
         {
@@ -40,6 +41,7 @@ def _config(tmp_path, unread_file: str, inbox_names: list[str]) -> GrzctlConfig:
             "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
             "pruefbericht": PRUEFBERICHT,
             "identifiers": {"grz": "GRZK00007"},
+            "detailed_qc": DETAILED_QC,
         }
     )
 
