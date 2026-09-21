@@ -32,13 +32,13 @@ def _merge_config_dicts_recursive(a: dict, b: dict, path) -> dict:
                 _merge_config_dicts_recursive(a_val, b_val, [*path, str(key)])
             elif type(a_val) == type(b_val):
                 # If the value type from `a` matches the value type of `b`, `b` replaces the value in `a`.
-                log.warning(f"Overriding configuration key {'.'.join([*path, str(key)])} with value: {b_val}")
+                log.warning(f"Overriding configuration key {'.'.join([*path, str(key)])}")
                 # Use deepcopy to avoid modifying the original objects
                 a[key] = deepcopy(b_val)
             else:
                 # Conflicting types that cannot be merged
                 raise ValueError(
-                    "Conflict at " + ".".join([*path, str(key)]) + ": " + repr(a_val) + " != " + repr(b_val)
+                    f"Conflict at {'.'.join([*path, str(key)])}: {type(a_val).__name__} != {type(b_val).__name__}"
                 )
         else:
             # If key does not exist in the target dictionary, add it

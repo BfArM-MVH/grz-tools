@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from grz_common.models.base import IgnoringBaseModel
-from pydantic import AnyHttpUrl, UrlConstraints
+from pydantic import AnyHttpUrl, SecretStr, UrlConstraints
 
 
 class PruefberichtModel(IgnoringBaseModel):
@@ -17,7 +17,7 @@ class PruefberichtModel(IgnoringBaseModel):
     Client ID used to obtain new Prüfbericht submission tokens
     """
 
-    client_secret: str | None = None
+    client_secret: SecretStr | None = None
     """
     Client secret used to obtain new Prüfbericht submission tokens
     """

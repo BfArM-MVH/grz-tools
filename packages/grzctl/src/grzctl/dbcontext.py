@@ -196,7 +196,11 @@ class DbContext:
         return Author(
             name=db_config.author.name,
             private_key_bytes=key_path.read_bytes(),
-            private_key_passphrase=db_config.author.private_key_passphrase,
+            private_key_passphrase=(
+                db_config.author.private_key_passphrase.get_secret_value()
+                if db_config.author.private_key_passphrase is not None
+                else None
+            ),
         )
 
     def _map_exception_to_failure_reason(
