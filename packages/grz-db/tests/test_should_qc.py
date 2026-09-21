@@ -1,5 +1,7 @@
 import datetime
 import math
+import threading
+import time
 
 import pytest
 from grz_db.errors import (
@@ -53,6 +55,36 @@ def _add_submission_with_history(
 
     if is_qced:
         db.modify_submission(submission_id, "detailed_qc_passed", "true")
+
+    current_timestamp = base_timestamp
+    for state_str in states:
+        state_enum = SubmissionStateEnum(state_str.capitalize())
+        _update_submission_state(db, submission_id, state_enum, current_timestamp)
+        current_timestamp += datetime.timedelta(seconds=1)
+
+
+def _add_submission_pending_basic_qc(
+    db: SubmissionDb,
+    submission_id: str,
+    submitter_id: str,
+    submission_date: datetime.date,
+    states: list[str],
+    base_timestamp: datetime.datetime,
+):
+    """
+    Helper to manually insert a submission whose basic QC has not been decided yet.
+
+    Skips the ``basic_qc_passed`` step of ``_add_submission_with_history``, so the row is left
+    with both ``basic_qc_passed`` and ``selected_for_qc`` at their default None. Setting
+    ``basic_qc_passed`` to false through ``modify_submission`` instead would also force
+    ``selected_for_qc`` to false as a side effect, which is not the state a submission is in
+    before basic QC has run.
+    """
+    db.add_submission(submission_id)
+
+    db.modify_submission(submission_id, "submission_uploaded_date", str(submission_date.isoformat()))
+    db.modify_submission(submission_id, "submission_type", SubmissionType.initial)
+    db.modify_submission(submission_id, "submitter_id", submitter_id)
 
     current_timestamp = base_timestamp
     for state_str in states:
@@ -374,3 +406,115 @@ class TestQcStrategy:
 
         with pytest.raises(SubmissionBasicQCNotPassedError):
             db.should_qc(submission_id, 2.0, "salt")
+
+    def test_should_qc_predict_before_basic_qc_answers_without_persisting(self, db: SubmissionDb):
+        """predict=True must answer even before basic QC has passed, and must store nothing.
+
+        The submission is the only one from its submitter this month, so the month rule selects
+        it regardless of the prediction; the point of this test is that predict skips the
+        "basic QC must have passed" check and leaves selected_for_qc untouched afterwards.
+        """
+        test_date = datetime.date(2025, 12, 1)
+        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
+        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+
+        _add_submission_pending_basic_qc(
+            db, submission_id, SUBMITTER_ID, test_date, DEFAULT_HISTORY, base_timestamp=base_timestamp
+        )
+
+        should_run = db.should_qc(submission_id, 2.0, "any_salt", predict=True)
+
+        assert should_run is True
+
+        submission = db.get_submission(submission_id)
+        assert submission is not None
+        assert submission.selected_for_qc is None
+
+    def test_should_qc_predict_returns_stored_selected_for_qc_false(self, db: SubmissionDb):
+        """predict=True must return an already-stored decision rather than compute a fresh one."""
+        test_date = datetime.date(2025, 12, 1)
+        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
+        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+
+        _add_submission_with_history(
+            db,
+            submission_id,
+            SUBMITTER_ID,
+            test_date,
+            DEFAULT_HISTORY,
+            base_timestamp=base_timestamp,
+            is_qced=False,
+        )
+        db.modify_submission(submission_id, "selected_for_qc", "false")
+
+        should_run = db.should_qc(submission_id, 2.0, "any_salt", predict=True)
+
+        assert should_run is False
+
+    def test_should_qc_concurrent_decisions_select_only_one_submission(
+        self, db: SubmissionDb, migrated_db_connection: str, test_author, monkeypatch
+    ):
+        """Two should_qc calls racing for the same submitter and month must still select only one.
+
+        should_qc locks the whole read-then-write decision, so the two calls are serialized and
+        the second always sees the first one's stored selection. _list_submitter_qc_candidates is
+        patched to sleep right after its read, widening the window in which a missing lock would
+        let both calls read before either one writes.
+        """
+        base_date = datetime.date(2025, 12, 1)
+        start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
+
+        submission_id_a = f"{SUBMITTER_ID}_{base_date}_00000000"
+        submission_id_b = f"{SUBMITTER_ID}_{base_date}_00000001"
+        _add_submission_with_history(
+            db, submission_id_a, SUBMITTER_ID, base_date, DEFAULT_HISTORY, base_timestamp=start_time
+        )
+        _add_submission_with_history(
+            db,
+            submission_id_b,
+            SUBMITTER_ID,
+            base_date,
+            DEFAULT_HISTORY,
+            base_timestamp=start_time + datetime.timedelta(minutes=10),
+        )
+
+        original_list_candidates = SubmissionDb._list_submitter_qc_candidates
+
+        def _slow_list_candidates(self, *args, **kwargs):
+            candidates = original_list_candidates(self, *args, **kwargs)
+            time.sleep(0.3)
+            return candidates
+
+        monkeypatch.setattr(SubmissionDb, "_list_submitter_qc_candidates", _slow_list_candidates)
+
+        db_b = SubmissionDb(db_url=migrated_db_connection, author=test_author)
+        try:
+            barrier = threading.Barrier(2)
+            results: dict[str, bool] = {}
+            exceptions: dict[str, Exception] = {}
+
+            def _run(name: str, target_db: SubmissionDb, submission_id: str):
+                try:
+                    barrier.wait()
+                    results[name] = target_db.should_qc(submission_id, 2.0, "salt")
+                except Exception as e:
+                    exceptions[name] = e
+
+            thread_a = threading.Thread(target=_run, args=("a", db, submission_id_a))
+            thread_b = threading.Thread(target=_run, args=("b", db_b, submission_id_b))
+            thread_a.start()
+            thread_b.start()
+            thread_a.join()
+            thread_b.join()
+        finally:
+            db_b.engine.dispose()
+
+        assert not exceptions, f"should_qc raised in a thread: {exceptions}"
+        assert sum(results.values()) == 1, f"expected exactly one True, got {results}"
+
+        submission_a = db.get_submission(submission_id_a)
+        submission_b = db.get_submission(submission_id_b)
+        assert submission_a is not None
+        assert submission_b is not None
+        selected_flags = [submission_a.selected_for_qc, submission_b.selected_for_qc]
+        assert selected_flags.count(True) == 1, f"expected exactly one selected_for_qc=True, got {selected_flags}"
