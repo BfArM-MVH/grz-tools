@@ -1,7 +1,10 @@
 """Fixtures for the tests."""
 
+import contextlib
 import json
 import os
+import threading
+from collections.abc import Callable
 from datetime import datetime
 from importlib.metadata import version
 from os import PathLike
@@ -9,6 +12,7 @@ from pathlib import Path
 from shutil import copyfile
 
 import boto3
+import botocore.client
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
@@ -613,3 +617,30 @@ def working_dir(tmpdir_factory: pytest.TempdirFactory):
 @pytest.fixture
 def working_dir_path(working_dir) -> Path:
     return Path(working_dir.strpath)
+
+
+@pytest.fixture
+def overlapping_s3_calls(monkeypatch):
+    """Make S3 calls of one operation wait for each other, to see whether two ever run at once.
+
+    The returned function installs the wait for *operation* and reports afterwards whether a
+    second call arrived while the first one waited. A caller that expects no overlap passes a
+    short *timeout*, since every call waits that long before it gives up.
+    """
+
+    def install(operation: str, timeout: float) -> Callable[[], bool]:
+        started = threading.Barrier(2, timeout=timeout)
+        overlapped = threading.Event()
+        original_call = botocore.client.BaseClient._make_api_call
+
+        def wait_for_a_second_call(self, operation_name, kwargs):
+            if operation_name == operation and not overlapped.is_set():
+                with contextlib.suppress(threading.BrokenBarrierError):
+                    started.wait()
+                    overlapped.set()
+            return original_call(self, operation_name, kwargs)
+
+        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", wait_for_a_second_call)
+        return overlapped.is_set
+
+    return install

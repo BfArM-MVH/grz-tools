@@ -21,8 +21,10 @@ else:
     S3Client = object
     S3ServiceResource = object
 
+from .exceptions import MissingObjectError, MissingSubmissionFileError
 from .models.base import get_secret_value
 from .models.s3 import S3Options
+from .pipeline.components.s3 import head_object
 
 
 def _empty_str_to_none(string: str | None) -> str | None:
@@ -33,7 +35,7 @@ def _empty_str_to_none(string: str | None) -> str | None:
         return string
 
 
-def init_s3_client(s3_options: S3Options) -> S3Client:
+def init_s3_client(s3_options: S3Options, max_pool_connections: int = 10) -> S3Client:
     """Create a boto3 Client from a grz-cli configuration."""
     # configure proxies if proxy_url is defined
     proxy_url = s3_options.proxy_url
@@ -42,6 +44,8 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config,  # type: ignore
         request_checksum_calculation=s3_options.request_checksum_calculation,
+        max_pool_connections=max_pool_connections,
+        retries={"max_attempts": 3, "mode": "standard"},
     )
 
     # Initialize S3 client for uploading
@@ -60,7 +64,7 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
     return s3_client
 
 
-def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
+def init_s3_resource(s3_options: S3Options, max_pool_connections: int = 10) -> S3ServiceResource:
     """Create a boto3 Resource from a grz-cli configuration."""
     proxy_url = s3_options.proxy_url
     proxies_config = s3_options.proxy_config.model_dump(exclude_none=True) if s3_options.proxy_config else None
@@ -68,6 +72,8 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
         proxies={"http": str(proxy_url), "https": str(proxy_url)} if proxy_url is not None else None,
         proxies_config=proxies_config,  # type: ignore
         request_checksum_calculation=s3_options.request_checksum_calculation,
+        max_pool_connections=max_pool_connections,
+        retries={"max_attempts": 3, "mode": "standard"},
     )
     s3_resource = boto3.resource(
         service_name="s3",
@@ -99,7 +105,13 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     :returns: ``LastModified`` (timezone-aware ``datetime``) for
         ``<submission_id>/metadata/metadata.json``. Callers that only need the date
         portion should call ``.date()`` themselves.
-    :raises botocore.exceptions.ClientError: If the object does not exist or S3 returns an error.
+    :raises MissingSubmissionFileError: If the inbox lacks the metadata.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
     """
-    response = s3_client.head_object(Bucket=bucket, Key=f"{submission_id}/metadata/metadata.json")
+    key = f"{submission_id}/metadata/metadata.json"
+    try:
+        response = head_object(s3_client, bucket, key)
+    except MissingObjectError as e:
+        raise MissingSubmissionFileError(f"s3://{bucket}/{key} does not exist") from e
     return response["LastModified"]
