@@ -14,7 +14,9 @@ from types import SimpleNamespace
 
 import click.testing
 import grzctl.cli
+import grzctl.commands.db.cli
 import pytest
+import rich.console
 import sqlalchemy
 import yaml
 from grz_db.models.submission import FailureReasonEnum, SubmissionBase, SubmissionDb, SubmissionStateEnum
@@ -1576,9 +1578,13 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
         assert "data_steward_signature" in state
 
     # Test 2: Verify grzctl_versions reaches the human-readable table too. The column is rendered
-    # wide enough to read only on a wide terminal; at the default width Rich truncates it away.
-    wide_runner = click.testing.CliRunner(env={"COLUMNS": "500"})
-    result_show_table = wide_runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
+    # wide enough to read only on a wide console, and at the default width Rich truncates it away.
+    # The width is pinned on the console itself: a test process has no terminal to take one from,
+    # and what Rich falls back to depends on how the process was started.
+    monkeypatch.setattr(grzctl.commands.db.cli, "console", rich.console.Console(width=500))
+    result_show_table = click.testing.CliRunner().invoke(
+        cli, [*args_common, "submission", "show", metadata.submission_id]
+    )
     assert result_show_table.exit_code == 0, result_show_table.stderr
     # the cell holds a JSON blob that Rich wraps, so compare with the layout whitespace removed
     rendered = "".join(result_show_table.stdout.split())

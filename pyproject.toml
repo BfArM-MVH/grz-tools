@@ -49,6 +49,7 @@ constraint-dependencies = [
     "pytest-mock >=3.14.0,<4",
     "pytest-sugar >=1.0.0,<2",
     "pytest-postgresql ~=7.0.2",
+    "pytest-xdist >=3.6,<4",
     "moto[s3] >=5.0.16,<6",
     "responses ==0.25.*",
     "numpy >=2.1.2,<3",
@@ -62,6 +63,7 @@ test = [
     "pytest-cov",
     "pytest-mock",
     "pytest-sugar",
+    "pytest-xdist",
     "pytest-postgresql",
     "psycopg",
     "moto[s3]",
@@ -87,6 +89,7 @@ test = [
     "pytest-mock",
     "pytest-cov",
     "pytest-sugar",
+    "pytest-xdist",
     "pytest-postgresql",
     "psycopg",
     "moto[s3]",
@@ -115,7 +118,7 @@ exclude = [
     "__pycache__",
     "build",
     "dist",
-    "out"
+    "out",
 ]
 extend-exclude = ["alembic"]
 
@@ -154,6 +157,7 @@ ignore = [
     "D101", # Missing docstring in public class
     "D102", # Missing docstring in public method
     "D103", # Missing docstring in public function
+    "D105", # Missing docstring in magic function
     "B028"    # No explicit `stacklevel` keyword argument found
 ]
 # A list of rule codes to enable.
@@ -259,6 +263,11 @@ module = "crypt4gh.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# boto3/botocore ship no py.typed marker; the types-boto3 stubs are not picked up here.
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # Test-only imports, absent from the lint environment that runs mypy.
 module = ["pytest", "pytest_postgresql.*"]
 ignore_missing_imports = true
@@ -266,4 +275,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    # Pass -n0 to turn this off, which a debugger needs and which restores per-test output order.
+    "-n", "auto",
 ]
