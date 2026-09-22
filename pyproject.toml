@@ -263,11 +263,6 @@ module = "crypt4gh.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# boto3/botocore ship no py.typed marker; the types-boto3 stubs are not picked up here.
-module = ["boto3", "boto3.*", "botocore", "botocore.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 # Test-only imports, absent from the lint environment that runs mypy.
 module = ["pytest", "pytest_postgresql.*"]
 ignore_missing_imports = true

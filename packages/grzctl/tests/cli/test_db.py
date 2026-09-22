@@ -1579,8 +1579,8 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
 
     # Test 2: Verify grzctl_versions reaches the human-readable table too. The column is rendered
     # wide enough to read only on a wide console, and at the default width Rich truncates it away.
-    # The width is pinned on the console itself: a test process has no terminal to take one from,
-    # and what Rich falls back to depends on how the process was started.
+    # Rich fixes the console width at import time if COLUMNS is set then, and a CliRunner env
+    # cannot change it afterwards. So the test swaps in a console with a fixed width.
     monkeypatch.setattr(grzctl.commands.db.cli, "console", rich.console.Console(width=500))
     result_show_table = click.testing.CliRunner().invoke(
         cli, [*args_common, "submission", "show", metadata.submission_id]
