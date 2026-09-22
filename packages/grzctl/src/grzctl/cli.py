@@ -3,12 +3,14 @@ CLI module for handling command-line interface operations for GRZ administrators
 """
 
 import logging
+import sys
 from pathlib import Path
 
 import click
 import platformdirs
 import yaml
 from grz_common.cli import FILE_R_E
+from grz_common.exceptions import GrzError
 from grz_common.logging import setup_cli_logging
 
 from . import get_versions
@@ -128,7 +130,12 @@ def main():
     Main entry point for the CLI application.
     """
     cli = build_cli()
-    cli()
+    try:
+        cli()
+    except GrzError as e:
+        # an expected failure, such as an invalid metadata.json: log its message, not a traceback
+        log.error(e)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

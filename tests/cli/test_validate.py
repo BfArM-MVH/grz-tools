@@ -77,3 +77,28 @@ def test_validate_submission_incorrect_grz_id(
     assert "does not match genomic data center identifier" in str(exc)
 
     assert result.exit_code == 1, result.output
+
+
+def test_validate_reports_invalid_metadata_without_traceback(
+    temp_identifiers_config_file_path, working_dir_path, monkeypatch, caplog
+):
+    """Submitters see this whenever their metadata.json is invalid, so ``main`` ends with the message, not a traceback."""
+    copy_submission(working_dir_path, "files", "metadata")
+    (working_dir_path / "metadata" / "metadata.json").write_text("{}")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "grz-cli",
+            "validate",
+            "--config-file",
+            str(temp_identifiers_config_file_path),
+            "--submission-dir",
+            str(working_dir_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        grz_cli.cli.main()
+
+    assert exit_info.value.code == 1
+    assert "Invalid metadata in" in caplog.text
