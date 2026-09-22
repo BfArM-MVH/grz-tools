@@ -182,16 +182,23 @@ class TestCheckPrerequisites:
 
         assert caplog.records == []
 
-    def test_first_state_adds_a_new_submission(self, db):
-        """``grzctl process`` starts a submission that the DB does not know yet.
+    @pytest.mark.parametrize(
+        ("start_state", "end_state"),
+        [
+            (SubmissionStateEnum.PROCESSING, SubmissionStateEnum.PROCESSED),
+            (SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED),
+        ],
+    )
+    def test_entry_state_adds_a_new_submission(self, db, start_state, end_state):
+        """``grzctl process`` and the step-by-step flow both start a submission that the DB does not know yet.
 
         A real DB, unlike a mock, fails if the new submission's states are not loaded.
         """
         context = DbContext(
             configuration={},
             submission_id="123456789_2025-01-01_a1b2c3d4",
-            start_state=SubmissionStateEnum.PROCESSING,
-            end_state=SubmissionStateEnum.PROCESSED,
+            start_state=start_state,
+            end_state=end_state,
             enabled=True,
         )
         context.db = db  # bypass __enter__

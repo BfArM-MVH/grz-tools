@@ -73,6 +73,14 @@ class DbContext:
         is configured).
     """
 
+    _SUBMISSION_ENTRY_STATES = frozenset({SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING})
+    """States at which a brand-new submission may be created.
+
+    ``grzctl process`` starts at ``PROCESSING``. The step-by-step flow starts at ``UPLOADING``,
+    which the inbox scan records, and continues with ``grzctl download``. These are explicit
+    because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
+    """
+
     def __init__(
         self,
         configuration: dict[str, Any] | GrzctlConfig,
@@ -103,16 +111,17 @@ class DbContext:
 
     @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
-        # determine expected prior state based on order of enums
+        """Return the states the submission may be in before transitioning to ``start_state``.
+
+        The entry states start a new submission, so they expect no prior state at all.
+        Every other transition expects the previous ``SubmissionStateEnum`` member,
+        whose order mirrors the pipeline order.
+        """
+        if self.start_state in self._SUBMISSION_ENTRY_STATES:
+            return {None}
         members = list(SubmissionStateEnum)
         start_index = members.index(self.start_state)
-
-        if start_index == 0:
-            # first state in the enum, no prior state expected
-            return {None}
-        else:
-            # return previous state in the enum as expected prior state
-            return {members[start_index - 1]}
+        return {members[start_index - 1]}
 
     def __enter__(self):
         """Initializes DB connection, checks prerequisites, and sets the initial state."""
