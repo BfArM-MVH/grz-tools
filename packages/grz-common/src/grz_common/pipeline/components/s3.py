@@ -8,7 +8,15 @@ from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
 from boto3.exceptions import Boto3Error
-from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, PartialCredentialsError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    IncompleteReadError,
+    NoCredentialsError,
+    PartialCredentialsError,
+    ReadTimeoutError,
+    ResponseStreamingError,
+)
 from grz_common.constants import MULTIPART_DEFAULT_PART_SIZE, MULTIPART_MAX_PARTS, MULTIPART_MIN_PART_SIZE
 from grz_common.exceptions import (
     ConfigurationError,
@@ -106,28 +114,60 @@ def head_object(s3_client: Any, bucket: str, key: str) -> dict[str, Any]:
             raise
 
 
-class S3Downloader(ReadStream):
-    """Reading from S3 is the Source of the pipeline."""
+_RESUMABLE_READ_ERRORS = (ReadTimeoutError, IncompleteReadError, ResponseStreamingError, OSError)
+"""What reading the body of an S3 object raises when the connection breaks."""
 
-    def __init__(self, s3_client: Any, bucket: str, key: str):
+
+class S3Downloader(ReadStream):
+    """Reading from S3 is the Source of the pipeline.
+
+    If the connection breaks while reading, the rest of the object is requested again, from the
+    offset reached. The read fails after ``max_resumes`` breaks in a row without data in between.
+    ``IfMatch`` makes sure that the rest comes from the same object.
+    """
+
+    def __init__(self, s3_client: Any, bucket: str, key: str, max_resumes: int = 5):
         # Base first: a stage that raises before it runs is still finalized, and finalizing closes.
         super().__init__()
-        with s3_errors(f"Reading s3://{bucket}/{key}", DownloadError):
-            try:
-                self.response = s3_client.get_object(Bucket=bucket, Key=key)
-            except ClientError as e:
-                if _is_missing_object(e):
-                    raise MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
-                raise
-        # S3 Body is already a buffered stream, but we wrap it to be Pipeable
+        self._s3_client = s3_client
+        self._bucket = bucket
+        self._key = key
+        self._max_resumes = max_resumes
+        self._resumes = 0
+        self._offset = 0
+        # get_object reads only the headers. The body stays on the connection as a StreamingBody,
+        # and read() takes it from there in chunks, so the whole object is never in memory.
+        self.response = self._get_object()
         self._source = self.response["Body"]
         self.length: int = self.response.get("ContentLength", 0)
 
+    def _get_object(self, **kwargs: Any) -> dict[str, Any]:
+        with s3_errors(f"Reading s3://{self._bucket}/{self._key}", DownloadError):
+            try:
+                return self._s3_client.get_object(Bucket=self._bucket, Key=self._key, **kwargs)
+            except ClientError as e:
+                if _is_missing_object(e):
+                    raise MissingObjectError(f"s3://{self._bucket}/{self._key} does not exist") from e
+                raise
+
     def read(self, size: int | None = -1) -> bytes:
-        try:
-            return super().read(size)
-        except Exception as e:
-            raise NetworkError(f"S3 read error: {e}") from e
+        while True:
+            try:
+                chunk = super().read(size)
+            except _RESUMABLE_READ_ERRORS as e:
+                if self._resumes >= self._max_resumes:
+                    raise NetworkError(f"S3 read error: {e}") from e
+                self._resumes += 1
+                log.warning(f"Reading s3://{self._bucket}/{self._key} broke at byte {self._offset}, resuming: {e}")
+                self._source = self._get_object(Range=f"bytes={self._offset}-", IfMatch=self.response["ETag"])["Body"]
+                continue
+            except Exception as e:
+                raise NetworkError(f"S3 read error: {e}") from e
+            if chunk:
+                # a long download may break more often than max_resumes, as long as it progresses
+                self._resumes = 0
+            self._offset += len(chunk)
+            return chunk
 
 
 class S3MultipartUploader(Observer):
@@ -262,6 +302,9 @@ class S3MultipartUploader(Observer):
 
     def abort(self) -> None:
         """Abort the multipart upload on S3."""
+        if self._executor:
+            # a part still in flight could land after the abort and stay in the bucket
+            self._executor.shutdown(wait=True, cancel_futures=True)
         if self._upload_id:
             try:
                 self.s3.abort_multipart_upload(Bucket=self.bucket, Key=self.key, UploadId=self._upload_id)

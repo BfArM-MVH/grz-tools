@@ -14,6 +14,7 @@ upload is neither completed nor aborted).
 
 import io
 import logging
+import time
 
 import boto3
 import pytest
@@ -99,3 +100,33 @@ def test_failed_pipeline_surfaces_original_error_when_abort_is_denied(caplog):
     # Even when abort is denied, no (partial) object may be committed.
     objects = s3.list_objects_v2(Bucket=BUCKET)
     assert "Contents" not in objects, f"failure must not commit an object, found: {objects.get('Contents')}"
+
+
+@mock_aws
+def test_abort_waits_for_the_parts_in_flight():
+    """A part that is still uploading when the abort runs could land afterwards and stay in the bucket."""
+    s3 = boto3.client("s3", region_name="us-east-1")  # moto placeholder, see note above
+    s3.create_bucket(Bucket=BUCKET)
+    events = []
+    upload_part = s3.upload_part
+    abort_multipart_upload = s3.abort_multipart_upload
+
+    def slow_upload_part(**kwargs):
+        time.sleep(0.2)
+        response = upload_part(**kwargs)
+        events.append("part")
+        return response
+
+    def recorded_abort(**kwargs):
+        events.append("abort")
+        return abort_multipart_upload(**kwargs)
+
+    s3.upload_part = slow_upload_part
+    s3.abort_multipart_upload = recorded_abort
+    uploader = S3MultipartUploader(s3, BUCKET, KEY, part_size=1024, max_threads=2)
+    # two full parts, which go out at once and are both still uploading when the abort starts
+    uploader.observe(b"x" * 2048)
+
+    uploader.abort()
+
+    assert events == ["part", "part", "abort"]

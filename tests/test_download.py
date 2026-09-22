@@ -1,6 +1,8 @@
 """Tests for the download module"""
 
 import io
+import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -174,7 +176,8 @@ def test_download_file_leaves_no_partial_file_when_the_stream_breaks(
     def break_the_body(self, operation_name, kwargs):
         response = original_call(self, operation_name, kwargs)
         if operation_name == "GetObject":
-            response["Body"] = _BreakingBody(b"encrypted ")
+            # the first body breaks after one chunk, and every resumed one at once
+            response["Body"] = _BreakingBody(b"" if "Range" in kwargs else b"encrypted ")
         return response
 
     monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", break_the_body)
@@ -335,6 +338,98 @@ def test_worker_download_checks_metadata_version_before_files(
     assert not list((tmp_path / "encrypted_files").rglob("*.c4gh"))
 
 
+def test_download_file_resumes_when_the_stream_breaks(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """A download that breaks part way through requests the rest of the object and completes."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+    requested_ranges = []
+
+    def break_the_first_body(self, operation_name, kwargs):
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            requested_ranges.append(kwargs.get("Range"))
+            if len(requested_ranges) == 1:
+                response["Body"] = _BreakingBody(response["Body"].read(len(b"encrypted ")))
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", break_the_first_body)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    download_worker.download_file(
+        local_file_path,
+        f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+        progress_logger,
+        file_metadata,
+        submission.submission_id,
+    )
+
+    assert requested_ranges == [None, "bytes=10-"]
+    assert local_file_path.read_bytes() == b"encrypted payload"
+
+
+def test_download_file_resumes_more_often_than_max_resumes_while_it_progresses(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """The limit counts breaks in a row without data, so a long download may break more often."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+    requested_ranges = []
+
+    def break_every_body_after_two_bytes(self, operation_name, kwargs):
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            requested_ranges.append(kwargs.get("Range"))
+            chunk = response["Body"].read(2)
+            # the last body ends normally, since a resume from the end of the object is no valid range
+            response["Body"] = _BreakingBody(chunk) if response["Body"].read() else io.BytesIO(chunk)
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", break_every_body_after_two_bytes)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    download_worker.download_file(
+        local_file_path,
+        f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+        progress_logger,
+        file_metadata,
+        submission.submission_id,
+    )
+
+    # every body but the last breaks, more often in total than max_resumes allows in a row
+    assert requested_ranges == [None, *(f"bytes={offset}-" for offset in range(2, 17, 2))]
+    assert local_file_path.read_bytes() == b"encrypted payload"
+
+
 def _submission_in_the_bucket(remote_bucket, submission_metadata_dir: Path, tmp_path: Path) -> EncryptedSubmission:
     """Put every encrypted file of the example submission into the bucket, to be downloaded to *tmp_path*."""
     submission = EncryptedSubmission(submission_metadata_dir, tmp_path / "encrypted_files")
@@ -358,6 +453,41 @@ def test_download_downloads_files_in_parallel(
 
     assert overlapped(), "two files should have been downloaded at the same time"
     assert all(path.exists() for path in submission.encrypted_files)
+
+
+def test_download_starts_no_queued_file_after_an_interrupt(
+    s3_config_model, remote_bucket, submission_metadata_dir, temp_download_log_file_path, monkeypatch, tmp_path
+):
+    """Ctrl-C cancels the queued files, and the one already downloading finishes.
+
+    The interrupt reaches the main thread while it waits for the downloads, which is where
+    ``as_completed`` raises it here.
+    """
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    assert len(submission.encrypted_files) > 1
+    started = []
+    first_started = threading.Event()
+
+    def slow_download_file(self, local_file_path, *args):
+        started.append(local_file_path)
+        first_started.set()
+        # stay busy while the main thread cancels the queue
+        time.sleep(0.2)
+
+    def interrupted(futures):
+        first_started.wait(timeout=10)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(S3BotoDownloadWorker, "download_file", slow_download_file)
+    monkeypatch.setattr("grz_common.workers.download.as_completed", interrupted)
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3, status_file_path=temp_download_log_file_path, threads=1
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        download_worker.download(submission.submission_id, submission)
+
+    assert len(started) == 1
 
 
 def test_download_downloads_one_file_at_a_time_with_one_thread(

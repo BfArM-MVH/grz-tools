@@ -169,6 +169,7 @@ class S3BotoDownloadWorker:
                     raise MissingSubmissionFileError(
                         f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
                     ) from e
+                pbar.reset(total=source.length)
                 pipeline = source | Tee(TqdmObserver(pbar))
                 pipeline >> f
         except Exception:
@@ -258,8 +259,8 @@ class S3BotoDownloadWorker:
             try:
                 for future in as_completed(futures):
                     future.result()
-            except Exception:
-                # the progress log records what finished, so a rerun picks the rest up
+            except BaseException:
+                # also Ctrl-C and SIGTERM: the progress log records what finished, so a rerun picks the rest up
                 pool.shutdown(cancel_futures=True)
                 raise
 
