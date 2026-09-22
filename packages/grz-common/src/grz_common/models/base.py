@@ -1,10 +1,8 @@
-from collections.abc import Sequence
 from os import PathLike
 from pathlib import Path
 from typing import Annotated, Any, Self
 
 import yaml
-from grz_common.utils.config import read_and_merge_config_files
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -54,14 +52,19 @@ class IgnoringBaseModel(_RevealableSecrets, BaseModel):
     )
 
     def to_yaml(self, fd):
-        """Reads the configuration file and validates it against the schema."""
-        yaml.dump(self.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True), fd)
+        """Writes the configuration as YAML, with secrets in plain text, so that ``from_path`` loads it back."""
+        data = self.model_dump(
+            mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True, context={"reveal_secrets": True}
+        )
+        yaml.dump(data, fd)
 
     @classmethod
-    def from_path(cls, path: str | PathLike | Sequence[str | PathLike]) -> Self:
-        """Reads one or more configuration files, merges them in order, and validates the result against the schema."""
-        paths = [path] if isinstance(path, str | PathLike) else list(path)
-        return cls.model_validate(read_and_merge_config_files([Path(p) for p in paths]))
+    def from_path(cls, path: str | PathLike) -> Self:
+        """Reads the configuration file and validates it against the schema."""
+        with open(path, encoding="utf-8") as f:
+            config = cls(**yaml.safe_load(f))
+
+        return config
 
 
 class IgnoringBaseSettings(_RevealableSecrets, BaseSettings):
@@ -74,11 +77,16 @@ class IgnoringBaseSettings(_RevealableSecrets, BaseSettings):
     )
 
     def to_yaml(self, fd):
-        """Reads the configuration file and validates it against the schema."""
-        yaml.dump(self.model_dump(mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True), fd)
+        """Writes the configuration as YAML, with secrets in plain text, so that ``from_path`` loads it back."""
+        data = self.model_dump(
+            mode="json", exclude_none=True, exclude_unset=True, exclude_defaults=True, context={"reveal_secrets": True}
+        )
+        yaml.dump(data, fd)
 
     @classmethod
-    def from_path(cls, path: str | PathLike | Sequence[str | PathLike]) -> Self:
-        """Reads one or more configuration files, merges them in order, and validates the result against the schema."""
-        paths = [path] if isinstance(path, str | PathLike) else list(path)
-        return cls.model_validate(read_and_merge_config_files([Path(p) for p in paths]))
+    def from_path(cls, path: str | PathLike) -> Self:
+        """Reads the configuration file and validates it against the schema."""
+        with open(path, encoding="utf-8") as f:
+            config = cls(**yaml.safe_load(f))
+
+        return config

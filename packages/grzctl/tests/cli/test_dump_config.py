@@ -11,6 +11,8 @@ from grzctl.models.config import GrzctlConfig
 
 PASSPHRASE = "author-passphrase"
 CLIENT_SECRET = "pruefbericht-client-secret"
+INBOX_S3_SECRET = "inbox-s3-secret"
+ARCHIVE_S3_SECRET = "archive-s3-secret"
 
 
 def _dump_config(config_path: Path, *args: str) -> str:
@@ -22,10 +24,12 @@ def _dump_config(config_path: Path, *args: str) -> str:
 
 @pytest.fixture
 def config_with_secrets_path(tmp_path: Path, offline_config: GrzctlConfig) -> Path:
-    """A YAML config file with two secrets in plain text: one in an IgnoringBaseSettings, one in an IgnoringBaseModel."""
+    """A YAML config file with secrets in plain text: in an IgnoringBaseSettings, in an IgnoringBaseModel, and in S3."""
     data = offline_config.model_dump(mode="json", exclude_none=True)
     data["db"]["author"]["private_key_passphrase"] = PASSPHRASE
     data["pruefbericht"]["client_secret"] = CLIENT_SECRET
+    data["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["secret"] = INBOX_S3_SECRET
+    data["archives"]["consented"]["s3"]["secret"] = ARCHIVE_S3_SECRET
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(data))
@@ -37,6 +41,8 @@ def test_dump_config_masks_secrets_by_default(config_with_secrets_path: Path):
 
     assert dumped["db"]["author"]["private_key_passphrase"] == "**********"
     assert dumped["pruefbericht"]["client_secret"] == "**********"
+    assert dumped["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["secret"] == "**********"
+    assert dumped["archives"]["consented"]["s3"]["secret"] == "**********"
 
 
 def test_dump_config_reveal_secrets_roundtrips(tmp_path: Path, config_with_secrets_path: Path):
