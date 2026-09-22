@@ -83,7 +83,6 @@ class Crypt4GH:
                     total=input_path.stat().st_size,
                     desc="ENCRYPT ",
                     postfix={"file": input_path.name},
-                    leave=False,
                     **TQDM_DEFAULTS,
                 )
                 if show_progress
@@ -168,7 +167,6 @@ class Crypt4GH:
                     total=input_path.stat().st_size,
                     desc="DECRYPT ",
                     postfix={"file": input_path.name},
-                    leave=False,
                     **TQDM_DEFAULTS,
                 )
                 if show_progress

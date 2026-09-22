@@ -85,19 +85,13 @@ class FileProgressLogger[T: State]:
         If size/mtime are provided, use them. Otherwise try to stat the local file.
         Does NOT resolve to absolute path to preserve relative paths and S3 keys.
         """
-        path_str = str(file_path)
         path_obj = Path(file_path)
+        if (size is None or mtime is None) and path_obj.is_file():
+            stat = path_obj.stat()
+            size = stat.st_size if size is None else size
+            mtime = stat.st_mtime if mtime is None else mtime
 
-        mtime_ = None
-        size_ = None
-        if path_obj.is_file():
-            mtime_ = path_obj.stat().st_mtime
-            size_ = path_obj.stat().st_size
-
-        mtime_ = mtime or mtime_ or -1.0
-        size_ = size or size_ or -1
-
-        return path_str, mtime_, size_
+        return str(file_path), -1.0 if mtime is None else mtime, -1 if size is None else size
 
     def get_state(
         self,
