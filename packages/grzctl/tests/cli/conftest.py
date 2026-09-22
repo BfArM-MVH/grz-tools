@@ -94,6 +94,12 @@ def _write_config(tmp_path: Path, config: GrzctlConfig) -> Path:
 
 
 @pytest.fixture
+def offline_config(tmp_path: Path) -> GrzctlConfig:
+    """Config for tests that never open the database."""
+    return _database_config(tmp_path, f"sqlite:///{tmp_path / 'unused.sqlite'}")
+
+
+@pytest.fixture
 def migrated_database_config(tmp_path: Path, migrated_db_connection: str) -> GrzctlConfig:
     """Config for a database already on the latest schema, one per supported backend."""
     return _database_config(tmp_path, migrated_db_connection)

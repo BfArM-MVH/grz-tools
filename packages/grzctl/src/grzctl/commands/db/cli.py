@@ -25,6 +25,7 @@ from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes, load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
+from grz_common.models.base import get_secret_value
 from grz_common.transfer import init_s3_client
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
@@ -200,7 +201,7 @@ def db(
     author = Author(
         name=author_name,
         private_key_bytes=private_key_bytes,
-        private_key_passphrase=db_config.author.private_key_passphrase,
+        private_key_passphrase=get_secret_value(db_config.author.private_key_passphrase),
     )
     ctx.obj.update(
         {

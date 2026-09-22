@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 import platformdirs
-import rich.pretty
+import yaml
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
 
@@ -112,11 +112,17 @@ def build_cli():
 
 
 @click.command()
+@click.option(
+    "--reveal-secrets",
+    is_flag=True,
+    help="Print secret values in plain text instead of '**********', so the output loads back as a config file.",
+)
 @click.pass_context
-def dump_config(ctx: click.Context):
-    """Dump the loaded grzctl configuration."""
+def dump_config(ctx: click.Context, reveal_secrets: bool):
+    """Dump the loaded grzctl configuration as YAML."""
     config: GrzctlConfig = ctx.obj["configuration"]
-    rich.pretty.pprint(config.model_dump(mode="json", exclude_none=True))
+    data = config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": reveal_secrets})
+    click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
 
 
 def main():

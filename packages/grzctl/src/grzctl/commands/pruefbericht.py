@@ -254,7 +254,7 @@ def submit(  # noqa: PLR0913, PLR0917
             api_base_url=str(api_base_url),
             auth_url=str(auth_url),
             client_id=client_id,
-            client_secret=client_secret,
+            client_secret=client_secret.get_secret_value(),
             token=token,
         )
 
