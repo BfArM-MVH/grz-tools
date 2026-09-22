@@ -13,6 +13,9 @@ import grzctl.cli
 import pytest
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
+#: The upload date that populate records. Without --submission-date, populate reads it from an inbox.
+UPLOAD_DATE = "2026-01-01"
+
 
 def _invoke(cli, config_path: Path, *args: str, input: str | None = None) -> click.testing.Result:
     """Invoke ``grzctl db ...`` with the given config file and arguments."""
@@ -55,7 +58,15 @@ def _add_and_populate(cli, config_path: Path, test_metadata_path: Path) -> str:
     assert result_add.exit_code == 0, result_add.stderr
 
     result_populate = _invoke(
-        cli, config_path, "submission", "populate", submission_id, str(test_metadata_path), "--no-confirm"
+        cli,
+        config_path,
+        "submission",
+        "populate",
+        submission_id,
+        str(test_metadata_path),
+        "--no-confirm",
+        "--submission-date",
+        UPLOAD_DATE,
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -357,7 +368,15 @@ def test_populate_declined_confirmation_creates_no_case(
     assert result_add.exit_code == 0, result_add.stderr
 
     result = _invoke(
-        cli, migrated_database_config_path, "submission", "populate", submission_id, str(metadata_path), input="n\n"
+        cli,
+        migrated_database_config_path,
+        "submission",
+        "populate",
+        submission_id,
+        str(metadata_path),
+        "--submission-date",
+        UPLOAD_DATE,
+        input="n\n",
     )
     assert result.exit_code == 0, result.stderr
     assert "Database populated successfully" not in result.stderr
@@ -365,7 +384,15 @@ def test_populate_declined_confirmation_creates_no_case(
 
     # accepting the same populate does create one, so the decline is what the assertion above rests on
     result_accepted = _invoke(
-        cli, migrated_database_config_path, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"
+        cli,
+        migrated_database_config_path,
+        "submission",
+        "populate",
+        submission_id,
+        str(metadata_path),
+        "--no-confirm",
+        "--submission-date",
+        UPLOAD_DATE,
     )
     assert result_accepted.exit_code == 0, result_accepted.stderr
     assert len(_list_cases(cli, migrated_database_config_path)) == 1

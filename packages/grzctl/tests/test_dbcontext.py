@@ -182,6 +182,24 @@ class TestCheckPrerequisites:
 
         assert caplog.records == []
 
+    def test_first_state_adds_a_new_submission(self, db):
+        """``grzctl process`` starts a submission that the DB does not know yet.
+
+        A real DB, unlike a mock, fails if the new submission's states are not loaded.
+        """
+        context = DbContext(
+            configuration={},
+            submission_id="123456789_2025-01-01_a1b2c3d4",
+            start_state=SubmissionStateEnum.PROCESSING,
+            end_state=SubmissionStateEnum.PROCESSED,
+            enabled=True,
+        )
+        context.db = db  # bypass __enter__
+
+        context._check_prerequisites()
+
+        assert db.get_submission(context.submission_id) is not None
+
     def test_later_state_warns_when_the_history_lacks_the_prior_state(self, mock_db, caplog):
         """The history check still runs for every state that has a prior state."""
         mock_db.get_submission.return_value.get_latest_state.return_value = None

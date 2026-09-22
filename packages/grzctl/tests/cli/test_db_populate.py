@@ -4,25 +4,32 @@ Tests for SubmissionDb.populate and for ``grzctl db submission populate``.
 The grz-db half exercises the populate orchestration directly. The S3 last-modified
 date and the parsed metadata are passed in as arguments, so neither S3 nor
 filesystem I/O is involved in those tests. The command half runs the CLI against the
-same database, since the two refuse a destructive change on their own paths.
+same database, since the two refuse a destructive change on their own paths. The
+command reads the upload date from a moto inbox unless --submission-date is given.
 """
 
 import json
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import boto3
 import click.testing
 import grzctl.cli
 import pytest
+import yaml
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import DONORS_KEY, SubmissionDb
 from grz_db.models.submission.diff import DiffState, DonorDiff, SubmissionChangeSet
 from grz_pydantic_models.submission.metadata import REDACTED_LOCAL_CASE_ID, REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
+from moto import mock_aws
 
 SUBMISSION_DATE = date(2025, 9, 15)
+INBOX_BUCKET = "inbox"
+REGION = "us-east-1"
 
 
 def _parse(metadata_raw: dict) -> GrzSubmissionMetadata:
@@ -282,13 +289,108 @@ def _write_metadata(tmp_path: Path, metadata_raw: dict) -> Path:
     return path
 
 
-def _invoke_populate(config_path: Path, submission_id: str, metadata_path: Path, *args: str):
-    """Invoke ``grzctl db submission populate`` against the database *config_path* names."""
+def _invoke_populate(
+    config_path: Path,
+    submission_id: str,
+    metadata_path: Path,
+    *args: str,
+    submission_date: date | None = SUBMISSION_DATE,
+):
+    """Invoke ``grzctl db submission populate`` against the database *config_path* names.
+
+    With *submission_date* set to ``None``, the command looks for the upload date in the inbox.
+    """
+    date_args = ["--submission-date", submission_date.isoformat()] if submission_date is not None else []
     runner = click.testing.CliRunner()
     return runner.invoke(
         grzctl.cli.build_cli(),
-        ["--config", str(config_path), "db", "submission", "populate", submission_id, str(metadata_path), *args],
+        [
+            "--config",
+            str(config_path),
+            "db",
+            "submission",
+            "populate",
+            submission_id,
+            str(metadata_path),
+            *date_args,
+            *args,
+        ],
     )
+
+
+@pytest.fixture
+def inbox_config_path(
+    migrated_database_config: GrzctlConfig, tmp_path: Path, test_metadata_path: Path
+) -> Iterator[Path]:
+    """A config whose only inbox for the example submitter is an empty moto bucket, which lives as long as the test."""
+    submitter_id = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text()).submission.submitter_id
+    data = migrated_database_config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": True})
+    data["leistungserbringer"] = {
+        submitter_id: {"inbox_buckets": {INBOX_BUCKET: {"private_key_path": "/dev/null", "region_name": REGION}}}
+    }
+    config_path = tmp_path / "config.inbox.yaml"
+    config_path.write_text(yaml.safe_dump(data))
+    with mock_aws():
+        boto3.client("s3", region_name=REGION).create_bucket(Bucket=INBOX_BUCKET)
+        yield config_path
+
+
+def _put_inbox_metadata(submission_id: str, body: bytes) -> date:
+    """Write metadata.json into the inbox, and return the date that S3 records for it."""
+    s3_client = boto3.client("s3", region_name=REGION)
+    key = f"{submission_id}/metadata/metadata.json"
+    s3_client.put_object(Bucket=INBOX_BUCKET, Key=key, Body=body)
+    return s3_client.head_object(Bucket=INBOX_BUCKET, Key=key)["LastModified"].date()
+
+
+def test_populate_command_takes_the_upload_date_from_the_inbox(
+    db_ctx: SimpleNamespace, inbox_config_path: Path, test_metadata_path: Path
+):
+    """The date is when metadata.json arrived in the inbox, not the submissionDate it contains."""
+    ctx = db_ctx
+    uploaded = _put_inbox_metadata(ctx.submission_id, test_metadata_path.read_bytes())
+    assert uploaded != ctx.metadata.submission.submission_date
+
+    result = _invoke_populate(
+        inbox_config_path, ctx.submission_id, test_metadata_path, "--no-confirm", submission_date=None
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert ctx.db.get_submission(ctx.submission_id).submission_uploaded_date == uploaded
+
+
+@pytest.mark.parametrize("body", [b"", None], ids=["emptied-by-clean", "missing"])
+def test_populate_command_needs_a_date_when_the_inbox_has_none(
+    db_ctx: SimpleNamespace, inbox_config_path: Path, test_metadata_path: Path, body: bytes | None
+):
+    """``grzctl clean`` leaves an empty metadata.json, whose LastModified is the time of cleaning."""
+    ctx = db_ctx
+    if body is not None:
+        _put_inbox_metadata(ctx.submission_id, body)
+
+    result = _invoke_populate(
+        inbox_config_path, ctx.submission_id, test_metadata_path, "--no-confirm", submission_date=None
+    )
+
+    assert result.exit_code != 0
+    assert "Pass --submission-date" in result.stderr
+    assert ctx.db.get_submission(ctx.submission_id).local_case_id is None, "nothing is written"
+
+
+def test_populate_command_needs_a_date_even_when_one_is_stored(
+    db_ctx: SimpleNamespace, migrated_database_config_path: Path, test_metadata_path: Path
+):
+    """Without an inbox for the submitter, a re-populate needs --submission-date again."""
+    ctx = db_ctx
+    ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
+
+    result = _invoke_populate(
+        migrated_database_config_path, ctx.submission_id, test_metadata_path, "--no-confirm", submission_date=None
+    )
+
+    assert result.exit_code != 0
+    assert "has no inbox in the configuration" in result.stderr
+    assert ctx.db.get_submission(ctx.submission_id).submission_uploaded_date == SUBMISSION_DATE
 
 
 def test_populate_command_refuses_an_overwrite_and_writes_nothing(

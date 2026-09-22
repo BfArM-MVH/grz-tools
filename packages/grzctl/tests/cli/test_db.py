@@ -29,6 +29,9 @@ from grz_db.models.submission import (
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
 
+#: The upload date that populate records. Without --submission-date, populate reads it from an inbox.
+UPLOAD_DATE = "2026-01-01"
+
 
 def test_init_brings_an_empty_database_to_the_latest_schema(empty_database_config_path):
     """``db init`` is the only way an operator creates a schema, so it must reach head unaided."""
@@ -130,7 +133,17 @@ def test_populate(migrated_database_config_path: Path, test_metadata_path: Path)
     assert result_add.exit_code == 0, result_add.stderr
 
     result_populate = runner.invoke(
-        cli, [*args_common, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"]
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -196,50 +209,6 @@ def test_populate_date(migrated_database_config_path: Path, test_metadata_path: 
     assert submission.submission_uploaded_date == changed_date
 
 
-def test_populate_preserves_stored_submission_date(migrated_database_config_path: Path, test_metadata_path: Path):
-    """Populate without --submission-date keeps the stored upload date instead of replacing it.
-
-    The column records when the upload finished, so the metadata's declared submission_date
-    must never stand in for it; only --submission-date may override the stored value.
-    """
-    db_args = ["--config", migrated_database_config_path, "db"]
-    stored_date = date(2026, 1, 1)
-    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
-    assert metadata.submission.submission_date != stored_date
-
-    runner = click.testing.CliRunner(catch_exceptions=False)
-    cli = grzctl.cli.build_cli()
-    result_add = runner.invoke(cli, [*db_args, "submission", "add", metadata.submission_id])
-    assert result_add.exit_code == 0, result_add.stderr
-
-    result_populate = runner.invoke(
-        cli,
-        [
-            *db_args,
-            "submission",
-            "populate",
-            metadata.submission_id,
-            str(test_metadata_path),
-            "--no-confirm",
-            "--submission-date",
-            stored_date.strftime("%Y-%m-%d"),
-        ],
-    )
-    assert result_populate.exit_code == 0, result_populate.stderr
-
-    result_repopulate = runner.invoke(
-        cli,
-        [*db_args, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"],
-    )
-    assert result_repopulate.exit_code == 0, result_repopulate.stderr
-
-    config = GrzctlConfig.from_path(migrated_database_config_path)
-    db = SubmissionDb(db_url=config.db.database_url, author=None)
-
-    submission = db.get_submission(metadata.submission_id)
-    assert submission.submission_uploaded_date == stored_date
-
-
 def test_populate_redacted(tmp_path: Path, migrated_database_config_path: Path, test_metadata_path: Path):
     args_common = ["--config", migrated_database_config_path, "db"]
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
@@ -296,7 +265,16 @@ def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_me
 
     result_populate_s1 = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata_s1.submission_id, str(metadata_s1_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata_s1.submission_id,
+            str(metadata_s1_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            changed_date.strftime("%Y-%m-%d"),
+        ],
     )
     assert result_populate_s1.exit_code == 0, result_populate_s1.stderr
 
@@ -314,7 +292,16 @@ def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_me
 
     result_populate_s2 = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata_s2.submission_id, str(metadata_s2_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata_s2.submission_id,
+            str(metadata_s2_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            changed_date.strftime("%Y-%m-%d"),
+        ],
     )
     assert result_populate_s2.exit_code == 0, result_populate_s2.stderr
 
@@ -395,7 +382,16 @@ def test_populate_qc(migrated_database_config_path: Path, tmp_path: Path, test_m
     metadata = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -452,7 +448,16 @@ def test_populate_qc_is_atomic(migrated_database_config_path: Path, tmp_path: Pa
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -582,7 +587,16 @@ def test_populate_qc_with_bom_header(migrated_database_config_path: Path, tmp_pa
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -647,7 +661,16 @@ def test_populate_qc_with_qc_workflow_version_flag(
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -708,7 +731,16 @@ def test_populate_qc_with_qc_workflow_version_env_var(
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -764,7 +796,16 @@ def test_populate_qc_missing_qc_workflow_version(
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -810,7 +851,16 @@ def test_populate_qc_version_from_report(migrated_database_config_path: Path, tm
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -857,7 +907,16 @@ def test_populate_qc_flag_report_mismatch(
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -1791,7 +1850,16 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
     # populate submission (triggers first state transition)
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(test_metadata_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 

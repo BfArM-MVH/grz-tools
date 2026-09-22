@@ -517,7 +517,6 @@ def init(ctx: click.Context):
     """Initializes the database schema using Alembic."""
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
-
     console_err.print(f"[cyan]Initializing database {db}[/cyan]")
     submission_db.initialize_schema()
 
@@ -1081,22 +1080,49 @@ def _prepare_donor_console_table(
     return diff_table
 
 
-def _submission_upload_date(submission: Submission, override: datetime | None) -> date | None:
-    """Pick the upload date to store: *override* if given, else the one already stored.
+def _submission_upload_date(
+    configuration: GrzctlConfig, submission_id: str, override: datetime | None, inbox_name: str | None
+) -> date:
+    """Pick the upload date to store: *override* if given, else the ``LastModified`` of metadata.json in the inbox.
 
-    :param submission: The stored submission row.
+    :param configuration: The grzctl configuration, which names the submitter's inboxes.
+    :param submission_id: The submission. Its first part is the submitter ID.
     :param override: The date ``--submission-date`` named, if any.
-    :returns: The date to record, or ``None`` when neither source knows one.
+    :param inbox_name: The inbox ``--inbox`` named, if any. Without it, the submitter's only inbox is used.
+    :returns: The date to record.
+    :raises click.ClickException: if neither *override* nor the inbox gives a date.
     """
     if override is not None:
         return override.date()
-    if submission.submission_uploaded_date is not None:
-        return submission.submission_uploaded_date
-    log.warning(
-        "No submission date provided and submission date is missing in the database. "
-        "Leaving the submission upload date unset; pass --submission-date to record one."
-    )
-    return None
+
+    missing = f"No upload date for submission {submission_id}"
+    submitter_id = submission_id.split("_", maxsplit=1)[0]
+    if inbox_name is None:
+        entry = configuration.leistungserbringer.get(submitter_id)
+        if entry is None:
+            raise click.ClickException(
+                f"{missing}: submitter {submitter_id} has no inbox in the configuration. Pass --submission-date."
+            )
+        if len(entry.inbox_buckets) != 1:
+            raise click.ClickException(
+                f"{missing}: submitter {submitter_id} has several inboxes ({', '.join(sorted(entry.inbox_buckets))}). "
+                "Pass --inbox or --submission-date."
+            )
+        inbox_name = next(iter(entry.inbox_buckets))
+
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    key = f"{submission_id}/metadata/metadata.json"
+    url = f"s3://{s3_options.bucket}/{key}"
+    try:
+        response = init_s3_client(s3_options).head_object(Bucket=s3_options.bucket, Key=key)
+    except botocore.exceptions.ClientError as e:
+        if e.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
+            raise
+        raise click.ClickException(f"{missing}: {url} does not exist. Pass --submission-date.") from e
+    # grzctl clean leaves an empty metadata.json, whose LastModified is the time of cleaning
+    if response["ContentLength"] == 0:
+        raise click.ClickException(f"{missing}: {url} is empty, because the inbox was cleaned. Pass --submission-date.")
+    return response["LastModified"].date()
 
 
 def _print_pending_changes(changes: "SubmissionChangeSet") -> None:
@@ -1142,8 +1168,16 @@ def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite:
     "--submission-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
     default=None,
-    help="Submission upload date to store; overrides the stored one. Without it, "
-    "the stored submission upload date is kept.",
+    help="Submission upload date to store. Without it, the date is when metadata.json arrived in the "
+    "submitter's inbox, which is gone once grzctl clean has run. Replacing a stored date takes "
+    "--allow-overwrite submission_uploaded_date or --force.",
+)
+@click.option(
+    "-b",
+    "--inbox",
+    "inbox_name",
+    default=None,
+    help="Inbox to read the upload date from. Needed only if the submitter has several inboxes.",
 )
 @click.option(
     "--confirm/--no-confirm",
@@ -1159,6 +1193,7 @@ def populate(  # noqa: C901, PLR0913, PLR0917
     submission_id: str,
     metadata_path: str,
     submission_date: datetime | None,
+    inbox_name: str | None,
     confirm: bool,
     force: bool,
     allow_overwrite: tuple[str, ...],
@@ -1172,6 +1207,9 @@ def populate(  # noqa: C901, PLR0913, PLR0917
     Writes the whole change set or none of it. Filling a value the database does not have is
     always allowed; replacing or removing one takes --force or --allow-overwrite, and otherwise
     stops the command before anything is written.
+
+    The upload date is --submission-date, or else when metadata.json arrived in the submitter's
+    inbox. Without either, the command stops before anything is written.
     """
     log.debug("Ignored fields for populate: %s", ignore_field)
 
@@ -1211,7 +1249,9 @@ def populate(  # noqa: C901, PLR0913, PLR0917
             "or use 'grzctl db submission modify' directly."
         ) from e
 
-    submission_uploaded_date = _submission_upload_date(submission, submission_date)
+    submission_uploaded_date = _submission_upload_date(
+        ctx.obj["configuration"], submission_id, submission_date, inbox_name
+    )
 
     try:
         changes = db_service.diff(
