@@ -176,6 +176,7 @@ class S3BotoDownloadWorker:
                     s3_object_id,
                     missing_error=grzexc.MissingSubmissionFileError,
                 )
+                pbar.reset(total=source.length)
                 pipeline = source | Tee(TqdmObserver(pbar))
                 pipeline >> f
         except Exception:
@@ -265,8 +266,8 @@ class S3BotoDownloadWorker:
             try:
                 for future in as_completed(futures):
                     future.result()
-            except Exception:
-                # the progress log records what finished, so a rerun picks the rest up
+            except BaseException:
+                # also Ctrl-C and SIGTERM: the progress log records what finished, so a rerun picks the rest up
                 pool.shutdown(cancel_futures=True)
                 raise
 
