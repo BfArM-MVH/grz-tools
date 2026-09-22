@@ -24,7 +24,6 @@ from .commands.encrypt import encrypt
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
-from .commands.upload import upload
 from .commands.validate import validate
 from .models.config import GrzctlConfig
 
@@ -93,7 +92,6 @@ def build_cli():
 
     cli.add_command(validate)
     cli.add_command(encrypt)
-    cli.add_command(upload)
 
     cli.add_command(list_submissions, name="list")
     cli.add_command(download)

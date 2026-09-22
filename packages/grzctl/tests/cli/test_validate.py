@@ -82,6 +82,8 @@ def test_validate_forwards_mmap_to_worker(tmp_path, flag, expected_no_mmap, grzc
 #: The submitterId of the shipped example metadata these tests build their submissions from.
 #: ``validate`` requires it on the command line and checks the metadata against it.
 SUBMITTER_ID = "260914050"
+#: The upload date that populate records. Without --submission-date, populate reads it from an inbox.
+UPLOAD_DATE = "2026-01-01"
 
 
 def _set_up_case_with_qc_passed_initial(tmp_path, migrated_database_config_path, test_metadata_path) -> SimpleNamespace:
@@ -117,7 +119,7 @@ def _set_up_case_with_qc_passed_initial(tmp_path, migrated_database_config_path,
     for sid, meta in ((qc_passed_id, qc_passed_meta), (duplicate_id, duplicate_meta)):
         result = db("submission", "add", sid)
         assert result.exit_code == 0, result.output
-        result = db("submission", "populate", sid, str(meta), "--no-confirm")
+        result = db("submission", "populate", sid, str(meta), "--no-confirm", "--submission-date", UPLOAD_DATE)
         assert result.exit_code == 0, result.output
     result = db("submission", "modify", qc_passed_id, "basic_qc_passed", "true")
     assert result.exit_code == 0, result.output
