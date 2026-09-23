@@ -6,6 +6,7 @@ import datetime
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 import boto3
@@ -169,15 +170,18 @@ def raise_if_cleaned(s3_client: Any, bucket: str, submission_id: str, metadata_h
     :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
     :raises DownloadError: For any other error of the S3 client.
     """
-    marker_keys = {f"{submission_id}/cleaning", f"{submission_id}/cleaned"}
-    # the prefix finds both markers with one request, and the intersection keeps only these exact keys
-    with s3_errors(f"Listing the clean markers of s3://{bucket}/{submission_id}", grzexc.DownloadError):
-        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=f"{submission_id}/clean")
-    markers = sorted(marker_keys & {obj["Key"] for obj in response.get("Contents", [])})
-    if markers:
-        raise grzexc.SubmissionCleanedError(
-            f"grzctl clean has started on {submission_id}: s3://{bucket} holds {', '.join(markers)}"
-        )
+    for key in (f"{submission_id}/cleaning", f"{submission_id}/cleaned"):
+        with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
+            try:
+                s3_client.head_object(Bucket=bucket, Key=key)
+            except ClientError as e:
+                # the caller has read the metadata.json, so the bucket exists and a 404 means a missing marker
+                if e.response["ResponseMetadata"]["HTTPStatusCode"] != HTTPStatus.NOT_FOUND:
+                    raise
+            else:
+                raise grzexc.SubmissionCleanedError(
+                    f"grzctl clean has started on {submission_id}: s3://{bucket} holds {key}"
+                )
     if metadata_head["ContentLength"] == 0:
         raise grzexc.SubmissionCleanedError(
             f"s3://{bucket}/{submission_id}/metadata/metadata.json is empty, because grzctl clean emptied it"

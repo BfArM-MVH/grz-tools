@@ -2,6 +2,7 @@
 
 import datetime
 import io
+from http import HTTPStatus
 
 import boto3
 import grz_common.exceptions as grzexc
@@ -133,19 +134,30 @@ UPLOADED = datetime.datetime(2024, 7, 15, tzinfo=datetime.UTC)
 
 
 class _InboxClient:
-    """Answer a HEAD request for metadata.json with ``content_length``, and list the keys in ``keys``."""
+    """Answer a HEAD request for metadata.json with ``content_length``, and for a key in ``keys``.
 
-    def __init__(self, content_length: int = 2, keys: tuple[str, ...] = ()):
+    For any other key, fail with the HTTP status ``missing_status`` alone, as S3 does.
+    """
+
+    def __init__(
+        self, content_length: int = 2, keys: tuple[str, ...] = (), missing_status: HTTPStatus = HTTPStatus.NOT_FOUND
+    ):
         self.content_length = content_length
         self.keys = keys
+        self.missing_status = missing_status
 
-    def head_object(self, **_kwargs):
-        return {"ContentLength": self.content_length, "LastModified": UPLOADED}
-
-    def list_objects_v2(self, Bucket: str, Prefix: str):  # noqa: N803
-        contents = [{"Key": key} for key in self.keys if key.startswith(Prefix)]
-        # S3 leaves out Contents when no key matches
-        return {"Contents": contents} if contents else {}
+    def head_object(self, Bucket: str, Key: str):  # noqa: N803
+        if Key.endswith("/metadata/metadata.json"):
+            return {"ContentLength": self.content_length, "LastModified": UPLOADED}
+        if Key in self.keys:
+            return {"ContentLength": 0, "LastModified": UPLOADED}
+        raise ClientError(
+            {
+                "Error": {"Code": str(self.missing_status.value), "Message": ""},
+                "ResponseMetadata": {"HTTPStatusCode": self.missing_status.value},
+            },
+            "HeadObject",
+        )
 
 
 @pytest.mark.parametrize("key", ["submission/version", "submission/cleaner"], ids=["other-key", "similar-key"])
@@ -167,3 +179,9 @@ def test_get_metadata_upload_timestamp_refuses_a_cleaned_submission(inbox: _Inbo
     """An emptied metadata.json carries the time of cleaning, not the time of upload."""
     with pytest.raises(grzexc.SubmissionCleanedError):
         get_metadata_upload_timestamp(inbox, "bucket", "submission")
+
+
+def test_get_metadata_upload_timestamp_reports_a_failed_marker_check_as_a_failed_download():
+    """Only a 404 means that a marker is missing, so a refused HEAD request does not count as clean."""
+    with pytest.raises(grzexc.DownloadError):
+        get_metadata_upload_timestamp(_InboxClient(missing_status=HTTPStatus.FORBIDDEN), "bucket", "submission")
