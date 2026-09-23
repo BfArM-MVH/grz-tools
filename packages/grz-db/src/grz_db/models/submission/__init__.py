@@ -645,7 +645,8 @@ class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     DETAILED_QC_ERROR = "detailed_qc_error"
     TRANSFER_ERROR = "transfer_error"
     CONFIGURATION_ERROR = "configuration_error"
-    REPORTING_ERROR = "reporting_error"
+    PRUEFBERICHT_GENERATION_ERROR = "pruefbericht_generation_error"
+    PRUEFBERICHT_REJECTED = "pruefbericht_rejected"
     INTERRUPTED = "interrupted"
     UNKNOWN = "unknown"
 

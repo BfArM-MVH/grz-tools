@@ -27,7 +27,8 @@ _FAILURE_REASONS: dict[type[BaseException], FailureReasonEnum] = {
     grzexc.TransferError: FailureReasonEnum.TRANSFER_ERROR,
     grzexc.EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
     grzexc.DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
-    grzexc.ReportingError: FailureReasonEnum.REPORTING_ERROR,
+    grzexc.PruefberichtGenerationError: FailureReasonEnum.PRUEFBERICHT_GENERATION_ERROR,
+    grzexc.PruefberichtRejectedError: FailureReasonEnum.PRUEFBERICHT_REJECTED,
 }
 """The failure reason of each expected error. Any other exception records ``unknown``."""
 

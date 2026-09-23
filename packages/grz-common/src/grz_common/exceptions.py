@@ -50,7 +50,7 @@ class ConfigurationError(GrzError):
 
 
 class TransferError(GrzError):
-    """Moving data to or from S3 failed."""
+    """Moving data to or from S3 or BfArM failed."""
 
 
 class DownloadError(TransferError):
@@ -70,7 +70,7 @@ class UploadError(TransferError):
 
 
 class NetworkError(TransferError):
-    """The connection to S3 failed during a transfer."""
+    """A request to S3 or BfArM did not get through, such as for a lost connection, a timeout, or a server error."""
 
 
 class EncryptionError(GrzError):
@@ -81,5 +81,9 @@ class DetailedQCError(GrzError):
     """The detailed QC workflow failed."""
 
 
-class ReportingError(GrzError):
-    """The Prüfbericht could not be generated, or BfArM did not accept it."""
+class PruefberichtGenerationError(GrzError):
+    """The Prüfbericht cannot be generated, such as because the database lacks a field that it needs."""
+
+
+class PruefberichtRejectedError(GrzError):
+    """BfArM rejected the Prüfbericht, so sending the same one again does not help."""

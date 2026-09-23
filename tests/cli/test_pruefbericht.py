@@ -9,14 +9,19 @@ import click.testing
 import grz_common.exceptions as grzexc
 import grzctl.cli
 import pytest
+import requests
 import responses
-from grz_pydantic_models.pruefbericht.v0 import LibraryType
+from grz_pydantic_models.pruefbericht.v0 import LibraryType, Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
+from grzctl.commands.pruefbericht import _generate_pruefbericht_from_database, _try_submit
+from grzctl.models.config import GrzctlConfig
 
 from .. import mock_files
 from .common import copy_submission
 
 TEST_SUBMISSION_ID = "123456789_1970-01-01_00000000"
+TOKEN_URL = "https://bfarm.localhost/token"
+API_BASE_URL = "https://bfarm.localhost/api"
 
 
 @pytest.fixture
@@ -334,6 +339,73 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
             runner.invoke(cli, submit_args, catch_exceptions=False)
 
 
+def _submit(token: str) -> None:
+    """Submit a valid Prüfbericht to the faked BfArM endpoints."""
+    pruefbericht = Pruefbericht.model_validate(
+        {
+            "SubmittedCase": {
+                "submissionDate": "2024-07-15",
+                "submissionType": "test",
+                "tan": "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000",
+                "submitterId": "260914050",
+                "dataNodeId": "GRZK00007",
+                "diseaseType": "oncological",
+                "dataCategory": "genomic",
+                "libraryType": "wes",
+                "coverageType": "GKV",
+                "dataQualityCheckPassed": True,
+            }
+        }
+    )
+    _try_submit(
+        pruefbericht=pruefbericht,
+        api_base_url=API_BASE_URL,
+        auth_url=TOKEN_URL,
+        client_id="pytest",
+        client_secret="pysecret",
+        token=token,
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ({"status": 400}, grzexc.PruefberichtRejectedError),
+        ({"status": 403}, grzexc.ConfigurationError),
+        ({"status": 503}, grzexc.NetworkError),
+        ({"body": requests.ConnectionError("connection refused")}, grzexc.NetworkError),
+    ],
+    ids=["rejected", "forbidden", "server-error", "no-connection"],
+)
+def test_a_failed_submission_is_classified_by_the_answer_of_bfarm(requests_mock, answer, expected):
+    """Only a client error means that the Prüfbericht itself is wrong, so only that one is a rejection."""
+    requests_mock.post(f"{API_BASE_URL}/upload", **answer)
+
+    with pytest.raises(expected):
+        _submit(token="my_token")
+
+
+def test_credentials_refused_after_a_token_refresh_are_a_configuration_error(bfarm_auth_api):
+    """A 401 first refreshes the token, and a second 401 means that BfArM refuses the credentials."""
+    bfarm_auth_api.post(f"{API_BASE_URL}/upload", status=401)
+
+    with pytest.raises(grzexc.ConfigurationError):
+        _submit(token="expired_token")
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(400, grzexc.ConfigurationError), (503, grzexc.NetworkError)],
+    ids=["client-error", "server-error"],
+)
+def test_a_failed_token_request_is_classified_by_the_answer_of_bfarm(requests_mock, status, expected):
+    """The token request carries only the client credentials, so any client error means that they are wrong."""
+    requests_mock.post(TOKEN_URL, status=status)
+
+    with pytest.raises(expected):
+        _submit(token="")
+
+
 @pytest.fixture
 def pruefbericht_db_config(tmp_path, migrated_db_connection):
     """Config file for a database already on the latest schema, one per supported backend."""
@@ -504,6 +576,10 @@ def test_generate_from_database_missing_fields(pruefbericht_db_config):
 
     assert result.exit_code != 0
     assert "missing required fields" in result.output
+
+    configuration = GrzctlConfig.from_configuration(pruefbericht_db_config["config"])
+    with pytest.raises(grzexc.PruefberichtGenerationError, match="missing required fields"):
+        _generate_pruefbericht_from_database(TEST_SUBMISSION_ID, configuration, failed=False)
 
 
 def test_generate_from_database_no_index_donor(pruefbericht_db_config):

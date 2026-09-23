@@ -4,10 +4,10 @@ Revision ID: b7e4c1f9a2d3
 Revises: 2f6a24f8db05
 Create Date: 2026-09-17 00:00:00.000000+00:00
 
-Adds five reasons to the PostgreSQL ``failurereasonenum`` type: a failed detailed QC
-workflow, a failed S3 transfer, a faulty setup, a failed Prüfbericht and an interrupted run.
-The retired ``network_error`` and ``upload_error`` stay in the type, because older states
-carry them.
+Adds six reasons to the PostgreSQL ``failurereasonenum`` type: a failed detailed QC
+workflow, a failed transfer, a faulty setup, a Prüfbericht that cannot be generated, a
+Prüfbericht that BfArM rejected, and an interrupted run. The retired ``network_error`` and
+``upload_error`` stay in the type, because older states carry them.
 """
 
 from collections.abc import Sequence
@@ -23,7 +23,8 @@ NEW_FAILURE_REASONS = [
     "detailed_qc_error",
     "transfer_error",
     "configuration_error",
-    "reporting_error",
+    "pruefbericht_generation_error",
+    "pruefbericht_rejected",
     "interrupted",
 ]
 
