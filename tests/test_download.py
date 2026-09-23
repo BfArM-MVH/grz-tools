@@ -284,3 +284,36 @@ def test_download_file_reports_a_connection_that_keeps_breaking_as_a_failed_down
         )
 
     assert isinstance(excinfo.value.__cause__, RetriesExceededError)
+
+
+def test_download_metadata_reports_a_faulty_setup_as_a_configuration_error(s3_config_model, faulty_s3_setup, tmp_path):
+    """A faulty setup does not look like a missing metadata.json, which would blame the submitter."""
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=tmp_path / "progress_download.cjson",
+    )
+
+    with pytest.raises(grzexc.ConfigurationError):
+        download_worker.download_metadata("submission", tmp_path / "metadata")
+
+
+def test_download_file_reports_a_faulty_setup_as_a_configuration_error(
+    s3_config_model, faulty_s3_setup, encrypted_submission, tmp_path
+):
+    """A faulty setup does not look like a missing file, which would blame the submitter."""
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.ConfigurationError):
+        download_worker.download_file(
+            tmp_path / "files" / file_path.name,
+            f"{encrypted_submission.submission_id}/files/{file_path.name}",
+            progress_logger,
+            file_metadata,
+            encrypted_submission.submission_id,
+        )

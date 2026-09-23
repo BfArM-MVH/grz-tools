@@ -304,3 +304,31 @@ def test_upload_file_reports_any_other_s3_error_as_a_failed_upload(
 
     with pytest.raises(grzexc.UploadError):
         upload_worker.upload_file(temp_small_file_path, "small_test_file.bed")
+
+
+def test_upload_reports_a_faulty_setup_as_a_configuration_error(
+    s3_config_model, faulty_s3_setup, encrypted_submission, tmp_path
+):
+    """The check for an earlier upload is the first request, and it already finds a faulty setup."""
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    with pytest.raises(grzexc.ConfigurationError):
+        upload_worker.upload(encrypted_submission)
+
+
+def test_upload_counts_access_denied_as_a_new_submission(
+    s3_config_model, remote_bucket, encrypted_submission, tmp_path, monkeypatch
+):
+    """Credentials that may not list the bucket get ``AccessDenied`` for a missing object, so the upload goes ahead."""
+    _fail_s3_operation(monkeypatch, "HeadObject", "403")
+    _fail_s3_operation(monkeypatch, "GetObject", "AccessDenied")
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    upload_worker.upload(encrypted_submission)
+
+    _, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+    assert metadata_s3_object_id in {o.key for o in remote_bucket.objects.all()}

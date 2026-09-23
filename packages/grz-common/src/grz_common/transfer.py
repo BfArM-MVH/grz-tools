@@ -161,24 +161,53 @@ def _is_missing_object(error: Exception) -> bool:
     return error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}
 
 
-def head_object(s3_client: Any, bucket: str, key: str) -> dict[str, Any]:
+def _explain_head_error(s3_client: Any, bucket: str, key: str, error: ClientError) -> ClientError:
+    """Return the error that tells why a HEAD request for an S3 object failed.
+
+    S3 answers a HEAD request without a body, so botocore sets the HTTP status as the error code.
+    A ``403`` can then mean rejected credentials, and a ``404`` a missing bucket. For these two
+    codes, a GET request for the first byte of the object learns the error code.
+
+    :param error: The error of the HEAD request.
+    :returns: The error of the GET request, or ``error`` if the GET request succeeds or is not needed.
+    """
+    if error.response.get("Error", {}).get("Code") not in {"403", "404"}:
+        return error
+    try:
+        response = s3_client.get_object(Bucket=bucket, Key=key, Range="bytes=0-0")
+    except ClientError as e:
+        return e
+    response["Body"].close()
+    return error
+
+
+def head_object(
+    s3_client: Any, bucket: str, key: str, transfer_error: type[grzexc.TransferError] = grzexc.DownloadError
+) -> dict[str, Any]:
     """Return the ``head_object`` response of an S3 object.
+
+    If S3 answers the HEAD request with ``403`` or ``404`` alone, the error of a GET request
+    decides, see :func:`_explain_head_error`.
 
     :param s3_client: boto3 S3 client.
     :param bucket: Name of the bucket.
     :param key: Key of the object.
+    :param transfer_error: The class for a failed transfer.
     :returns: The ``head_object`` response.
     :raises MissingObjectError: If the object does not exist.
     :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
-    :raises DownloadError: For any other error of the S3 client.
+    :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
     """
-    with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
+    with s3_errors(f"Reading s3://{bucket}/{key}", transfer_error):
         try:
             return s3_client.head_object(Bucket=bucket, Key=key)
         except ClientError as e:
-            if _is_missing_object(e):
-                raise grzexc.MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
-            raise
+            error = _explain_head_error(s3_client, bucket, key, e)
+            if _is_missing_object(error):
+                raise grzexc.MissingObjectError(f"s3://{bucket}/{key} does not exist") from error
+            if error is e:
+                raise
+            raise error from e
 
 
 def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_id: str) -> datetime.datetime:

@@ -111,15 +111,15 @@ class S3BotoDownloadWorker:
             # Ensure the local target directory exists
             metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
+            # download_file sends a HEAD request first, whose error code is the HTTP status alone
+            try:
+                head_object(self._s3_client, bucket, metadata_key)
+            except grzexc.MissingObjectError as e:
+                raise grzexc.MissingSubmissionFileError(
+                    f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
+                ) from e
             with s3_errors(f"Download of s3://{bucket}/{metadata_key}", grzexc.DownloadError):
-                try:
-                    self._s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
-                except botocore.exceptions.ClientError as e:
-                    if e.response.get("Error", {}).get("Code") == "404":
-                        raise grzexc.MissingSubmissionFileError(
-                            f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
-                        ) from e
-                    raise
+                self._s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
             self.__log.info("Metadata download complete.")
         except Exception as e:
             self.__log.error("Download failed for metadata '%s': %s", metadata_key, e)

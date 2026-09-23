@@ -99,13 +99,21 @@ The S3 boundary sorts the error codes like this:
 
 | S3 answer                                                     | Raised as                    | Reason                |
 | ------------------------------------------------------------- | ---------------------------- | --------------------- |
-| 404 for an inbox object                                       | `MissingSubmissionFileError` | `file_not_found`      |
-| 404 for any other object                                      | `MissingObjectError`         | `transfer_error`      |
+| `NoSuchKey` for an inbox object                               | `MissingSubmissionFileError` | `file_not_found`      |
+| `NoSuchKey` for any other object                              | `MissingObjectError`         | `transfer_error`      |
 | `InvalidAccessKeyId`, `SignatureDoesNotMatch`, `NoSuchBucket` | `ConfigurationError`         | `configuration_error` |
 | `AccessDenied` and anything else                              | `TransferError`              | `transfer_error`      |
 
 Missing credentials count as a configuration error as well. The error code counts even
 if boto3 wraps the error, as `S3Transfer` does for an upload.
 
+S3 answers a HEAD request without a body, so botocore reports only the HTTP status as the
+error code. A `403` can then mean rejected credentials, and a `404` a missing bucket. For
+these two codes, `head_object()` sends a GET request for the first byte of the object and
+sorts the error code of that answer. Downloads and uploads start with `head_object()`, so
+their first request already tells a faulty setup from a missing object.
+
 `AccessDenied` is not a configuration error. S3 also answers 403 for a missing object if
-the credentials lack the permission to list the bucket.
+the credentials lack the permission to list the bucket. For the same reason, an upload
+takes `AccessDenied` for the submission's metadata to mean that the bucket does not hold
+the submission yet.

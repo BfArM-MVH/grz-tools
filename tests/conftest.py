@@ -9,10 +9,12 @@ from pathlib import Path
 from shutil import copyfile
 
 import boto3
+import botocore.client
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
 import pytest
+from botocore.exceptions import ClientError
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from grz_db import testing as grz_db_testing
@@ -580,6 +582,33 @@ def remote_bucket(boto_s3_client, s3_config_model):
     boto_s3_client.create_bucket(Bucket=s3_config_model.s3.bucket)
 
     return boto3.resource("s3").Bucket(s3_config_model.s3.bucket)
+
+
+@pytest.fixture(params=["missing-bucket", "rejected-credentials"])
+def faulty_s3_setup(request, aws_credentials, monkeypatch):
+    """Answer S3 requests as S3 does for a faulty setup: the bucket is missing, or S3 rejects the credentials.
+
+    S3 answers a HEAD request without a body, so botocore sets the HTTP status as the error code.
+    moto sends a body with some HEAD errors, such as ``NoSuchBucket``, so the fixture drops their code.
+    """
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def call(self, operation_name, kwargs):
+        try:
+            if request.param == "rejected-credentials":
+                error = {"Code": "InvalidAccessKeyId", "Message": "The AWS Access Key Id does not exist."}
+                raise ClientError({"Error": error, "ResponseMetadata": {"HTTPStatusCode": 403}}, operation_name)
+            return original_call(self, operation_name, kwargs)
+        except ClientError as e:
+            if operation_name != "HeadObject":
+                raise
+            status = e.response["ResponseMetadata"]["HTTPStatusCode"]
+            error = {"Code": str(status), "Message": ""}
+            raise ClientError(
+                {"Error": error, "ResponseMetadata": {"HTTPStatusCode": status}}, operation_name
+            ) from None
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", call)
 
 
 @pytest.fixture

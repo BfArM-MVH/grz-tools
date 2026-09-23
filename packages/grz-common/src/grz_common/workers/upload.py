@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
-from ..transfer import init_s3_client, init_s3_resource, s3_errors
+from ..transfer import head_object, init_s3_client, init_s3_resource, s3_errors
 from ..utils.redaction import redact_file
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
@@ -144,20 +144,20 @@ class S3BotoUploadWorker(UploadWorker):
         """
         Determine if a remote ID already exists
         :param s3_object_id: Remote S3 object ID under which the file should be stored
+        :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+        :raises UploadError: For any other error of the S3 client.
         """
-        exists = True
         try:
-            self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
-        except self._s3_client.exceptions.NoSuchKey:
-            exists = False
-        except botocore.exceptions.ClientError as error:
-            if error.response["Error"]["Code"] in {"403", "404"}:
-                # backend can return forbidden instead if user has no ListBucket permission
-                exists = False
-            else:
-                raise error
-
-        return exists
+            head_object(self._s3_client, self._s3_options.bucket, s3_object_id, grzexc.UploadError)
+        except grzexc.MissingObjectError:
+            return False
+        except grzexc.UploadError as e:
+            cause = e.__cause__
+            # backend can return forbidden instead if user has no ListBucket permission
+            if isinstance(cause, botocore.exceptions.ClientError) and cause.response["Error"]["Code"] == "AccessDenied":
+                return False
+            raise
+        return True
 
     def _upload_logged_files(self, encrypted_submission, progress_logger, files_to_upload):
         for file_path in files_to_upload:
