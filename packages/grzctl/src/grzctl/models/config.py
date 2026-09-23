@@ -8,11 +8,10 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
-from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
+from grz_common.models.base import Crypt4GHPublicKey, IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
-from grz_common.models.keys import KeyModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
-from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
+from pydantic import Field, PrivateAttr, SecretStr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
 
@@ -82,16 +81,11 @@ class ArchiveTarget(IgnoringBaseModel):
     s3: S3Options
     """S3 connection details and bucket for this archive."""
 
-    public_key: str | None = None
+    public_key: Crypt4GHPublicKey | None = None
     """The crypt4gh public key for re-encryption of files destined for this archive."""
 
     public_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
     """Path to the crypt4gh public key for re-encryption of files destined for this archive."""
-
-    @field_validator("public_key")
-    @classmethod
-    def check_public_key(cls, v: str | None) -> str | None:
-        return KeyModel.check_grz_public_key(v)
 
     @model_validator(mode="after")
     def validate_public_key(self) -> "ArchiveTarget":

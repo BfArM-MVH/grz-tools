@@ -1,0 +1,55 @@
+"""Tests for ``KeyModel``, the keys section of the grz-cli config, which moved here from grz-common."""
+
+import importlib.util
+from pathlib import Path
+
+import pytest
+from grz_cli.models.config import EncryptConfig, KeyModel
+from pydantic import ValidationError
+
+PUBLIC_KEY = "-----BEGIN CRYPT4GH PUBLIC KEY-----\n7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n-----END CRYPT4GH PUBLIC KEY-----\n"
+"""A crypt4gh public key as text. ``Crypt4GHPublicKey`` only checks for the markers, so it need not decode."""
+
+
+def test_grz_common_keeps_no_copy_of_the_key_models():
+    assert importlib.util.find_spec("grz_common.models.keys") is None
+
+
+def test_encrypt_config_reads_the_keys_section(tmp_path: Path):
+    public_key_path = tmp_path / "grz.pub"
+    public_key_path.write_text(PUBLIC_KEY)
+
+    config = EncryptConfig.model_validate({"keys": {"grz_public_key_path": str(public_key_path)}})
+
+    assert config.keys.grz_public_key_path == public_key_path
+
+
+def test_neither_grz_public_key_nor_grz_public_key_path_fails():
+    with pytest.raises(ValidationError, match="Either grz_public_key or grz_public_key_path must be set"):
+        KeyModel()
+
+
+def test_both_grz_public_key_and_grz_public_key_path_fails(tmp_path: Path):
+    public_key_path = tmp_path / "grz.pub"
+    public_key_path.write_text(PUBLIC_KEY)
+
+    with pytest.raises(ValidationError, match="Only one of grz_public_key or grz_public_key_path must be set"):
+        KeyModel(grz_public_key=PUBLIC_KEY, grz_public_key_path=public_key_path)
+
+
+@pytest.mark.parametrize(
+    "public_key",
+    [
+        PUBLIC_KEY,
+        "-----BEGIN CRYPT4GH PUBLIC KEY-----\n7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n",
+        "7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n-----END CRYPT4GH PUBLIC KEY-----\n",
+    ],
+    ids=["both markers", "BEGIN marker only", "END marker only"],
+)
+def test_grz_public_key_with_a_marker_passes(public_key: str):
+    assert KeyModel(grz_public_key=public_key).grz_public_key == public_key
+
+
+def test_grz_public_key_without_markers_fails():
+    with pytest.raises(ValidationError, match="Invalid public key format"):
+        KeyModel(grz_public_key="7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=")
