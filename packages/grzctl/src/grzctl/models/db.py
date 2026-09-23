@@ -1,7 +1,7 @@
 from typing import Annotated, Self
 
-from grz_common.models.base import IgnoringBaseSettings
-from pydantic import Field, FilePath, SecretStr, model_validator
+from grz_common.models.base import FilePath, IgnoringBaseSettings
+from pydantic import Field, SecretStr, model_validator
 
 # No whitespace (\s)
 # No control characters (\x00-\x1f and \x7f)
