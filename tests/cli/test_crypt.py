@@ -405,7 +405,7 @@ def test_decrypt_uses_the_inbox_keys_of_the_submitter_in_the_metadata(working_di
     config_path = _write_grzctl_config(
         tmp_path,
         {
-            "000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/nonexistent/other_le.sec"}}},
+            "000000000": {"inbox_buckets": {"inbox": {"private_key_path": SUBMITTER_PRIVATE_KEY}}},
             SUBMITTER_ID: {
                 "inbox_buckets": {
                     "first": {"private_key_path": NON_CONSENTED_PRIVATE_KEY},
@@ -413,7 +413,7 @@ def test_decrypt_uses_the_inbox_keys_of_the_submitter_in_the_metadata(working_di
                 }
             },
         },
-        consented={"private_key_path": "/nonexistent/consented.sec"},
+        consented={"private_key_path": str(CONSENTED_PRIVATE_KEY)},
     )
 
     with _loaded_key_paths() as loaded:
@@ -466,8 +466,8 @@ def test_decrypt_with_private_key_file_uses_no_config_key(working_dir_path, tmp_
     copy_submission(working_dir_path, "encrypted_files", "metadata")
     config_path = _write_grzctl_config(
         tmp_path,
-        {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": "/nonexistent/inbox.sec"}}}},
-        consented={"private_key_path": "/nonexistent/consented.sec"},
+        {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": NON_CONSENTED_PRIVATE_KEY}}}},
+        consented={"private_key_path": str(CONSENTED_PRIVATE_KEY)},
     )
 
     with _loaded_key_paths() as loaded:
@@ -504,7 +504,7 @@ def test_decrypt_tries_only_the_archive_keys_for_a_submitter_missing_from_the_co
     copy_submission(working_dir_path, "encrypted_files", "metadata")
     config_path = _write_grzctl_config(
         tmp_path,
-        {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/nonexistent/other_le.sec"}}}},
+        {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": SUBMITTER_PRIVATE_KEY}}}},
         non_consented={"private_key_path": GRZ_PRIVATE_KEY},
     )
 

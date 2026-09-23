@@ -12,7 +12,6 @@ INBOX = {
     "endpoint_url": "https://s3.amazonaws.com",
     "access_key": "testing",
     "secret": "testing",
-    "private_key_path": "/path/to/test.sec",
 }
 
 
@@ -20,7 +19,8 @@ INBOX = {
 def configuration(offline_config: GrzctlConfig) -> dict:
     """The offline config as a dict, whose only inbox is ``BUCKET_NAME`` of submitter ``LE_ID``."""
     configuration = offline_config.model_dump(mode="json", exclude_none=True)
-    configuration["leistungserbringer"] = {LE_ID: {"inbox_buckets": {BUCKET_NAME: INBOX}}}
+    inbox = {**INBOX, "private_key_path": configuration["archives"]["signing_key_path"]}
+    configuration["leistungserbringer"] = {LE_ID: {"inbox_buckets": {BUCKET_NAME: inbox}}}
     return configuration
 
 

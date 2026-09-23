@@ -19,9 +19,9 @@ def test_neither_public_key_nor_public_key_path_fails():
         _archive_target()
 
 
-def test_both_public_key_and_public_key_path_fails(crypt4gh_public_key: str):
+def test_both_public_key_and_public_key_path_fails(crypt4gh_public_key: str, unread_file: str):
     with pytest.raises(ValidationError, match="Only one of public_key or public_key_path must be set"):
-        _archive_target(public_key=crypt4gh_public_key, public_key_path="/dev/null")
+        _archive_target(public_key=crypt4gh_public_key, public_key_path=unread_file)
 
 
 def test_malformed_public_key_fails():
@@ -29,11 +29,11 @@ def test_malformed_public_key_fails():
         _archive_target(public_key="not a crypt4gh key")
 
 
-def test_public_key_file_gives_the_path_unchanged():
-    target = _archive_target(public_key_path="/dev/null")
+def test_public_key_file_gives_the_path_unchanged(unread_file: str):
+    target = _archive_target(public_key_path=unread_file)
 
     with target.public_key_file() as path:
-        assert path == "/dev/null"
+        assert path == Path(unread_file)
 
 
 def test_public_key_file_writes_the_inline_key_to_a_temporary_file(crypt4gh_public_key: str):

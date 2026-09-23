@@ -54,6 +54,8 @@ crypt4gh_grz_public_key_file = "tests/mock_files/grz_mock_public_key.pub"
 crypt4gh_submitter_private_key_file = "tests/mock_files/submitter_mock_private_key.sec"
 crypt4gh_submitter_public_key_file = "tests/mock_files/submitter_mock_public_key.pub"
 db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
+_GRZ_PRIVATE_KEY_PATH = str(Path(crypt4gh_grz_private_key_file).resolve())
+"""An existing key file for the key path fields of the grzctl config, which need an existing file."""
 db_known_keys_file = "tests/mock_files/db/known_keys"
 
 
@@ -348,7 +350,7 @@ def encrypt_config_model(keys_config_content):
 def db_config_model(db_config_content, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **db_config_content,
-        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
         identifiers=grzctl_identifiers_config,
@@ -359,7 +361,7 @@ def db_config_model(db_config_content, grzctl_identifiers_config):
 def migrated_db_config_model(migrated_db_config_content, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **migrated_db_config_content,
-        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
         identifiers=grzctl_identifiers_config,
@@ -423,7 +425,7 @@ def temp_identifiers_config_file_path(temp_data_dir_path, identifiers_config_mod
 def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_content) -> Path:
     config_file = temp_data_dir_path / "config.pruefbericht.yaml"
     config = _grzctl_model(
-        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         db=_GRZCTL_DB_DUMMY,
         pruefbericht=pruefbericht_config_content["pruefbericht"],
     )
@@ -442,8 +444,13 @@ def grzctl_identifiers_config():
     return {"grz": "GRZK00007"}
 
 
-def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
-    """Build archives config dict. Pass *endpoint_url* for moto-backed tests."""
+def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str | None = None) -> dict:
+    """Build archives config dict. Pass *endpoint_url* for moto-backed tests.
+
+    *public_key_path* defaults to the GRZ mock public key.
+    """
+    if public_key_path is None:
+        public_key_path = str(Path(crypt4gh_grz_public_key_file).resolve())
 
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
@@ -497,7 +504,7 @@ def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
     """GrzctlConfig-format S3-only config for grzctl CLI tests."""
     config_file = temp_data_dir_path / "config.grzctl_s3.yaml"
     config = _grzctl_model(
-        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
     )
     with open(config_file, "w") as fd:
         config.to_yaml(fd)

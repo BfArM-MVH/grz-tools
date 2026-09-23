@@ -10,9 +10,7 @@ from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metada
 from grzctl.models.config import GrzctlConfig
 
 
-def _grzctl_archives(
-    endpoint_url: str | None = None, public_key_path: str = "/dev/null", signing_key_path: str = "/dev/null"
-) -> dict:
+def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: str | None = None) -> dict:
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
         if endpoint_url:
@@ -28,6 +26,15 @@ def _grzctl_archives(
 
 #: The revision the schema-upgrade tests start from.
 INITIAL_REVISION = "1a9bd994df1b"
+
+
+@pytest.fixture
+def unread_file() -> str:
+    """An existing file for the key path fields of tests that never read it.
+
+    The key path fields need an existing file, and this conftest module serves as one.
+    """
+    return str(Path(__file__).resolve())
 
 
 @pytest.fixture

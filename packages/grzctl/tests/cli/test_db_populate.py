@@ -326,7 +326,11 @@ def inbox_config_path(
     submitter_id = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text()).submission.submitter_id
     data = migrated_database_config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": True})
     data["leistungserbringer"] = {
-        submitter_id: {"inbox_buckets": {INBOX_BUCKET: {"private_key_path": "/dev/null", "region_name": REGION}}}
+        submitter_id: {
+            "inbox_buckets": {
+                INBOX_BUCKET: {"private_key_path": data["archives"]["signing_key_path"], "region_name": REGION}
+            }
+        }
     }
     config_path = tmp_path / "config.inbox.yaml"
     config_path.write_text(yaml.safe_dump(data))

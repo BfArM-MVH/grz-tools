@@ -411,14 +411,14 @@ def pruefbericht_db_config(tmp_path, migrated_db_connection):
     """Config file for a database already on the latest schema, one per supported backend."""
     import json
 
-    from tests.conftest import _grzctl_archives
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
 
     config = {
         "leistungserbringer": {
             "000000000": {
                 "inbox_buckets": {
                     "inbox": {
-                        "private_key_path": "/dev/null",
+                        "private_key_path": _GRZ_PRIVATE_KEY_PATH,
                     }
                 },
             }

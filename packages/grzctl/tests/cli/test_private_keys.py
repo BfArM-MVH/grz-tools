@@ -44,36 +44,36 @@ def no_prompt(monkeypatch):
     monkeypatch.setattr("grz_common.utils.crypt.getpass", _fail)
 
 
-def _archive_target(bucket: str) -> ArchiveTarget:
-    return ArchiveTarget(s3=S3Options(bucket=bucket), public_key_path="/dev/null")
+def _archive_target(bucket: str, unread_file: str) -> ArchiveTarget:
+    return ArchiveTarget(s3=S3Options(bucket=bucket), public_key_path=unread_file)
 
 
-def _archives(**signing_key_fields) -> ArchivesConfig:
+def _archives(unread_file: str, **signing_key_fields) -> ArchivesConfig:
     return ArchivesConfig(
-        consented=_archive_target("consented"),
-        non_consented=_archive_target("non_consented"),
+        consented=_archive_target("consented", unread_file),
+        non_consented=_archive_target("non_consented", unread_file),
         **signing_key_fields,
     )
 
 
-def test_neither_signing_key_nor_signing_key_path_fails():
+def test_neither_signing_key_nor_signing_key_path_fails(unread_file: str):
     with pytest.raises(ValidationError, match="Either signing_key or signing_key_path must be set"):
-        _archives()
+        _archives(unread_file)
 
 
-def test_both_signing_key_and_signing_key_path_fails(key_path: Path):
+def test_both_signing_key_and_signing_key_path_fails(key_path: Path, unread_file: str):
     with pytest.raises(ValidationError, match="Only one of signing_key or signing_key_path must be set"):
-        _archives(signing_key=key_path.read_text(), signing_key_path=str(key_path))
+        _archives(unread_file, signing_key=key_path.read_text(), signing_key_path=str(key_path))
 
 
-def test_signing_key_path_loads_with_its_passphrase(key_path: Path, expected_key: bytes, no_prompt):
-    archives = _archives(signing_key_path=str(key_path), signing_key_passphrase=PASSPHRASE)
+def test_signing_key_path_loads_with_its_passphrase(key_path: Path, expected_key: bytes, no_prompt, unread_file: str):
+    archives = _archives(unread_file, signing_key_path=str(key_path), signing_key_passphrase=PASSPHRASE)
 
     assert archives.load_signing_key() == expected_key
 
 
-def test_inline_signing_key_loads_in_memory(key_path: Path, expected_key: bytes, no_prompt):
-    archives = _archives(signing_key=key_path.read_text(), signing_key_passphrase=PASSPHRASE)
+def test_inline_signing_key_loads_in_memory(key_path: Path, expected_key: bytes, no_prompt, unread_file: str):
+    archives = _archives(unread_file, signing_key=key_path.read_text(), signing_key_passphrase=PASSPHRASE)
 
     with (
         patch("builtins.open", side_effect=AssertionError("no file may be opened")),
@@ -85,8 +85,8 @@ def test_inline_signing_key_loads_in_memory(key_path: Path, expected_key: bytes,
     assert loaded == expected_key
 
 
-def test_inline_signing_key_is_named_by_its_config_location_in_errors(no_prompt):
-    archives = _archives(signing_key="not a key")
+def test_inline_signing_key_is_named_by_its_config_location_in_errors(no_prompt, unread_file: str):
+    archives = _archives(unread_file, signing_key="not a key")
 
     with pytest.raises(grzexc.ConfigurationError, match=r"Secret key archives\.signing_key cannot be read") as exc_info:
         archives.load_signing_key()
@@ -98,8 +98,8 @@ def _inbox(**private_key_fields) -> InboxConfig:
     return InboxConfig(**private_key_fields)
 
 
-def _archive_target_with_private_key(**private_key_fields) -> ArchiveTarget:
-    return ArchiveTarget(s3=S3Options(bucket="consented"), public_key_path="/dev/null", **private_key_fields)
+def _archive_target_with_private_key(unread_file: str, **private_key_fields) -> ArchiveTarget:
+    return ArchiveTarget(s3=S3Options(bucket="consented"), public_key_path=unread_file, **private_key_fields)
 
 
 def test_neither_inbox_private_key_nor_private_key_path_fails():
@@ -112,28 +112,30 @@ def test_both_inbox_private_key_and_private_key_path_fails(key_path: Path):
         _inbox(private_key=key_path.read_text(), private_key_path=str(key_path))
 
 
-def test_archive_private_key_is_optional():
-    target = _archive_target_with_private_key()
+def test_archive_private_key_is_optional(unread_file: str):
+    target = _archive_target_with_private_key(unread_file)
 
     assert target.private_key is None
     assert target.private_key_path is None
 
 
-def test_both_archive_private_key_and_private_key_path_fails(key_path: Path):
+def test_both_archive_private_key_and_private_key_path_fails(key_path: Path, unread_file: str):
     with pytest.raises(ValidationError, match="Only one of private_key or private_key_path must be set"):
-        _archive_target_with_private_key(private_key=key_path.read_text(), private_key_path=str(key_path))
+        _archive_target_with_private_key(unread_file, private_key=key_path.read_text(), private_key_path=str(key_path))
 
 
-def _grzctl_config(tmp_path: Path, leistungserbringer: dict, **archive_private_keys: dict) -> GrzctlConfig:
+def _grzctl_config(
+    tmp_path: Path, unread_file: str, leistungserbringer: dict, **archive_private_keys: dict
+) -> GrzctlConfig:
     """A config with the given inboxes, and the archive private keys given by archive name."""
     archives = {
-        name: {"s3": {"bucket": name}, "public_key_path": "/dev/null", **archive_private_keys.get(name, {})}
+        name: {"s3": {"bucket": name}, "public_key_path": unread_file, **archive_private_keys.get(name, {})}
         for name in ("consented", "non_consented")
     }
     return GrzctlConfig.from_configuration(
         {
             "leistungserbringer": leistungserbringer,
-            "archives": {**archives, "signing_key_path": "/dev/null"},
+            "archives": {**archives, "signing_key_path": unread_file},
             "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
             "pruefbericht": {},
             "identifiers": {"grz": "GRZK00007"},
@@ -141,20 +143,20 @@ def _grzctl_config(tmp_path: Path, leistungserbringer: dict, **archive_private_k
     )
 
 
-def _config_with_one_private_key(tmp_path: Path, holder: str, **private_key_fields) -> GrzctlConfig:
+def _config_with_one_private_key(tmp_path: Path, unread_file: str, holder: str, **private_key_fields) -> GrzctlConfig:
     """A config whose only key for submitter 260914050 is in its inbox, or in the consented archive."""
     if holder == "inbox":
-        return _grzctl_config(tmp_path, {"260914050": {"inbox_buckets": {"inbox": private_key_fields}}})
-    other_le = {"111111111": {"inbox_buckets": {"other": {"private_key_path": "/dev/null"}}}}
-    return _grzctl_config(tmp_path, other_le, consented=private_key_fields)
+        return _grzctl_config(tmp_path, unread_file, {"260914050": {"inbox_buckets": {"inbox": private_key_fields}}})
+    other_le = {"111111111": {"inbox_buckets": {"other": {"private_key_path": unread_file}}}}
+    return _grzctl_config(tmp_path, unread_file, other_le, consented=private_key_fields)
 
 
 @pytest.mark.parametrize("holder", ["inbox", "archive"])
 def test_inline_private_key_loads_in_memory(
-    holder: str, tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt
+    holder: str, tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
 ):
     config = _config_with_one_private_key(
-        tmp_path, holder, private_key=key_path.read_text(), private_key_passphrase=PASSPHRASE
+        tmp_path, unread_file, holder, private_key=key_path.read_text(), private_key_passphrase=PASSPHRASE
     )
 
     with (
@@ -169,10 +171,10 @@ def test_inline_private_key_loads_in_memory(
 
 @pytest.mark.parametrize("holder", ["inbox", "archive"])
 def test_private_key_path_loads_with_its_passphrase(
-    holder: str, tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt
+    holder: str, tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
 ):
     config = _config_with_one_private_key(
-        tmp_path, holder, private_key_path=str(key_path), private_key_passphrase=PASSPHRASE
+        tmp_path, unread_file, holder, private_key_path=str(key_path), private_key_passphrase=PASSPHRASE
     )
 
     assert [key for _, key in config.iter_decryption_keys("260914050")] == [expected_key]
@@ -193,12 +195,13 @@ def _load(path: Path) -> bytes:
 
 
 def test_iter_decryption_keys_gives_the_submitter_inboxes_first_then_the_archives(
-    tmp_path: Path, key_paths: dict[str, Path], no_prompt
+    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
 ):
     config = _grzctl_config(
         tmp_path,
+        unread_file,
         {
-            "111111111": {"inbox_buckets": {"other": {"private_key_path": "/nonexistent/other.sec"}}},
+            "111111111": {"inbox_buckets": {"other": {"private_key_path": unread_file}}},
             "260914050": {
                 "inbox_buckets": {
                     "inbox-a": {"private_key": key_paths["first"].read_text()},
@@ -220,11 +223,14 @@ def test_iter_decryption_keys_gives_the_submitter_inboxes_first_then_the_archive
     ]
 
 
-def test_iter_decryption_keys_loads_a_key_only_when_asked_for(tmp_path: Path, key_paths: dict[str, Path], no_prompt):
+def test_iter_decryption_keys_loads_a_key_only_when_asked_for(
+    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
+):
     config = _grzctl_config(
         tmp_path,
+        unread_file,
         {"260914050": {"inbox_buckets": {"inbox": {"private_key_path": str(key_paths["first"])}}}},
-        consented={"private_key_path": "/nonexistent/archive.sec"},
+        consented={"private_key_path": unread_file},
     )
 
     keys = config.iter_decryption_keys("260914050")
@@ -233,16 +239,19 @@ def test_iter_decryption_keys_loads_a_key_only_when_asked_for(tmp_path: Path, ke
         "leistungserbringer.260914050.inbox_buckets.inbox.private_key_path",
         _load(key_paths["first"]),
     )
-    with pytest.raises(grzexc.ConfigurationError, match=r"archives\.consented\.private_key_path: Secret key not found"):
+    with pytest.raises(
+        grzexc.ConfigurationError, match=r"archives\.consented\.private_key_path: Secret key .* cannot be read"
+    ):
         next(keys)
 
 
 def test_iter_decryption_keys_skips_the_inboxes_of_a_submitter_missing_from_the_config(
-    tmp_path: Path, key_paths: dict[str, Path], no_prompt
+    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
 ):
     config = _grzctl_config(
         tmp_path,
-        {"111111111": {"inbox_buckets": {"other": {"private_key_path": "/nonexistent/other.sec"}}}},
+        unread_file,
+        {"111111111": {"inbox_buckets": {"other": {"private_key_path": unread_file}}}},
         consented={"private_key_path": str(key_paths["first"])},
     )
 
@@ -252,7 +261,7 @@ def test_iter_decryption_keys_skips_the_inboxes_of_a_submitter_missing_from_the_
 
 
 def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
-    tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt
+    tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
 ):
     """A GRZ with one key pair for all inboxes writes the key once and refers to it with YAML aliases."""
     key_block = "".join(f"          {line}\n" for line in key_path.read_text().splitlines())
@@ -271,10 +280,10 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
         "archives:\n"
         "  consented:\n"
         "    s3: {bucket: consented}\n"
-        "    public_key_path: /dev/null\n"
+        f"    public_key_path: {unread_file}\n"
         "  non_consented:\n"
         "    s3: {bucket: non_consented}\n"
-        "    public_key_path: /dev/null\n"
+        f"    public_key_path: {unread_file}\n"
         "  signing_key: *grz_key\n"
         "  signing_key_passphrase: *grz_key_passphrase\n"
         "db:\n"
@@ -301,7 +310,7 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
 
 
 def test_two_inboxes_sharing_a_key_path_through_a_yaml_anchor_prompt_once(
-    tmp_path: Path, key_path: Path, expected_key: bytes, monkeypatch
+    tmp_path: Path, key_path: Path, expected_key: bytes, monkeypatch, unread_file: str
 ):
     """Without a configured passphrase, the shared key asks for its passphrase once, not once per inbox."""
     monkeypatch.delenv("C4GH_PASSPHRASE", raising=False)
@@ -324,10 +333,10 @@ def test_two_inboxes_sharing_a_key_path_through_a_yaml_anchor_prompt_once(
         "archives:\n"
         "  consented:\n"
         "    s3: {bucket: consented}\n"
-        "    public_key_path: /dev/null\n"
+        f"    public_key_path: {unread_file}\n"
         "  non_consented:\n"
         "    s3: {bucket: non_consented}\n"
-        "    public_key_path: /dev/null\n"
+        f"    public_key_path: {unread_file}\n"
         "  signing_key_path: *grz_key\n"
         "db:\n"
         f"  database_url: sqlite:///{tmp_path / 'unused.sqlite'}\n"
@@ -346,3 +355,41 @@ def test_two_inboxes_sharing_a_key_path_through_a_yaml_anchor_prompt_once(
         )
     ]
     assert prompts == [f"Passphrase for {key_path}: "]
+
+
+@pytest.mark.parametrize(
+    ("section", "field"),
+    [
+        (("leistungserbringer", "260914050", "inbox_buckets", "inbox"), "private_key_path"),
+        (("archives", "consented"), "public_key_path"),
+        (("archives", "consented"), "private_key_path"),
+        (("archives",), "signing_key_path"),
+    ],
+)
+def test_a_missing_key_file_fails_loading_the_config(
+    tmp_path: Path, unread_file: str, section: tuple[str, ...], field: str
+):
+    """A key path must name an existing file, so a missing file fails the config for every command."""
+    inbox = {"private_key_path": unread_file}
+    config = _grzctl_config(tmp_path, unread_file, {"260914050": {"inbox_buckets": {"inbox": inbox}}})
+    data = config.model_dump(mode="json", exclude_none=True)
+    fields = data
+    for key in section:
+        fields = fields[key]
+    fields[field] = str(tmp_path / "missing.sec")
+
+    with pytest.raises(ValidationError, match="Path does not point to a file"):
+        GrzctlConfig.from_configuration(data)
+
+
+def test_a_key_path_expands_the_home_directory(
+    tmp_path: Path, unread_file: str, key_path: Path, expected_key: bytes, monkeypatch, no_prompt
+):
+    monkeypatch.setenv("HOME", str(key_path.parent))
+
+    config = _config_with_one_private_key(
+        tmp_path, unread_file, "inbox", private_key_path=f"~/{key_path.name}", private_key_passphrase=PASSPHRASE
+    )
+
+    assert config.leistungserbringer["260914050"].inbox_buckets["inbox"].private_key_path == key_path
+    assert [key for _, key in config.iter_decryption_keys("260914050")] == [expected_key]

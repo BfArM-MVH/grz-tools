@@ -22,12 +22,12 @@ def signing_key_path(tmp_path) -> Path:
     return private_key_path
 
 
-def _config(public_key: str, signing_key: dict[str, str]) -> dict:
+def _config(public_key: str, unread_file: str, signing_key: dict[str, str]) -> dict:
     return {
-        "leistungserbringer": {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
+        "leistungserbringer": {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": unread_file}}}},
         "archives": {
             "consented": {"s3": {"bucket": "consented"}, "public_key": public_key},
-            "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": "/dev/null"},
+            "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": unread_file},
             **signing_key,
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
@@ -44,9 +44,9 @@ def _write_config(tmp_path: Path, config: dict) -> Path:
 
 
 @pytest.fixture
-def grzctl_config_path(tmp_path, signing_key_path, crypt4gh_public_key):
+def grzctl_config_path(tmp_path, signing_key_path, crypt4gh_public_key, unread_file):
     signing_key = {"signing_key_path": str(signing_key_path), "signing_key_passphrase": SIGNING_KEY_PASSPHRASE}
-    return _write_config(tmp_path, _config(crypt4gh_public_key, signing_key))
+    return _write_config(tmp_path, _config(crypt4gh_public_key, unread_file, signing_key))
 
 
 def _submission_dir(tmp_path: Path) -> Path:
@@ -106,9 +106,9 @@ def test_encrypt_signs_with_the_signing_key(tmp_path, grzctl_config_path, signin
     assert "submitter_private_key_path" not in encrypt_kwargs
 
 
-def test_encrypt_signs_with_an_inline_signing_key(tmp_path, signing_key_path, crypt4gh_public_key):
+def test_encrypt_signs_with_an_inline_signing_key(tmp_path, signing_key_path, crypt4gh_public_key, unread_file):
     signing_key = {"signing_key": signing_key_path.read_text(), "signing_key_passphrase": SIGNING_KEY_PASSPHRASE}
-    config_path = _write_config(tmp_path, _config(crypt4gh_public_key, signing_key))
+    config_path = _write_config(tmp_path, _config(crypt4gh_public_key, unread_file, signing_key))
 
     with patch("grzctl.commands.encrypt.Worker") as mock_worker_cls:
         result = _invoke_encrypt(config_path, _submission_dir(tmp_path), mock_worker_cls)
@@ -118,13 +118,17 @@ def test_encrypt_signs_with_an_inline_signing_key(tmp_path, signing_key_path, cr
     assert mock_worker_cls.return_value.encrypt.call_args.kwargs["submitter_private_key"] == expected_key
 
 
-def test_encrypt_fails_if_the_signing_key_cannot_be_loaded(tmp_path, crypt4gh_public_key):
+def test_encrypt_fails_if_the_signing_key_cannot_be_loaded(tmp_path, crypt4gh_public_key, unread_file):
     """A signing key that cannot be loaded is a configuration error, which the GRZ has to fix."""
-    config_path = _write_config(tmp_path, _config(crypt4gh_public_key, {"signing_key_path": "/dev/null"}))
+    not_a_key_path = tmp_path / "not_a_key.sec"
+    not_a_key_path.write_text("not a key")
+    config_path = _write_config(
+        tmp_path, _config(crypt4gh_public_key, unread_file, {"signing_key_path": str(not_a_key_path)})
+    )
 
     with patch("grzctl.commands.encrypt.Worker") as mock_worker_cls:
         result = _invoke_encrypt(config_path, _submission_dir(tmp_path), mock_worker_cls)
 
     assert isinstance(result.exception, grzexc.ConfigurationError), result.output
-    assert "archives.signing_key_path: Secret key /dev/null cannot be read" in str(result.exception)
+    assert f"archives.signing_key_path: Secret key {not_a_key_path} cannot be read" in str(result.exception)
     mock_worker_cls.return_value.encrypt.assert_not_called()

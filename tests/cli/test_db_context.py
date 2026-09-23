@@ -27,7 +27,7 @@ def full_config_path(
     migrated_db_config_content,
     pruefbericht_config_content,
 ):
-    from tests.conftest import _grzctl_archives
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
 
     archives = _grzctl_archives(endpoint_url="http://localhost:9000")
     # Use distinct public keys per archive so tests can assert that the consent
@@ -41,7 +41,7 @@ def full_config_path(
                 "inbox_buckets": {
                     "inbox": {
                         "endpoint_url": "http://localhost:9000",
-                        "private_key_path": "/dev/null",
+                        "private_key_path": _GRZ_PRIVATE_KEY_PATH,
                     }
                 },
             }
@@ -352,7 +352,7 @@ def test_db_wrappers(
                 expected_key = (
                     CONSENTED_PUBLIC_KEY_PATH if command_spec.get("consent_value") else NON_CONSENTED_PUBLIC_KEY_PATH
                 )
-                assert mock_worker.encrypt.call_args.kwargs["recipient_public_key_path"] == expected_key, (
+                assert mock_worker.encrypt.call_args.kwargs["recipient_public_key_path"] == Path(expected_key), (
                     "encrypt must use the public key of the archive targeted by the submission's consent"
                 )
             elif method_name == "archive":

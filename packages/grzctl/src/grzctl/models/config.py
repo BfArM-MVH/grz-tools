@@ -9,7 +9,13 @@ from typing import Annotated, Any
 
 import grz_common.exceptions as grzexc
 import yaml
-from grz_common.models.base import Crypt4GHPublicKey, IgnoringBaseModel, IgnoringBaseSettings, get_secret_value
+from grz_common.models.base import (
+    Crypt4GHPublicKey,
+    FilePath,
+    IgnoringBaseModel,
+    IgnoringBaseSettings,
+    get_secret_value,
+)
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from grz_common.utils.crypt import Crypt4GH
@@ -25,7 +31,7 @@ from .pruefbericht import PruefberichtModel
 _config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", default=None)
 
 
-def _check_key_fields(name: str, key: object | None, key_path: str | None, *, required: bool) -> None:
+def _check_key_fields(name: str, key: object | None, key_path: Path | None, *, required: bool) -> None:
     """Check that at most one of the fields ``<name>`` and ``<name>_path`` is set.
 
     :param name: Name of the field with the inline key.
@@ -41,7 +47,7 @@ def _check_key_fields(name: str, key: object | None, key_path: str | None, *, re
 
 
 def _load_private_key(
-    location: str, private_key: SecretStr | None, private_key_path: str | None, passphrase: SecretStr | None
+    location: str, private_key: SecretStr | None, private_key_path: Path | None, passphrase: SecretStr | None
 ) -> bytes:
     """Load a crypt4gh private key in memory, from its inline text or from its file.
 
@@ -79,7 +85,7 @@ class InboxConfig(S3ConnectionBase):
     private_key: SecretStr | None = None
     """The GRZ crypt4gh private key used to decrypt files from this inbox."""
 
-    private_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    private_key_path: FilePath | None = None
     """Path to the GRZ crypt4gh private key used to decrypt files from this inbox."""
 
     private_key_passphrase: SecretStr | None = None
@@ -103,7 +109,7 @@ class InboxTarget(IgnoringBaseModel):
     private_key: SecretStr | None = None
     """The GRZ crypt4gh private key used to decrypt files from this inbox."""
 
-    private_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    private_key_path: FilePath | None = None
     """Path to the GRZ crypt4gh private key used to decrypt files from this inbox."""
 
     private_key_passphrase: SecretStr | None = None
@@ -134,13 +140,13 @@ class ArchiveTarget(IgnoringBaseModel):
     public_key: Crypt4GHPublicKey | None = None
     """The crypt4gh public key for re-encryption of files destined for this archive."""
 
-    public_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    public_key_path: FilePath | None = None
     """Path to the crypt4gh public key for re-encryption of files destined for this archive."""
 
     private_key: SecretStr | None = None
     """The crypt4gh private key of this archive, to decrypt archived submissions (optional)."""
 
-    private_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    private_key_path: FilePath | None = None
     """Path to the crypt4gh private key of this archive, to decrypt archived submissions (optional)."""
 
     private_key_passphrase: SecretStr | None = None
@@ -157,7 +163,7 @@ class ArchiveTarget(IgnoringBaseModel):
         return self
 
     @contextlib.contextmanager
-    def public_key_file(self) -> Iterator[str]:
+    def public_key_file(self) -> Iterator[Path]:
         """Give a path to the crypt4gh public key, for callers that need a file.
 
         ``public_key_path`` is given as is. ``public_key`` is written to a temporary file first,
@@ -173,7 +179,7 @@ class ArchiveTarget(IgnoringBaseModel):
         with tempfile.NamedTemporaryFile("w") as public_key_file:
             public_key_file.write(self.public_key)
             public_key_file.flush()
-            yield public_key_file.name
+            yield Path(public_key_file.name)
 
 
 class ArchivesConfig(IgnoringBaseModel):
@@ -188,7 +194,7 @@ class ArchivesConfig(IgnoringBaseModel):
     signing_key: SecretStr | None = None
     """The GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
 
-    signing_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    signing_key_path: FilePath | None = None
     """Path to the GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
 
     signing_key_passphrase: SecretStr | None = None
@@ -378,8 +384,11 @@ class GrzctlConfig(IgnoringBaseSettings):
         for prefix, holder in candidates:
             if holder.private_key is not None:
                 source = ("inline", holder.private_key.get_secret_value())
+            elif holder.private_key_path is not None:
+                source = ("path", str(holder.private_key_path.resolve()))
             else:
-                source = ("path", str(Path(str(holder.private_key_path)).expanduser().resolve()))
+                # validation leaves no inbox without a key, and the archives without one are not candidates
+                continue
             groups.setdefault(source, []).append((prefix, holder))
 
         for group in groups.values():
