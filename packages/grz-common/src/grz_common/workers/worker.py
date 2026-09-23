@@ -134,9 +134,6 @@ class Worker:
                 raise grzexc.SubmissionValidationError(error_msg)
             else:
                 self.__log.info("File validation successful!")
-        except KeyboardInterrupt:
-            self.__log.error("Validation was cancelled by the user and is incomplete.")
-            raise
         except grzexc.GrzError:
             # already logged and typed above, so wrapping it again would log and double-report it
             raise
