@@ -154,6 +154,15 @@ def test_get_index(mocker, logger, temp_data_file_path):
     assert index == (str(temp_data_file_path), 1234567890.0, 1234)
 
 
+def test_get_index_keeps_size_zero(logger, test_dir_path):
+    """An empty file has size 0, as in the progress logs written before, not the -1 of a missing file."""
+    empty_file_path = test_dir_path / "empty.bed"
+    empty_file_path.touch()
+
+    assert logger._get_index(empty_file_path)[2] == 0
+    assert logger._get_index("missing.bed", size=0, mtime=0.0) == ("missing.bed", 0.0, 0)
+
+
 def test_read_existing_log(temp_log_file_path, temp_data_file_path, temp_data_file_metadata):
     """Test that file states are correctly read from an existing json log."""
     # Manually write a row to the log file
