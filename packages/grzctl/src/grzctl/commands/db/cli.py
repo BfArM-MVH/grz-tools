@@ -143,33 +143,44 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
-def _read_known_public_keys(path: str | Path) -> dict[str, list[SSHPublicKeyTypes]]:
-    """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
+def _parse_known_public_keys(lines: Iterable[str], source: str) -> dict[str, list[SSHPublicKeyTypes]]:
+    """Parse lines with one ``<format> <key> <comment>`` entry per key.
 
     The comment names the key's owner, and signature checks look keys up by it. So the comment
     is required, and it may contain spaces. Several keys may share a comment, for example across
     a key rotation, and all of them are kept. Blank lines and lines starting with ``#`` are skipped.
 
-    :param path: Path to the known public keys file.
+    :param lines: The entries, one per line.
+    :param source: Name for *lines* to use in error messages, such as a file path or config key.
     :returns: The public keys, grouped by their comment in file order.
     :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
     """
     public_keys: dict[str, list[SSHPublicKeyTypes]] = {}
-    with open(path) as f:
-        for line_number, line in enumerate(f, start=1):
-            entry = line.strip()
-            if not entry or entry.startswith("#"):
-                continue
-            parts = entry.split(maxsplit=2)
-            if len(parts) < 3:
-                raise DatabaseConfigurationError(
-                    f"{path}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
-                )
-            try:
-                public_keys.setdefault(parts[2], []).append(load_ssh_public_key(entry.encode()))
-            except (ValueError, UnsupportedAlgorithm) as e:
-                raise DatabaseConfigurationError(f"{path}:{line_number}: cannot load the public key: {e}") from e
+    for line_number, line in enumerate(lines, start=1):
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        parts = entry.split(maxsplit=2)
+        if len(parts) < 3:
+            raise DatabaseConfigurationError(
+                f"{source}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
+            )
+        try:
+            public_keys.setdefault(parts[2], []).append(load_ssh_public_key(entry.encode()))
+        except (ValueError, UnsupportedAlgorithm) as e:
+            raise DatabaseConfigurationError(f"{source}:{line_number}: cannot load the public key: {e}") from e
     return public_keys
+
+
+def _read_known_public_keys(path: str | Path) -> dict[str, list[SSHPublicKeyTypes]]:
+    """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
+
+    :param path: Path to the known public keys file.
+    :returns: The public keys, grouped by their comment in file order.
+    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
+    """
+    with open(path) as f:
+        return _parse_known_public_keys(f, source=str(path))
 
 
 @click.group(help="Database operations")
@@ -196,7 +207,12 @@ def db(
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
-    public_keys = _read_known_public_keys(db_config.known_public_keys)
+    if db_config.known_public_keys is not None:
+        public_keys = _parse_known_public_keys(db_config.known_public_keys, "db.known_public_keys")
+    elif db_config.known_public_keys_file is not None:
+        public_keys = _read_known_public_keys(db_config.known_public_keys_file)
+    else:
+        raise DatabaseConfigurationError("Either known_public_keys or known_public_keys_file must be provided.")
     for comment, keys in public_keys.items():
         log.debug(f"Found {len(keys)} public key(s) labeled '{comment}'")
 

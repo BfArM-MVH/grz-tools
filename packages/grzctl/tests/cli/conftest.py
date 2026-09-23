@@ -75,7 +75,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
                 "private_key_path": str(private_key_path.resolve()),
                 "private_key_passphrase": "",
             },
-            "known_public_keys": str(public_key_path.resolve()),
+            "known_public_keys_file": str(public_key_path.resolve()),
         },
         pruefbericht={},
         keys={

@@ -1,13 +1,20 @@
-"""Tests for reading the ``known_public_keys`` file of ``grzctl db``, and for the signature checks that use it."""
+"""Tests for the known public keys of ``grzctl db`` (inline or from a file), and for the signature
+checks that use them.
+"""
 
 from pathlib import Path
 
+import click.testing
+import grzctl.cli
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from grz_db.errors import DatabaseConfigurationError
 from grzctl.commands.db import SignatureStatus, _verify_signature
-from grzctl.commands.db.cli import _read_known_public_keys
+from grzctl.commands.db.cli import _parse_known_public_keys, _read_known_public_keys
+from grzctl.models.config import GrzctlConfig
+from grzctl.models.db import Author, DbModel
+from pydantic import ValidationError
 
 
 def _openssh_public_key() -> str:
@@ -59,6 +66,11 @@ def test_rejects_a_key_that_does_not_load_and_names_the_line(tmp_path: Path) -> 
         _read_known_public_keys(path)
 
 
+def test_parse_known_public_keys_names_the_entry_by_number() -> None:
+    with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys:2: expected"):
+        _parse_known_public_keys(["# data stewards", _openssh_public_key()], "db.known_public_keys")
+
+
 class _SignedBy:
     """Stands in for a signed log entry that only the given public key verifies."""
 
@@ -91,3 +103,67 @@ def test_an_unknown_name_tries_every_key_of_every_name() -> None:
     public_keys = {"alice": [_public_key()], "bob": [_public_key(), signer]}
 
     assert _verify_signature(public_keys, "carol", _SignedBy(signer)) == (SignatureStatus.VERIFIED, "bob")
+
+
+def _db_model(**known_public_keys_kwargs) -> DbModel:
+    return DbModel(
+        database_url="sqlite:///unused.sqlite",
+        author=Author(name="alice", private_key="dummy"),
+        **known_public_keys_kwargs,
+    )
+
+
+def test_known_public_keys_rejects_a_path_with_a_migration_hint() -> None:
+    """Old configs put a path into ``known_public_keys``; the error points at the new field."""
+    with pytest.raises(ValidationError, match="known_public_keys_file"):
+        _db_model(known_public_keys="/some/known_public_keys")
+
+
+def test_known_public_keys_rejects_both_set(tmp_path: Path) -> None:
+    path = _write(tmp_path, f"{_openssh_public_key()} alice\n")
+
+    with pytest.raises(ValidationError, match="Only one of known_public_keys or known_public_keys_file"):
+        _db_model(known_public_keys=[f"{_openssh_public_key()} alice"], known_public_keys_file=str(path))
+
+
+def test_known_public_keys_file_expands_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = tmp_path / "known_public_keys"
+    path.write_text(f"{_openssh_public_key()} alice\n")
+
+    config = _db_model(known_public_keys_file="~/known_public_keys")
+
+    assert config.known_public_keys_file == path
+
+
+def _write_config(tmp_path: Path, config: GrzctlConfig) -> Path:
+    config_path = tmp_path / "config.yaml"
+    with open(config_path, "w") as config_file:
+        config.to_yaml(config_file)
+    return config_path
+
+
+def test_db_group_requires_one_of_known_public_keys_or_known_public_keys_file(
+    tmp_path: Path, offline_config: GrzctlConfig
+) -> None:
+    offline_config.db.known_public_keys_file = None
+    config_path = _write_config(tmp_path, offline_config)
+    cli = grzctl.cli.build_cli()
+
+    result = click.testing.CliRunner().invoke(cli, ["--config", str(config_path), "db", "init"])
+
+    assert isinstance(result.exception, DatabaseConfigurationError)
+    assert "known_public_keys" in str(result.exception)
+
+
+def test_db_group_accepts_an_inline_known_public_keys_list(tmp_path: Path, offline_config: GrzctlConfig) -> None:
+    """A config with the keys inlined works just as well as one naming a file."""
+    keys_file = Path(offline_config.db.known_public_keys_file)
+    offline_config.db.known_public_keys_file = None
+    offline_config.db.known_public_keys = [line for line in keys_file.read_text().splitlines() if line.strip()]
+    config_path = _write_config(tmp_path, offline_config)
+    cli = grzctl.cli.build_cli()
+
+    result = click.testing.CliRunner().invoke(cli, ["--config", str(config_path), "db", "init"])
+
+    assert result.exit_code == 0, result.stderr
