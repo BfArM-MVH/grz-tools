@@ -74,10 +74,10 @@ class SubmissionMetadata:
         try:
             with open(file_path, encoding="utf-8") as jsonfile:
                 metadata = json.load(jsonfile)
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             raise grzexc.SubmissionValidationError(f"Invalid JSON in metadata file {file_path}: {e}") from e
         try:
-            return GrzSubmissionMetadata(**metadata)
+            return GrzSubmissionMetadata.model_validate(metadata)
         except ValidationError as ve:
             raise grzexc.SubmissionValidationError(f"Invalid metadata in {file_path}: {ve}") from ve
 
