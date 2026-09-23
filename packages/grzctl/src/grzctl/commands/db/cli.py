@@ -152,7 +152,7 @@ def _parse_known_public_keys(lines: Iterable[str], source: str) -> dict[str, lis
 
     :param lines: The entries, one per line.
     :param source: Name for *lines* to use in error messages, such as a file path or config key.
-    :returns: The public keys, grouped by their comment in file order.
+    :returns: The public keys, grouped by their comment in the order of *lines*.
     :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
     """
     public_keys: dict[str, list[SSHPublicKeyTypes]] = {}
