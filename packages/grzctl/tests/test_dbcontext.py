@@ -118,15 +118,23 @@ class TestMapExceptionToFailureReason:
         assert not unmapped, f"These FailureReasonEnum values have no exception mapping: {unmapped}"
 
     def test_every_expected_failure_records_a_current_reason(self, db_context: DbContext):
-        """A GrzError that maps to ``unknown`` would be recorded as a bug, and a retired reason not at all."""
+        """A GrzError that maps to ``unknown`` would be recorded as a bug, and a retired reason not at all.
 
-        def leaves(cls: type[grzexc.GrzError]) -> list[type[grzexc.GrzError]]:
-            subclasses = cls.__subclasses__()
-            return [leaf for subclass in subclasses for leaf in leaves(subclass)] if subclasses else [cls]
+        This walks every subclass, not only the leaves: a class with subclasses of its own,
+        such as ``TransferError``, can still be raised directly and needs its own reason.
+        """
+
+        def all_subclasses(cls: type[grzexc.GrzError]) -> list[type[grzexc.GrzError]]:
+            direct = cls.__subclasses__()
+            return direct + [sub for subclass in direct for sub in all_subclasses(subclass)]
+
+        # grouping classes that no code raises directly, so they carry no failure reason of their own
+        grouping_classes = {grzexc.GrzError, grzexc.SubmissionRejectedError}
 
         reasons = {
             cls.__name__: db_context._map_exception_to_failure_reason(cls, cls("failed"))
-            for cls in leaves(grzexc.GrzError)
+            for cls in all_subclasses(grzexc.GrzError)
+            if cls not in grouping_classes
         }
 
         wrong = {
