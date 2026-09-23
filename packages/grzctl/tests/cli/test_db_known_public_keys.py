@@ -11,7 +11,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from grz_db.errors import DatabaseConfigurationError
 from grzctl.commands.db import SignatureStatus, _verify_signature
-from grzctl.commands.db.cli import _parse_known_public_keys, _read_known_public_keys_file
 from grzctl.models.config import GrzctlConfig
 from grzctl.models.db import Author, DbModel
 from pydantic import ValidationError
@@ -29,53 +28,60 @@ def _write(tmp_path: Path, content: str) -> Path:
     return path
 
 
+def _db_model(**known_public_keys_kwargs) -> DbModel:
+    return DbModel(
+        database_url="sqlite:///unused.sqlite",
+        author=Author(name="alice", private_key="dummy"),
+        **known_public_keys_kwargs,
+    )
+
+
 def test_file_skips_blank_lines_and_comment_lines(tmp_path: Path) -> None:
     path = _write(tmp_path, f"# data stewards\n\n{_openssh_public_key()} alice\n\n{_openssh_public_key()} bob\n")
 
-    assert _read_known_public_keys_file(path).keys() == {"alice", "bob"}
+    assert _db_model(known_public_keys_file=path).public_keys_by_owner.keys() == {"alice", "bob"}
 
 
 def test_file_names_the_line_of_an_error(tmp_path: Path) -> None:
     path = _write(tmp_path, f"# data stewards\n{_openssh_public_key()}\n")
 
     with pytest.raises(DatabaseConfigurationError, match=r"known_public_keys:2: expected"):
-        _read_known_public_keys_file(path)
+        _ = _db_model(known_public_keys_file=path).public_keys_by_owner
 
 
 def test_keeps_every_key_that_shares_a_comment_in_order() -> None:
     """A rotated key keeps its owner's name, and the owner's older signatures must still verify."""
     first = _openssh_public_key()
     second = _openssh_public_key()
-    entries = [("db.known_public_keys[0]", f"{first} alice"), ("db.known_public_keys[1]", f"{second} alice")]
 
-    keys = _parse_known_public_keys(entries)["alice"]
+    keys = _db_model(known_public_keys=[f"{first} alice", f"{second} alice"]).public_keys_by_owner["alice"]
 
     assert [key.public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode() for key in keys] == [first, second]
 
 
 def test_keeps_a_comment_with_spaces_whole() -> None:
-    entries = [("db.known_public_keys[0]", f"{_openssh_public_key()} Alice Example")]
+    config = _db_model(known_public_keys=[f"{_openssh_public_key()} Alice Example"])
 
-    assert _parse_known_public_keys(entries).keys() == {"Alice Example"}
+    assert config.public_keys_by_owner.keys() == {"Alice Example"}
 
 
 @pytest.mark.parametrize("entry", ["", "# data stewards"], ids=["blank", "comment"])
 def test_rejects_an_entry_that_is_no_key_and_names_it(entry: str) -> None:
     """The list takes its comments from YAML, so an entry that is no key is a mistake."""
-    entries = [("db.known_public_keys[0]", f"{_openssh_public_key()} alice"), ("db.known_public_keys[1]", entry)]
+    config = _db_model(known_public_keys=[f"{_openssh_public_key()} alice", entry])
 
     with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[1\]: "):
-        _parse_known_public_keys(entries)
+        _ = config.public_keys_by_owner
 
 
 def test_rejects_a_key_without_a_comment_and_names_it() -> None:
     with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[0\]: expected"):
-        _parse_known_public_keys([("db.known_public_keys[0]", _openssh_public_key())])
+        _ = _db_model(known_public_keys=[_openssh_public_key()]).public_keys_by_owner
 
 
 def test_rejects_a_key_that_does_not_load_and_names_it() -> None:
     with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[0\]: cannot load"):
-        _parse_known_public_keys([("db.known_public_keys[0]", "ssh-ed25519 not-a-key alice")])
+        _ = _db_model(known_public_keys=["ssh-ed25519 not-a-key alice"]).public_keys_by_owner
 
 
 class _SignedBy:
@@ -110,14 +116,6 @@ def test_an_unknown_name_tries_every_key_of_every_name() -> None:
     public_keys = {"alice": [_public_key()], "bob": [_public_key(), signer]}
 
     assert _verify_signature(public_keys, "carol", _SignedBy(signer)) == (SignatureStatus.VERIFIED, "bob")
-
-
-def _db_model(**known_public_keys_kwargs) -> DbModel:
-    return DbModel(
-        database_url="sqlite:///unused.sqlite",
-        author=Author(name="alice", private_key="dummy"),
-        **known_public_keys_kwargs,
-    )
 
 
 def test_known_public_keys_rejects_a_path_with_a_migration_hint() -> None:
