@@ -1,5 +1,6 @@
 """Tests for submission_id-aware validation skip logic"""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -153,3 +154,39 @@ def test_validation_reruns_after_failed_validation(
         or mock_validate.validate_bam.called
         or mock_validate.validate_raw.called
     ), "Expected grz-check to re-run for previously failed files"
+
+
+def test_an_interruption_cancels_the_queued_validation_tasks(
+    submission,
+    temp_checksum_log,
+    temp_seq_data_log,
+    mocker,
+):
+    """A KeyboardInterrupt stops the validation without running the queued tasks. grzctl raises one for SIGTERM."""
+    started_tasks = []
+
+    def interrupt_the_first_task(*_args, **_kwargs):
+        started_tasks.append(None)
+        if len(started_tasks) == 1:
+            # future.result() raises it again in the main thread, where a signal would raise it
+            raise KeyboardInterrupt
+        time.sleep(0.1)
+
+    mock_validate = mocker.patch("grz_common.workers.submission.grz_check")
+    mock_validate.validate_fastq_paired.side_effect = interrupt_the_first_task
+    mock_validate.validate_fastq.side_effect = interrupt_the_first_task
+    mock_validate.validate_bam.side_effect = interrupt_the_first_task
+    mock_validate.validate_raw.side_effect = interrupt_the_first_task
+
+    with pytest.raises(KeyboardInterrupt):
+        list(
+            submission.validate_files(
+                checksum_progress_file=temp_checksum_log,
+                seq_data_progress_file=temp_seq_data_log,
+                threads=1,
+                no_mmap=True,
+            )
+        )
+
+    # the one worker thread may have started the second task before the interruption reached the main thread
+    assert len(started_tasks) <= 2, f"{len(started_tasks)} tasks ran"

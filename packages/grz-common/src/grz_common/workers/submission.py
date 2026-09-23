@@ -434,54 +434,61 @@ class Submission:
             concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor,
             tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,  # type: ignore[call-overload]
         ):
-            futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
+            try:
+                futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
 
-            for future in concurrent.futures.as_completed(futures):
-                paths, metas, reports = future.result()
+                for future in concurrent.futures.as_completed(futures):
+                    paths, metas, reports = future.result()
 
-                pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
+                    pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
 
-                for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
-                    checksum_issues = []
+                    for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
+                        checksum_issues = []
 
-                    for w in report.warnings:
-                        self.__log.warning(f"{file_path.name}: {w}")
+                        for w in report.warnings:
+                            self.__log.warning(f"{file_path.name}: {w}")
 
-                    if not report.sha256:
-                        checksum_issues.append("No checksum found.")
+                        if not report.sha256:
+                            checksum_issues.append("No checksum found.")
 
-                    if (
-                        report.sha256
-                        and file_metadata.checksum_type == ChecksumType.sha256
-                        and file_metadata.file_checksum != report.sha256
-                    ):
-                        checksum_issues.append(
-                            f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
-                        )
-
-                    if file_path.exists() and file_path.is_file():
-                        if file_metadata.file_size_in_bytes != file_path.stat().st_size:
+                        if (
+                            report.sha256
+                            and file_metadata.checksum_type == ChecksumType.sha256
+                            and file_metadata.file_checksum != report.sha256
+                        ):
                             checksum_issues.append(
-                                f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
+                                f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
                             )
-                    else:
-                        checksum_issues.append("File not found for size check.")
 
-                    checksum_passed = not checksum_issues
-                    checksum_state = ValidationState(
-                        errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
-                    )
-                    checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
+                        if file_path.exists() and file_path.is_file():
+                            if file_metadata.file_size_in_bytes != file_path.stat().st_size:
+                                checksum_issues.append(
+                                    f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
+                                )
+                        else:
+                            checksum_issues.append("File not found for size check.")
 
-                    if file_metadata.file_type in ("fastq", "bam"):
-                        seq_data_state = ValidationState(
-                            errors=report.errors, validation_passed=report.is_valid, submission_id=self.submission_id
+                        checksum_passed = not checksum_issues
+                        checksum_state = ValidationState(
+                            errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
                         )
-                        seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
+                        checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
 
-                if not no_mmap:
-                    task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
-                    pbar.update(task_bytes)
+                        if file_metadata.file_type in ("fastq", "bam"):
+                            seq_data_state = ValidationState(
+                                errors=report.errors,
+                                validation_passed=report.is_valid,
+                                submission_id=self.submission_id,
+                            )
+                            seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
+
+                    if not no_mmap:
+                        task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
+                        pbar.update(task_bytes)
+            except BaseException:
+                # the with block would otherwise run every queued task before it lets the error through
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
