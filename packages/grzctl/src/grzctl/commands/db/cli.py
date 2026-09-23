@@ -143,33 +143,43 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
-def _parse_known_public_keys(lines: Iterable[str], source: str) -> dict[str, list[SSHPublicKeyTypes]]:
-    """Parse lines with one ``<format> <key> <comment>`` entry per key.
+def _parse_known_public_keys(entries: Iterable[tuple[str, str]]) -> dict[str, list[SSHPublicKeyTypes]]:
+    """Parse ``<format> <key> <comment>`` entries, one per key.
 
     The comment names the key's owner, and signature checks look keys up by it. So the comment
     is required, and it may contain spaces. Several keys may share a comment, for example across
-    a key rotation, and all of them are kept. Blank lines and lines starting with ``#`` are skipped.
+    a key rotation, and all of them are kept.
 
-    :param lines: The entries, one per line.
-    :param source: Name for *lines* to use in error messages, such as a file path or config key.
-    :returns: The public keys, grouped by their comment in the order of *lines*.
-    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
+    :param entries: Pairs of the entry's location for error messages, such as ``path:line``, and the entry.
+    :returns: The public keys, grouped by their comment in the order of *entries*.
+    :raises DatabaseConfigurationError: for an entry without a comment, or with a key that does not load.
     """
     public_keys: dict[str, list[SSHPublicKeyTypes]] = {}
-    for line_number, line in enumerate(lines, start=1):
-        entry = line.strip()
-        if not entry or entry.startswith("#"):
-            continue
+    for location, entry in entries:
         parts = entry.split(maxsplit=2)
         if len(parts) < 3:
             raise DatabaseConfigurationError(
-                f"{source}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
+                f"{location}: expected '<format> <key> <comment>', where the comment names the key's owner."
             )
         try:
             public_keys.setdefault(parts[2], []).append(load_ssh_public_key(entry.encode()))
         except (ValueError, UnsupportedAlgorithm) as e:
-            raise DatabaseConfigurationError(f"{source}:{line_number}: cannot load the public key: {e}") from e
+            raise DatabaseConfigurationError(f"{location}: cannot load the public key: {e}") from e
     return public_keys
+
+
+def _read_known_public_keys_file(path: Path) -> dict[str, list[SSHPublicKeyTypes]]:
+    """Read a file with one ``<format> <key> <comment>`` line per key.
+
+    Blank lines and lines starting with ``#`` are skipped.
+
+    :param path: Path to the known public keys file.
+    :returns: The public keys, grouped by their comment in file order.
+    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
+    """
+    with open(path) as f:
+        lines = [(f"{path}:{line_number}", line.strip()) for line_number, line in enumerate(f, start=1)]
+    return _parse_known_public_keys((location, line) for location, line in lines if line and not line.startswith("#"))
 
 
 @click.group(help="Database operations")
@@ -197,10 +207,11 @@ def db(
 
     log.debug("Reading known public keys...")
     if db_config.known_public_keys is not None:
-        public_keys = _parse_known_public_keys(db_config.known_public_keys, "db.known_public_keys")
+        public_keys = _parse_known_public_keys(
+            (f"db.known_public_keys[{index}]", entry.strip()) for index, entry in enumerate(db_config.known_public_keys)
+        )
     elif db_config.known_public_keys_file is not None:
-        with open(db_config.known_public_keys_file) as f:
-            public_keys = _parse_known_public_keys(f, str(db_config.known_public_keys_file))
+        public_keys = _read_known_public_keys_file(db_config.known_public_keys_file)
     else:
         raise DatabaseConfigurationError("Either known_public_keys or known_public_keys_file must be provided.")
     for comment, keys in public_keys.items():

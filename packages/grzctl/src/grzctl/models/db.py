@@ -46,7 +46,8 @@ class DbModel(IgnoringBaseSettings):
 
     known_public_keys: list[str] | None = None
     """Public keys that verify the signatures in the DB, one ``<format> <key> <author name>``
-    entry per key, the same format as a line of ``known_public_keys_file``."""
+    entry per key, the same format as a line of ``known_public_keys_file``. Every entry must be
+    a key. Use YAML comments, not entries starting with ``#``."""
 
     known_public_keys_file: FilePath | None = None
     """File with one ``<format> <key> <author name>`` line per key. Blank lines and lines

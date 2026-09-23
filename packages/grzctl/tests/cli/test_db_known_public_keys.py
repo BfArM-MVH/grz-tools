@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from grz_db.errors import DatabaseConfigurationError
 from grzctl.commands.db import SignatureStatus, _verify_signature
-from grzctl.commands.db.cli import _parse_known_public_keys
+from grzctl.commands.db.cli import _parse_known_public_keys, _read_known_public_keys_file
 from grzctl.models.config import GrzctlConfig
 from grzctl.models.db import Author, DbModel
 from pydantic import ValidationError
@@ -29,10 +29,21 @@ def _write(tmp_path: Path, content: str) -> Path:
     return path
 
 
-def test_skips_blank_lines_and_comment_lines() -> None:
-    lines = ["# data stewards", "", f"{_openssh_public_key()} alice", "", f"{_openssh_public_key()} bob"]
+def _entries(*entries: str) -> list[tuple[str, str]]:
+    return [(f"db.known_public_keys[{index}]", entry) for index, entry in enumerate(entries)]
 
-    assert _parse_known_public_keys(lines, "db.known_public_keys").keys() == {"alice", "bob"}
+
+def test_file_skips_blank_lines_and_comment_lines(tmp_path: Path) -> None:
+    path = _write(tmp_path, f"# data stewards\n\n{_openssh_public_key()} alice\n\n{_openssh_public_key()} bob\n")
+
+    assert _read_known_public_keys_file(path).keys() == {"alice", "bob"}
+
+
+def test_file_names_the_line_of_an_error(tmp_path: Path) -> None:
+    path = _write(tmp_path, f"# data stewards\n{_openssh_public_key()}\n")
+
+    with pytest.raises(DatabaseConfigurationError, match=r"known_public_keys:2: expected"):
+        _read_known_public_keys_file(path)
 
 
 def test_keeps_every_key_that_shares_a_comment_in_order() -> None:
@@ -40,25 +51,30 @@ def test_keeps_every_key_that_shares_a_comment_in_order() -> None:
     first = _openssh_public_key()
     second = _openssh_public_key()
 
-    keys = _parse_known_public_keys([f"{first} alice", f"{second} alice"], "db.known_public_keys")["alice"]
+    keys = _parse_known_public_keys(_entries(f"{first} alice", f"{second} alice"))["alice"]
 
     assert [key.public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode() for key in keys] == [first, second]
 
 
 def test_keeps_a_comment_with_spaces_whole() -> None:
-    lines = [f"{_openssh_public_key()} Alice Example"]
-
-    assert _parse_known_public_keys(lines, "db.known_public_keys").keys() == {"Alice Example"}
+    assert _parse_known_public_keys(_entries(f"{_openssh_public_key()} Alice Example")).keys() == {"Alice Example"}
 
 
-def test_rejects_a_key_without_a_comment_and_names_the_line() -> None:
-    with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys:2: expected"):
-        _parse_known_public_keys(["# data stewards", _openssh_public_key()], "db.known_public_keys")
+@pytest.mark.parametrize("entry", ["", "# data stewards"], ids=["blank", "comment"])
+def test_rejects_an_entry_that_is_no_key_and_names_it(entry: str) -> None:
+    """The list takes its comments from YAML, so an entry that is no key is a mistake."""
+    with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[1\]: "):
+        _parse_known_public_keys(_entries(f"{_openssh_public_key()} alice", entry))
 
 
-def test_rejects_a_key_that_does_not_load_and_names_the_line() -> None:
-    with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys:1: cannot load"):
-        _parse_known_public_keys(["ssh-ed25519 not-a-key alice"], "db.known_public_keys")
+def test_rejects_a_key_without_a_comment_and_names_it() -> None:
+    with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[0\]: expected"):
+        _parse_known_public_keys(_entries(_openssh_public_key()))
+
+
+def test_rejects_a_key_that_does_not_load_and_names_it() -> None:
+    with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[0\]: cannot load"):
+        _parse_known_public_keys(_entries("ssh-ed25519 not-a-key alice"))
 
 
 class _SignedBy:
