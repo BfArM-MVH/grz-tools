@@ -10,6 +10,7 @@ import yaml
 from grzctl.models.config import GrzctlConfig
 
 PASSPHRASE = "author-passphrase"
+PRIVATE_KEY = "author-private-key"
 CLIENT_SECRET = "pruefbericht-client-secret"
 INBOX_S3_SECRET = "inbox-s3-secret"
 ARCHIVE_S3_SECRET = "archive-s3-secret"
@@ -26,6 +27,8 @@ def _dump_config(config_path: Path, *args: str) -> str:
 def config_with_secrets_path(tmp_path: Path, offline_config: GrzctlConfig) -> Path:
     """A YAML config file with secrets in plain text: in an IgnoringBaseSettings, in an IgnoringBaseModel, and in S3."""
     data = offline_config.model_dump(mode="json", exclude_none=True)
+    del data["db"]["author"]["private_key_path"]
+    data["db"]["author"]["private_key"] = PRIVATE_KEY
     data["db"]["author"]["private_key_passphrase"] = PASSPHRASE
     data["pruefbericht"]["client_secret"] = CLIENT_SECRET
     data["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["secret"] = INBOX_S3_SECRET
@@ -39,6 +42,7 @@ def config_with_secrets_path(tmp_path: Path, offline_config: GrzctlConfig) -> Pa
 def test_dump_config_masks_secrets_by_default(config_with_secrets_path: Path):
     dumped = yaml.safe_load(_dump_config(config_with_secrets_path))
 
+    assert dumped["db"]["author"]["private_key"] == "**********"
     assert dumped["db"]["author"]["private_key_passphrase"] == "**********"
     assert dumped["pruefbericht"]["client_secret"] == "**********"
     assert dumped["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["secret"] == "**********"
@@ -49,6 +53,7 @@ def test_dump_config_reveal_secrets_roundtrips(tmp_path: Path, config_with_secre
     """The --reveal-secrets output loads back as a config file, and dumping that again prints the same YAML."""
     first = _dump_config(config_with_secrets_path, "--reveal-secrets")
     dumped = yaml.safe_load(first)
+    assert dumped["db"]["author"]["private_key"] == PRIVATE_KEY
     assert dumped["db"]["author"]["private_key_passphrase"] == PASSPHRASE
     assert dumped["pruefbericht"]["client_secret"] == CLIENT_SECRET
 

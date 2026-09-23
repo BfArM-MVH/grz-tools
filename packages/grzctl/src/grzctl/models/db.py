@@ -31,7 +31,7 @@ class Author(IgnoringBaseSettings):
     name: AuthorNameStr
     """Name of the author"""
 
-    private_key: str | None = None
+    private_key: SecretStr | None = None
     """Author's private key (needed to sign DB modifications)."""
 
     private_key_path: FilePath | None = None
@@ -157,7 +157,7 @@ class DbModel(IgnoringBaseSettings):
         if self.author.private_key_path is not None:
             private_key_bytes = Path(self.author.private_key_path).read_bytes()
         elif self.author.private_key is not None:
-            private_key_bytes = self.author.private_key.encode("utf-8")
+            private_key_bytes = self.author.private_key.get_secret_value().encode("utf-8")
         else:
             raise ValueError("Either private_key or private_key_path must be provided.")
 

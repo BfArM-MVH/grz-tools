@@ -161,7 +161,7 @@ def db(
     if path := db_config.author.private_key_path:
         with open(path, "rb") as f:
             private_key_bytes = f.read()
-    elif key := db_config.author.private_key:
+    elif key := get_secret_value(db_config.author.private_key):
         private_key_bytes = key.encode("utf-8")
     else:
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
