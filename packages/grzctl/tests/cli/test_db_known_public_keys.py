@@ -29,10 +29,6 @@ def _write(tmp_path: Path, content: str) -> Path:
     return path
 
 
-def _entries(*entries: str) -> list[tuple[str, str]]:
-    return [(f"db.known_public_keys[{index}]", entry) for index, entry in enumerate(entries)]
-
-
 def test_file_skips_blank_lines_and_comment_lines(tmp_path: Path) -> None:
     path = _write(tmp_path, f"# data stewards\n\n{_openssh_public_key()} alice\n\n{_openssh_public_key()} bob\n")
 
@@ -50,31 +46,36 @@ def test_keeps_every_key_that_shares_a_comment_in_order() -> None:
     """A rotated key keeps its owner's name, and the owner's older signatures must still verify."""
     first = _openssh_public_key()
     second = _openssh_public_key()
+    entries = [("db.known_public_keys[0]", f"{first} alice"), ("db.known_public_keys[1]", f"{second} alice")]
 
-    keys = _parse_known_public_keys(_entries(f"{first} alice", f"{second} alice"))["alice"]
+    keys = _parse_known_public_keys(entries)["alice"]
 
     assert [key.public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode() for key in keys] == [first, second]
 
 
 def test_keeps_a_comment_with_spaces_whole() -> None:
-    assert _parse_known_public_keys(_entries(f"{_openssh_public_key()} Alice Example")).keys() == {"Alice Example"}
+    entries = [("db.known_public_keys[0]", f"{_openssh_public_key()} Alice Example")]
+
+    assert _parse_known_public_keys(entries).keys() == {"Alice Example"}
 
 
 @pytest.mark.parametrize("entry", ["", "# data stewards"], ids=["blank", "comment"])
 def test_rejects_an_entry_that_is_no_key_and_names_it(entry: str) -> None:
     """The list takes its comments from YAML, so an entry that is no key is a mistake."""
+    entries = [("db.known_public_keys[0]", f"{_openssh_public_key()} alice"), ("db.known_public_keys[1]", entry)]
+
     with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[1\]: "):
-        _parse_known_public_keys(_entries(f"{_openssh_public_key()} alice", entry))
+        _parse_known_public_keys(entries)
 
 
 def test_rejects_a_key_without_a_comment_and_names_it() -> None:
     with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[0\]: expected"):
-        _parse_known_public_keys(_entries(_openssh_public_key()))
+        _parse_known_public_keys([("db.known_public_keys[0]", _openssh_public_key())])
 
 
 def test_rejects_a_key_that_does_not_load_and_names_it() -> None:
     with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys\[0\]: cannot load"):
-        _parse_known_public_keys(_entries("ssh-ed25519 not-a-key alice"))
+        _parse_known_public_keys([("db.known_public_keys[0]", "ssh-ed25519 not-a-key alice")])
 
 
 class _SignedBy:
