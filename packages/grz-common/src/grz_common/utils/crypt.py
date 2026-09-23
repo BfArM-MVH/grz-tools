@@ -24,6 +24,34 @@ from .io import TqdmIOWrapper
 log = logging.getLogger(__name__)
 
 
+class _OSErrorKeeper:
+    """Wrap a file for crypt4gh, and keep the first ``OSError`` that a read or a write raises.
+
+    ``crypt4gh.lib.decrypt`` swallows every ``OSError``, so the caller raises the kept error again.
+    """
+
+    def __init__(self, file) -> None:
+        self.file = file
+        self.error: OSError | None = None
+
+    def read(self, size=-1):
+        return self._keep_error(self.file.read, size)
+
+    def readinto(self, buffer):
+        return self._keep_error(self.file.readinto, buffer)
+
+    def write(self, data):
+        return self._keep_error(self.file.write, data)
+
+    def _keep_error(self, method, argument):
+        try:
+            return method(argument)
+        except OSError as e:
+            if self.error is None:
+                self.error = e
+            raise
+
+
 class Crypt4GH:
     """Crypt4GH encryption/decryption utility class"""
 
@@ -140,6 +168,7 @@ class Crypt4GH:
         :param output_path: Path to the decrypted file
         :param private_key: The private key
         :raises DecryptionError: If the header or a segment of the file cannot be decrypted.
+        :raises OSError: If reading the file or writing the decrypted file fails, such as on a full disk.
         """
         total_size = getsize(input_path)
         file_name = input_path.name
@@ -151,12 +180,18 @@ class Crypt4GH:
                 tqdm(total=total_size, desc="DECRYPT ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
             ) as pbar_in_fd,
         ):
+            infile = _OSErrorKeeper(pbar_in_fd)
+            outfile = _OSErrorKeeper(out_fd)
             try:
                 crypt4gh.lib.decrypt(
                     keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
-                    infile=pbar_in_fd,
-                    outfile=out_fd,
+                    infile=infile,
+                    outfile=outfile,
                 )
             except ValueError as e:
                 # crypt4gh raises ValueError for a header or a segment that the file gets wrong
                 raise grzexc.DecryptionError(f"Cannot decrypt {input_path}: {e}") from e
+            # crypt4gh.lib.decrypt returns normally after an OSError, such as the one of a full disk
+            for file in (infile, outfile):
+                if file.error is not None:
+                    raise file.error

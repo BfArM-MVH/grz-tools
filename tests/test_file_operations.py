@@ -1,11 +1,14 @@
 """Tests for the file_operations module."""
 
+import errno
+import os
 from pathlib import Path
 
 import grz_common.exceptions as grzexc
 import pytest
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.utils.crypt import Crypt4GH
+from grz_common.utils.io import TqdmIOWrapper
 from grz_common.utils.paths import is_relative_subdirectory
 
 
@@ -93,3 +96,43 @@ def test_crypt4gh_decrypt_file_reports_a_changed_byte_as_a_decryption_error(
 
     with pytest.raises(grzexc.DecryptionError):
         Crypt4GH.decrypt_file(tmp_encrypted_file, tmp_path / "temp_file", private_key=private_key)
+
+
+@pytest.fixture
+def encrypted_random_file(crypt4gh_grz_public_keys, tmp_path) -> Path:
+    """A file of several crypt4gh segments."""
+    plain_file = tmp_path / "random"
+    plain_file.write_bytes(os.urandom(300 * 1024))
+    encrypted_file = tmp_path / "random.c4gh"
+    Crypt4GH.encrypt_file(plain_file, encrypted_file, crypt4gh_grz_public_keys)
+    return encrypted_file
+
+
+@pytest.mark.skipif(not Path("/dev/full").exists(), reason="needs /dev/full")
+def test_crypt4gh_decrypt_file_raises_the_error_of_a_full_disk(
+    encrypted_random_file, crypt4gh_grz_private_key_file_path
+):
+    """A full disk does not look like a decrypted file, although crypt4gh swallows the OSError of the failed write."""
+    private_key = Crypt4GH.retrieve_private_key(crypt4gh_grz_private_key_file_path)
+
+    with pytest.raises(OSError) as excinfo:
+        Crypt4GH.decrypt_file(encrypted_random_file, Path("/dev/full"), private_key=private_key)
+
+    assert excinfo.value.errno == errno.ENOSPC
+
+
+def test_crypt4gh_decrypt_file_raises_the_error_of_a_failed_read(
+    encrypted_random_file, crypt4gh_grz_private_key_file_path, tmp_path, monkeypatch
+):
+    """A failed read does not look like a decrypted file either."""
+    private_key = Crypt4GH.retrieve_private_key(crypt4gh_grz_private_key_file_path)
+
+    def fail(*_args):
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(TqdmIOWrapper, "readinto", fail)
+
+    with pytest.raises(OSError) as excinfo:
+        Crypt4GH.decrypt_file(encrypted_random_file, tmp_path / "random", private_key=private_key)
+
+    assert excinfo.value.errno == errno.EIO
