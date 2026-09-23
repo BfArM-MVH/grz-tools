@@ -7,10 +7,12 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
 
+import grz_common.exceptions as grzexc
 import yaml
-from grz_common.models.base import Crypt4GHPublicKey, IgnoringBaseModel, IgnoringBaseSettings
+from grz_common.models.base import Crypt4GHPublicKey, IgnoringBaseModel, IgnoringBaseSettings, get_secret_value
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
+from grz_common.utils.crypt import Crypt4GH
 from pydantic import Field, PrivateAttr, SecretStr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
@@ -21,6 +23,45 @@ from .db import DbModel
 from .pruefbericht import PruefberichtModel
 
 _config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", default=None)
+
+
+def _check_key_fields(name: str, key: object | None, key_path: str | None, *, required: bool) -> None:
+    """Check that at most one of the fields ``<name>`` and ``<name>_path`` is set.
+
+    :param name: Name of the field with the inline key.
+    :param key: Value of that field.
+    :param key_path: Value of the field ``<name>_path``.
+    :param required: Whether one of the two fields must be set.
+    :raises ValueError: If both are set, or if neither is set although one is required.
+    """
+    if required and key is None and key_path is None:
+        raise ValueError(f"Either {name} or {name}_path must be set.")
+    if key is not None and key_path is not None:
+        raise ValueError(f"Only one of {name} or {name}_path must be set.")
+
+
+def _load_private_key(
+    location: str, private_key: SecretStr | None, private_key_path: str | None, passphrase: SecretStr | None
+) -> bytes:
+    """Load a crypt4gh private key in memory, from its inline text or from its file.
+
+    The passphrase is only asked for if the key is encrypted. It is the first of: *passphrase*,
+    the ``C4GH_PASSPHRASE`` environment variable, and an interactive prompt.
+
+    :param location: Config location of the inline key. Names the key in the prompt and in errors.
+    :param private_key: The private key, given inline.
+    :param private_key_path: Path to the private key.
+    :param passphrase: Passphrase of the private key.
+    :returns: The private key.
+    :raises ConfigurationError: If neither the key nor its path is set, or if the key cannot be loaded.
+    """
+    if private_key is not None:
+        return Crypt4GH.load_private_key(
+            private_key.get_secret_value(), passphrase=get_secret_value(passphrase), key_name=location
+        )
+    if private_key_path is not None:
+        return Crypt4GH.retrieve_private_key(private_key_path, passphrase=get_secret_value(passphrase))
+    raise grzexc.ConfigurationError(f"Neither {location} nor {location}_path is set.")
 
 
 class InboxConfig(S3ConnectionBase):
@@ -89,10 +130,7 @@ class ArchiveTarget(IgnoringBaseModel):
 
     @model_validator(mode="after")
     def validate_public_key(self) -> "ArchiveTarget":
-        if self.public_key is None and self.public_key_path is None:
-            raise ValueError("Either public_key or public_key_path must be set.")
-        if self.public_key is not None and self.public_key_path is not None:
-            raise ValueError("Only one of public_key or public_key_path must be set.")
+        _check_key_fields("public_key", self.public_key, self.public_key_path, required=True)
         return self
 
     @contextlib.contextmanager
@@ -124,11 +162,35 @@ class ArchivesConfig(IgnoringBaseModel):
     non_consented: ArchiveTarget
     """Target definition for non-consented submissions."""
 
+    signing_key: SecretStr | None = None
+    """The GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
+
+    signing_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    """Path to the GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
+
+    signing_key_passphrase: SecretStr | None = None
+    """Passphrase to the GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
+
     @model_validator(mode="after")
     def check_buckets_are_unique(self) -> "ArchivesConfig":
         if self.consented.s3.bucket == self.non_consented.s3.bucket:
             raise ValueError("consented and non-consented buckets must be distinct.")
         return self
+
+    @model_validator(mode="after")
+    def validate_signing_key(self) -> "ArchivesConfig":
+        _check_key_fields("signing_key", self.signing_key, self.signing_key_path, required=True)
+        return self
+
+    def load_signing_key(self) -> bytes:
+        """Load the signing key in memory.
+
+        :returns: The signing key.
+        :raises ConfigurationError: If the key cannot be loaded.
+        """
+        return _load_private_key(
+            "archives.signing_key", self.signing_key, self.signing_key_path, self.signing_key_passphrase
+        )
 
 
 class DictConfigSettingsSource(PydanticBaseSettingsSource):

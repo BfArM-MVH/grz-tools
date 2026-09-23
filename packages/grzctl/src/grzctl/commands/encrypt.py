@@ -34,7 +34,11 @@ def encrypt(
     update_db,
     **kwargs,
 ):
-    """Encrypt a submission (standalone with DB updates)."""
+    """Encrypt a submission (standalone with DB updates).
+
+    The files are encrypted for the archive that the submission's research consent selects,
+    and signed with the key in archives.signing_key or archives.signing_key_path.
+    """
     submission_dir = Path(submission_dir)
 
     worker_inst = Worker(
@@ -63,7 +67,7 @@ def encrypt(
     ):
         worker_inst.encrypt(
             recipient_public_key_path=recipient_public_key_path,
-            submitter_private_key_path=configuration.keys.grz_private_key_path,
             force=force,
             check_validation_logs=check_validation_logs,
+            submitter_private_key=configuration.archives.load_signing_key(),
         )

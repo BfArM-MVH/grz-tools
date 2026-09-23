@@ -22,6 +22,7 @@ def grzctl_config_path(tmp_path):
         "archives": {
             "consented": {"s3": {"bucket": "consented"}, "public_key_path": "/dev/null"},
             "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": "/dev/null"},
+            "signing_key_path": "/dev/null",
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
         "pruefbericht": {},

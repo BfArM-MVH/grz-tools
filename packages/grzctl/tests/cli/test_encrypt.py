@@ -1,31 +1,74 @@
 """Tests for the grzctl ``encrypt`` command."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import click.testing
+import crypt4gh.keys
+import crypt4gh.keys.c4gh
+import grz_common.exceptions as grzexc
 import grzctl.cli
 import pytest
 import yaml
 
+SIGNING_KEY_PASSPHRASE = "signing-key-passphrase"
+
 
 @pytest.fixture
-def grzctl_config_path(tmp_path, crypt4gh_public_key):
-    config = {
+def signing_key_path(tmp_path) -> Path:
+    """A crypt4gh private key, encrypted with ``SIGNING_KEY_PASSPHRASE``."""
+    private_key_path = tmp_path / "grz.sec"
+    crypt4gh.keys.c4gh.generate(private_key_path, tmp_path / "grz.pub", SIGNING_KEY_PASSPHRASE.encode(), comment=None)
+    return private_key_path
+
+
+def _config(public_key: str, signing_key: dict[str, str]) -> dict:
+    return {
         "leistungserbringer": {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
         "archives": {
-            "consented": {"s3": {"bucket": "consented"}, "public_key": crypt4gh_public_key},
+            "consented": {"s3": {"bucket": "consented"}, "public_key": public_key},
             "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": "/dev/null"},
+            **signing_key,
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
         "pruefbericht": {},
         "keys": {"grz_private_key_path": "/dev/null"},
         "identifiers": {"grz": "GRZT00000"},
     }
+
+
+def _write_config(tmp_path: Path, config: dict) -> Path:
     config_path = tmp_path / "config.yaml"
     with open(config_path, "w") as f:
         yaml.dump(config, f)
     return config_path
+
+
+@pytest.fixture
+def grzctl_config_path(tmp_path, signing_key_path, crypt4gh_public_key):
+    signing_key = {"signing_key_path": str(signing_key_path), "signing_key_passphrase": SIGNING_KEY_PASSPHRASE}
+    return _write_config(tmp_path, _config(crypt4gh_public_key, signing_key))
+
+
+def _submission_dir(tmp_path: Path) -> Path:
+    submission_dir = tmp_path / "submission"
+    for sub in ("metadata", "files", "logs", "encrypted_files"):
+        (submission_dir / sub).mkdir(parents=True)
+    return submission_dir
+
+
+def _invoke_encrypt(config_path: Path, submission_dir: Path, mock_worker_cls: MagicMock) -> click.testing.Result:
+    """Run ``grzctl encrypt`` against a mocked ``Worker`` for a consented submission."""
+    mock_worker = mock_worker_cls.return_value
+    mock_submission = mock_worker.parse_submission.return_value
+    mock_submission.metadata.content.submission_id = "S1"
+    mock_submission.metadata.content.consents_to_research.return_value = True
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    return runner.invoke(
+        cli, ["--config", str(config_path), "encrypt", "--submission-dir", str(submission_dir), "--no-update-db"]
+    )
 
 
 def test_encrypt_uses_an_inline_archive_public_key(tmp_path, grzctl_config_path, crypt4gh_public_key):
@@ -35,10 +78,6 @@ def test_encrypt_uses_an_inline_archive_public_key(tmp_path, grzctl_config_path,
     The file is cleaned up again once ``Worker.encrypt`` returns, so its content has to be read
     from inside the mocked call rather than after ``invoke`` comes back.
     """
-    submission_dir = tmp_path / "submission"
-    for sub in ("metadata", "files", "logs", "encrypted_files"):
-        (submission_dir / sub).mkdir(parents=True)
-
     used_key_content = None
 
     def _capture_key_content(*, recipient_public_key_path, **kwargs):
@@ -46,26 +85,47 @@ def test_encrypt_uses_an_inline_archive_public_key(tmp_path, grzctl_config_path,
         used_key_content = Path(recipient_public_key_path).read_text()
 
     with patch("grzctl.commands.encrypt.Worker") as mock_worker_cls:
-        mock_worker = mock_worker_cls.return_value
-        mock_submission = mock_worker.parse_submission.return_value
-        mock_submission.metadata.content.submission_id = "S1"
-        mock_submission.metadata.content.consents_to_research.return_value = True
-        mock_worker.encrypt.side_effect = _capture_key_content
+        mock_worker_cls.return_value.encrypt.side_effect = _capture_key_content
+        result = _invoke_encrypt(grzctl_config_path, _submission_dir(tmp_path), mock_worker_cls)
 
-        runner = click.testing.CliRunner()
-        cli = grzctl.cli.build_cli()
-        result = runner.invoke(
-            cli,
-            [
-                "--config",
-                str(grzctl_config_path),
-                "encrypt",
-                "--submission-dir",
-                str(submission_dir),
-                "--no-update-db",
-            ],
-        )
+    assert result.exit_code == 0, result.output
+    mock_worker_cls.return_value.encrypt.assert_called_once()
+    assert used_key_content == crypt4gh_public_key
 
-        assert result.exit_code == 0, result.output
-        mock_worker.encrypt.assert_called_once()
-        assert used_key_content == crypt4gh_public_key
+
+def test_encrypt_signs_with_the_signing_key(tmp_path, grzctl_config_path, signing_key_path, monkeypatch):
+    """The signing key reaches ``Worker.encrypt`` loaded, decrypted with the configured passphrase."""
+    monkeypatch.setenv("C4GH_PASSPHRASE", "wrong-passphrase")
+
+    with patch("grzctl.commands.encrypt.Worker") as mock_worker_cls:
+        result = _invoke_encrypt(grzctl_config_path, _submission_dir(tmp_path), mock_worker_cls)
+
+    assert result.exit_code == 0, result.output
+    encrypt_kwargs = mock_worker_cls.return_value.encrypt.call_args.kwargs
+    expected_key = crypt4gh.keys.get_private_key(signing_key_path, lambda: SIGNING_KEY_PASSPHRASE)
+    assert encrypt_kwargs["submitter_private_key"] == expected_key
+    assert "submitter_private_key_path" not in encrypt_kwargs
+
+
+def test_encrypt_signs_with_an_inline_signing_key(tmp_path, signing_key_path, crypt4gh_public_key):
+    signing_key = {"signing_key": signing_key_path.read_text(), "signing_key_passphrase": SIGNING_KEY_PASSPHRASE}
+    config_path = _write_config(tmp_path, _config(crypt4gh_public_key, signing_key))
+
+    with patch("grzctl.commands.encrypt.Worker") as mock_worker_cls:
+        result = _invoke_encrypt(config_path, _submission_dir(tmp_path), mock_worker_cls)
+
+    assert result.exit_code == 0, result.output
+    expected_key = crypt4gh.keys.get_private_key(signing_key_path, lambda: SIGNING_KEY_PASSPHRASE)
+    assert mock_worker_cls.return_value.encrypt.call_args.kwargs["submitter_private_key"] == expected_key
+
+
+def test_encrypt_fails_if_the_signing_key_cannot_be_loaded(tmp_path, crypt4gh_public_key):
+    """A signing key that cannot be loaded is a configuration error, which the GRZ has to fix."""
+    config_path = _write_config(tmp_path, _config(crypt4gh_public_key, {"signing_key_path": "/dev/null"}))
+
+    with patch("grzctl.commands.encrypt.Worker") as mock_worker_cls:
+        result = _invoke_encrypt(config_path, _submission_dir(tmp_path), mock_worker_cls)
+
+    assert isinstance(result.exception, grzexc.ConfigurationError), result.output
+    assert "Secret key /dev/null cannot be read" in str(result.exception)
+    mock_worker_cls.return_value.encrypt.assert_not_called()
