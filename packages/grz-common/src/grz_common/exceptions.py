@@ -86,8 +86,8 @@ class DetailedQCError(GrzError):
 
 
 class PruefberichtGenerationError(GrzError):
-    """The Prüfbericht cannot be generated, such as because the database lacks a field that it needs."""
+    """The Prüfbericht cannot be generated, for example because the database lacks a field that it needs."""
 
 
 class PruefberichtRejectedError(GrzError):
-    """BfArM rejected the Prüfbericht, so sending the same one again does not help."""
+    """BfArM rejected the Prüfbericht."""
