@@ -15,10 +15,7 @@ class VersionFileValidationError(VersionFileError):
 
 
 class GrzError(Exception):
-    """Base of every failure that grz-tools accounts for, as opposed to a bug.
-
-    grzctl records a failure reason for each subclass, so a new subclass needs one.
-    """
+    """Base of every failure that grz-tools accounts for, as opposed to a bug."""
 
 
 class SubmissionRejectedError(GrzError):
@@ -38,7 +35,7 @@ class DecryptionError(SubmissionRejectedError):
 
 
 class DuplicateUploadError(SubmissionRejectedError):
-    """The bucket already holds a submission with this ID, so it was uploaded before."""
+    """The bucket already holds a submission with this ID."""
 
 
 class IncompleteSubmissionError(GrzError):
@@ -46,7 +43,7 @@ class IncompleteSubmissionError(GrzError):
 
 
 class SubmissionCleanedError(GrzError):
-    """``grzctl clean`` has started on the submission, so the inbox no longer holds it."""
+    """``grzctl clean`` has started on the submission."""
 
 
 class ConfigurationError(GrzError):
@@ -62,11 +59,7 @@ class DownloadError(TransferError):
 
 
 class MissingObjectError(DownloadError):
-    """S3 holds no object under the key.
-
-    Only the caller knows whose object it is. For a submission file, it passes
-    :class:`MissingSubmissionFileError` as ``missing_error`` to :func:`grz_common.transfer.head_object`.
-    """
+    """S3 holds no object under the key."""
 
 
 class UploadError(TransferError):

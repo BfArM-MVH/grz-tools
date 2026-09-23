@@ -164,11 +164,6 @@ def head_object(
 def raise_if_cleaned(s3_client: Any, bucket: str, submission_id: str) -> None:
     """Raise if ``grzctl clean`` has started on the submission in the inbox.
 
-    Cleaning puts a ``<submission_id>/cleaning`` object before it deletes the files and empties
-    the metadata.json, and replaces it with ``<submission_id>/cleaned`` at the end. So an emptied
-    metadata.json always sits next to one of the two markers. An empty metadata.json without a
-    marker was uploaded like that, so it is no concern of this check.
-
     :param s3_client: boto3 S3 client pointed at the inbox bucket.
     :param bucket: Name of the inbox bucket.
     :param submission_id: Submission identifier (the top-level S3 prefix).
