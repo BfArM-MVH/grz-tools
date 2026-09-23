@@ -80,10 +80,9 @@ class DbContext:
       transition still proceeds (no hard failure).
     - If the submission **does not exist** in the DB:
 
-      - for the entry states ``PROCESSING`` and ``UPLOADING``, the submission is
-        automatically created and the transition proceeds. ``grzctl process``
-        starts at ``PROCESSING``. ``UPLOADING`` comes from the inbox scan
-        ``grzctl db sync-from-inbox``, which records it without a ``DbContext``;
+      - for the entry states, ``PROCESSING`` and ``UPLOADING``, the submission is
+        automatically created and the transition proceeds. ``UPLOADING`` is usually
+        recorded by the inbox scan directly, without going through a ``DbContext``;
       - otherwise: ``SubmissionNotFoundError`` is raised immediately.
 
     Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError``) are
@@ -111,9 +110,9 @@ class DbContext:
     _SUBMISSION_ENTRY_STATES = frozenset({SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING})
     """States at which a brand-new submission may be created.
 
-    ``grzctl process`` starts at ``PROCESSING``. The step-by-step flow starts at ``UPLOADING``,
-    which the inbox scan records, and continues with ``grzctl download``. These are explicit
-    because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
+    Both states may start a submission that the DB does not know yet. ``UPLOADING`` is
+    recorded by the inbox scan, outside a ``DbContext``. These are explicit because
+    ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
     """
 
     def __init__(

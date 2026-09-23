@@ -246,7 +246,7 @@ class TestCheckPrerequisites:
         ],
     )
     def test_entry_state_adds_a_new_submission(self, db, start_state, end_state):
-        """``grzctl process`` and the step-by-step flow both start a submission that the DB does not know yet.
+        """Both entry states start a submission that the DB does not know yet.
 
         A real DB, unlike a mock, fails if the new submission's states are not loaded.
         """
