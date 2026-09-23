@@ -105,8 +105,8 @@ The S3 boundary sorts the error codes like this:
 | `AccessDenied` and anything else                              | `TransferError`              | `transfer_error`      |
 
 Missing credentials count as a configuration error as well, and so does a bucket name
-that botocore rejects before it sends a request. The error code counts even if boto3 wraps
-the error, as `S3Transfer` does for an upload.
+that botocore rejects before it sends a request. The upload worker takes the error code from
+the `ClientError` that `S3Transfer` wraps in `S3UploadFailedError`.
 
 S3 answers a HEAD request without a body, so botocore reports only the HTTP status as the
 error code. A `403` can then mean rejected credentials, and a `404` a missing bucket. For

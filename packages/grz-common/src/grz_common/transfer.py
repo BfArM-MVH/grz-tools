@@ -95,9 +95,6 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     return s3_resource
 
 
-S3_CLIENT_ERRORS = (ClientError, BotoCoreError, Boto3Error)
-"""What boto3 and botocore raise for a failed request."""
-
 _SETUP_ERROR_CODES = frozenset({"InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket"})
 """S3 error codes that only a faulty setup causes.
 
@@ -106,90 +103,25 @@ may not list the bucket.
 """
 
 
-def _chain(error: BaseException) -> Iterator[BaseException]:
-    """Yield ``error``, then the exception that ``error`` was raised from or while handling, and so on.
-
-    The chain is the one a traceback shows. It matters for ``S3Transfer.upload_file``, which raises
-    ``S3UploadFailedError`` while it handles the ``ClientError`` that carries the error code.
-    """
-    seen: set[int] = set()
-    current: BaseException | None = error
-    # a cause can form a cycle, as in ``raise e from e``
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        yield current
-        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
-
-
-def _is_faulty_setup(error: BaseException) -> bool:
-    """Whether only a faulty setup causes ``error``.
-
-    botocore raises ``ParamValidationError`` before it sends a request. Of the parameters that
-    grz-tools sends, only the configured bucket name can fail validation. A key fails only if it
-    is empty, and every key that grz-tools builds starts with the submission ID.
-    """
-    if isinstance(error, NoCredentialsError | PartialCredentialsError | ParamValidationError):
-        return True
-    return isinstance(error, ClientError) and error.response.get("Error", {}).get("Code") in _SETUP_ERROR_CODES
-
-
-def s3_error(
-    error: Exception, action: str, transfer_error: type[grzexc.TransferError] = grzexc.TransferError
-) -> grzexc.GrzError:
-    """Classify an error of the S3 client as the failure it stands for.
-
-    The exceptions that ``error`` was raised from or while handling count as well.
-
-    :param error: What the S3 client raised.
-    :param action: What failed, such as ``"Upload to s3://bucket/key"``.
-    :param transfer_error: The class for a failed transfer.
-    :returns: A :class:`ConfigurationError` if only a faulty setup causes ``error``, otherwise a ``transfer_error``.
-    """
-    faulty_setup = any(_is_faulty_setup(e) for e in _chain(error))
-    error_class = grzexc.ConfigurationError if faulty_setup else transfer_error
-    return error_class(f"{action} failed: {error}")
-
-
 @contextmanager
 def s3_errors(action: str, transfer_error: type[grzexc.TransferError] = grzexc.TransferError) -> Iterator[None]:
     """Raise an error of the S3 client in the body as the failure it stands for.
 
     :param action: What the body does, such as ``"Upload to s3://bucket/key"``.
     :param transfer_error: The class for a failed transfer.
-    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
+    :raises ConfigurationError: If only a faulty setup causes the error, such as rejected credentials.
     :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
     """
     try:
         yield
-    except S3_CLIENT_ERRORS as e:
-        raise s3_error(e, action, transfer_error) from e
-
-
-def _is_missing_object(error: Exception) -> bool:
-    """Whether ``error`` is S3's response for an object that does not exist."""
-    if not isinstance(error, ClientError):
-        return False
-    return error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}
-
-
-def _explain_head_error(s3_client: Any, bucket: str, key: str, error: ClientError) -> ClientError:
-    """Return the error that tells why a HEAD request for an S3 object failed.
-
-    S3 answers a HEAD request without a body, so botocore sets the HTTP status as the error code.
-    A ``403`` can then mean rejected credentials, and a ``404`` a missing bucket. For these two
-    codes, a GET request for the first byte of the object learns the error code.
-
-    :param error: The error of the HEAD request.
-    :returns: The error of the GET request, or ``error`` if the GET request succeeds or is not needed.
-    """
-    if error.response.get("Error", {}).get("Code") not in {"403", "404"}:
-        return error
-    try:
-        response = s3_client.get_object(Bucket=bucket, Key=key, Range="bytes=0-0")
     except ClientError as e:
-        return e
-    response["Body"].close()
-    return error
+        error_class = grzexc.ConfigurationError if e.response["Error"]["Code"] in _SETUP_ERROR_CODES else transfer_error
+        raise error_class(f"{action} failed: {e}") from e
+    except (NoCredentialsError, PartialCredentialsError, ParamValidationError) as e:
+        # botocore raises ParamValidationError for a bucket name from the config before it sends a request
+        raise grzexc.ConfigurationError(f"{action} failed: {e}") from e
+    except (BotoCoreError, Boto3Error) as e:
+        raise transfer_error(f"{action} failed: {e}") from e
 
 
 def head_object(
@@ -197,28 +129,30 @@ def head_object(
 ) -> dict[str, Any]:
     """Return the ``head_object`` response of an S3 object.
 
-    If S3 answers the HEAD request with ``403`` or ``404`` alone, the error of a GET request
-    decides, see :func:`_explain_head_error`.
-
     :param s3_client: boto3 S3 client.
     :param bucket: Name of the bucket.
     :param key: Key of the object.
     :param transfer_error: The class for a failed transfer.
     :returns: The ``head_object`` response.
     :raises MissingObjectError: If the object does not exist.
-    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
+    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_errors`.
     :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
     """
     with s3_errors(f"Reading s3://{bucket}/{key}", transfer_error):
         try:
             return s3_client.head_object(Bucket=bucket, Key=key)
         except ClientError as e:
-            error = _explain_head_error(s3_client, bucket, key, e)
-            if _is_missing_object(error):
-                raise grzexc.MissingObjectError(f"s3://{bucket}/{key} does not exist") from error
-            if error is e:
+            if e.response["Error"]["Code"] not in {"403", "404"}:
                 raise
-            raise error from e
+            head_error = e
+        # a HEAD answer has no body, so its error code is only the HTTP status. A GET answers with the real code.
+        try:
+            s3_client.get_object(Bucket=bucket, Key=key, Range="bytes=0-0")["Body"].close()
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                raise grzexc.MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
+            raise
+        raise head_error
 
 
 def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_id: str) -> datetime.datetime:

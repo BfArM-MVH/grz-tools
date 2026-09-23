@@ -5,9 +5,8 @@ import io
 import boto3
 import grz_common.exceptions as grzexc
 import pytest
-from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
-from grz_common.transfer import get_metadata_upload_timestamp, head_object, s3_error
+from grz_common.transfer import get_metadata_upload_timestamp, head_object, s3_errors
 
 
 def _client_error(code: str, operation: str = "HeadObject") -> ClientError:
@@ -34,13 +33,20 @@ class _FailingClient:
         raise _client_error(self.get_code, "GetObject")
 
 
+def _failure_of(error: Exception, transfer_error: type[grzexc.TransferError] = grzexc.TransferError) -> Exception:
+    """Return what ``s3_errors`` raises for ``error``."""
+    with pytest.raises(grzexc.GrzError) as excinfo, s3_errors("Upload to s3://bucket/key", transfer_error):
+        raise error
+    return excinfo.value
+
+
 @pytest.mark.parametrize("code", ["InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket"])
 def test_an_error_that_only_a_faulty_setup_causes_is_a_configuration_error(code: str):
-    assert isinstance(s3_error(_client_error(code), "Reading s3://bucket/key"), grzexc.ConfigurationError)
+    assert isinstance(_failure_of(_client_error(code)), grzexc.ConfigurationError)
 
 
 def test_missing_credentials_are_a_configuration_error():
-    assert isinstance(s3_error(NoCredentialsError(), "Reading s3://bucket/key"), grzexc.ConfigurationError)
+    assert isinstance(_failure_of(NoCredentialsError()), grzexc.ConfigurationError)
 
 
 def test_a_bucket_name_that_botocore_rejects_is_a_configuration_error():
@@ -49,42 +55,6 @@ def test_a_bucket_name_that_botocore_rejects_is_a_configuration_error():
 
     with pytest.raises(grzexc.ConfigurationError):
         head_object(s3_client, "not a bucket name", "key")
-
-
-def _upload_failed_while_handling(error: ClientError) -> S3UploadFailedError:
-    """Raise ``S3UploadFailedError`` the way ``S3Transfer.upload_file`` does: inside ``except``, without ``from``."""
-    try:
-        try:
-            raise error
-        except ClientError as e:
-            raise S3UploadFailedError(f"Failed to upload file to bucket/key: {e}")  # noqa: B904
-    except S3UploadFailedError as wrapped:
-        return wrapped
-
-
-def test_the_error_code_counts_inside_the_wrapper_of_s3transfer():
-    failure = s3_error(_upload_failed_while_handling(_client_error("InvalidAccessKeyId")), "Upload", grzexc.UploadError)
-
-    assert isinstance(failure, grzexc.ConfigurationError)
-
-
-def test_the_wrapper_of_s3transfer_is_a_failed_transfer_for_any_other_code():
-    failure = s3_error(_upload_failed_while_handling(_client_error("SlowDown")), "Upload", grzexc.UploadError)
-
-    assert type(failure) is grzexc.UploadError
-
-
-def test_a_suppressed_context_does_not_count():
-    """``raise ... from None`` hides the context, so its error code does not count either."""
-    try:
-        try:
-            raise _client_error("InvalidAccessKeyId")
-        except ClientError:
-            raise S3UploadFailedError("upload failed") from None
-    except S3UploadFailedError as e:
-        failure = s3_error(e, "Upload", grzexc.UploadError)
-
-    assert type(failure) is grzexc.UploadError
 
 
 @pytest.mark.parametrize(
@@ -98,7 +68,7 @@ def test_a_suppressed_context_does_not_count():
     ids=["access-denied", "slow-down", "unreachable"],
 )
 def test_any_other_error_is_a_failed_transfer_of_the_given_kind(error: Exception):
-    failure = s3_error(error, "Upload to s3://bucket/key", grzexc.UploadError)
+    failure = _failure_of(error, grzexc.UploadError)
 
     assert type(failure) is grzexc.UploadError
     assert str(failure).startswith("Upload to s3://bucket/key failed: ")
@@ -131,18 +101,15 @@ def test_head_object_raises_the_given_class_for_a_failed_transfer():
         head_object(_FailingClient("403", "AccessDenied"), "bucket", "key", grzexc.UploadError)
 
 
-@pytest.mark.parametrize(
-    ("head_status", "expected"),
-    [("404", grzexc.MissingObjectError), ("403", grzexc.DownloadError)],
-)
-def test_head_object_sorts_the_head_error_if_the_get_request_succeeds(head_status: str, expected: type[Exception]):
+@pytest.mark.parametrize("head_status", ["404", "403"])
+def test_head_object_reports_a_failed_read_if_the_get_request_succeeds(head_status: str):
     """The object may appear between the two requests. The GET response is then closed unread."""
     s3_client = _FailingClient(head_status)
 
-    with pytest.raises(expected) as excinfo:
+    with pytest.raises(grzexc.DownloadError) as excinfo:
         head_object(s3_client, "bucket", "key")
 
-    assert type(excinfo.value) is expected
+    assert not isinstance(excinfo.value, grzexc.MissingObjectError)
     assert s3_client.body.closed
 
 

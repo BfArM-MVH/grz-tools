@@ -5,7 +5,6 @@ from pathlib import Path
 import botocore.client
 import grz_common.exceptions as grzexc
 import pytest
-from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import ClientError
 from grz_common.progress.progress_logging import FileProgressLogger
 from grz_common.progress.states import UploadState
@@ -281,7 +280,7 @@ def _fail_s3_operation(monkeypatch, operation: str, code: str):
 def test_upload_file_reports_rejected_credentials_as_a_configuration_error(
     s3_config_model, remote_bucket, temp_small_file_path, tmp_path, monkeypatch
 ):
-    """S3Transfer wraps the ClientError in S3UploadFailedError, and the error code still counts."""
+    """S3Transfer wraps the ClientError in S3UploadFailedError, and the upload worker takes it out again."""
     _fail_s3_operation(monkeypatch, "PutObject", "InvalidAccessKeyId")
     upload_worker = S3BotoUploadWorker(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
@@ -290,7 +289,7 @@ def test_upload_file_reports_rejected_credentials_as_a_configuration_error(
     with pytest.raises(grzexc.ConfigurationError) as excinfo:
         upload_worker.upload_file(temp_small_file_path, "small_test_file.bed")
 
-    assert isinstance(excinfo.value.__cause__, S3UploadFailedError)
+    assert isinstance(excinfo.value.__cause__, ClientError)
 
 
 def test_upload_file_reports_any_other_s3_error_as_a_failed_upload(
