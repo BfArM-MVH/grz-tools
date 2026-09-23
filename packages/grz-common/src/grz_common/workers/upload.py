@@ -342,22 +342,3 @@ class S3BotoUploadWorker(UploadWorker):
 
             # upload redacted metadata
             self._upload_metadata(redacted_metadata_tmpfile.name, metadata_s3_object_id)
-
-    def _check_for_completed_submission(self, s3_object_id: str) -> bool:
-        try:
-            return s3_object_id in self._list_keys(self._s3_options.bucket, prefix=str(Path(s3_object_id).parent))
-        except Exception as e:
-            self.__log.warning(
-                "Exception occured during check for completed submission; assuming submission is incomplete.",
-                exc_info=e,
-            )
-            return False
-
-    # https://stackoverflow.com/a/54014862
-    def _list_keys(self, bucket_name, prefix="/", delimiter="/", start_after=""):
-        s3_paginator = self._s3_client.get_paginator("list_objects_v2")
-        prefix = prefix.lstrip(delimiter)
-        start_after = (start_after or prefix) if prefix.endswith(delimiter) else start_after
-        for page in s3_paginator.paginate(Bucket=bucket_name, Prefix=prefix, StartAfter=start_after):
-            for content in page.get("Contents", ()):
-                yield content["Key"]
