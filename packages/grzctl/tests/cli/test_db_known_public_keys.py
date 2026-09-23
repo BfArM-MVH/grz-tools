@@ -141,24 +141,25 @@ def test_known_public_keys_file_expands_home(tmp_path: Path, monkeypatch: pytest
     assert config.known_public_keys_file == path
 
 
+def test_reads_the_default_file_if_neither_field_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _write(tmp_path, f"{_openssh_public_key()} alice\n")
+    monkeypatch.setattr("grzctl.models.db.DEFAULT_KNOWN_PUBLIC_KEYS_FILE", path)
+
+    assert _db_model().public_keys_by_owner.keys() == {"alice"}
+
+
+def test_names_a_missing_default_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("grzctl.models.db.DEFAULT_KNOWN_PUBLIC_KEYS_FILE", tmp_path / "known_public_keys")
+
+    with pytest.raises(DatabaseConfigurationError, match="Cannot read the known public keys file"):
+        _ = _db_model().public_keys_by_owner
+
+
 def _write_config(tmp_path: Path, config: GrzctlConfig) -> Path:
     config_path = tmp_path / "config.yaml"
     with open(config_path, "w") as config_file:
         config.to_yaml(config_file)
     return config_path
-
-
-def test_db_group_requires_one_of_known_public_keys_or_known_public_keys_file(
-    tmp_path: Path, offline_config: GrzctlConfig
-) -> None:
-    offline_config.db.known_public_keys_file = None
-    config_path = _write_config(tmp_path, offline_config)
-    cli = grzctl.cli.build_cli()
-
-    result = click.testing.CliRunner().invoke(cli, ["--config", str(config_path), "db", "init"])
-
-    assert isinstance(result.exception, DatabaseConfigurationError)
-    assert "known_public_keys" in str(result.exception)
 
 
 def test_db_group_accepts_an_inline_known_public_keys_list(tmp_path: Path, offline_config: GrzctlConfig) -> None:
