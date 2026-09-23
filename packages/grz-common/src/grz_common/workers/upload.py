@@ -148,10 +148,11 @@ class S3BotoUploadWorker(UploadWorker):
                     raise
                 raise e.__context__ from None
 
-    def _remote_id_exists(self, s3_object_id: str) -> bool:
+    def _remote_id_exists(self, s3_object_id: str) -> bool | None:
         """
         Determine if a remote ID already exists
         :param s3_object_id: Remote S3 object ID under which the file should be stored
+        :returns: Whether the object exists, or ``None`` if S3 denies access, so that the answer is unknown.
         :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
         :raises UploadError: For any other error of the S3 client.
         """
@@ -161,9 +162,9 @@ class S3BotoUploadWorker(UploadWorker):
             return False
         except grzexc.UploadError as e:
             cause = e.__cause__
-            # backend can return forbidden instead if user has no ListBucket permission
+            # without the ListBucket permission, S3 denies access to a missing object as well
             if isinstance(cause, botocore.exceptions.ClientError) and cause.response["Error"]["Code"] == "AccessDenied":
-                return False
+                return None
             raise
         return True
 
@@ -235,7 +236,15 @@ class S3BotoUploadWorker(UploadWorker):
         progress_logger = FileProgressLogger[UploadState](self._status_file_path)
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
-        if self._remote_id_exists(metadata_s3_object_id):
+        exists = self._remote_id_exists(metadata_s3_object_id)
+        if exists is None:
+            self.__log.warning(
+                "Cannot check whether submission '%s' was uploaded before, because S3 denies access to '%s'. "
+                "Uploading it anyway.",
+                encrypted_submission.submission_id,
+                metadata_s3_object_id,
+            )
+        elif exists:
             raise grzexc.DuplicateUploadError(
                 "Submission already uploaded. Corrections, additions, and followups require a new tanG."
             )
@@ -263,7 +272,15 @@ class S3BotoUploadWorker(UploadWorker):
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
         # archive uploads the metadata last, so an archived metadata object means an earlier run finished
-        if self._remote_id_exists(metadata_s3_object_id):
+        exists = self._remote_id_exists(metadata_s3_object_id)
+        if exists is None:
+            self.__log.warning(
+                "Cannot check whether submission '%s' is already archived, because S3 denies access to '%s'. "
+                "Archiving it anyway.",
+                encrypted_submission.submission_id,
+                metadata_s3_object_id,
+            )
+        elif exists:
             self.__log.info(
                 "Submission '%s' is already archived. Nothing to upload.", encrypted_submission.submission_id
             )

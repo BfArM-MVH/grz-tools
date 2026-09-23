@@ -317,17 +317,19 @@ def test_upload_reports_a_faulty_setup_as_a_configuration_error(
         upload_worker.upload(encrypted_submission)
 
 
-def test_upload_counts_access_denied_as_a_new_submission(
-    s3_config_model, remote_bucket, encrypted_submission, tmp_path, monkeypatch
+@pytest.mark.parametrize("method", ["upload", "archive"])
+def test_upload_goes_ahead_with_a_warning_if_access_is_denied(
+    s3_config_model, remote_bucket, encrypted_submission, tmp_path, monkeypatch, caplog, method
 ):
-    """Credentials that may not list the bucket get ``AccessDenied`` for a missing object, so the upload goes ahead."""
+    """Credentials that may not list the bucket get ``AccessDenied`` for a missing object, so the check cannot tell."""
     _fail_s3_operation(monkeypatch, "HeadObject", "403")
     _fail_s3_operation(monkeypatch, "GetObject", "AccessDenied")
     upload_worker = S3BotoUploadWorker(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
     )
 
-    upload_worker.upload(encrypted_submission)
+    getattr(upload_worker, method)(encrypted_submission)
 
     _, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
     assert metadata_s3_object_id in {o.key for o in remote_bucket.objects.all()}
+    assert "because S3 denies access" in caplog.text

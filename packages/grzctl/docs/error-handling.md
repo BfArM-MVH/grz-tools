@@ -117,4 +117,5 @@ Downloads and uploads start with `head_object()`, so their first request already
 
 `AccessDenied` is not a configuration error.
 S3 also answers 403 for a missing object if the credentials lack the permission to list the bucket.
-For the same reason, an upload takes `AccessDenied` for the submission's metadata to mean that the bucket does not hold the submission yet.
+For the same reason, `AccessDenied` for the submission's metadata does not tell whether the bucket holds the submission.
+An upload or an archival then logs a warning that it cannot check for an earlier run, and it continues.
