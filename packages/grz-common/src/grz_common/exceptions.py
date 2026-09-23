@@ -15,7 +15,7 @@ class VersionFileValidationError(VersionFileError):
 
 
 class GrzError(Exception):
-    """Base of every failure that grz-tools expects, as opposed to a bug.
+    """Base of every failure that grz-tools accounts for, as opposed to a bug.
 
     grzctl records a failure reason for each subclass, so a new subclass needs one.
     """
@@ -38,7 +38,7 @@ class DecryptionError(SubmissionRejectedError):
 
 
 class DuplicateUploadError(SubmissionRejectedError):
-    """The bucket already holds a submission with this ID, so its tanG was used before."""
+    """The bucket already holds a submission with this ID, so it was uploaded before."""
 
 
 class IncompleteSubmissionError(GrzError):

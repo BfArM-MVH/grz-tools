@@ -136,7 +136,7 @@ def test_upload_download_submission(
 def test_upload_refuses_a_submission_already_in_the_inbox(
     working_dir_path, temp_s3_config_file_path, remote_bucket_with_version
 ):
-    """A second upload of a submission reuses its tanG, so it fails as a duplicate, not as a failed upload."""
+    """A second upload of a submission fails as a duplicate, not as a failed upload."""
     copy_submission(working_dir_path, "files", "encrypted_files", "metadata")
     logs_dir = working_dir_path / "logs"
     logs_dir.mkdir()

@@ -224,7 +224,7 @@ def test_upload_rereuploads_file_after_failed_upload(
 def test_upload_of_a_submission_already_in_the_inbox_raises(
     s3_config_model, remote_bucket, encrypted_submission, tmp_path
 ):
-    """An inbox that already holds the submission's metadata means that its tanG was used before."""
+    """An inbox that already holds the submission's metadata means that the submission was uploaded before."""
     _, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
     remote_bucket.put_object(Key=metadata_s3_object_id, Body=b"{}")
     upload_worker = S3BotoUploadWorker(
