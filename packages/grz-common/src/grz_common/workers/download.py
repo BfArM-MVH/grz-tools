@@ -113,12 +113,7 @@ class S3BotoDownloadWorker:
             metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
             # download_file sends a HEAD request first, whose error code is the HTTP status alone
-            try:
-                head_object(self._s3_client, bucket, metadata_key)
-            except grzexc.MissingObjectError as e:
-                raise grzexc.MissingSubmissionFileError(
-                    f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
-                ) from e
+            head_object(self._s3_client, bucket, metadata_key, missing_error=grzexc.MissingSubmissionFileError)
             # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json is empty,
             # and its parsing would fail as if the LE had sent an invalid file.
             raise_if_cleaned(self._s3_client, bucket, submission_id)
@@ -140,10 +135,9 @@ class S3BotoDownloadWorker:
         :raises DownloadError: For any other error of the S3 client.
         """
         bucket = self._s3_options.bucket
-        try:
-            s3_object_meta = head_object(self._s3_client, bucket, s3_object_id)
-        except grzexc.MissingObjectError as e:
-            raise grzexc.MissingSubmissionFileError(f"File '{s3_object_id}' not found in S3 bucket '{bucket}'.") from e
+        s3_object_meta = head_object(
+            self._s3_client, bucket, s3_object_id, missing_error=grzexc.MissingSubmissionFileError
+        )
         filesize = s3_object_meta["ContentLength"]
 
         chunksize = (

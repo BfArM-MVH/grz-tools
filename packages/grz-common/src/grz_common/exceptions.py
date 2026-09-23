@@ -64,8 +64,8 @@ class DownloadError(TransferError):
 class MissingObjectError(DownloadError):
     """S3 holds no object under the key.
 
-    Only the caller knows whose object it is, so it turns a missing submission file into a
-    :class:`MissingSubmissionFileError`.
+    Only the caller knows whose object it is. For a submission file, it passes
+    :class:`MissingSubmissionFileError` as ``missing_error`` to :func:`grz_common.transfer.head_object`.
     """
 
 

@@ -126,7 +126,11 @@ def s3_errors(action: str, transfer_error: type[grzexc.TransferError] = grzexc.T
 
 
 def head_object(
-    s3_client: Any, bucket: str, key: str, transfer_error: type[grzexc.TransferError] = grzexc.DownloadError
+    s3_client: Any,
+    bucket: str,
+    key: str,
+    transfer_error: type[grzexc.TransferError] = grzexc.DownloadError,
+    missing_error: type[grzexc.GrzError] = grzexc.MissingObjectError,
 ) -> dict[str, Any]:
     """Return the ``head_object`` response of an S3 object.
 
@@ -134,8 +138,9 @@ def head_object(
     :param bucket: Name of the bucket.
     :param key: Key of the object.
     :param transfer_error: The class for a failed transfer.
+    :param missing_error: The class for a missing object.
     :returns: The ``head_object`` response.
-    :raises MissingObjectError: If the object does not exist.
+    :raises MissingObjectError: As ``missing_error``, if the object does not exist.
     :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_errors`.
     :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
     """
@@ -151,7 +156,7 @@ def head_object(
             s3_client.get_object(Bucket=bucket, Key=key, Range="bytes=0-0")["Body"].close()
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey":
-                raise grzexc.MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
+                raise missing_error(f"s3://{bucket}/{key} does not exist") from e
             raise
         raise head_error
 
@@ -206,10 +211,7 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     :raises DownloadError: For any other error of the S3 client.
     """
     key = f"{submission_id}/metadata/metadata.json"
-    try:
-        response = head_object(s3_client, bucket, key)
-    except grzexc.MissingObjectError as e:
-        raise grzexc.MissingSubmissionFileError(f"s3://{bucket}/{key} does not exist") from e
+    response = head_object(s3_client, bucket, key, missing_error=grzexc.MissingSubmissionFileError)
     # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json's timestamp is invalid.
     raise_if_cleaned(s3_client, bucket, submission_id)
     return response["LastModified"]
