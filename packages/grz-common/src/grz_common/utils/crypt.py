@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
+from ..exceptions import ConfigurationError, DecryptionError
 from .io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class Crypt4GH:
                 format=serialization.PrivateFormat.Raw,
                 encryption_algorithm=serialization.NoEncryption(),
             )
-        keys = ((0, sk, crypt4gh.keys.get_public_key(recipient_key_file_path)),)
+        keys = ((0, sk, Crypt4GH.retrieve_public_key(recipient_key_file_path)),)
         return keys
 
     @staticmethod
@@ -91,15 +92,31 @@ class Crypt4GH:
             )
 
     @staticmethod
+    def retrieve_public_key(pubkey_path: str | PathLike) -> bytes:
+        """
+        Read Crypt4GH public key from specified path.
+
+        :param pubkey_path: Path to the public key
+        :returns: Public key bytes
+        :raises ConfigurationError: If the key is missing or cannot be read.
+        """
+        try:
+            return crypt4gh.keys.get_public_key(os.path.expanduser(str(pubkey_path)))
+        except (OSError, ValueError, NotImplementedError) as e:
+            # crypt4gh raises NotImplementedError for a file in no key format it knows
+            raise ConfigurationError(f"Public key {pubkey_path} cannot be read: {e}") from e
+
+    @staticmethod
     def retrieve_private_key(seckey_path) -> bytes:
         """
         Read Crypt4GH private key from specified path.
         :param seckey_path: path to the private key
         :return:
+        :raises ConfigurationError: If the key is missing, or cannot be read with the passphrase.
         """
         seckeypath = os.path.expanduser(seckey_path)
         if not os.path.exists(seckeypath):
-            raise ValueError("Secret key not found")
+            raise ConfigurationError(f"Secret key not found: {seckey_path}")
 
         passphrase = os.getenv("C4GH_PASSPHRASE")
         if passphrase:
@@ -107,7 +124,13 @@ class Crypt4GH:
         else:
             passphrase_callback = partial(getpass, prompt=f"Passphrase for {seckey_path}: ")
 
-        return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
+        try:
+            return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
+        except SystemExit as e:
+            # crypt4gh exits the process for a key or a passphrase that it cannot use
+            raise ConfigurationError(f"Secret key {seckey_path} cannot be read with the given passphrase") from e
+        except (OSError, ValueError, NotImplementedError) as e:
+            raise ConfigurationError(f"Secret key {seckey_path} cannot be read: {e}") from e
 
     @staticmethod
     def decrypt_file(input_path: Path, output_path: Path, private_key: bytes):
@@ -116,6 +139,7 @@ class Crypt4GH:
         :param input_path: Path to the encrypted file
         :param output_path: Path to the decrypted file
         :param private_key: The private key
+        :raises DecryptionError: If the header or a segment of the file cannot be decrypted.
         """
         total_size = getsize(input_path)
         file_name = input_path.name
@@ -127,8 +151,12 @@ class Crypt4GH:
                 tqdm(total=total_size, desc="DECRYPT ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
             ) as pbar_in_fd,
         ):
-            crypt4gh.lib.decrypt(
-                keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
-                infile=pbar_in_fd,
-                outfile=out_fd,
-            )
+            try:
+                crypt4gh.lib.decrypt(
+                    keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
+                    infile=pbar_in_fd,
+                    outfile=out_fd,
+                )
+            except ValueError as e:
+                # crypt4gh raises ValueError for a header or a segment that the file gets wrong
+                raise DecryptionError(f"Cannot decrypt {input_path}: {e}") from e

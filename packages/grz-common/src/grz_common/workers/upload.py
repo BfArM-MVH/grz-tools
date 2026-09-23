@@ -16,14 +16,14 @@ from typing import TYPE_CHECKING, override
 
 import botocore.handlers
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
-from grz_common.exceptions import UploadError
+from grz_common.exceptions import DuplicateUploadError, IncompleteSubmissionError, UploadError
 from grz_pydantic_models.submission.metadata import redact_metadata_dict
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
-from ..transfer import init_s3_client, init_s3_resource
+from ..transfer import init_s3_client, init_s3_resource, s3_errors
 from ..utils.redaction import redact_file
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
@@ -65,6 +65,9 @@ class UploadWorker(metaclass=abc.ABCMeta):
         """
         Archive an encrypted submission within a GRZ
 
+        If the archive already holds the submission's metadata, an earlier run finished the archival.
+        This run then returns without uploading anything.
+
         :param encrypted_submission: The encrypted submission to archive
         :raises UploadError: when archival failed
         """
@@ -103,6 +106,8 @@ class S3BotoUploadWorker(UploadWorker):
         Upload a single file to the specified object ID
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
+        :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+        :raises UploadError: For any other error of the S3 client.
         """
         self.__log.info(f"Uploading {local_file_path} to {s3_object_id}...")
 
@@ -127,12 +132,13 @@ class S3BotoUploadWorker(UploadWorker):
 
         transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
         progress_bar = tqdm(total=filesize, desc="UPLOAD  ", **TQDM_DEFAULTS, postfix=f"{s3_object_id}")  # type: ignore[call-overload]
-        transfer.upload_file(
-            str(local_file_path),
-            self._s3_options.bucket,
-            s3_object_id,
-            callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-        )
+        with s3_errors(f"Upload to s3://{self._s3_options.bucket}/{s3_object_id}", UploadError):
+            transfer.upload_file(
+                str(local_file_path),
+                self._s3_options.bucket,
+                s3_object_id,
+                callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
+            )
 
     def _remote_id_exists(self, s3_object_id: str) -> bool:
         """
@@ -156,7 +162,7 @@ class S3BotoUploadWorker(UploadWorker):
     def _upload_logged_files(self, encrypted_submission, progress_logger, files_to_upload):
         for file_path in files_to_upload:
             if not Path(file_path).exists():
-                raise UploadError(f"File {file_path} does not exist")
+                raise IncompleteSubmissionError(f"File {file_path} does not exist")
 
         for file_path, file_metadata in encrypted_submission.encrypted_files.items():
             logged_state = progress_logger.get_state(file_path, file_metadata)
@@ -222,7 +228,9 @@ class S3BotoUploadWorker(UploadWorker):
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
         if self._remote_id_exists(metadata_s3_object_id):
-            raise UploadError("Submission already uploaded. Corrections, additions, and followups require a new tanG.")
+            raise DuplicateUploadError(
+                "Submission already uploaded. Corrections, additions, and followups require a new tanG."
+            )
 
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id
@@ -246,8 +254,12 @@ class S3BotoUploadWorker(UploadWorker):
         progress_logger = FileProgressLogger[UploadState](self._status_file_path)
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
+        # archive uploads the metadata last, so an archived metadata object means an earlier run finished
         if self._remote_id_exists(metadata_s3_object_id):
-            raise UploadError("Submission already archived.")
+            self.__log.info(
+                "Submission '%s' is already archived. Nothing to upload.", encrypted_submission.submission_id
+            )
+            return
 
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id

@@ -6,8 +6,9 @@ from typing import Annotated, Any, Self
 import platformdirs
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes, load_ssh_public_key
-from grz_common.models.base import FilePath, IgnoringBaseSettings
+from grz_common.models.base import FilePath, IgnoringBaseSettings, get_secret_value
 from grz_db.errors import DatabaseConfigurationError
+from grz_db.models.author import Author as SigningAuthor
 from pydantic import Field, SecretStr, field_validator, model_validator
 
 DEFAULT_KNOWN_PUBLIC_KEYS_FILE = Path(platformdirs.user_config_dir("grzctl")) / "known_public_keys"
@@ -142,3 +143,26 @@ class DbModel(IgnoringBaseSettings):
                 (f"db.known_public_keys[{index}]", entry.strip()) for index, entry in enumerate(self.known_public_keys)
             )
         return _read_known_public_keys_file(self.known_public_keys_file or DEFAULT_KNOWN_PUBLIC_KEYS_FILE)
+
+    @cached_property
+    def signing_author(self) -> SigningAuthor:
+        """The author signing this run's DB writes, holding the private key behind them.
+
+        Cached on the configuration, so a command that opens several ``DbContext`` unlocks the
+        key once and, without a configured passphrase, asks for it once.
+
+        :returns: The author to hand to :class:`~grz_db.models.submission.SubmissionDb`.
+        :raises ValueError: If neither ``private_key`` nor ``private_key_path`` is configured.
+        """
+        if self.author.private_key_path is not None:
+            private_key_bytes = Path(self.author.private_key_path).read_bytes()
+        elif self.author.private_key is not None:
+            private_key_bytes = self.author.private_key.encode("utf-8")
+        else:
+            raise ValueError("Either private_key or private_key_path must be provided.")
+
+        return SigningAuthor(
+            name=self.author.name,
+            private_key_bytes=private_key_bytes,
+            private_key_passphrase=get_secret_value(self.author.private_key_passphrase),
+        )

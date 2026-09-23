@@ -636,11 +636,24 @@ class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
     INCOMPLETE_SUBMISSION = "incomplete_submission"
     DECRYPTION_ERROR = "decryption_error"
     NETWORK_ERROR = "network_error"
+    """Retired: older states carry it for what :attr:`TRANSFER_ERROR` means now."""
     VALIDATION_ERROR = "validation_error"
     FILE_NOT_FOUND = "file_not_found"
     ENCRYPTION_ERROR = "encryption_error"
     UPLOAD_ERROR = "upload_error"
+    """Retired: older states carry it for what :attr:`TRANSFER_ERROR` means now."""
+    DETAILED_QC_ERROR = "detailed_qc_error"
+    TRANSFER_ERROR = "transfer_error"
+    CONFIGURATION_ERROR = "configuration_error"
+    REPORTING_ERROR = "reporting_error"
+    INTERRUPTED = "interrupted"
     UNKNOWN = "unknown"
+
+
+RETIRED_FAILURE_REASONS: frozenset[FailureReasonEnum] = frozenset(
+    {FailureReasonEnum.NETWORK_ERROR, FailureReasonEnum.UPLOAD_ERROR}
+)
+"""Failure reasons that older states carry and that nothing records anymore."""
 
 
 class SubmissionStateLogBase(SQLModel):

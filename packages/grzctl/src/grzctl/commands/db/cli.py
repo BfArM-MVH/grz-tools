@@ -41,6 +41,7 @@ from grz_db.models.author import Author
 from grz_db.models.submission import (
     CASE_LINK_KEY,
     DONORS_KEY,
+    RETIRED_FAILURE_REASONS,
     Case,
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -486,8 +487,19 @@ def init(ctx: click.Context):
     """Initializes the database schema using Alembic."""
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
-    console_err.print(f"[cyan]Initializing database {db}[/cyan]")
-    submission_db.initialize_schema()
+    try:
+        console_err.print(f"[cyan]Initializing database {db}[/cyan]")
+        submission_db.initialize_schema()
+        console_err.print("[green]Successfully initialized database![/green]")
+
+    except (DatabaseConfigurationError, RuntimeError) as e:
+        console_err.print(f"[red]Error during schema initialization: {e}[/red]")
+        if isinstance(e, RuntimeError):
+            console_err.print("[yellow]Ensure your database is running and accessible.[/yellow]")
+        raise click.ClickException(str(e)) from e
+    except Exception as e:
+        console_err.print(f"[red]An unexpected error occurred during 'db init': {type(e).__name__} - {e}[/red]")
+        raise click.ClickException(str(e)) from e
 
 
 @db.command()
@@ -821,7 +833,9 @@ def add(ctx: click.Context, submission_id: str):
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.option(
     "--failure-reason",
-    type=click.Choice(FailureReasonEnum.list(), case_sensitive=False),
+    type=click.Choice(
+        [reason.value for reason in FailureReasonEnum if reason not in RETIRED_FAILURE_REASONS], case_sensitive=False
+    ),
     help="Failure reason when state is ERROR.",
 )
 @click.option("--ignore-error-state/--confirm-error-state")

@@ -4,11 +4,15 @@ Common methods for transferring data to and from GRZ buckets.
 
 import datetime
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
 
 import boto3
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
+from boto3.exceptions import Boto3Error
 from botocore.config import Config as Boto3Config
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, PartialCredentialsError
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,14 @@ else:
     S3Client = object
     S3ServiceResource = object
 
+from .exceptions import (
+    ConfigurationError,
+    DownloadError,
+    GrzError,
+    MissingObjectError,
+    MissingSubmissionFileError,
+    TransferError,
+)
 from .models.base import get_secret_value
 from .models.s3 import S3Options
 
@@ -84,6 +96,96 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
     return s3_resource
 
 
+S3_CLIENT_ERRORS = (ClientError, BotoCoreError, Boto3Error)
+"""What boto3 and botocore raise for a failed request."""
+
+_SETUP_ERROR_CODES = frozenset({"InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket"})
+"""S3 error codes that only a faulty setup causes.
+
+``AccessDenied`` is not among them: S3 also answers it for a missing object if the credentials
+may not list the bucket.
+"""
+
+
+def _chain(error: BaseException) -> Iterator[BaseException]:
+    """Yield ``error``, then the exception that ``error`` was raised from or while handling, and so on.
+
+    The chain is the one a traceback shows. It matters for ``S3Transfer.upload_file``, which raises
+    ``S3UploadFailedError`` while it handles the ``ClientError`` that carries the error code.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    # a cause can form a cycle, as in ``raise e from e``
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+
+
+def _is_faulty_setup(error: BaseException) -> bool:
+    """Whether only a faulty setup causes ``error``."""
+    if isinstance(error, NoCredentialsError | PartialCredentialsError):
+        return True
+    return isinstance(error, ClientError) and error.response.get("Error", {}).get("Code") in _SETUP_ERROR_CODES
+
+
+def s3_error(error: Exception, action: str, transfer_error: type[TransferError] = TransferError) -> GrzError:
+    """Classify an error of the S3 client as the failure it stands for.
+
+    The exceptions that ``error`` was raised from or while handling count as well.
+
+    :param error: What the S3 client raised.
+    :param action: What failed, such as ``"Upload to s3://bucket/key"``.
+    :param transfer_error: The class for a failed transfer.
+    :returns: A :class:`ConfigurationError` if only a faulty setup causes ``error``, otherwise a ``transfer_error``.
+    """
+    faulty_setup = any(_is_faulty_setup(e) for e in _chain(error))
+    error_class = ConfigurationError if faulty_setup else transfer_error
+    return error_class(f"{action} failed: {error}")
+
+
+@contextmanager
+def s3_errors(action: str, transfer_error: type[TransferError] = TransferError) -> Iterator[None]:
+    """Raise an error of the S3 client in the body as the failure it stands for.
+
+    :param action: What the body does, such as ``"Upload to s3://bucket/key"``.
+    :param transfer_error: The class for a failed transfer.
+    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
+    :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
+    """
+    try:
+        yield
+    except S3_CLIENT_ERRORS as e:
+        raise s3_error(e, action, transfer_error) from e
+
+
+def _is_missing_object(error: Exception) -> bool:
+    """Whether ``error`` is S3's response for an object that does not exist."""
+    if not isinstance(error, ClientError):
+        return False
+    return error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}
+
+
+def head_object(s3_client: Any, bucket: str, key: str) -> dict[str, Any]:
+    """Return the ``head_object`` response of an S3 object.
+
+    :param s3_client: boto3 S3 client.
+    :param bucket: Name of the bucket.
+    :param key: Key of the object.
+    :returns: The ``head_object`` response.
+    :raises MissingObjectError: If the object does not exist.
+    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    with s3_errors(f"Reading s3://{bucket}/{key}", DownloadError):
+        try:
+            return s3_client.head_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_missing_object(e):
+                raise MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
+            raise
+
+
 def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_id: str) -> datetime.datetime:
     """Return the S3 last-modified timestamp of a submission's ``metadata/metadata.json`` object.
 
@@ -99,7 +201,13 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     :returns: ``LastModified`` (timezone-aware ``datetime``) for
         ``<submission_id>/metadata/metadata.json``. Callers that only need the date
         portion should call ``.date()`` themselves.
-    :raises botocore.exceptions.ClientError: If the object does not exist or S3 returns an error.
+    :raises MissingSubmissionFileError: If the inbox lacks the metadata.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
     """
-    response = s3_client.head_object(Bucket=bucket, Key=f"{submission_id}/metadata/metadata.json")
+    key = f"{submission_id}/metadata/metadata.json"
+    try:
+        response = head_object(s3_client, bucket, key)
+    except MissingObjectError as e:
+        raise MissingSubmissionFileError(f"s3://{bucket}/{key} does not exist") from e
     return response["LastModified"]

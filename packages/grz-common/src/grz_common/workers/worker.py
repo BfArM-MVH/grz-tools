@@ -8,17 +8,19 @@ from os import PathLike
 from pathlib import Path
 
 from grz_common.exceptions import (
-    DecryptionError,
     EncryptionError,
+    GrzError,
     IncompleteSubmissionError,
+    SubmissionValidationError,
     UploadError,
 )
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
+from ..transfer import s3_errors
 from .download import S3BotoDownloadWorker
-from .submission import EncryptedSubmission, Submission, SubmissionValidationError
+from .submission import EncryptedSubmission, Submission
 from .upload import S3BotoUploadWorker
 
 log = logging.getLogger(__name__)
@@ -97,7 +99,7 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False, no_mmap=False):
+    def validate(self, identifiers: IdentifiersModel, force: bool = False, no_mmap: bool = False):
         """
         Validate this submission
 
@@ -138,10 +140,9 @@ class Worker:
                 raise SubmissionValidationError(error_msg)
             else:
                 self.__log.info("File validation successful!")
-        except KeyboardInterrupt as e:
-            error_msg = "Validation was cancelled by the user and is incomplete."
-            self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg) from e
+        except KeyboardInterrupt:
+            self.__log.error("Validation was cancelled by the user and is incomplete.")
+            raise
         except Exception as e:
             error_msg = f"Validation failed due to an error: {e}"
             self.__log.error(error_msg)
@@ -208,6 +209,8 @@ class Worker:
                 submitter_private_key_path=submitter_private_key_path,
                 force=force,
             )
+        except GrzError:
+            raise
         except Exception as e:
             raise EncryptionError(str(e)) from e
 
@@ -226,14 +229,11 @@ class Worker:
             # delete the log file if it exists
             self.progress_file_decrypt.unlink(missing_ok=True)
 
-        try:
-            submission = encrypted_submission.decrypt(
-                files_dir=self.files_dir,
-                progress_log_file=self.progress_file_decrypt,
-                recipient_private_key_path=recipient_private_key_path,
-            )
-        except Exception as e:
-            raise DecryptionError(str(e)) from e
+        submission = encrypted_submission.decrypt(
+            files_dir=self.files_dir,
+            progress_log_file=self.progress_file_decrypt,
+            recipient_private_key_path=recipient_private_key_path,
+        )
 
         return submission
 
@@ -272,10 +272,8 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        try:
+        with s3_errors(f"Upload of {encrypted_submission.submission_id}", UploadError):
             upload_worker.upload(encrypted_submission)
-        except Exception as e:
-            raise UploadError(str(e)) from e
 
         return encrypted_submission.submission_id
 
@@ -289,7 +287,8 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        upload_worker.archive(encrypted_submission)
+        with s3_errors(f"Archiving {encrypted_submission.submission_id}", UploadError):
+            upload_worker.archive(encrypted_submission)
 
     def download(
         self,
