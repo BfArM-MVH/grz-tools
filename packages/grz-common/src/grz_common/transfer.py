@@ -170,6 +170,7 @@ def raise_if_cleaned(s3_client: Any, bucket: str, submission_id: str, metadata_h
     :raises DownloadError: For any other error of the S3 client.
     """
     marker_keys = {f"{submission_id}/cleaning", f"{submission_id}/cleaned"}
+    # the prefix finds both markers with one request, and the intersection keeps only these exact keys
     with s3_errors(f"Listing the clean markers of s3://{bucket}/{submission_id}", grzexc.DownloadError):
         response = s3_client.list_objects_v2(Bucket=bucket, Prefix=f"{submission_id}/clean")
     markers = sorted(marker_keys & {obj["Key"] for obj in response.get("Contents", [])})

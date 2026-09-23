@@ -148,8 +148,10 @@ class _InboxClient:
         return {"Contents": contents} if contents else {}
 
 
-def test_get_metadata_upload_timestamp_returns_the_time_of_upload():
-    assert get_metadata_upload_timestamp(_InboxClient(keys=("submission/version",)), "bucket", "submission") == UPLOADED
+@pytest.mark.parametrize("key", ["submission/version", "submission/cleaner"], ids=["other-key", "similar-key"])
+def test_get_metadata_upload_timestamp_returns_the_time_of_upload(key: str):
+    """Only the exact marker keys count, not every key that starts like them."""
+    assert get_metadata_upload_timestamp(_InboxClient(keys=(key,)), "bucket", "submission") == UPLOADED
 
 
 @pytest.mark.parametrize(
