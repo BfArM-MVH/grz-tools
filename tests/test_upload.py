@@ -1,5 +1,6 @@
 """Tests for the upload module"""
 
+from http import HTTPStatus
 from pathlib import Path
 
 import botocore.client
@@ -265,13 +266,16 @@ def test_upload_of_a_submission_with_a_missing_local_file_raises(
         upload_worker.upload(submission)
 
 
-def _fail_s3_operation(monkeypatch, operation: str, code: str):
-    """Answer every S3 call of *operation* with the error *code*."""
+def _fail_s3_operation(monkeypatch, operation: str, code: str, status: HTTPStatus = HTTPStatus.FORBIDDEN):
+    """Answer every S3 call of *operation* with the error *code* and the HTTP *status*."""
     original_call = botocore.client.BaseClient._make_api_call
 
     def fail(self, operation_name, kwargs):
         if operation_name == operation:
-            raise ClientError({"Error": {"Code": code, "Message": code}}, operation_name)
+            raise ClientError(
+                {"Error": {"Code": code, "Message": code}, "ResponseMetadata": {"HTTPStatusCode": status.value}},
+                operation_name,
+            )
         return original_call(self, operation_name, kwargs)
 
     monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", fail)

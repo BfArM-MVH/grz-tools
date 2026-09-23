@@ -143,7 +143,7 @@ def head_object(
         try:
             return s3_client.head_object(Bucket=bucket, Key=key)
         except ClientError as e:
-            if e.response["Error"]["Code"] not in {"403", "404"}:
+            if e.response["ResponseMetadata"]["HTTPStatusCode"] not in {HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND}:
                 raise
             head_error = e
         # a HEAD answer has no body, so its error code is only the HTTP status. A GET answers with the real code.

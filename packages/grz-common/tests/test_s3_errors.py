@@ -15,19 +15,27 @@ def _client_error(code: str, operation: str = "HeadObject") -> ClientError:
     return ClientError({"Error": {"Code": code, "Message": code}}, operation)
 
 
+def _head_error(status: HTTPStatus) -> ClientError:
+    """Fail a HEAD request as botocore does: S3 sends no body, so the error code is the HTTP status."""
+    return ClientError(
+        {"Error": {"Code": str(status.value), "Message": ""}, "ResponseMetadata": {"HTTPStatusCode": status.value}},
+        "HeadObject",
+    )
+
+
 class _FailingClient:
     """Fail a HEAD request with the HTTP status alone, as S3 does, and a GET request with ``get_code``.
 
     Without ``get_code``, the GET request succeeds.
     """
 
-    def __init__(self, head_status: str, get_code: str | None = None):
+    def __init__(self, head_status: HTTPStatus, get_code: str | None = None):
         self.head_status = head_status
         self.get_code = get_code
         self.body = io.BytesIO(b"x")
 
     def head_object(self, **_kwargs):
-        raise _client_error(self.head_status)
+        raise _head_error(self.head_status)
 
     def get_object(self, **_kwargs):
         if self.get_code is None:
@@ -78,14 +86,18 @@ def test_any_other_error_is_a_failed_transfer_of_the_given_kind(error: Exception
 
 def test_head_object_reports_a_missing_object():
     with pytest.raises(grzexc.MissingObjectError):
-        head_object(_FailingClient("404", "NoSuchKey"), "bucket", "key")
+        head_object(_FailingClient(HTTPStatus.NOT_FOUND, "NoSuchKey"), "bucket", "key")
 
 
 @pytest.mark.parametrize(
     ("head_status", "get_code"),
-    [("404", "NoSuchBucket"), ("403", "InvalidAccessKeyId"), ("403", "SignatureDoesNotMatch")],
+    [
+        (HTTPStatus.NOT_FOUND, "NoSuchBucket"),
+        (HTTPStatus.FORBIDDEN, "InvalidAccessKeyId"),
+        (HTTPStatus.FORBIDDEN, "SignatureDoesNotMatch"),
+    ],
 )
-def test_head_object_learns_a_faulty_setup_from_a_get_request(head_status: str, get_code: str):
+def test_head_object_learns_a_faulty_setup_from_a_get_request(head_status: HTTPStatus, get_code: str):
     """S3 answers HEAD with the HTTP status alone, so the error code of a GET request decides."""
     with pytest.raises(grzexc.ConfigurationError):
         head_object(_FailingClient(head_status, get_code), "bucket", "key")
@@ -93,18 +105,18 @@ def test_head_object_learns_a_faulty_setup_from_a_get_request(head_status: str, 
 
 def test_head_object_reports_a_refused_read_as_a_failed_download():
     with pytest.raises(grzexc.DownloadError) as excinfo:
-        head_object(_FailingClient("403", "AccessDenied"), "bucket", "key")
+        head_object(_FailingClient(HTTPStatus.FORBIDDEN, "AccessDenied"), "bucket", "key")
 
     assert not isinstance(excinfo.value, grzexc.MissingObjectError)
 
 
 def test_head_object_raises_the_given_class_for_a_failed_transfer():
     with pytest.raises(grzexc.UploadError):
-        head_object(_FailingClient("403", "AccessDenied"), "bucket", "key", grzexc.UploadError)
+        head_object(_FailingClient(HTTPStatus.FORBIDDEN, "AccessDenied"), "bucket", "key", grzexc.UploadError)
 
 
-@pytest.mark.parametrize("head_status", ["404", "403"])
-def test_head_object_reports_a_failed_read_if_the_get_request_succeeds(head_status: str):
+@pytest.mark.parametrize("head_status", [HTTPStatus.NOT_FOUND, HTTPStatus.FORBIDDEN])
+def test_head_object_reports_a_failed_read_if_the_get_request_succeeds(head_status: HTTPStatus):
     """The object may appear between the two requests. The GET response is then closed unread."""
     s3_client = _FailingClient(head_status)
 
@@ -118,13 +130,13 @@ def test_head_object_reports_a_failed_read_if_the_get_request_succeeds(head_stat
 @pytest.mark.parametrize(
     ("head_status", "get_code", "expected"),
     [
-        ("404", "NoSuchKey", grzexc.MissingSubmissionFileError),
-        ("404", "NoSuchBucket", grzexc.ConfigurationError),
-        ("403", "InvalidAccessKeyId", grzexc.ConfigurationError),
+        (HTTPStatus.NOT_FOUND, "NoSuchKey", grzexc.MissingSubmissionFileError),
+        (HTTPStatus.NOT_FOUND, "NoSuchBucket", grzexc.ConfigurationError),
+        (HTTPStatus.FORBIDDEN, "InvalidAccessKeyId", grzexc.ConfigurationError),
     ],
 )
 def test_get_metadata_upload_timestamp_sorts_the_error_of_the_get_request(
-    head_status: str, get_code: str, expected: type[Exception]
+    head_status: HTTPStatus, get_code: str, expected: type[Exception]
 ):
     with pytest.raises(expected):
         get_metadata_upload_timestamp(_FailingClient(head_status, get_code), "bucket", "submission")
@@ -151,13 +163,7 @@ class _InboxClient:
             return {"ContentLength": self.content_length, "LastModified": UPLOADED}
         if Key in self.keys:
             return {"ContentLength": 0, "LastModified": UPLOADED}
-        raise ClientError(
-            {
-                "Error": {"Code": str(self.missing_status.value), "Message": ""},
-                "ResponseMetadata": {"HTTPStatusCode": self.missing_status.value},
-            },
-            "HeadObject",
-        )
+        raise _head_error(self.missing_status)
 
 
 @pytest.mark.parametrize("key", ["submission/version", "submission/cleaner"], ids=["other-key", "similar-key"])
