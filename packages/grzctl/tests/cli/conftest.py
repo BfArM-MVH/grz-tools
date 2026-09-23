@@ -28,6 +28,15 @@ INITIAL_REVISION = "1a9bd994df1b"
 
 
 @pytest.fixture
+def crypt4gh_public_key() -> str:
+    """A crypt4gh public key as text.
+
+    ``KeyModel.check_grz_public_key`` only checks for the markers, not the payload, so the key need not decode.
+    """
+    return "-----BEGIN CRYPT4GH PUBLIC KEY-----\n7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n-----END CRYPT4GH PUBLIC KEY-----\n"
+
+
+@pytest.fixture
 def test_metadata_path():
     return importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 

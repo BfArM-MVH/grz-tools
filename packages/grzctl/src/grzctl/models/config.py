@@ -1,5 +1,8 @@
+import contextlib
 import logging
 import sys
+import tempfile
+from collections.abc import Iterator
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
@@ -7,8 +10,9 @@ from typing import Annotated, Any
 import yaml
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
 from grz_common.models.identifiers import IdentifiersModel
+from grz_common.models.keys import KeyModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
-from pydantic import Field, PrivateAttr, SecretStr, model_validator
+from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
 
@@ -78,8 +82,43 @@ class ArchiveTarget(IgnoringBaseModel):
     s3: S3Options
     """S3 connection details and bucket for this archive."""
 
-    public_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the public key for re-encryption of files destined for this archive."""
+    public_key: str | None = None
+    """The crypt4gh public key for re-encryption of files destined for this archive."""
+
+    public_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    """Path to the crypt4gh public key for re-encryption of files destined for this archive."""
+
+    @field_validator("public_key")
+    @classmethod
+    def check_public_key(cls, v: str | None) -> str | None:
+        return KeyModel.check_grz_public_key(v)
+
+    @model_validator(mode="after")
+    def validate_public_key(self) -> "ArchiveTarget":
+        if self.public_key is None and self.public_key_path is None:
+            raise ValueError("Either public_key or public_key_path must be set.")
+        if self.public_key is not None and self.public_key_path is not None:
+            raise ValueError("Only one of public_key or public_key_path must be set.")
+        return self
+
+    @contextlib.contextmanager
+    def public_key_file(self) -> Iterator[str]:
+        """Give a path to the crypt4gh public key, for callers that need a file.
+
+        ``public_key_path`` is given as is. ``public_key`` is written to a temporary file first,
+        which is deleted again once the caller is done with it.
+
+        :yields: Path to a file with the crypt4gh public key.
+        """
+        if self.public_key_path is not None:
+            yield self.public_key_path
+            return
+        if self.public_key is None:
+            raise RuntimeError("Either public_key or public_key_path must be set.")
+        with tempfile.NamedTemporaryFile("w") as public_key_file:
+            public_key_file.write(self.public_key)
+            public_key_file.flush()
+            yield public_key_file.name
 
 
 class ArchivesConfig(IgnoringBaseModel):

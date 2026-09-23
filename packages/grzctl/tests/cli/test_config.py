@@ -42,3 +42,16 @@ def test_pydantic_json_env_var_merging(monkeypatch, configuration: dict):
 
     entry = config.leistungserbringer[LE_ID]
     assert get_secret_value(entry.inbox_buckets[BUCKET_NAME].private_key_passphrase) == "json-secret-passphrase"
+
+
+def test_archive_public_key_env_var_overrides_the_path(monkeypatch, configuration: dict, crypt4gh_public_key: str):
+    """An operator may put the archive's public key into an environment variable inline,
+    instead of writing it to a file that ``public_key_path`` then points at.
+    """
+    del configuration["archives"]["consented"]["public_key_path"]
+    monkeypatch.setenv("GRZ_ARCHIVES__CONSENTED__PUBLIC_KEY", crypt4gh_public_key)
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    assert config.archives.consented.public_key == crypt4gh_public_key
+    assert config.archives.consented.public_key_path is None
