@@ -32,7 +32,6 @@ def _config(public_key: str, signing_key: dict[str, str]) -> dict:
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
         "pruefbericht": {},
-        "keys": {"grz_private_key_path": "/dev/null"},
         "identifiers": {"grz": "GRZT00000"},
     }
 
@@ -127,5 +126,5 @@ def test_encrypt_fails_if_the_signing_key_cannot_be_loaded(tmp_path, crypt4gh_pu
         result = _invoke_encrypt(config_path, _submission_dir(tmp_path), mock_worker_cls)
 
     assert isinstance(result.exception, grzexc.ConfigurationError), result.output
-    assert "Secret key /dev/null cannot be read" in str(result.exception)
+    assert "archives.signing_key_path: Secret key /dev/null cannot be read" in str(result.exception)
     mock_worker_cls.return_value.encrypt.assert_not_called()

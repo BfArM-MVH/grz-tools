@@ -48,7 +48,7 @@ def _load_private_key(
     The passphrase is only asked for if the key is encrypted. It is the first of: *passphrase*,
     the ``C4GH_PASSPHRASE`` environment variable, and an interactive prompt.
 
-    :param location: Config location of the inline key. Names the key in the prompt and in errors.
+    :param location: Config location of the inline key. Errors name the key by it, or by it with a ``_path`` suffix.
     :param private_key: The private key, given inline.
     :param private_key_path: Path to the private key.
     :param passphrase: Passphrase of the private key.
@@ -60,7 +60,10 @@ def _load_private_key(
             private_key.get_secret_value(), passphrase=get_secret_value(passphrase), key_name=location
         )
     if private_key_path is not None:
-        return Crypt4GH.retrieve_private_key(private_key_path, passphrase=get_secret_value(passphrase))
+        try:
+            return Crypt4GH.retrieve_private_key(private_key_path, passphrase=get_secret_value(passphrase))
+        except grzexc.ConfigurationError as e:
+            raise grzexc.ConfigurationError(f"{location}_path: {e}") from e
     raise grzexc.ConfigurationError(f"Neither {location} nor {location}_path is set.")
 
 
@@ -73,11 +76,19 @@ class InboxConfig(S3ConnectionBase):
     bucket: Annotated[str | None, Field(default=None)] = None
     """S3 bucket name. Defaults to the inbox name key if not set."""
 
-    private_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the GRZ private key used to decrypt files from this inbox."""
+    private_key: SecretStr | None = None
+    """The GRZ crypt4gh private key used to decrypt files from this inbox."""
+
+    private_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    """Path to the GRZ crypt4gh private key used to decrypt files from this inbox."""
 
     private_key_passphrase: SecretStr | None = None
     """Passphrase to the GRZ private key used to decrypt files from this inbox."""
+
+    @model_validator(mode="after")
+    def validate_private_key(self) -> "InboxConfig":
+        _check_key_fields("private_key", self.private_key, self.private_key_path, required=True)
+        return self
 
 
 class InboxTarget(IgnoringBaseModel):
@@ -89,11 +100,19 @@ class InboxTarget(IgnoringBaseModel):
     s3: S3Options
     """Fully resolved S3 options, including the bucket name."""
 
-    private_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the GRZ private key used to decrypt files from this inbox."""
+    private_key: SecretStr | None = None
+    """The GRZ crypt4gh private key used to decrypt files from this inbox."""
+
+    private_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    """Path to the GRZ crypt4gh private key used to decrypt files from this inbox."""
 
     private_key_passphrase: SecretStr | None = None
     """Passphrase to the GRZ private key used to decrypt files from this inbox."""
+
+    @model_validator(mode="after")
+    def validate_private_key(self) -> "InboxTarget":
+        _check_key_fields("private_key", self.private_key, self.private_key_path, required=True)
+        return self
 
 
 class LeistungserbringerEntry(IgnoringBaseModel):
@@ -106,18 +125,8 @@ class LeistungserbringerEntry(IgnoringBaseModel):
     """Mapping: InboxName -> InboxConfig."""
 
 
-class GrzctlKeyModel(IgnoringBaseModel):
-    """Key configuration for grzctl commands."""
-
-    grz_private_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the GRZ private key for decryption."""
-
-    grz_public_key_path: Annotated[str | None, Field(default=None)] = None
-    """Path to the GRZ public key (optional; encryption targets are configured via archives instead)."""
-
-
 class ArchiveTarget(IgnoringBaseModel):
-    """Encapsulates everything needed to write to a specific archive."""
+    """Encapsulates everything needed to write to a specific archive, and to decrypt submissions from it."""
 
     s3: S3Options
     """S3 connection details and bucket for this archive."""
@@ -128,9 +137,23 @@ class ArchiveTarget(IgnoringBaseModel):
     public_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
     """Path to the crypt4gh public key for re-encryption of files destined for this archive."""
 
+    private_key: SecretStr | None = None
+    """The crypt4gh private key of this archive, to decrypt archived submissions (optional)."""
+
+    private_key_path: Annotated[str | None, Field(default=None, min_length=1)] = None
+    """Path to the crypt4gh private key of this archive, to decrypt archived submissions (optional)."""
+
+    private_key_passphrase: SecretStr | None = None
+    """Passphrase to the crypt4gh private key of this archive."""
+
     @model_validator(mode="after")
     def validate_public_key(self) -> "ArchiveTarget":
         _check_key_fields("public_key", self.public_key, self.public_key_path, required=True)
+        return self
+
+    @model_validator(mode="after")
+    def validate_private_key(self) -> "ArchiveTarget":
+        _check_key_fields("private_key", self.private_key, self.private_key_path, required=False)
         return self
 
     @contextlib.contextmanager
@@ -235,9 +258,6 @@ class GrzctlConfig(IgnoringBaseSettings):
     pruefbericht: PruefberichtModel
     """Configuration for Prüfbericht submission."""
 
-    keys: GrzctlKeyModel
-    """Key configuration for encryption/decryption commands."""
-
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
 
@@ -320,5 +340,57 @@ class GrzctlConfig(IgnoringBaseSettings):
         bucket = inbox_cfg.bucket or inbox_name
         return InboxTarget(
             s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
-            **inbox_cfg.model_dump(include={"private_key_path", "private_key_passphrase"}),
+            **inbox_cfg.model_dump(include={"private_key", "private_key_path", "private_key_passphrase"}),
         )
+
+    def iter_decryption_keys(self, submitter_id: str) -> Iterator[tuple[str, bytes]]:
+        """Load the private keys that may decrypt a submission of a submitter, one at a time.
+
+        First come the keys of all inboxes of the submitter (LE), then the private keys of the consented
+        and the non-consented archive, if set. A submitter missing from the config has no inbox keys.
+        Each key is only loaded, and its passphrase only asked for, when the caller asks for it.
+
+        Locations that share a key, for example through a YAML anchor, give one entry, so their key is
+        loaded once. Two locations share a key if they name the same file or hold the same inline text.
+        The entry takes its place from the first of them, and its passphrase from the first as well.
+
+        :param submitter_id: Submitter (LE) ID, as in the submission's metadata.
+        :yields: Pairs of the config locations of a key, joined by ``", "``, and the key.
+        :raises ConfigurationError: If a key cannot be loaded.
+        """
+        candidates: list[tuple[str, InboxConfig | ArchiveTarget]] = []
+        entry = self._le_by_id.get(submitter_id)
+        if entry is None:
+            log.warning(f"Submitter '{submitter_id}' is not in the config, so no inbox private key is tried.")
+        else:
+            for inbox_name, inbox in entry.inbox_buckets.items():
+                candidates.append((f"leistungserbringer.{submitter_id}.inbox_buckets.{inbox_name}", inbox))
+        for archive_name, target in (
+            ("consented", self.archives.consented),
+            ("non_consented", self.archives.non_consented),
+        ):
+            if target.private_key is not None or target.private_key_path is not None:
+                candidates.append((f"archives.{archive_name}", target))
+
+        # Group the locations by where their key comes from: the inline text, or the resolved path of the file.
+        # dicts keep their insertion order, so the groups keep the order of their first location.
+        groups: dict[tuple[str, str], list[tuple[str, InboxConfig | ArchiveTarget]]] = {}
+        for prefix, holder in candidates:
+            if holder.private_key is not None:
+                source = ("inline", holder.private_key.get_secret_value())
+            else:
+                source = ("path", str(Path(str(holder.private_key_path)).expanduser().resolve()))
+            groups.setdefault(source, []).append((prefix, holder))
+
+        for group in groups.values():
+            locations = ", ".join(
+                f"{prefix}.private_key" if holder.private_key is not None else f"{prefix}.private_key_path"
+                for prefix, holder in group
+            )
+            prefix, holder = group[0]
+            yield (
+                locations,
+                _load_private_key(
+                    f"{prefix}.private_key", holder.private_key, holder.private_key_path, holder.private_key_passphrase
+                ),
+            )

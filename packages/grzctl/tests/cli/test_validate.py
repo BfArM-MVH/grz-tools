@@ -26,7 +26,6 @@ def grzctl_config_path(tmp_path):
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
         "pruefbericht": {},
-        "keys": {"grz_private_key_path": "/dev/null"},
         "identifiers": {"grz": "GRZT00000"},
     }
     config_path = tmp_path / "config.yaml"

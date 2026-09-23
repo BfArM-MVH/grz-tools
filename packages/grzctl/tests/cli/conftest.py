@@ -90,10 +90,6 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
             "known_public_keys_file": str(public_key_path.resolve()),
         },
         pruefbericht={},
-        keys={
-            "grz_private_key_path": str(private_key_path.resolve()),
-            "grz_public_key_path": str(public_key_path.resolve()),
-        },
         identifiers={"grz": "GRZK00007"},
     )
 

@@ -345,25 +345,23 @@ def encrypt_config_model(keys_config_content):
 
 
 @pytest.fixture
-def db_config_model(db_config_content, grzctl_keys_config, grzctl_identifiers_config):
+def db_config_model(db_config_content, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **db_config_content,
         leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
-        keys=grzctl_keys_config,
         identifiers=grzctl_identifiers_config,
     )
 
 
 @pytest.fixture
-def migrated_db_config_model(migrated_db_config_content, grzctl_keys_config, grzctl_identifiers_config):
+def migrated_db_config_model(migrated_db_config_content, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **migrated_db_config_content,
         leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
         archives=_grzctl_archives(),
         pruefbericht={},
-        keys=grzctl_keys_config,
         identifiers=grzctl_identifiers_config,
     )
 
@@ -439,15 +437,6 @@ _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "te
 
 
 @pytest.fixture()
-def grzctl_keys_config():
-    """Keys section for GrzctlConfig: GRZ private + public key, using distinct mock files."""
-    return {
-        "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
-        "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
-    }
-
-
-@pytest.fixture()
 def grzctl_identifiers_config():
     """Identifiers section for GrzctlConfig."""
     return {"grz": "GRZK00007"}
@@ -469,25 +458,15 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     }
 
 
-def _grzctl_config_dict(
-    *, leistungserbringer, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None
-) -> dict:
+def _grzctl_config_dict(*, leistungserbringer, db=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
 
-    *keys* and *identifiers* default to valid placeholders for tests that don't
-    exercise those sections.  In tests that need real key material, pass values
-    from the ``grzctl_keys_config`` / ``grzctl_identifiers_config`` fixtures.
+    *identifiers* defaults to a valid placeholder for tests that don't exercise that section.
     """
     return {
         "leistungserbringer": leistungserbringer,
         "archives": _grzctl_archives(endpoint_url=endpoint_url),
         "db": db if db is not None else _GRZCTL_DB_DUMMY,
-        "keys": keys
-        if keys is not None
-        else {
-            "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
-            "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
-        },
         "pruefbericht": pruefbericht if pruefbericht is not None else {},
         "identifiers": identifiers if identifiers is not None else {"grz": "GRZK00007"},
     }
@@ -497,7 +476,6 @@ def _grzctl_model(
     *,
     leistungserbringer,
     db=None,
-    keys=None,
     pruefbericht=None,
     identifiers=None,
     endpoint_url=None,
@@ -507,7 +485,6 @@ def _grzctl_model(
         **_grzctl_config_dict(
             leistungserbringer=leistungserbringer,
             db=db,
-            keys=keys,
             pruefbericht=pruefbericht,
             identifiers=identifiers,
             endpoint_url=endpoint_url,
@@ -528,13 +505,13 @@ def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
 
 
 @pytest.fixture
-def temp_grzctl_keys_config_file_path(temp_data_dir_path, keys_config_content) -> Path:
-    """GrzctlConfig-format keys config for grzctl CLI tests."""
+def temp_grzctl_keys_config_file_path(temp_data_dir_path) -> Path:
+    """GrzctlConfig-format config for grzctl CLI tests, whose inbox key decrypts the example submission."""
     config_file = temp_data_dir_path / "config.grzctl_keys.yaml"
+    grz_private_key_path = str(Path(crypt4gh_grz_private_key_file).resolve())
     config = _grzctl_model(
-        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": grz_private_key_path}}}},
         db=_GRZCTL_DB_DUMMY,
-        keys=keys_config_content["keys"],
     )
     with open(config_file, "w") as fd:
         config.to_yaml(fd)

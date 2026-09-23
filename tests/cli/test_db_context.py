@@ -25,7 +25,6 @@ UPLOAD_DATE = "2026-01-01"
 def full_config_path(
     tmp_path,
     migrated_db_config_content,
-    keys_config_content,
     pruefbericht_config_content,
 ):
     from tests.conftest import _grzctl_archives
@@ -51,7 +50,6 @@ def full_config_path(
         "identifiers": {"grz": "GRZK00007"},
     }
     config_data.update(migrated_db_config_content)
-    config_data.update(keys_config_content)
     config_data.update(pruefbericht_config_content)
 
     if "author" in config_data.get("db", {}):

@@ -16,6 +16,8 @@ INBOX_S3_SECRET = "inbox-s3-secret"
 ARCHIVE_S3_SECRET = "archive-s3-secret"
 SIGNING_KEY = "signing-key"
 SIGNING_KEY_PASSPHRASE = "signing-key-passphrase"
+INBOX_PRIVATE_KEY = "inbox-private-key"
+ARCHIVE_PRIVATE_KEY = "archive-private-key"
 
 
 def _dump_config(config_path: Path, *args: str) -> str:
@@ -34,6 +36,9 @@ def config_with_secrets_path(tmp_path: Path, offline_config: GrzctlConfig) -> Pa
     data["db"]["author"]["private_key_passphrase"] = PASSPHRASE
     data["pruefbericht"]["client_secret"] = CLIENT_SECRET
     data["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["secret"] = INBOX_S3_SECRET
+    del data["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["private_key_path"]
+    data["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["private_key"] = INBOX_PRIVATE_KEY
+    data["archives"]["consented"]["private_key"] = ARCHIVE_PRIVATE_KEY
     data["archives"]["consented"]["s3"]["secret"] = ARCHIVE_S3_SECRET
     del data["archives"]["signing_key_path"]
     data["archives"]["signing_key"] = SIGNING_KEY
@@ -53,6 +58,8 @@ def test_dump_config_masks_secrets_by_default(config_with_secrets_path: Path):
     assert dumped["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["secret"] == "**********"
     assert dumped["archives"]["consented"]["s3"]["secret"] == "**********"
     assert dumped["archives"]["signing_key"] == "**********"
+    assert dumped["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["private_key"] == "**********"
+    assert dumped["archives"]["consented"]["private_key"] == "**********"
     assert dumped["archives"]["signing_key_passphrase"] == "**********"
 
 
@@ -64,6 +71,8 @@ def test_dump_config_reveal_secrets_roundtrips(tmp_path: Path, config_with_secre
     assert dumped["db"]["author"]["private_key_passphrase"] == PASSPHRASE
     assert dumped["pruefbericht"]["client_secret"] == CLIENT_SECRET
     assert dumped["archives"]["signing_key"] == SIGNING_KEY
+    assert dumped["leistungserbringer"]["000000000"]["inbox_buckets"]["inbox"]["private_key"] == INBOX_PRIVATE_KEY
+    assert dumped["archives"]["consented"]["private_key"] == ARCHIVE_PRIVATE_KEY
     assert dumped["archives"]["signing_key_passphrase"] == SIGNING_KEY_PASSPHRASE
 
     reloaded_path = tmp_path / "reloaded.yaml"

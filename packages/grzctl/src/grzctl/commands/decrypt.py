@@ -1,11 +1,12 @@
 """Command for decrypting a submission."""
 
 import logging
-import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
+from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
@@ -16,14 +17,31 @@ from ..models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 
+def _load_private_key_file(private_key_file: str) -> Iterator[tuple[str, bytes]]:
+    """Load the key of ``--private-key-file`` once the caller asks for it, like the config keys.
+
+    :yields: The option and the key.
+    """
+    yield f"--private-key-file {private_key_file}", Crypt4GH.retrieve_private_key(private_key_file)
+
+
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
+@click.option(
+    "--private-key-file",
+    "private_key_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Decrypt with this crypt4gh private key instead of the keys in the config. "
+    "Its passphrase comes from C4GH_PASSPHRASE, else a prompt.",
+)
 @grzcli.force
 @grzcli.update_db
 def decrypt(
     configuration: GrzctlConfig,
     submission_dir,
+    private_key_file,
     force,
     update_db,
     **kwargs,
@@ -32,14 +50,11 @@ def decrypt(
     Decrypt a submission.
 
     Decrypting a submission requires the _private_ key of the original recipient.
+    Without --private-key-file, the keys in the config are tried one at a time:
+    first the private keys of all inboxes of the submitter named in the submission's metadata,
+    then the private keys of the consented and the non-consented archive.
+    The first key that opens the crypt4gh header of the submission's files decrypts all of them.
     """
-    keys = configuration.keys
-
-    grz_privkey_path = keys.grz_private_key_path
-    if not grz_privkey_path:
-        log.error("GRZ private key path is required for decryption.")
-        sys.exit(1)
-
     log.info("Starting decryption...")
 
     submission_dir = Path(submission_dir)
@@ -50,7 +65,15 @@ def decrypt(
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
     )
-    submission_id = worker_inst.parse_encrypted_submission().submission_id
+    encrypted_submission = worker_inst.parse_encrypted_submission()
+    submission_id = encrypted_submission.submission_id
+
+    if private_key_file is not None:
+        private_keys = _load_private_key_file(private_key_file)
+    else:
+        submitter_id = encrypted_submission.metadata.content.submission.submitter_id
+        private_keys = configuration.iter_decryption_keys(submitter_id)
+
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,
@@ -58,6 +81,7 @@ def decrypt(
         end_state=SubmissionStateEnum.DECRYPTED,
         enabled=update_db,
     ):
-        worker_inst.decrypt(grz_privkey_path, force=force)
+        private_key = encrypted_submission.find_private_key(private_keys)
+        worker_inst.decrypt(recipient_private_key=private_key, force=force)
 
     log.info("Decryption successful!")
