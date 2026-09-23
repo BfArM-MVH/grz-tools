@@ -137,6 +137,9 @@ class Worker:
         except KeyboardInterrupt:
             self.__log.error("Validation was cancelled by the user and is incomplete.")
             raise
+        except grzexc.GrzError:
+            # already logged and typed above, so wrapping it again would log and double-report it
+            raise
         except Exception as e:
             error_msg = f"Validation failed due to an error: {e}"
             self.__log.error(error_msg)
