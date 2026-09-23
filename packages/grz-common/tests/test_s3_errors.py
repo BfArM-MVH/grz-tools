@@ -2,6 +2,7 @@
 
 import io
 
+import boto3
 import grz_common.exceptions as grzexc
 import pytest
 from boto3.exceptions import S3UploadFailedError
@@ -40,6 +41,14 @@ def test_an_error_that_only_a_faulty_setup_causes_is_a_configuration_error(code:
 
 def test_missing_credentials_are_a_configuration_error():
     assert isinstance(s3_error(NoCredentialsError(), "Reading s3://bucket/key"), grzexc.ConfigurationError)
+
+
+def test_a_bucket_name_that_botocore_rejects_is_a_configuration_error():
+    """The S3 client checks the bucket name before it sends a request, so no S3 server is needed."""
+    s3_client = boto3.client("s3", region_name="us-east-1", aws_access_key_id="key", aws_secret_access_key="secret")
+
+    with pytest.raises(grzexc.ConfigurationError):
+        head_object(s3_client, "not a bucket name", "key")
 
 
 def _upload_failed_while_handling(error: ClientError) -> S3UploadFailedError:

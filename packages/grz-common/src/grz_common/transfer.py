@@ -13,7 +13,13 @@ import grz_common.exceptions as grzexc
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from boto3.exceptions import Boto3Error
 from botocore.config import Config as Boto3Config
-from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, PartialCredentialsError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    ParamValidationError,
+    PartialCredentialsError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +122,13 @@ def _chain(error: BaseException) -> Iterator[BaseException]:
 
 
 def _is_faulty_setup(error: BaseException) -> bool:
-    """Whether only a faulty setup causes ``error``."""
-    if isinstance(error, NoCredentialsError | PartialCredentialsError):
+    """Whether only a faulty setup causes ``error``.
+
+    botocore raises ``ParamValidationError`` before it sends a request. Of the parameters that
+    grz-tools sends, only the configured bucket name can fail validation. A key fails only if it
+    is empty, and every key that grz-tools builds starts with the submission ID.
+    """
+    if isinstance(error, NoCredentialsError | PartialCredentialsError | ParamValidationError):
         return True
     return isinstance(error, ClientError) and error.response.get("Error", {}).get("Code") in _SETUP_ERROR_CODES
 
