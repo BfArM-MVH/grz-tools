@@ -361,8 +361,8 @@ def test_populate_command_takes_the_upload_date_from_the_inbox(
 
 @pytest.mark.parametrize(
     ("body", "marker"),
-    [(b"", "cleaned"), (b"{}", "cleaning"), (b"", None), (None, None)],
-    ids=["cleaned", "being-cleaned", "uploaded-empty", "missing"],
+    [(b"", "cleaned"), (b"{}", "cleaning"), (None, None)],
+    ids=["cleaned", "being-cleaned", "missing"],
 )
 def test_populate_command_needs_a_date_when_the_inbox_has_none(
     db_ctx: SimpleNamespace,

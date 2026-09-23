@@ -125,7 +125,8 @@ It also empties the metadata.json, whose `LastModified` then is the time of clea
 Since `cleaning` stays until `cleaned` exists, an emptied metadata.json always sits next to one of the two markers.
 So before grzctl downloads the metadata.json or reads its upload date, it checks for both markers.
 If it finds one, it raises a `SubmissionCleanedError`.
-An empty metadata.json without a marker was uploaded like that, so it fails as an invalid metadata.json.
+An empty metadata.json without a marker was uploaded like that.
+So its `LastModified` is the upload date, and its download fails as an invalid metadata.json.
 
 `AccessDenied` is not a configuration error.
 S3 also answers 403 for a missing object if the credentials lack the permission to list the bucket.

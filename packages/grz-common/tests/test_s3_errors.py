@@ -186,10 +186,9 @@ def test_get_metadata_upload_timestamp_refuses_a_cleaned_submission(inbox: _Inbo
         get_metadata_upload_timestamp(inbox, "bucket", "submission")
 
 
-def test_get_metadata_upload_timestamp_refuses_an_empty_upload():
+def test_get_metadata_upload_timestamp_returns_the_time_of_an_empty_upload():
     """``grzctl clean`` leaves a marker next to the metadata.json it empties, so this one was uploaded empty."""
-    with pytest.raises(grzexc.SubmissionValidationError):
-        get_metadata_upload_timestamp(_InboxClient(content_length=0), "bucket", "submission")
+    assert get_metadata_upload_timestamp(_InboxClient(content_length=0), "bucket", "submission") == UPLOADED
 
 
 def test_get_metadata_upload_timestamp_reports_a_failed_marker_check_as_a_failed_download():
