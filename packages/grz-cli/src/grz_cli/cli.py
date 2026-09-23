@@ -11,10 +11,10 @@ from pathlib import Path
 from textwrap import dedent
 
 import click
+import grz_common.exceptions as grzexc
 import grz_pydantic_models.submission.metadata
 from grz_common.cli import config_file
 from grz_common.cli.dump_config import dump_config
-from grz_common.exceptions import GrzError
 from grz_common.logging import setup_cli_logging
 
 from .commands.encrypt import encrypt
@@ -98,7 +98,7 @@ def main():
     cli = build_cli()
     try:
         cli()
-    except GrzError as e:
+    except grzexc.GrzError as e:
         # an expected failure, such as an invalid metadata.json: log its message, not a traceback
         log.error(e)
         sys.exit(1)

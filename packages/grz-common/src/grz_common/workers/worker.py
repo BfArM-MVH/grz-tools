@@ -7,13 +7,7 @@ from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 
-from grz_common.exceptions import (
-    EncryptionError,
-    GrzError,
-    IncompleteSubmissionError,
-    SubmissionValidationError,
-    UploadError,
-)
+import grz_common.exceptions as grzexc
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
@@ -115,7 +109,7 @@ class Worker:
             error_msg = "\n".join(["Metadata validation failed! Errors:", *errors])
             self.__log.error(error_msg)
 
-            raise SubmissionValidationError(error_msg)
+            raise grzexc.SubmissionValidationError(error_msg)
         else:
             self.__log.info("Metadata validation successful!")
 
@@ -137,7 +131,7 @@ class Worker:
             if errors:
                 error_msg = "\n".join(["File validation failed! Errors:", *errors])
                 self.__log.error(error_msg)
-                raise SubmissionValidationError(error_msg)
+                raise grzexc.SubmissionValidationError(error_msg)
             else:
                 self.__log.info("File validation successful!")
         except KeyboardInterrupt:
@@ -146,7 +140,7 @@ class Worker:
         except Exception as e:
             error_msg = f"Validation failed due to an error: {e}"
             self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg) from e
+            raise grzexc.SubmissionValidationError(error_msg) from e
 
     def encrypt(
         self,
@@ -193,7 +187,7 @@ class Worker:
                     "Please re-run the 'validate' command and try again."
                 )
                 self.__log.error(error_msg)
-                raise IncompleteSubmissionError(error_msg)
+                raise grzexc.IncompleteSubmissionError(error_msg)
 
             self.__log.info("All files verified as successfully validated.")
 
@@ -209,10 +203,10 @@ class Worker:
                 submitter_private_key_path=submitter_private_key_path,
                 force=force,
             )
-        except GrzError:
+        except grzexc.GrzError:
             raise
         except Exception as e:
-            raise EncryptionError(str(e)) from e
+            raise grzexc.EncryptionError(str(e)) from e
 
         return encrypted_submission
 
@@ -262,7 +256,7 @@ class Worker:
                 "Please re-run the 'encrypt' command and try again."
             )
             self.__log.error(error_msg)
-            raise IncompleteSubmissionError(error_msg)
+            raise grzexc.IncompleteSubmissionError(error_msg)
 
         self.__log.info("All files verified as successfully encrypted.")
 
@@ -272,7 +266,7 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        with s3_errors(f"Upload of {encrypted_submission.submission_id}", UploadError):
+        with s3_errors(f"Upload of {encrypted_submission.submission_id}", grzexc.UploadError):
             upload_worker.upload(encrypted_submission)
 
         return encrypted_submission.submission_id
@@ -287,7 +281,7 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        with s3_errors(f"Archiving {encrypted_submission.submission_id}", UploadError):
+        with s3_errors(f"Archiving {encrypted_submission.submission_id}", grzexc.UploadError):
             upload_worker.archive(encrypted_submission)
 
     def download(

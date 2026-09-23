@@ -6,10 +6,10 @@ import importlib.resources
 import json
 
 import click.testing
+import grz_common.exceptions as grzexc
 import grzctl.cli
 import pytest
 import responses
-from grz_common.exceptions import SubmissionValidationError
 from grz_pydantic_models.pruefbericht.v0 import LibraryType
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
@@ -284,7 +284,7 @@ def test_generate_fails_with_invalid_library_type(temp_pruefbericht_config_file_
         runner = click.testing.CliRunner()
         cli = grzctl.cli.build_cli()
         result = runner.invoke(cli, args)
-        assert isinstance(result.exception, SubmissionValidationError), result.output
+        assert isinstance(result.exception, grzexc.SubmissionValidationError), result.output
 
 
 def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):

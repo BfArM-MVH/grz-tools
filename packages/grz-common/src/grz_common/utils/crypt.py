@@ -13,12 +13,12 @@ from pathlib import Path
 import crypt4gh.header
 import crypt4gh.keys
 import crypt4gh.lib
+import grz_common.exceptions as grzexc
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
-from ..exceptions import ConfigurationError, DecryptionError
 from .io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ class Crypt4GH:
             return crypt4gh.keys.get_public_key(os.path.expanduser(str(pubkey_path)))
         except (OSError, ValueError, NotImplementedError) as e:
             # crypt4gh raises NotImplementedError for a file in no key format it knows
-            raise ConfigurationError(f"Public key {pubkey_path} cannot be read: {e}") from e
+            raise grzexc.ConfigurationError(f"Public key {pubkey_path} cannot be read: {e}") from e
 
     @staticmethod
     def retrieve_private_key(seckey_path) -> bytes:
@@ -116,7 +116,7 @@ class Crypt4GH:
         """
         seckeypath = os.path.expanduser(seckey_path)
         if not os.path.exists(seckeypath):
-            raise ConfigurationError(f"Secret key not found: {seckey_path}")
+            raise grzexc.ConfigurationError(f"Secret key not found: {seckey_path}")
 
         passphrase = os.getenv("C4GH_PASSPHRASE")
         if passphrase:
@@ -128,9 +128,9 @@ class Crypt4GH:
             return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
         except SystemExit as e:
             # crypt4gh exits the process for a key or a passphrase that it cannot use
-            raise ConfigurationError(f"Secret key {seckey_path} cannot be read with the given passphrase") from e
+            raise grzexc.ConfigurationError(f"Secret key {seckey_path} cannot be read with the given passphrase") from e
         except (OSError, ValueError, NotImplementedError) as e:
-            raise ConfigurationError(f"Secret key {seckey_path} cannot be read: {e}") from e
+            raise grzexc.ConfigurationError(f"Secret key {seckey_path} cannot be read: {e}") from e
 
     @staticmethod
     def decrypt_file(input_path: Path, output_path: Path, private_key: bytes):
@@ -159,4 +159,4 @@ class Crypt4GH:
                 )
             except ValueError as e:
                 # crypt4gh raises ValueError for a header or a segment that the file gets wrong
-                raise DecryptionError(f"Cannot decrypt {input_path}: {e}") from e
+                raise grzexc.DecryptionError(f"Cannot decrypt {input_path}: {e}") from e

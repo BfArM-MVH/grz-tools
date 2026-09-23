@@ -2,9 +2,9 @@ import signal
 
 import click
 import click.testing
+import grz_common.exceptions as grzexc
 import grzctl.cli
 import pytest
-from grz_common.exceptions import ConfigurationError
 
 
 def test_help():
@@ -19,7 +19,7 @@ def test_main_reports_a_grz_error_without_traceback(monkeypatch, caplog):
 
     @click.command()
     def failing():
-        raise ConfigurationError("the key cannot be read")
+        raise grzexc.ConfigurationError("the key cannot be read")
 
     monkeypatch.setattr(grzctl.cli, "build_cli", lambda: failing)
     monkeypatch.setattr("sys.argv", ["grzctl"])

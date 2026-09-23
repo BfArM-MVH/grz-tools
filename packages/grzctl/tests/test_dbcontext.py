@@ -3,24 +3,8 @@ import subprocess
 from unittest import mock
 from unittest.mock import MagicMock
 
+import grz_common.exceptions as grzexc
 import pytest
-from grz_common.exceptions import (
-    ConfigurationError,
-    DecryptionError,
-    DetailedQCError,
-    DownloadError,
-    DuplicateUploadError,
-    EncryptionError,
-    GrzError,
-    IncompleteSubmissionError,
-    MissingObjectError,
-    MissingSubmissionFileError,
-    NetworkError,
-    ReportingError,
-    SubmissionValidationError,
-    TransferError,
-    UploadError,
-)
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
@@ -60,20 +44,20 @@ class TestMapExceptionToFailureReason:
         "exception,expected",
         [
             (FileNotFoundError("missing file"), FailureReasonEnum.UNKNOWN),
-            (DecryptionError("failed"), FailureReasonEnum.DECRYPTION_ERROR),
-            (EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
-            (MissingSubmissionFileError("failed"), FailureReasonEnum.FILE_NOT_FOUND),
-            (DownloadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
-            (MissingObjectError("failed"), FailureReasonEnum.TRANSFER_ERROR),
-            (DuplicateUploadError("failed"), FailureReasonEnum.DUPLICATE_TANG),
-            (NetworkError("failed"), FailureReasonEnum.TRANSFER_ERROR),
-            (UploadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
-            (ConfigurationError("failed"), FailureReasonEnum.CONFIGURATION_ERROR),
-            (ReportingError("failed"), FailureReasonEnum.REPORTING_ERROR),
+            (grzexc.DecryptionError("failed"), FailureReasonEnum.DECRYPTION_ERROR),
+            (grzexc.EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
+            (grzexc.MissingSubmissionFileError("failed"), FailureReasonEnum.FILE_NOT_FOUND),
+            (grzexc.DownloadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.MissingObjectError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.DuplicateUploadError("failed"), FailureReasonEnum.DUPLICATE_TANG),
+            (grzexc.NetworkError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.UploadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.ConfigurationError("failed"), FailureReasonEnum.CONFIGURATION_ERROR),
+            (grzexc.ReportingError("failed"), FailureReasonEnum.REPORTING_ERROR),
             (KeyboardInterrupt(), FailureReasonEnum.INTERRUPTED),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
-            (IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
-            (DetailedQCError("failed"), FailureReasonEnum.DETAILED_QC_ERROR),
+            (grzexc.IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
+            (grzexc.DetailedQCError("failed"), FailureReasonEnum.DETAILED_QC_ERROR),
             (subprocess.CalledProcessError(returncode=3, cmd="some other command"), FailureReasonEnum.UNKNOWN),
             (RuntimeError("unexpected"), FailureReasonEnum.UNKNOWN),
             (Exception("generic"), FailureReasonEnum.UNKNOWN),
@@ -93,7 +77,7 @@ class TestMapExceptionToFailureReason:
         metadata_file = tmp_path / "metadata.json"
         metadata_file.write_text('{"submission": {}}')
 
-        with pytest.raises(SubmissionValidationError) as excinfo:
+        with pytest.raises(grzexc.SubmissionValidationError) as excinfo:
             SubmissionMetadata(metadata_file)
 
         exc = excinfo.value
@@ -102,7 +86,7 @@ class TestMapExceptionToFailureReason:
     def test_maps_a_cause_of_an_unmapped_exception(self, db_context: DbContext):
         """An exception raised ``from`` a mapped one gets the failure reason of its cause."""
         with pytest.raises(RuntimeError) as exc_info:
-            raise RuntimeError("processing failed") from UploadError("upload failed")
+            raise RuntimeError("processing failed") from grzexc.UploadError("upload failed")
         result = db_context._map_exception_to_failure_reason(exc_info.type, exc_info.value)
         assert result == FailureReasonEnum.TRANSFER_ERROR
 
@@ -115,18 +99,18 @@ class TestMapExceptionToFailureReason:
         mapped_results = {
             db_context._map_exception_to_failure_reason(type(exc), exc)
             for exc in [
-                MissingSubmissionFileError(),
-                DecryptionError(),
-                EncryptionError(),
-                TransferError(),
-                ConfigurationError(),
-                ReportingError(),
+                grzexc.MissingSubmissionFileError(),
+                grzexc.DecryptionError(),
+                grzexc.EncryptionError(),
+                grzexc.TransferError(),
+                grzexc.ConfigurationError(),
+                grzexc.ReportingError(),
                 KeyboardInterrupt(),
                 DuplicateTanGError(),
                 DuplicateInitialSubmissionError(1),
-                IncompleteSubmissionError(),
-                DetailedQCError(),
-                SubmissionValidationError(),
+                grzexc.IncompleteSubmissionError(),
+                grzexc.DetailedQCError(),
+                grzexc.SubmissionValidationError(),
             ]
         }
         recorded = {e for e in FailureReasonEnum if e != FailureReasonEnum.UNKNOWN} - RETIRED_FAILURE_REASONS
@@ -136,12 +120,13 @@ class TestMapExceptionToFailureReason:
     def test_every_expected_failure_records_a_current_reason(self, db_context: DbContext):
         """A GrzError that maps to ``unknown`` would be recorded as a bug, and a retired reason not at all."""
 
-        def leaves(cls: type[GrzError]) -> list[type[GrzError]]:
+        def leaves(cls: type[grzexc.GrzError]) -> list[type[grzexc.GrzError]]:
             subclasses = cls.__subclasses__()
             return [leaf for subclass in subclasses for leaf in leaves(subclass)] if subclasses else [cls]
 
         reasons = {
-            cls.__name__: db_context._map_exception_to_failure_reason(cls, cls("failed")) for cls in leaves(GrzError)
+            cls.__name__: db_context._map_exception_to_failure_reason(cls, cls("failed"))
+            for cls in leaves(grzexc.GrzError)
         }
 
         wrong = {
@@ -154,7 +139,7 @@ class TestMapExceptionToFailureReason:
 
 class TestDbContextFailureReason:
     def test_file_not_found_maps_correctly(self, ctx, mock_db):
-        exc = MissingSubmissionFileError("missing file")
+        exc = grzexc.MissingSubmissionFileError("missing file")
         ctx.__exit__(type(exc), exc, None)
         mock_db.update_submission_state.assert_called_once_with(
             ctx.submission_id,

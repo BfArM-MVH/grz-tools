@@ -3,10 +3,10 @@
 from pathlib import Path
 
 import botocore.client
+import grz_common.exceptions as grzexc
 import pytest
 from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import ClientError
-from grz_common.exceptions import ConfigurationError, DuplicateUploadError, IncompleteSubmissionError, UploadError
 from grz_common.progress.progress_logging import FileProgressLogger
 from grz_common.progress.states import UploadState
 from grz_common.utils.checksums import calculate_sha256
@@ -232,7 +232,7 @@ def test_upload_of_a_submission_already_in_the_inbox_raises(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
     )
 
-    with pytest.raises(DuplicateUploadError):
+    with pytest.raises(grzexc.DuplicateUploadError):
         upload_worker.upload(encrypted_submission)
 
 
@@ -262,7 +262,7 @@ def test_upload_of_a_submission_with_a_missing_local_file_raises(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
     )
 
-    with pytest.raises(IncompleteSubmissionError):
+    with pytest.raises(grzexc.IncompleteSubmissionError):
         upload_worker.upload(submission)
 
 
@@ -287,7 +287,7 @@ def test_upload_file_reports_rejected_credentials_as_a_configuration_error(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
     )
 
-    with pytest.raises(ConfigurationError) as excinfo:
+    with pytest.raises(grzexc.ConfigurationError) as excinfo:
         upload_worker.upload_file(temp_small_file_path, "small_test_file.bed")
 
     assert isinstance(excinfo.value.__cause__, S3UploadFailedError)
@@ -302,5 +302,5 @@ def test_upload_file_reports_any_other_s3_error_as_a_failed_upload(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
     )
 
-    with pytest.raises(UploadError):
+    with pytest.raises(grzexc.UploadError):
         upload_worker.upload_file(temp_small_file_path, "small_test_file.bed")

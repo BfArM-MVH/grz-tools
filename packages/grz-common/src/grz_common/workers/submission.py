@@ -13,6 +13,7 @@ from os import PathLike
 from pathlib import Path
 
 import grz_check
+import grz_common.exceptions as grzexc
 from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
@@ -30,7 +31,6 @@ from pydantic import ValidationError
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
-from ..exceptions import SubmissionValidationError
 from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
@@ -75,11 +75,11 @@ class SubmissionMetadata:
             with open(file_path, encoding="utf-8") as jsonfile:
                 metadata = json.load(jsonfile)
         except json.JSONDecodeError as e:
-            raise SubmissionValidationError(f"Invalid JSON in metadata file {file_path}: {e}") from e
+            raise grzexc.SubmissionValidationError(f"Invalid JSON in metadata file {file_path}: {e}") from e
         try:
             return GrzSubmissionMetadata(**metadata)
         except ValidationError as ve:
-            raise SubmissionValidationError(f"Invalid metadata in {file_path}: {ve}") from ve
+            raise grzexc.SubmissionValidationError(f"Invalid metadata in {file_path}: {ve}") from ve
 
     @property
     def transaction_id(self) -> str:

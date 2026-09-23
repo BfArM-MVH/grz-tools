@@ -2,9 +2,9 @@ import json
 import logging
 
 import grz_cli.cli
+import grz_common.exceptions as grzexc
 import pytest
 from click.testing import CliRunner
-from grz_common.exceptions import SubmissionValidationError
 from grz_common.workers.submission import Submission
 
 from .common import copy_submission
@@ -74,7 +74,7 @@ def test_validate_submission_incorrect_grz_id(
     # set catch_exceptions to True because we expect this to fail
     result = runner.invoke(cli, testargs, catch_exceptions=True)
     exc_type, exc, *_ = result.exc_info
-    assert exc_type == SubmissionValidationError
+    assert exc_type == grzexc.SubmissionValidationError
     assert "does not match genomic data center identifier" in str(exc)
 
     assert result.exit_code == 1, result.output

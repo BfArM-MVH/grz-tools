@@ -5,16 +5,12 @@ from datetime import datetime
 from typing import Any, Self
 
 import botocore
+import grz_common.exceptions as grzexc
 from grz_pydantic_models.common import as_aware_datetime
 from packaging.version import Version
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_core import core_schema
 
-from ..exceptions import (
-    VersionFileAccessError,
-    VersionFileNotFoundError,
-    VersionFileValidationError,
-)
 from ..transfer import init_s3_client
 from .s3 import S3Options
 
@@ -131,16 +127,16 @@ class VersionFile(BaseModel):
             if error_code == "NoSuchKey":
                 msg = f"Version file not found at s3://{s3_options.bucket}/{version_file_key}."
                 logger.critical(msg)
-                raise VersionFileNotFoundError(msg) from e
+                raise grzexc.VersionFileNotFoundError(msg) from e
 
             msg = f"Unable to access s3://{s3_options.bucket}/{version_file_key} (Error code: {error_code})."
             logger.error(msg, exc_info=e)
-            raise VersionFileAccessError(msg) from e
+            raise grzexc.VersionFileAccessError(msg) from e
 
         except (ValidationError, json.JSONDecodeError, ValueError) as e:
             msg = f"Invalid version file format or content: {e}"
             logger.error(msg, exc_info=e)
-            raise VersionFileValidationError(msg) from e
+            raise grzexc.VersionFileValidationError(msg) from e
 
     @classmethod
     def read_bundled_text(cls) -> str:
@@ -164,5 +160,5 @@ class VersionFile(BaseModel):
         except ValidationError as e:
             msg = f"Invalid bundled version file: {e}"
             logger.error(msg, exc_info=e)
-            raise VersionFileValidationError(msg) from e
+            raise grzexc.VersionFileValidationError(msg) from e
         return content

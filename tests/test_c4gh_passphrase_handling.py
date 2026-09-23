@@ -4,8 +4,8 @@ import os
 from stat import S_IRUSR, S_IWUSR
 
 import crypt4gh.keys.c4gh
+import grz_common.exceptions as grzexc
 import pytest
-from grz_common.exceptions import ConfigurationError
 from grz_common.utils.crypt import Crypt4GH
 
 
@@ -40,7 +40,7 @@ def test_retrieve_private_key_with_envvar(encrypted_dummy_key, monkeypatch):
 
 
 def test_a_missing_private_key_is_a_configuration_error(tmp_path):
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(grzexc.ConfigurationError):
         Crypt4GH.retrieve_private_key(tmp_path / "missing.sec")
 
 
@@ -49,10 +49,10 @@ def test_a_wrong_passphrase_is_a_configuration_error(encrypted_dummy_key, monkey
     sec_key_path, _ = encrypted_dummy_key
     monkeypatch.setenv("C4GH_PASSPHRASE", "not the passphrase")
 
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(grzexc.ConfigurationError):
         Crypt4GH.retrieve_private_key(sec_key_path)
 
 
 def test_a_missing_public_key_is_a_configuration_error(tmp_path):
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(grzexc.ConfigurationError):
         Crypt4GH.retrieve_public_key(tmp_path / "missing.pub")

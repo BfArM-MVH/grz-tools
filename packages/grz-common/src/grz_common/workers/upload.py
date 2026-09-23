@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import botocore.handlers
+import grz_common.exceptions as grzexc
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
-from grz_common.exceptions import DuplicateUploadError, IncompleteSubmissionError, UploadError
 from grz_pydantic_models.submission.metadata import redact_metadata_dict
 from tqdm.auto import tqdm
 
@@ -132,7 +132,7 @@ class S3BotoUploadWorker(UploadWorker):
 
         transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
         progress_bar = tqdm(total=filesize, desc="UPLOAD  ", **TQDM_DEFAULTS, postfix=f"{s3_object_id}")  # type: ignore[call-overload]
-        with s3_errors(f"Upload to s3://{self._s3_options.bucket}/{s3_object_id}", UploadError):
+        with s3_errors(f"Upload to s3://{self._s3_options.bucket}/{s3_object_id}", grzexc.UploadError):
             transfer.upload_file(
                 str(local_file_path),
                 self._s3_options.bucket,
@@ -162,7 +162,7 @@ class S3BotoUploadWorker(UploadWorker):
     def _upload_logged_files(self, encrypted_submission, progress_logger, files_to_upload):
         for file_path in files_to_upload:
             if not Path(file_path).exists():
-                raise IncompleteSubmissionError(f"File {file_path} does not exist")
+                raise grzexc.IncompleteSubmissionError(f"File {file_path} does not exist")
 
         for file_path, file_metadata in encrypted_submission.encrypted_files.items():
             logged_state = progress_logger.get_state(file_path, file_metadata)
@@ -228,7 +228,7 @@ class S3BotoUploadWorker(UploadWorker):
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
         if self._remote_id_exists(metadata_s3_object_id):
-            raise DuplicateUploadError(
+            raise grzexc.DuplicateUploadError(
                 "Submission already uploaded. Corrections, additions, and followups require a new tanG."
             )
 

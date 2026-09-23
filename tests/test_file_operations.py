@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
+import grz_common.exceptions as grzexc
 import pytest
-from grz_common.exceptions import DecryptionError
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.utils.paths import is_relative_subdirectory
@@ -91,5 +91,5 @@ def test_crypt4gh_decrypt_file_reports_a_changed_byte_as_a_decryption_error(
     tmp_encrypted_file.write_bytes(bytes(encrypted))
     private_key = Crypt4GH.retrieve_private_key(crypt4gh_grz_private_key_file_path)
 
-    with pytest.raises(DecryptionError):
+    with pytest.raises(grzexc.DecryptionError):
         Crypt4GH.decrypt_file(tmp_encrypted_file, tmp_path / "temp_file", private_key=private_key)

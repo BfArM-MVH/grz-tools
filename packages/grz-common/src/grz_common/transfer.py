@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import boto3
+import grz_common.exceptions as grzexc
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
 from boto3.exceptions import Boto3Error
 from botocore.config import Config as Boto3Config
@@ -25,14 +26,6 @@ else:
     S3Client = object
     S3ServiceResource = object
 
-from .exceptions import (
-    ConfigurationError,
-    DownloadError,
-    GrzError,
-    MissingObjectError,
-    MissingSubmissionFileError,
-    TransferError,
-)
 from .models.base import get_secret_value
 from .models.s3 import S3Options
 
@@ -129,7 +122,9 @@ def _is_faulty_setup(error: BaseException) -> bool:
     return isinstance(error, ClientError) and error.response.get("Error", {}).get("Code") in _SETUP_ERROR_CODES
 
 
-def s3_error(error: Exception, action: str, transfer_error: type[TransferError] = TransferError) -> GrzError:
+def s3_error(
+    error: Exception, action: str, transfer_error: type[grzexc.TransferError] = grzexc.TransferError
+) -> grzexc.GrzError:
     """Classify an error of the S3 client as the failure it stands for.
 
     The exceptions that ``error`` was raised from or while handling count as well.
@@ -140,12 +135,12 @@ def s3_error(error: Exception, action: str, transfer_error: type[TransferError] 
     :returns: A :class:`ConfigurationError` if only a faulty setup causes ``error``, otherwise a ``transfer_error``.
     """
     faulty_setup = any(_is_faulty_setup(e) for e in _chain(error))
-    error_class = ConfigurationError if faulty_setup else transfer_error
+    error_class = grzexc.ConfigurationError if faulty_setup else transfer_error
     return error_class(f"{action} failed: {error}")
 
 
 @contextmanager
-def s3_errors(action: str, transfer_error: type[TransferError] = TransferError) -> Iterator[None]:
+def s3_errors(action: str, transfer_error: type[grzexc.TransferError] = grzexc.TransferError) -> Iterator[None]:
     """Raise an error of the S3 client in the body as the failure it stands for.
 
     :param action: What the body does, such as ``"Upload to s3://bucket/key"``.
@@ -177,12 +172,12 @@ def head_object(s3_client: Any, bucket: str, key: str) -> dict[str, Any]:
     :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_error`.
     :raises DownloadError: For any other error of the S3 client.
     """
-    with s3_errors(f"Reading s3://{bucket}/{key}", DownloadError):
+    with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
         try:
             return s3_client.head_object(Bucket=bucket, Key=key)
         except ClientError as e:
             if _is_missing_object(e):
-                raise MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
+                raise grzexc.MissingObjectError(f"s3://{bucket}/{key} does not exist") from e
             raise
 
 
@@ -208,6 +203,6 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     key = f"{submission_id}/metadata/metadata.json"
     try:
         response = head_object(s3_client, bucket, key)
-    except MissingObjectError as e:
-        raise MissingSubmissionFileError(f"s3://{bucket}/{key} does not exist") from e
+    except grzexc.MissingObjectError as e:
+        raise grzexc.MissingSubmissionFileError(f"s3://{bucket}/{key} does not exist") from e
     return response["LastModified"]

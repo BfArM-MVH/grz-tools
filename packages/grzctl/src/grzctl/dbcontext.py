@@ -3,18 +3,7 @@ from collections.abc import Iterator
 from functools import cached_property
 from typing import Any
 
-from grz_common.exceptions import (
-    ConfigurationError,
-    DecryptionError,
-    DetailedQCError,
-    DuplicateUploadError,
-    EncryptionError,
-    IncompleteSubmissionError,
-    MissingSubmissionFileError,
-    ReportingError,
-    SubmissionValidationError,
-    TransferError,
-)
+import grz_common.exceptions as grzexc
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
@@ -26,19 +15,19 @@ from .models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 _FAILURE_REASONS: dict[type[BaseException], FailureReasonEnum] = {
-    MissingSubmissionFileError: FailureReasonEnum.FILE_NOT_FOUND,
-    SubmissionValidationError: FailureReasonEnum.VALIDATION_ERROR,
-    DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
-    DuplicateUploadError: FailureReasonEnum.DUPLICATE_TANG,
+    grzexc.MissingSubmissionFileError: FailureReasonEnum.FILE_NOT_FOUND,
+    grzexc.SubmissionValidationError: FailureReasonEnum.VALIDATION_ERROR,
+    grzexc.DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
+    grzexc.DuplicateUploadError: FailureReasonEnum.DUPLICATE_TANG,
     DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
     DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
-    IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
+    grzexc.IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
     KeyboardInterrupt: FailureReasonEnum.INTERRUPTED,
-    ConfigurationError: FailureReasonEnum.CONFIGURATION_ERROR,
-    TransferError: FailureReasonEnum.TRANSFER_ERROR,
-    EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
-    DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
-    ReportingError: FailureReasonEnum.REPORTING_ERROR,
+    grzexc.ConfigurationError: FailureReasonEnum.CONFIGURATION_ERROR,
+    grzexc.TransferError: FailureReasonEnum.TRANSFER_ERROR,
+    grzexc.EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
+    grzexc.DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
+    grzexc.ReportingError: FailureReasonEnum.REPORTING_ERROR,
 }
 """The failure reason of each expected error. Any other exception records ``unknown``."""
 

@@ -16,13 +16,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import botocore.handlers
+import grz_common.exceptions as grzexc
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
-from ..exceptions import DownloadError, MissingObjectError, MissingSubmissionFileError
 from ..models.s3 import S3Options
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import head_object, init_s3_client, s3_errors
@@ -111,12 +111,12 @@ class S3BotoDownloadWorker:
             # Ensure the local target directory exists
             metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-            with s3_errors(f"Download of s3://{bucket}/{metadata_key}", DownloadError):
+            with s3_errors(f"Download of s3://{bucket}/{metadata_key}", grzexc.DownloadError):
                 try:
                     self._s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
                 except botocore.exceptions.ClientError as e:
                     if e.response.get("Error", {}).get("Code") == "404":
-                        raise MissingSubmissionFileError(
+                        raise grzexc.MissingSubmissionFileError(
                             f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
                         ) from e
                     raise
@@ -138,8 +138,8 @@ class S3BotoDownloadWorker:
         bucket = self._s3_options.bucket
         try:
             s3_object_meta = head_object(self._s3_client, bucket, s3_object_id)
-        except MissingObjectError as e:
-            raise MissingSubmissionFileError(f"File '{s3_object_id}' not found in S3 bucket '{bucket}'.") from e
+        except grzexc.MissingObjectError as e:
+            raise grzexc.MissingSubmissionFileError(f"File '{s3_object_id}' not found in S3 bucket '{bucket}'.") from e
         filesize = s3_object_meta["ContentLength"]
 
         chunksize = (
@@ -160,7 +160,7 @@ class S3BotoDownloadWorker:
         transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
         with (
             tqdm(total=filesize, postfix=f"{s3_object_id}", **TQDM_DEFAULTS) as progress_bar,  # type: ignore[call-overload]
-            s3_errors(f"Download of s3://{bucket}/{s3_object_id}", DownloadError),
+            s3_errors(f"Download of s3://{bucket}/{s3_object_id}", grzexc.DownloadError),
         ):
             transfer.download_file(
                 bucket,

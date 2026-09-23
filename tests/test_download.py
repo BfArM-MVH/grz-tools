@@ -3,9 +3,9 @@
 from pathlib import Path
 
 import botocore.client
+import grz_common.exceptions as grzexc
 import pytest
 from boto3.exceptions import RetriesExceededError
-from grz_common.exceptions import DownloadError, MissingSubmissionFileError
 from grz_common.progress.progress_logging import FileProgressLogger
 from grz_common.progress.states import DownloadState
 from grz_common.utils.checksums import calculate_sha256
@@ -226,7 +226,7 @@ def test_download_file_fails_for_missing_key(
     progress_logger = FileProgressLogger[DownloadState](download_log_path)
     file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
 
-    with pytest.raises(MissingSubmissionFileError):
+    with pytest.raises(grzexc.MissingSubmissionFileError):
         download_worker.download_file(
             tmp_path / "files" / file_path.name,
             f"{encrypted_submission.submission_id}/files/missing.c4gh",
@@ -243,7 +243,7 @@ def test_download_metadata_fails_for_missing_metadata(s3_config_model, remote_bu
         status_file_path=tmp_path / "progress_download.cjson",
     )
 
-    with pytest.raises(MissingSubmissionFileError):
+    with pytest.raises(grzexc.MissingSubmissionFileError):
         download_worker.download_metadata("missing_submission", tmp_path / "metadata")
 
 
@@ -274,7 +274,7 @@ def test_download_file_reports_a_connection_that_keeps_breaking_as_a_failed_down
     progress_logger = FileProgressLogger[DownloadState](download_log_path)
     file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
 
-    with pytest.raises(DownloadError) as excinfo:
+    with pytest.raises(grzexc.DownloadError) as excinfo:
         download_worker.download_file(
             tmp_path / "files" / file_path.name,
             s3_object_id,
