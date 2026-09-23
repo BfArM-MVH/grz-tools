@@ -12,6 +12,15 @@ from grz_common.utils.system import get_effective_cpu_count
 
 from ..utils.config import read_and_merge_config_files
 
+
+class OrderedGroup(click.Group):
+    """A click group that lists its commands in the order they were added."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Return the list of commands in the order they were added."""
+        return list(self.commands.keys())
+
+
 # Aliases for path types for click options
 # Naming convention: {DIR,FILE}_{Read,Write}_{Exists,Create}
 DIR_R_E = click.Path(
