@@ -172,17 +172,6 @@ def _parse_known_public_keys(lines: Iterable[str], source: str) -> dict[str, lis
     return public_keys
 
 
-def _read_known_public_keys(path: str | Path) -> dict[str, list[SSHPublicKeyTypes]]:
-    """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
-
-    :param path: Path to the known public keys file.
-    :returns: The public keys, grouped by their comment in file order.
-    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
-    """
-    with open(path) as f:
-        return _parse_known_public_keys(f, source=str(path))
-
-
 @click.group(help="Database operations")
 @grzctl_configuration
 @click.pass_context
@@ -210,7 +199,8 @@ def db(
     if db_config.known_public_keys is not None:
         public_keys = _parse_known_public_keys(db_config.known_public_keys, "db.known_public_keys")
     elif db_config.known_public_keys_file is not None:
-        public_keys = _read_known_public_keys(db_config.known_public_keys_file)
+        with open(db_config.known_public_keys_file) as f:
+            public_keys = _parse_known_public_keys(f, str(db_config.known_public_keys_file))
     else:
         raise DatabaseConfigurationError("Either known_public_keys or known_public_keys_file must be provided.")
     for comment, keys in public_keys.items():

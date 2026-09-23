@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from grz_db.errors import DatabaseConfigurationError
 from grzctl.commands.db import SignatureStatus, _verify_signature
-from grzctl.commands.db.cli import _parse_known_public_keys, _read_known_public_keys
+from grzctl.commands.db.cli import _parse_known_public_keys
 from grzctl.models.config import GrzctlConfig
 from grzctl.models.db import Author, DbModel
 from pydantic import ValidationError
@@ -29,46 +29,36 @@ def _write(tmp_path: Path, content: str) -> Path:
     return path
 
 
-def test_skips_blank_lines_and_comment_lines(tmp_path: Path) -> None:
-    path = _write(tmp_path, f"# data stewards\n\n{_openssh_public_key()} alice\n\n{_openssh_public_key()} bob\n")
+def test_skips_blank_lines_and_comment_lines() -> None:
+    lines = ["# data stewards", "", f"{_openssh_public_key()} alice", "", f"{_openssh_public_key()} bob"]
 
-    assert _read_known_public_keys(path).keys() == {"alice", "bob"}
+    assert _parse_known_public_keys(lines, "db.known_public_keys").keys() == {"alice", "bob"}
 
 
-def test_keeps_every_key_that_shares_a_comment_in_file_order(tmp_path: Path) -> None:
+def test_keeps_every_key_that_shares_a_comment_in_order() -> None:
     """A rotated key keeps its owner's name, and the owner's older signatures must still verify."""
     first = _openssh_public_key()
     second = _openssh_public_key()
-    path = _write(tmp_path, f"{first} alice\n{second} alice\n")
 
-    keys = _read_known_public_keys(path)["alice"]
+    keys = _parse_known_public_keys([f"{first} alice", f"{second} alice"], "db.known_public_keys")["alice"]
 
     assert [key.public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode() for key in keys] == [first, second]
 
 
-def test_keeps_a_comment_with_spaces_whole(tmp_path: Path) -> None:
-    path = _write(tmp_path, f"{_openssh_public_key()} Alice Example\n")
+def test_keeps_a_comment_with_spaces_whole() -> None:
+    lines = [f"{_openssh_public_key()} Alice Example"]
 
-    assert _read_known_public_keys(path).keys() == {"Alice Example"}
-
-
-def test_rejects_a_key_without_a_comment_and_names_the_line(tmp_path: Path) -> None:
-    path = _write(tmp_path, f"# data stewards\n{_openssh_public_key()}\n")
-
-    with pytest.raises(DatabaseConfigurationError, match=r"known_public_keys:2: expected"):
-        _read_known_public_keys(path)
+    assert _parse_known_public_keys(lines, "db.known_public_keys").keys() == {"Alice Example"}
 
 
-def test_rejects_a_key_that_does_not_load_and_names_the_line(tmp_path: Path) -> None:
-    path = _write(tmp_path, "ssh-ed25519 not-a-key alice\n")
-
-    with pytest.raises(DatabaseConfigurationError, match=r"known_public_keys:1: cannot load"):
-        _read_known_public_keys(path)
-
-
-def test_parse_known_public_keys_names_the_entry_by_number() -> None:
+def test_rejects_a_key_without_a_comment_and_names_the_line() -> None:
     with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys:2: expected"):
         _parse_known_public_keys(["# data stewards", _openssh_public_key()], "db.known_public_keys")
+
+
+def test_rejects_a_key_that_does_not_load_and_names_the_line() -> None:
+    with pytest.raises(DatabaseConfigurationError, match=r"db\.known_public_keys:1: cannot load"):
+        _parse_known_public_keys(["ssh-ed25519 not-a-key alice"], "db.known_public_keys")
 
 
 class _SignedBy:
