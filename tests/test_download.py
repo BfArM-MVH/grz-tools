@@ -247,6 +247,19 @@ def test_download_metadata_fails_for_missing_metadata(s3_config_model, remote_bu
         download_worker.download_metadata("missing_submission", tmp_path / "metadata")
 
 
+def test_download_metadata_refuses_a_cleaned_submission(s3_config_model, remote_bucket, tmp_path):
+    """``grzctl clean`` empties metadata.json, which would otherwise fail its parsing as the submitter's fault."""
+    remote_bucket.put_object(Key="cleaned_submission/metadata/metadata.json", Body=b"")
+    remote_bucket.put_object(Key="cleaned_submission/cleaned", Body=b"")
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=tmp_path / "progress_download.cjson",
+    )
+
+    with pytest.raises(grzexc.SubmissionCleanedError):
+        download_worker.download_metadata("cleaned_submission", tmp_path / "metadata")
+
+
 def test_download_file_reports_a_connection_that_keeps_breaking_as_a_failed_download(
     s3_config_model,
     remote_bucket,

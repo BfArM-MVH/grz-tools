@@ -45,6 +45,10 @@ class IncompleteSubmissionError(GrzError):
     """A step ran before an earlier step had passed for every file of the submission."""
 
 
+class SubmissionCleanedError(GrzError):
+    """``grzctl clean`` has started on the submission, so the inbox no longer holds it."""
+
+
 class ConfigurationError(GrzError):
     """The setup is wrong or incomplete, such as a missing key or credentials that a service rejects."""
 

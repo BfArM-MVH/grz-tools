@@ -58,6 +58,7 @@ class TestMapExceptionToFailureReason:
             (KeyboardInterrupt(), FailureReasonEnum.INTERRUPTED),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
             (grzexc.IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
+            (grzexc.SubmissionCleanedError("failed"), FailureReasonEnum.SUBMISSION_CLEANED),
             (grzexc.DetailedQCError("failed"), FailureReasonEnum.DETAILED_QC_ERROR),
             (subprocess.CalledProcessError(returncode=3, cmd="some other command"), FailureReasonEnum.UNKNOWN),
             (RuntimeError("unexpected"), FailureReasonEnum.UNKNOWN),
@@ -111,6 +112,7 @@ class TestMapExceptionToFailureReason:
                 DuplicateTanGError(),
                 DuplicateInitialSubmissionError(1),
                 grzexc.IncompleteSubmissionError(),
+                grzexc.SubmissionCleanedError(),
                 grzexc.DetailedQCError(),
                 grzexc.SubmissionValidationError(),
             ]

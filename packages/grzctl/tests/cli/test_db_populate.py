@@ -359,14 +359,25 @@ def test_populate_command_takes_the_upload_date_from_the_inbox(
     assert ctx.db.get_submission(ctx.submission_id).submission_uploaded_date == uploaded
 
 
-@pytest.mark.parametrize("body", [b"", None], ids=["emptied-by-clean", "missing"])
+@pytest.mark.parametrize(
+    ("body", "marker"),
+    [(b"", None), (b"{}", "cleaning"), (None, None)],
+    ids=["emptied-by-clean", "being-cleaned", "missing"],
+)
 def test_populate_command_needs_a_date_when_the_inbox_has_none(
-    db_ctx: SimpleNamespace, inbox_config_path: Path, test_metadata_path: Path, body: bytes | None
+    db_ctx: SimpleNamespace,
+    inbox_config_path: Path,
+    test_metadata_path: Path,
+    body: bytes | None,
+    marker: str | None,
 ):
     """``grzctl clean`` leaves an empty metadata.json, whose LastModified is the time of cleaning."""
     ctx = db_ctx
     if body is not None:
         _put_inbox_metadata(ctx.submission_id, body)
+    if marker is not None:
+        s3_client = boto3.client("s3", region_name=REGION)
+        s3_client.put_object(Bucket=INBOX_BUCKET, Key=f"{ctx.submission_id}/{marker}", Body=b"")
 
     result = _invoke_populate(
         inbox_config_path, ctx.submission_id, test_metadata_path, "--no-confirm", submission_date=None

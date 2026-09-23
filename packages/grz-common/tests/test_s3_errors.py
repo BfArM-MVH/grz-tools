@@ -1,5 +1,6 @@
 """An error of the S3 client becomes the failure it stands for."""
 
+import datetime
 import io
 
 import boto3
@@ -126,3 +127,41 @@ def test_get_metadata_upload_timestamp_sorts_the_error_of_the_get_request(
 ):
     with pytest.raises(expected):
         get_metadata_upload_timestamp(_FailingClient(head_status, get_code), "bucket", "submission")
+
+
+UPLOADED = datetime.datetime(2024, 7, 15, tzinfo=datetime.UTC)
+
+
+class _InboxClient:
+    """Answer a HEAD request for metadata.json with ``content_length``, and list the keys in ``keys``."""
+
+    def __init__(self, content_length: int = 2, keys: tuple[str, ...] = ()):
+        self.content_length = content_length
+        self.keys = keys
+
+    def head_object(self, **_kwargs):
+        return {"ContentLength": self.content_length, "LastModified": UPLOADED}
+
+    def list_objects_v2(self, Bucket: str, Prefix: str):  # noqa: N803
+        contents = [{"Key": key} for key in self.keys if key.startswith(Prefix)]
+        # S3 leaves out Contents when no key matches
+        return {"Contents": contents} if contents else {}
+
+
+def test_get_metadata_upload_timestamp_returns_the_time_of_upload():
+    assert get_metadata_upload_timestamp(_InboxClient(keys=("submission/version",)), "bucket", "submission") == UPLOADED
+
+
+@pytest.mark.parametrize(
+    "inbox",
+    [
+        _InboxClient(keys=("submission/cleaning",)),
+        _InboxClient(content_length=0, keys=("submission/cleaned",)),
+        _InboxClient(content_length=0),
+    ],
+    ids=["being-cleaned", "cleaned", "emptied"],
+)
+def test_get_metadata_upload_timestamp_refuses_a_cleaned_submission(inbox: _InboxClient):
+    """An emptied metadata.json carries the time of cleaning, not the time of upload."""
+    with pytest.raises(grzexc.SubmissionCleanedError):
+        get_metadata_upload_timestamp(inbox, "bucket", "submission")

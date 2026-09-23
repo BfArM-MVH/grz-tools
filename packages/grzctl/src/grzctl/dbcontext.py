@@ -22,6 +22,7 @@ _FAILURE_REASONS: dict[type[BaseException], FailureReasonEnum] = {
     DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
     DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
     grzexc.IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
+    grzexc.SubmissionCleanedError: FailureReasonEnum.SUBMISSION_CLEANED,
     KeyboardInterrupt: FailureReasonEnum.INTERRUPTED,
     grzexc.ConfigurationError: FailureReasonEnum.CONFIGURATION_ERROR,
     grzexc.TransferError: FailureReasonEnum.TRANSFER_ERROR,

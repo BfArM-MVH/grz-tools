@@ -38,6 +38,7 @@ Every other step stops for a mistyped submission ID before its context is open, 
 | `duplicate_tang`                | LE       | Another submission already used the tanG.                                                                                                     |
 | `duplicate_initial`             | LE       | The case already has an initial submission that passed basic QC.                                                                              |
 | `incomplete_submission`         | GRZ      | A command ran before an earlier step had passed for every file.                                                                               |
+| `submission_cleaned`            | GRZ      | `grzctl clean` has started on the submission, so the inbox no longer holds it.                                                                |
 | `interrupted`                   | GRZ      | Ctrl-C or SIGTERM stopped the run. A rerun resumes it.                                                                                        |
 | `configuration_error`           | GRZ      | The setup is wrong or incomplete: a key or credential is missing, S3 or BfArM rejects the credentials, or a configured bucket does not exist. |
 | `transfer_error`                | GRZ      | Moving data to or from S3 or BfArM failed. A rerun usually succeeds. If the failure repeats, the message names the error code or HTTP status. |
@@ -67,6 +68,7 @@ GrzError
 │   ├── DecryptionError              decryption_error
 │   └── DuplicateUploadError         duplicate_tang
 ├── IncompleteSubmissionError        incomplete_submission
+├── SubmissionCleanedError           submission_cleaned
 ├── ConfigurationError               configuration_error
 ├── TransferError                    transfer_error
 │   ├── DownloadError
@@ -117,6 +119,11 @@ S3 answers a HEAD request without a body, so botocore reports only the HTTP stat
 A `403` can then mean rejected credentials, and a `404` a missing bucket.
 For these two codes, `head_object()` sends a GET request for the first byte of the object and sorts the error code of that answer.
 Downloads and uploads start with `head_object()`, so their first request already tells a faulty setup from a missing object.
+
+`grzctl clean` marks its start with a `<submission_id>/cleaning` object and its end with `<submission_id>/cleaned`.
+It also empties the metadata.json, whose `LastModified` then is the time of cleaning.
+So before grzctl downloads the metadata.json or reads its upload date, it checks for both markers and for an empty metadata.json.
+If it finds one of them, it raises a `SubmissionCleanedError`.
 
 `AccessDenied` is not a configuration error.
 S3 also answers 403 for a missing object if the credentials lack the permission to list the bucket.

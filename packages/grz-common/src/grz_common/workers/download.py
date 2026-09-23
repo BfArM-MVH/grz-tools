@@ -25,7 +25,7 @@ from tqdm.auto import tqdm
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import DownloadState, FileProgressLogger
-from ..transfer import head_object, init_s3_client, s3_errors
+from ..transfer import head_object, init_s3_client, raise_if_cleaned, s3_errors
 
 MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
 MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
@@ -99,6 +99,7 @@ class S3BotoDownloadWorker:
         :param metadata_dir: Path of the metadir folder
         :param metadata_file_name: name of the metadata.json
         :raises MissingSubmissionFileError: If the bucket holds no such metadata file.
+        :raises SubmissionCleanedError: If ``grzctl clean`` has started on the submission.
         :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
         :raises DownloadError: For any other error of the S3 client.
         """
@@ -113,11 +114,13 @@ class S3BotoDownloadWorker:
 
             # download_file sends a HEAD request first, whose error code is the HTTP status alone
             try:
-                head_object(self._s3_client, bucket, metadata_key)
+                metadata_head = head_object(self._s3_client, bucket, metadata_key)
             except grzexc.MissingObjectError as e:
                 raise grzexc.MissingSubmissionFileError(
                     f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
                 ) from e
+            # an emptied metadata.json would otherwise fail its parsing, as if the submitter had sent it
+            raise_if_cleaned(self._s3_client, bucket, submission_id, metadata_head)
             with s3_errors(f"Download of s3://{bucket}/{metadata_key}", grzexc.DownloadError):
                 self._s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
             self.__log.info("Metadata download complete.")
