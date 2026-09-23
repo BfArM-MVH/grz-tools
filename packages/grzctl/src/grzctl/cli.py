@@ -3,6 +3,7 @@ CLI module for handling command-line interface operations for GRZ administrators
 """
 
 import logging
+import signal
 import sys
 from pathlib import Path
 
@@ -125,10 +126,16 @@ def dump_config(ctx: click.Context, reveal_secrets: bool):
     click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
 
 
+def _stop_on_sigterm() -> None:
+    """Let SIGTERM stop a run the way Ctrl-C does, so the running step records ``interrupted``."""
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+
+
 def main():
     """
     Main entry point for the CLI application.
     """
+    _stop_on_sigterm()
     cli = build_cli()
     try:
         cli()
