@@ -22,7 +22,7 @@ import rich.table
 import rich.text
 import textual.logging
 from grz_common.cli import output_json
-from grz_common.exceptions import MissingSubmissionFileError, SubmissionCleanedError
+from grz_common.exceptions import MissingSubmissionFileError, SubmissionCleanedError, SubmissionValidationError
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.models.base import get_secret_value
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
@@ -1097,7 +1097,7 @@ def _submission_upload_date(
     s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
     try:
         uploaded = get_metadata_upload_timestamp(init_s3_client(s3_options), s3_options.bucket, submission_id)
-    except (MissingSubmissionFileError, SubmissionCleanedError) as e:
+    except (MissingSubmissionFileError, SubmissionCleanedError, SubmissionValidationError) as e:
         raise click.ClickException(f"{missing}: {e}. Pass --submission-date.") from e
     return uploaded.date()
 

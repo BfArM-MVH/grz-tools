@@ -156,17 +156,18 @@ def head_object(
         raise head_error
 
 
-def raise_if_cleaned(s3_client: Any, bucket: str, submission_id: str, metadata_head: dict[str, Any]) -> None:
+def raise_if_cleaned(s3_client: Any, bucket: str, submission_id: str) -> None:
     """Raise if ``grzctl clean`` has started on the submission in the inbox.
 
-    Cleaning deletes the files of the submission and empties its metadata.json. It marks its
-    start with a ``<submission_id>/cleaning`` object and its end with ``<submission_id>/cleaned``.
+    Cleaning puts a ``<submission_id>/cleaning`` object before it deletes the files and empties
+    the metadata.json, and replaces it with ``<submission_id>/cleaned`` at the end. So an emptied
+    metadata.json always sits next to one of the two markers. An empty metadata.json without a
+    marker was uploaded like that, so it is no concern of this check.
 
     :param s3_client: boto3 S3 client pointed at the inbox bucket.
     :param bucket: Name of the inbox bucket.
     :param submission_id: Submission identifier (the top-level S3 prefix).
-    :param metadata_head: The ``head_object`` response of the submission's metadata.json.
-    :raises SubmissionCleanedError: If a marker of ``grzctl clean`` exists or the metadata.json is empty.
+    :raises SubmissionCleanedError: If a marker of ``grzctl clean`` exists.
     :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
     :raises DownloadError: For any other error of the S3 client.
     """
@@ -182,10 +183,6 @@ def raise_if_cleaned(s3_client: Any, bucket: str, submission_id: str, metadata_h
                 raise grzexc.SubmissionCleanedError(
                     f"grzctl clean has started on {submission_id}: s3://{bucket} holds {key}"
                 )
-    if metadata_head["ContentLength"] == 0:
-        raise grzexc.SubmissionCleanedError(
-            f"s3://{bucket}/{submission_id}/metadata/metadata.json is empty, because grzctl clean emptied it"
-        )
 
 
 def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_id: str) -> datetime.datetime:
@@ -205,6 +202,7 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
         portion should call ``.date()`` themselves.
     :raises MissingSubmissionFileError: If the inbox lacks the metadata.
     :raises SubmissionCleanedError: If ``grzctl clean`` has started on the submission, see :func:`raise_if_cleaned`.
+    :raises SubmissionValidationError: If the metadata.json is empty without a marker of ``grzctl clean``.
     :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
     :raises DownloadError: For any other error of the S3 client.
     """
@@ -214,5 +212,8 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     except grzexc.MissingObjectError as e:
         raise grzexc.MissingSubmissionFileError(f"s3://{bucket}/{key} does not exist") from e
     # an emptied metadata.json carries the time of cleaning, not the time of upload
-    raise_if_cleaned(s3_client, bucket, submission_id, response)
+    raise_if_cleaned(s3_client, bucket, submission_id)
+    # without a marker, the empty metadata.json was uploaded like that
+    if response["ContentLength"] == 0:
+        raise grzexc.SubmissionValidationError(f"s3://{bucket}/{key} is empty")
     return response["LastModified"]

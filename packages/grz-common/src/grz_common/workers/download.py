@@ -114,13 +114,13 @@ class S3BotoDownloadWorker:
 
             # download_file sends a HEAD request first, whose error code is the HTTP status alone
             try:
-                metadata_head = head_object(self._s3_client, bucket, metadata_key)
+                head_object(self._s3_client, bucket, metadata_key)
             except grzexc.MissingObjectError as e:
                 raise grzexc.MissingSubmissionFileError(
                     f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
                 ) from e
             # an emptied metadata.json would otherwise fail its parsing, as if the submitter had sent it
-            raise_if_cleaned(self._s3_client, bucket, submission_id, metadata_head)
+            raise_if_cleaned(self._s3_client, bucket, submission_id)
             with s3_errors(f"Download of s3://{bucket}/{metadata_key}", grzexc.DownloadError):
                 self._s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
             self.__log.info("Metadata download complete.")

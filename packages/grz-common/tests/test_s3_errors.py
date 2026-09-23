@@ -177,14 +177,19 @@ def test_get_metadata_upload_timestamp_returns_the_time_of_upload(key: str):
     [
         _InboxClient(keys=("submission/cleaning",)),
         _InboxClient(content_length=0, keys=("submission/cleaned",)),
-        _InboxClient(content_length=0),
     ],
-    ids=["being-cleaned", "cleaned", "emptied"],
+    ids=["being-cleaned", "cleaned"],
 )
 def test_get_metadata_upload_timestamp_refuses_a_cleaned_submission(inbox: _InboxClient):
     """An emptied metadata.json carries the time of cleaning, not the time of upload."""
     with pytest.raises(grzexc.SubmissionCleanedError):
         get_metadata_upload_timestamp(inbox, "bucket", "submission")
+
+
+def test_get_metadata_upload_timestamp_refuses_an_empty_upload():
+    """``grzctl clean`` leaves a marker next to the metadata.json it empties, so this one was uploaded empty."""
+    with pytest.raises(grzexc.SubmissionValidationError):
+        get_metadata_upload_timestamp(_InboxClient(content_length=0), "bucket", "submission")
 
 
 def test_get_metadata_upload_timestamp_reports_a_failed_marker_check_as_a_failed_download():
