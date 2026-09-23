@@ -1,6 +1,7 @@
 import errno
 import re
 
+import crypt4gh.header
 import grz_cli.cli
 import grz_common.exceptions as grzexc
 import grzctl.cli
@@ -185,6 +186,36 @@ def test_encrypt_decrypt_submission(
         observed_checksum = calculate_sha256(working_dir_path / "files" / file)
 
         assert expected_checksum == observed_checksum
+
+
+def test_encrypt_signs_with_the_submitter_key(
+    working_dir_path,
+    temp_keys_config_file_path,
+    crypt4gh_grz_private_key_file_path,
+    crypt4gh_submitter_public_key_file_path,
+    crypt4gh_grz_public_key_file_path,
+):
+    """The header of an encrypted file names the submitter's key as the sender, not a random key."""
+    copy_submission(working_dir_path, "files", "metadata")
+    testargs = [
+        "encrypt",
+        "--submission-dir",
+        str(working_dir_path),
+        "--config-file",
+        temp_keys_config_file_path,
+        "--no-check-validation-logs",
+    ]
+    result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+
+    keys = [(0, Crypt4GH.retrieve_private_key(str(crypt4gh_grz_private_key_file_path)), None)]
+    submitter_public_key = Crypt4GH.retrieve_public_key(crypt4gh_submitter_public_key_file_path)
+    other_public_key = Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path)
+    encrypted_file = next((working_dir_path / "encrypted_files").rglob("*.c4gh"))
+    with open(encrypted_file, "rb") as f:
+        crypt4gh.header.deconstruct(f, keys, sender_pubkey=submitter_public_key)
+    with open(encrypted_file, "rb") as f, pytest.raises(ValueError):
+        crypt4gh.header.deconstruct(f, keys, sender_pubkey=other_public_key)
 
 
 def test_encrypt_succeeds_with_valid_logs(working_dir_path, temp_keys_config_file_path):

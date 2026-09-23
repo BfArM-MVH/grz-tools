@@ -509,6 +509,7 @@ class Submission:
         :param submitter_private_key_path: Path to the private key file which will be used to sign the encryption
         :param force: Force encryption even if target files already exist
         :return: EncryptedSubmission instance
+        :raises ConfigurationError: If a key is missing or cannot be read.
         """
         # Import here to avoid circular import issues
         from ..progress import FileProgressLogger  # noqa: PLC0415
@@ -517,15 +518,11 @@ class Submission:
 
         if not submitter_private_key_path:
             self.__log.warning("No submitter private key provided, skipping signing.")
-        elif not Path(submitter_private_key_path).expanduser().is_file():
-            msg = f"Private key file does not exist: {submitter_private_key_path}"
-            self.__log.error(msg)
-            raise FileNotFoundError(msg)
 
         try:
-            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
+            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path, submitter_private_key_path or None)
         except Exception as e:
-            self.__log.error(f"Error preparing public keys: {e}")
+            self.__log.error(f"Error preparing encryption keys: {e}")
             raise e
 
         if not encrypted_files_dir.is_dir():
