@@ -119,7 +119,8 @@ class S3BotoDownloadWorker:
                 raise grzexc.MissingSubmissionFileError(
                     f"Metadata file '{metadata_key}' not found in S3 bucket '{bucket}'."
                 ) from e
-            # an emptied metadata.json would otherwise fail its parsing, as if the submitter had sent it
+            # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json is empty,
+            # and its parsing would fail as if the LE had sent an invalid file.
             raise_if_cleaned(self._s3_client, bucket, submission_id)
             with s3_errors(f"Download of s3://{bucket}/{metadata_key}", grzexc.DownloadError):
                 self._s3_client.download_file(bucket, metadata_key, str(metadata_file_path))

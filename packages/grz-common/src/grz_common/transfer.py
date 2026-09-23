@@ -210,6 +210,6 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
         response = head_object(s3_client, bucket, key)
     except grzexc.MissingObjectError as e:
         raise grzexc.MissingSubmissionFileError(f"s3://{bucket}/{key} does not exist") from e
-    # an emptied metadata.json carries the time of cleaning, not the time of upload
+    # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json's timestamp is invalid.
     raise_if_cleaned(s3_client, bucket, submission_id)
     return response["LastModified"]
