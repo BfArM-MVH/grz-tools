@@ -21,8 +21,6 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from cryptography.exceptions import UnsupportedAlgorithm
-from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes, load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.models.base import get_secret_value
@@ -143,35 +141,6 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
-def _read_known_public_keys(path: str | Path) -> dict[str, list[SSHPublicKeyTypes]]:
-    """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
-
-    The comment names the key's owner, and signature checks look keys up by it. So the comment
-    is required, and it may contain spaces. Several keys may share a comment, for example across
-    a key rotation, and all of them are kept. Blank lines and lines starting with ``#`` are skipped.
-
-    :param path: Path to the known public keys file.
-    :returns: The public keys, grouped by their comment in file order.
-    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
-    """
-    public_keys: dict[str, list[SSHPublicKeyTypes]] = {}
-    with open(path) as f:
-        for line_number, line in enumerate(f, start=1):
-            entry = line.strip()
-            if not entry or entry.startswith("#"):
-                continue
-            parts = entry.split(maxsplit=2)
-            if len(parts) < 3:
-                raise DatabaseConfigurationError(
-                    f"{path}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
-                )
-            try:
-                public_keys.setdefault(parts[2], []).append(load_ssh_public_key(entry.encode()))
-            except (ValueError, UnsupportedAlgorithm) as e:
-                raise DatabaseConfigurationError(f"{path}:{line_number}: cannot load the public key: {e}") from e
-    return public_keys
-
-
 @click.group(help="Database operations")
 @grzctl_configuration
 @click.pass_context
@@ -196,7 +165,7 @@ def db(
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
-    public_keys = _read_known_public_keys(db_config.known_public_keys)
+    public_keys = db_config.public_keys_by_owner
     for comment, keys in public_keys.items():
         log.debug(f"Found {len(keys)} public key(s) labeled '{comment}'")
 

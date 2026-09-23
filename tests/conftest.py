@@ -285,7 +285,7 @@ def _db_config_content(private_key_path, known_keys_path, database_url):
         "db": {
             "database_url": database_url,
             "author": {"name": "Alice", "private_key_path": str(private_key_path)},
-            "known_public_keys": str(known_keys_path),
+            "known_public_keys_file": str(known_keys_path),
         }
     }
 
