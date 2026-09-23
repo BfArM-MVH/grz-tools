@@ -151,6 +151,8 @@ class Worker:
         submitter_private_key_path: str | PathLike | None = None,
         force: bool = False,
         check_validation_logs: bool = True,
+        *,
+        submitter_private_key: bytes | None = None,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
@@ -158,6 +160,9 @@ class Worker:
         :param submitter_private_key_path: Path to the private key file of the submitter.
         :param force: Force encryption of already encrypted files
         :param check_validation_logs: Check validation logs before encrypting.
+        :param submitter_private_key: The private key of the submitter, as returned by
+            :meth:`~grz_common.utils.crypt.Crypt4GH.load_private_key`.
+            Mutually exclusive with ``submitter_private_key_path``.
         :return: EncryptedSubmission instance
         """
         submission = self.parse_submission()
@@ -205,6 +210,7 @@ class Worker:
                 recipient_public_key_path=recipient_public_key_path,
                 submitter_private_key_path=submitter_private_key_path,
                 force=force,
+                submitter_private_key=submitter_private_key,
             )
         except grzexc.GrzError:
             raise
@@ -213,12 +219,23 @@ class Worker:
 
         return encrypted_submission
 
-    def decrypt(self, recipient_private_key_path: str | PathLike, force: bool = False) -> Submission:
+    def decrypt(
+        self,
+        recipient_private_key_path: str | PathLike | None = None,
+        force: bool = False,
+        *,
+        recipient_private_key: bytes | None = None,
+    ) -> Submission:
         """
-        Encrypt this submission with a public key using Crypt4Gh.
+        Decrypt this submission with a private key using Crypt4Gh.
+
+        Exactly one of ``recipient_private_key_path`` and ``recipient_private_key`` must be given.
+
         :param recipient_private_key_path: Path to the private key file of the recipient.
         :param force: Force decryption of already decrypted files
-        :return: EncryptedSubmission instance
+        :param recipient_private_key: The private key of the recipient, as returned by
+            :meth:`~grz_common.utils.crypt.Crypt4GH.load_private_key`.
+        :return: Submission instance
         """
         encrypted_submission = self.parse_encrypted_submission()
 
@@ -230,6 +247,7 @@ class Worker:
             files_dir=self.files_dir,
             progress_log_file=self.progress_file_decrypt,
             recipient_private_key_path=recipient_private_key_path,
+            recipient_private_key=recipient_private_key,
         )
 
         return submission
