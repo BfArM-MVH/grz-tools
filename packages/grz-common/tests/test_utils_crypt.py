@@ -189,7 +189,7 @@ def test_prepare_c4gh_keys_signs_with_the_sender_private_key_bytes(tmp_path: Pat
 def test_prepare_c4gh_keys_takes_one_sender_key(plain_key_pair, no_prompt):
     private_key_path, public_key_path = plain_key_pair
 
-    with pytest.raises(ValueError, match="Only one of sender_private_key or sender_private_key_bytes"):
+    with pytest.raises(ValueError, match="Only one of sender_private_key_file_path or sender_private_key_bytes"):
         Crypt4GH.prepare_c4gh_keys(
             public_key_path,
             private_key_path,

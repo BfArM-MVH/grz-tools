@@ -39,7 +39,7 @@ class Crypt4GH:
     @staticmethod
     def prepare_c4gh_keys(
         recipient_key_file_path: str | PathLike,
-        sender_private_key: str | PathLike | None = None,
+        sender_private_key_file_path: str | PathLike | None = None,
         *,
         sender_private_key_bytes: bytes | None = None,
     ) -> tuple[Key]:
@@ -50,17 +50,17 @@ class Crypt4GH:
         If neither sender key is given, a random one is generated.
 
         :param recipient_key_file_path: path to the public key file of the recipient
-        :param sender_private_key: path to the private key file of the sender.
+        :param sender_private_key_file_path: path to the private key file of the sender.
         :param sender_private_key_bytes: the private key of the sender, as returned by
-            :meth:`load_private_key`. Mutually exclusive with ``sender_private_key``.
+            :meth:`load_private_key`. Mutually exclusive with ``sender_private_key_file_path``.
         :raises ValueError: If both sender keys are given.
         """
-        if sender_private_key is not None and sender_private_key_bytes is not None:
-            raise ValueError("Only one of sender_private_key or sender_private_key_bytes must be given.")
+        if sender_private_key_file_path is not None and sender_private_key_bytes is not None:
+            raise ValueError("Only one of sender_private_key_file_path or sender_private_key_bytes must be given.")
         if sender_private_key_bytes is not None:
             sk = sender_private_key_bytes
-        elif sender_private_key is not None:
-            sk = Crypt4GH.retrieve_private_key(sender_private_key)
+        elif sender_private_key_file_path is not None:
+            sk = Crypt4GH.retrieve_private_key(sender_private_key_file_path)
         else:
             sk = X25519PrivateKey.generate().private_bytes(
                 encoding=serialization.Encoding.Raw,
