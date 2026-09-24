@@ -24,6 +24,13 @@ def test_encrypt_config_reads_the_keys_section(tmp_path: Path):
     assert config.keys.grz_public_key_path == public_key_path
 
 
+def test_a_config_with_the_removed_grz_private_key_path_still_loads():
+    """grz-cli never read ``keys.grz_private_key_path``. Old configs still set it, so the model ignores it."""
+    keys = KeyModel.model_validate({"grz_public_key": PUBLIC_KEY, "grz_private_key_path": "/no/such/key.sec"})
+
+    assert "grz_private_key_path" not in keys.model_dump()
+
+
 def test_neither_grz_public_key_nor_grz_public_key_path_fails():
     with pytest.raises(ValidationError, match="Either grz_public_key or grz_public_key_path must be set"):
         KeyModel()

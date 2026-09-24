@@ -260,13 +260,11 @@ def temp_metadata_file_path(temp_data_dir_path) -> Path:
 @pytest.fixture
 def keys_config_content(
     crypt4gh_grz_public_key_file_path,
-    crypt4gh_grz_private_key_file_path,
     crypt4gh_submitter_private_key_file_path,
 ):
     return {
         "keys": {
             "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
-            "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
             "submitter_private_key_path": str(crypt4gh_submitter_private_key_file_path),
         }
     }

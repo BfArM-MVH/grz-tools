@@ -20,11 +20,6 @@ class KeyModel(IgnoringBaseModel):
     Path to the crypt4gh public key of the recipient (the associated GRZ).
     """
 
-    grz_private_key_path: FilePath | None = None
-    """
-    Path to the crypt4gh private key of the recipient (optional).
-    """
-
     submitter_private_key_path: FilePath | None = None
     """
     Path to the submitter's private key (optional).
