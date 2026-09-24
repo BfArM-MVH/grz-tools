@@ -44,7 +44,7 @@ def test_pydantic_json_env_var_merging(monkeypatch, configuration: dict):
     assert get_secret_value(entry.inbox_buckets[BUCKET_NAME].private_key_passphrase) == "json-secret-passphrase"
 
 
-def test_archive_public_key_env_var_overrides_the_path(monkeypatch, configuration: dict, crypt4gh_public_key: str):
+def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration: dict, crypt4gh_public_key: str):
     """An operator may put the archive's public key into an environment variable inline,
     instead of writing it to a file that ``public_key_path`` then points at.
     """

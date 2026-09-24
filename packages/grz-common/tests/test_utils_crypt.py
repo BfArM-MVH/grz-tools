@@ -246,6 +246,11 @@ def test_find_private_key_passes_on_a_key_that_cannot_be_loaded(encrypted_submis
         encrypted_submission.find_private_key(_candidates())
 
 
-def test_decrypt_takes_exactly_one_key(tmp_path: Path, encrypted_submission):
+@pytest.mark.parametrize(
+    "keys",
+    [{}, {"recipient_private_key_path": "unused.sec", "recipient_private_key": b"unused"}],
+    ids=["neither", "both"],
+)
+def test_decrypt_takes_exactly_one_key(tmp_path: Path, encrypted_submission, keys: dict):
     with pytest.raises(ValueError, match="Exactly one of recipient_private_key_path or recipient_private_key"):
-        encrypted_submission.decrypt(tmp_path / "files", tmp_path / "progress_decrypt.cjson")
+        encrypted_submission.decrypt(tmp_path / "files", tmp_path / "progress_decrypt.cjson", **keys)
