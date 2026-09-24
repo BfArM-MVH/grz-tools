@@ -83,8 +83,7 @@ class DbContext:
     - If the submission **does not exist** in the DB:
 
       - for the entry states, ``PROCESSING`` and ``UPLOADING``, the submission is
-        automatically created and the transition proceeds. ``UPLOADING`` is usually
-        recorded by the inbox scan directly, without going through a ``DbContext``;
+        automatically created and the transition proceeds;
       - otherwise: ``SubmissionNotFoundError`` is raised immediately.
 
     Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError``) are
@@ -112,9 +111,7 @@ class DbContext:
     _SUBMISSION_ENTRY_STATES = frozenset({SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING})
     """States at which a brand-new submission may be created.
 
-    Both states may start a submission that the DB does not know yet. ``UPLOADING`` is
-    recorded by the inbox scan, outside a ``DbContext``. These are explicit because
-    ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
+    These are explicit because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
     """
 
     def __init__(
@@ -229,7 +226,6 @@ class DbContext:
 
     @property
     def author(self) -> Author:
-        # cached on the configuration, so the several contexts of one run share a single unlocked key
         return self.config.db.signing_author
 
     def _map_exception_to_failure_reason(
