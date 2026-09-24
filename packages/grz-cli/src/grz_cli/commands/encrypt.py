@@ -43,7 +43,11 @@ def encrypt(configuration: dict[str, Any], submission_dir, force, check_validati
         sys.exit("GRZ public key path is required for encryption.")
 
     submitter_private_key = None
-    if config.keys.submitter_private_key_path is not None:
+    if config.keys.submitter_private_key is not None:
+        submitter_private_key = Crypt4GH.load_private_key(
+            config.keys.submitter_private_key.get_secret_value(), key_name="keys.submitter_private_key"
+        )
+    elif config.keys.submitter_private_key_path is not None:
         submitter_private_key = Crypt4GH.retrieve_private_key(config.keys.submitter_private_key_path)
 
     log.info("Starting encryption...")
