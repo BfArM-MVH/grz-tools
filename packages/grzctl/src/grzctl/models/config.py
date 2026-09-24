@@ -32,7 +32,7 @@ _config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", defau
 
 
 def _check_key_fields(name: str, key: object | None, key_path: Path | None, *, required: bool) -> None:
-    """Check that at most one of the fields ``<name>`` and ``<name>_path`` is set.
+    """Check that no more than one of the fields ``<name>`` and ``<name>_path`` is set, or with *required* exactly one.
 
     :param name: Name of the field with the inline key.
     :param key: Value of that field.

@@ -53,7 +53,8 @@ def decrypt(
     Without --private-key-file, the keys in the config are tried one at a time:
     first the private keys of all inboxes of the submitter named in the submission's metadata,
     then the private keys of the consented and the non-consented archive.
-    The first key that opens the crypt4gh header of the submission's files decrypts all of them.
+    The keys are tested against the crypt4gh header of the submission's first encrypted file.
+    The first key that opens it decrypts all files.
     """
     log.info("Starting decryption...")
 

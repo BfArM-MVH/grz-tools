@@ -706,7 +706,7 @@ class EncryptedSubmission:
             :meth:`Crypt4GH.load_private_key`. The name only appears in logs and errors.
         :returns: The first private key that opens the header.
         :raises DecryptionError: If no key opens the header, naming the keys tried,
-            or if the file has no valid Crypt4GH header.
+            if the file has no valid Crypt4GH header, or if the submission has no encrypted files.
         :raises ConfigurationError: If *private_keys* holds no key, or cannot load one.
         """
         encrypted_file_path = next(iter(self.encrypted_files), None)
