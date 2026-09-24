@@ -1,6 +1,4 @@
-"""Tests for loading crypt4gh private keys in memory, their passphrase order, and finding the key
-that opens the header of an encrypted submission.
-"""
+"""Tests for loading crypt4gh private keys in memory, their passphrase order, and decrypting with a key."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -159,23 +157,6 @@ def _encrypt(tmp_path: Path, public_key_path: Path, sender_private_key: bytes | 
     return encrypted_path
 
 
-def test_key_opens_header(tmp_path: Path, plain_key_pair, no_prompt):
-    private_key_path, public_key_path = plain_key_pair
-    other_private_key_path, _ = _generate_key_pair(tmp_path, "other")
-    encrypted_path = _encrypt(tmp_path, public_key_path)
-
-    assert Crypt4GH.key_opens_header(encrypted_path, Crypt4GH.retrieve_private_key(private_key_path))
-    assert not Crypt4GH.key_opens_header(encrypted_path, Crypt4GH.retrieve_private_key(other_private_key_path))
-
-
-def test_key_opens_header_fails_for_a_file_that_is_not_crypt4gh(tmp_path: Path, plain_key_pair, no_prompt):
-    not_encrypted_path = tmp_path / "file.txt"
-    not_encrypted_path.write_text("not a crypt4gh file")
-
-    with pytest.raises(grzexc.DecryptionError, match="Not a CRYPT4GH formatted file"):
-        Crypt4GH.key_opens_header(not_encrypted_path, Crypt4GH.retrieve_private_key(plain_key_pair[0]))
-
-
 def test_decrypt_file_with_a_key_that_does_not_open_the_header_fails(tmp_path: Path, plain_key_pair, no_prompt):
     """A key that does not fit is named as the reason, since crypt4gh's own message does not say so."""
     other_private_key_path, _ = _generate_key_pair(tmp_path, "other")
@@ -184,6 +165,16 @@ def test_decrypt_file_with_a_key_that_does_not_open_the_header_fails(tmp_path: P
     with pytest.raises(grzexc.DecryptionError, match="the private key does not open its Crypt4GH header"):
         Crypt4GH.decrypt_file(
             encrypted_path, tmp_path / "decrypted.txt", Crypt4GH.retrieve_private_key(other_private_key_path)
+        )
+
+
+def test_decrypt_file_fails_for_a_file_that_is_not_crypt4gh(tmp_path: Path, plain_key_pair, no_prompt):
+    not_encrypted_path = tmp_path / "file.txt"
+    not_encrypted_path.write_text("not a crypt4gh file")
+
+    with pytest.raises(grzexc.DecryptionError, match="Not a CRYPT4GH formatted file"):
+        Crypt4GH.decrypt_file(
+            not_encrypted_path, tmp_path / "decrypted.txt", Crypt4GH.retrieve_private_key(plain_key_pair[0])
         )
 
 
@@ -219,45 +210,6 @@ def encrypted_submission(tmp_path: Path, plain_key_pair) -> Iterator[EncryptedSu
     with patch.object(EncryptedSubmission, "encrypted_files", new_callable=PropertyMock) as encrypted_files:
         encrypted_files.return_value = {encrypted_path: None}
         yield submission
-
-
-def test_find_private_key_stops_at_the_first_key_that_opens_the_header(
-    tmp_path: Path, encrypted_submission, plain_key_pair, no_prompt
-):
-    wrong_key = Crypt4GH.retrieve_private_key(_generate_key_pair(tmp_path, "wrong")[0])
-    right_key = Crypt4GH.retrieve_private_key(plain_key_pair[0])
-    loaded = []
-
-    def _candidates():
-        for name, key in [("wrong", wrong_key), ("right", right_key), ("later", b"never loaded")]:
-            loaded.append(name)
-            yield name, key
-
-    assert encrypted_submission.find_private_key(_candidates()) == right_key
-    assert loaded == ["wrong", "right"]
-
-
-def test_find_private_key_names_the_keys_tried(tmp_path: Path, encrypted_submission, no_prompt):
-    wrong_key = Crypt4GH.retrieve_private_key(_generate_key_pair(tmp_path, "wrong")[0])
-
-    with pytest.raises(grzexc.DecryptionError, match=r"No private key opens .* Tried: first, second\.") as exc_info:
-        encrypted_submission.find_private_key([("first", wrong_key), ("second", wrong_key)])
-
-    assert wrong_key.hex() not in str(exc_info.value)
-
-
-def test_find_private_key_without_keys_is_a_configuration_error(encrypted_submission):
-    """With no key to try, the GRZ has to configure one, so the submission is not at fault."""
-    with pytest.raises(grzexc.ConfigurationError, match="No private key is configured"):
-        encrypted_submission.find_private_key([])
-
-
-def test_find_private_key_passes_on_a_key_that_cannot_be_loaded(encrypted_submission):
-    def _candidates():
-        yield "broken", Crypt4GH.load_private_key("not a key", key_name="broken")
-
-    with pytest.raises(grzexc.ConfigurationError, match="Secret key broken cannot be read"):
-        encrypted_submission.find_private_key(_candidates())
 
 
 @pytest.mark.parametrize(

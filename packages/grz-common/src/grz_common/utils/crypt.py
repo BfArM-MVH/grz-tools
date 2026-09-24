@@ -192,35 +192,6 @@ class Crypt4GH:
         )
 
     @staticmethod
-    def key_opens_header(input_path: str | PathLike, private_key: bytes) -> bool:
-        """
-        Check whether a private key opens the Crypt4GH header of a file, without decrypting its body.
-
-        :param input_path: Path to the encrypted file
-        :param private_key: The private key, as returned by :meth:`load_private_key`
-        :returns: ``True`` if the key decrypts at least one header packet.
-        :raises DecryptionError: If the file has no valid Crypt4GH header.
-        """
-        with open(input_path, "rb") as in_fd:
-            try:
-                header_packets = list(crypt4gh.header.parse(in_fd))
-            except ValueError as e:
-                # crypt4gh raises ValueError for a header that the file gets wrong
-                raise grzexc.DecryptionError(f"Cannot read the Crypt4GH header of {input_path}: {e}") from e
-
-        # crypt4gh.header.decrypt logs every key that does not fit as an error, so try the key directly.
-        # Like crypt4gh.header.decrypt_packet, this supports X25519 with ChaCha20-Poly1305 (method 0) only.
-        for packet in header_packets:
-            if int.from_bytes(packet[:4], byteorder="little") != 0:
-                continue
-            try:
-                crypt4gh.header.decrypt_X25519_Chacha20_Poly1305(packet[4:], private_key)
-            except Exception:  # noqa: S112
-                continue
-            return True
-        return False
-
-    @staticmethod
     def decrypt_file(input_path: Path, output_path: Path, private_key: bytes):
         """
         Decrypt a file using the provided private key

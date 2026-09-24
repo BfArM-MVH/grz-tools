@@ -6,7 +6,7 @@ import concurrent
 import json
 import logging
 import mmap
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from contextlib import ExitStack
 from itertools import groupby
 from os import PathLike
@@ -693,39 +693,6 @@ class EncryptedSubmission:
         """
         p = Path(file_path)
         return p.with_suffix(p.suffix + ".c4gh_header")
-
-    def find_private_key(self, private_keys: Iterable[tuple[str, bytes]]) -> bytes:
-        """
-        Find the first private key that opens the Crypt4GH header of this submission's files.
-
-        The keys are tested against the first encrypted file only, without decrypting its body.
-        They are taken one at a time, so a lazy iterable loads a key, and asks for its passphrase,
-        only after every key before it failed.
-
-        :param private_keys: Pairs of a name and a private key, as returned by
-            :meth:`Crypt4GH.load_private_key`. The name only appears in logs and errors.
-        :returns: The first private key that opens the header.
-        :raises DecryptionError: If no key opens the header, naming the keys tried,
-            if the file has no valid Crypt4GH header, or if the submission has no encrypted files.
-        :raises ConfigurationError: If *private_keys* holds no key, or cannot load one.
-        """
-        encrypted_file_path = next(iter(self.encrypted_files), None)
-        if encrypted_file_path is None:
-            raise grzexc.DecryptionError("The submission has no encrypted files to test the private keys against.")
-
-        tried = []
-        for name, private_key in private_keys:
-            tried.append(name)
-            if Crypt4GH.key_opens_header(encrypted_file_path, private_key):
-                self.__log.info("Decrypting with the private key from %s.", name)
-                return private_key
-            self.__log.info("The private key from %s does not open '%s'.", name, str(encrypted_file_path))
-
-        if not tried:
-            raise grzexc.ConfigurationError(f"No private key is configured to open '{encrypted_file_path}'.")
-        raise grzexc.DecryptionError(
-            f"No private key opens the Crypt4GH header of '{encrypted_file_path}'. Tried: {', '.join(tried)}."
-        )
 
     def decrypt(
         self,
