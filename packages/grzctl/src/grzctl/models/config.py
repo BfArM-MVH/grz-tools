@@ -375,8 +375,7 @@ class GrzctlConfig(IgnoringBaseSettings):
             ("consented", self.archives.consented),
             ("non_consented", self.archives.non_consented),
         ):
-            if target.private_key is not None or target.private_key_path is not None:
-                candidates.append((f"archives.{archive_name}", target))
+            candidates.append((f"archives.{archive_name}", target))
 
         # Group the locations by where their key comes from: the inline text, or the resolved path of the file.
         # dicts keep their insertion order, so the groups keep the order of their first location.
@@ -387,7 +386,7 @@ class GrzctlConfig(IgnoringBaseSettings):
             elif holder.private_key_path is not None:
                 source = ("path", str(holder.private_key_path.resolve()))
             else:
-                # validation leaves no inbox without a key, and the archives without one are not candidates
+                # an archive without a private key, since validation leaves no inbox without one
                 continue
             groups.setdefault(source, []).append((prefix, holder))
 
