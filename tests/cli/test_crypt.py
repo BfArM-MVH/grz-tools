@@ -194,21 +194,29 @@ def test_encrypt_decrypt_submission(
         assert expected_checksum == observed_checksum
 
 
+@pytest.mark.parametrize("inline", [False, True], ids=["submitter_private_key_path", "submitter_private_key"])
 def test_encrypt_signs_with_the_submitter_key(
     working_dir_path,
-    temp_keys_config_file_path,
+    keys_config_content,
+    tmp_path,
+    inline,
     crypt4gh_grz_private_key_file_path,
     crypt4gh_submitter_public_key_file_path,
     crypt4gh_grz_public_key_file_path,
 ):
     """The header of an encrypted file names the submitter's key as the sender, not a random key."""
     copy_submission(working_dir_path, "files", "metadata")
+    if inline:
+        keys_config = keys_config_content["keys"]
+        keys_config["submitter_private_key"] = Path(keys_config.pop("submitter_private_key_path")).read_text()
+    config_file = tmp_path / "config.keys.yaml"
+    config_file.write_text(yaml.dump(keys_config_content))
     testargs = [
         "encrypt",
         "--submission-dir",
         str(working_dir_path),
         "--config-file",
-        temp_keys_config_file_path,
+        str(config_file),
         "--no-check-validation-logs",
     ]
     result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs, catch_exceptions=False)
