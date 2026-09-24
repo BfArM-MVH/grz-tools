@@ -151,6 +151,20 @@ def _config_with_one_private_key(tmp_path: Path, unread_file: str, holder: str, 
     return _grzctl_config(tmp_path, unread_file, other_le, consented=private_key_fields)
 
 
+def test_a_config_error_does_not_show_the_passphrase(tmp_path: Path, key_path: Path, unread_file: str):
+    """Pydantic shows the start and the end of the raw input in errors, and SecretStr does not mask it there."""
+    inbox = {
+        "private_key": key_path.read_text(),
+        "private_key_path": str(key_path),
+        "private_key_passphrase": PASSPHRASE,
+    }
+
+    with pytest.raises(ValidationError, match="Only one of private_key or private_key_path must be set") as exc_info:
+        _grzctl_config(tmp_path, unread_file, {"260914050": {"inbox_buckets": {"inbox": inbox}}})
+
+    assert PASSPHRASE not in str(exc_info.value)
+
+
 @pytest.mark.parametrize("holder", ["inbox", "archive"])
 def test_inline_private_key_loads_in_memory(
     holder: str, tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str

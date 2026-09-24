@@ -93,6 +93,8 @@ class IgnoringBaseSettings(_RevealableSecrets, BaseSettings):
         use_enum_values=True,
         env_nested_delimiter="__",
         env_prefix="grz_",
+        # errors would show the raw input, and SecretStr does not mask passphrases and keys there
+        hide_input_in_errors=True,
     )
 
     def to_yaml(self, fd):
