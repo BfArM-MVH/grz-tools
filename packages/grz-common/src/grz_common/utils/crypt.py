@@ -133,20 +133,12 @@ class Crypt4GH:
         if not os.path.exists(seckeypath):
             raise grzexc.ConfigurationError(f"Secret key not found: {seckey_path}")
 
-        if passphrase:
-            passphrase_callback = lambda: passphrase
-        elif global_passphrase := os.getenv("C4GH_PASSPHRASE"):
-            passphrase_callback = lambda: global_passphrase
-        else:
-            passphrase_callback = partial(getpass, prompt=f"Passphrase for {seckey_path}: ")
-
         try:
-            return crypt4gh.keys.get_private_key(seckeypath, passphrase_callback)
-        except SystemExit as e:
-            # crypt4gh exits the process for a key or a passphrase that it cannot use
-            raise grzexc.ConfigurationError(f"Secret key {seckey_path} cannot be read with the given passphrase") from e
-        except (OSError, ValueError, NotImplementedError) as e:
+            with open(seckeypath, "rb") as seckey_fd:
+                private_key = seckey_fd.read()
+        except OSError as e:
             raise grzexc.ConfigurationError(f"Secret key {seckey_path} cannot be read: {e}") from e
+        return Crypt4GH.load_private_key(private_key, passphrase=passphrase, key_name=str(seckey_path))
 
     @staticmethod
     def load_private_key(private_key: str | bytes, passphrase: str | None = None, key_name: str = "(inline)") -> bytes:
