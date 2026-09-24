@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+import cryptography.hazmat.primitives.serialization as cryptser
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from grz_common.models.version import VERSION_FILE_KEY, VersionFile
 from grzctl.models.config import GrzctlConfig
 from moto import mock_aws
@@ -19,17 +21,46 @@ BUCKET_A = "inbox-a"
 BUCKET_B = "inbox-b"
 
 
-def _two_inbox_config() -> GrzctlConfig:
+def _two_inbox_config(tmp_path: Path) -> GrzctlConfig:
     """A config with two LEs, each with one inbox, resolving to distinct buckets."""
+    private_key = Ed25519PrivateKey.generate()
+    private_key_path = tmp_path / "grz.sec"
+    with open(private_key_path, "wb") as private_key_file:
+        private_key_file.write(
+            private_key.private_bytes(
+                encoding=cryptser.Encoding.PEM,
+                format=cryptser.PrivateFormat.OpenSSH,
+                encryption_algorithm=cryptser.NoEncryption(),
+            )
+        )
+
+    public_key = private_key.public_key()
+    public_key_path = tmp_path / "grz.pub"
+    with open(public_key_path, "wb") as public_key_file:
+        public_key_file.write(
+            public_key.public_bytes(encoding=cryptser.Encoding.OpenSSH, format=cryptser.PublicFormat.OpenSSH)
+        )
+
+    inbox = {"private_key_path": str(private_key_path.resolve())}
     return GrzctlConfig(
         leistungserbringer={
-            "000000000": {"inbox_buckets": {"inbox": {"bucket": BUCKET_A, "private_key_path": "unused"}}},
-            "111111111": {"inbox_buckets": {"inbox": {"bucket": BUCKET_B, "private_key_path": "unused"}}},
+            "000000000": {"inbox_buckets": {"inbox": {"bucket": BUCKET_A, **inbox}}},
+            "111111111": {"inbox_buckets": {"inbox": {"bucket": BUCKET_B, **inbox}}},
         },
-        archives=_grzctl_archives(),
-        db={"database_url": "sqlite:///:memory:", "author": {"name": "alice"}},
+        archives=_grzctl_archives(
+            public_key_path=str(public_key_path.resolve()),
+            signing_key_path=str(private_key_path.resolve()),
+        ),
+        db={
+            "database_url": "sqlite:///:memory:",
+            "author": {
+                "name": "alice",
+                "private_key_path": str(private_key_path.resolve()),
+                "private_key_passphrase": "",
+            },
+            "known_public_keys_file": str(public_key_path.resolve()),
+        },
         pruefbericht={},
-        keys={"grz_private_key_path": "unused"},
         identifiers={"grz": "GRZK00007"},
     )
 
@@ -46,7 +77,7 @@ def s3_client_mock() -> Iterator[Any]:
 
 @pytest.fixture
 def config_path(tmp_path: Path) -> Path:
-    return _write_config(tmp_path, _two_inbox_config())
+    return _write_config(tmp_path, _two_inbox_config(tmp_path))
 
 
 def test_push_version_publishes_to_every_inbox(s3_client_mock, config_path):
