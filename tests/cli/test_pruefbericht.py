@@ -144,7 +144,15 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
     assert submit_result.exit_code == 0, submit_result.output
 
 
-def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path):
+@pytest.mark.parametrize(
+    ("token_args", "token_env"),
+    [(["--token", "my_token"], {}), ([], {"GRZ_PRUEFBERICHT_ACCESS_TOKEN": "my_token"})],
+    ids=["option", "env-var"],
+)
+def test_valid_submission_with_token(
+    bfarm_submit_api, temp_pruefbericht_config_file_path, tmp_path, token_args, token_env
+):
+    """A given token skips the token request, which ``bfarm_submit_api`` does not fake."""
     submission_dir_ptr = importlib.resources.files(mock_files).joinpath("submissions", "valid_submission")
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         runner = click.testing.CliRunner(
@@ -153,6 +161,7 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_
                 "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
                 "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
                 "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+                **token_env,
             }
         )
         cli = grzctl.cli.build_cli()
@@ -174,8 +183,7 @@ def test_valid_submission_with_token(bfarm_submit_api, temp_pruefbericht_config_
             TEST_SUBMISSION_ID,
             "--pruefbericht-file",
             str(pruefbericht_json_path),
-            "--token",
-            "my_token",
+            *token_args,
             "--no-update-db",
         ]
         submit_result = runner.invoke(cli, submit_args, catch_exceptions=False)
