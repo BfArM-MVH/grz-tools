@@ -176,6 +176,17 @@ def test_key_opens_header_fails_for_a_file_that_is_not_crypt4gh(tmp_path: Path, 
         Crypt4GH.key_opens_header(not_encrypted_path, Crypt4GH.retrieve_private_key(plain_key_pair[0]))
 
 
+def test_decrypt_file_with_a_key_that_does_not_open_the_header_fails(tmp_path: Path, plain_key_pair, no_prompt):
+    """A key that does not fit is named as the reason, since crypt4gh's own message does not say so."""
+    other_private_key_path, _ = _generate_key_pair(tmp_path, "other")
+    encrypted_path = _encrypt(tmp_path, plain_key_pair[1])
+
+    with pytest.raises(grzexc.DecryptionError, match="the private key does not open its Crypt4GH header"):
+        Crypt4GH.decrypt_file(
+            encrypted_path, tmp_path / "decrypted.txt", Crypt4GH.retrieve_private_key(other_private_key_path)
+        )
+
+
 def test_prepare_c4gh_keys_signs_with_the_sender_private_key_bytes(tmp_path: Path, plain_key_pair, no_prompt):
     """The header names the sender's public key, so the recipient can check who encrypted the file."""
     _, public_key_path = plain_key_pair

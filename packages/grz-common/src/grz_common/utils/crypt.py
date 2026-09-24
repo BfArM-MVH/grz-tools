@@ -227,7 +227,8 @@ class Crypt4GH:
         :param input_path: Path to the encrypted file
         :param output_path: Path to the decrypted file
         :param private_key: The private key
-        :raises DecryptionError: If the header or a segment of the file cannot be decrypted.
+        :raises DecryptionError: If the private key does not open the header,
+            or if the header or a segment of the file cannot be decrypted.
         """
         total_size = getsize(input_path)
         file_name = input_path.name
@@ -246,5 +247,10 @@ class Crypt4GH:
                     outfile=out_fd,
                 )
             except ValueError as e:
+                if str(e) == "No supported encryption method":
+                    # crypt4gh raises this if the key opens no packet of the header
+                    raise grzexc.DecryptionError(
+                        f"Cannot decrypt {input_path}: the private key does not open its Crypt4GH header"
+                    ) from e
                 # crypt4gh raises ValueError for a header or a segment that the file gets wrong
                 raise grzexc.DecryptionError(f"Cannot decrypt {input_path}: {e}") from e
