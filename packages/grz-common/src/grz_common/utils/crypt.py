@@ -114,7 +114,7 @@ class Crypt4GH:
         :raises ConfigurationError: If the key is missing or cannot be read.
         """
         try:
-            return crypt4gh.keys.get_public_key(os.path.expanduser(str(pubkey_path)))
+            return crypt4gh.keys.get_public_key(Path(pubkey_path).expanduser())
         except (OSError, ValueError, NotImplementedError) as e:
             # crypt4gh raises NotImplementedError for a file in no key format it knows
             raise grzexc.ConfigurationError(f"Public key {pubkey_path} cannot be read: {e}") from e
@@ -129,13 +129,12 @@ class Crypt4GH:
         :returns: Private key bytes
         :raises ConfigurationError: If the key is missing, or cannot be read with the passphrase.
         """
-        seckeypath = os.path.expanduser(str(seckey_path))
-        if not os.path.exists(seckeypath):
+        seckeypath = Path(seckey_path).expanduser()
+        if not seckeypath.exists():
             raise grzexc.ConfigurationError(f"Secret key not found: {seckey_path}")
 
         try:
-            with open(seckeypath, "rb") as seckey_fd:
-                private_key = seckey_fd.read()
+            private_key = seckeypath.read_bytes()
         except OSError as e:
             raise grzexc.ConfigurationError(f"Secret key {seckey_path} cannot be read: {e}") from e
         return Crypt4GH.load_private_key(private_key, passphrase=passphrase, key_name=str(seckey_path))
