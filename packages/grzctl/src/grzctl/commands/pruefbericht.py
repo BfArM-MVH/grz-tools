@@ -36,7 +36,7 @@ fail_or_pass = click.option(
 def _http_error(error: requests.RequestException, client_error: type[GrzError]) -> GrzError:
     """Classify a failed HTTP request as the failure it stands for.
 
-    :param error: What ``requests`` raised. Its message names the URL of the request.
+    :param error: What ``requests`` raised.
     :param client_error: The class for a client error other than refused credentials.
     :returns: A :class:`NetworkError` if the request did not get through or the server answered with a
         server error, a :class:`ConfigurationError` if the server refuses the credentials, and
