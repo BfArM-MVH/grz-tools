@@ -371,6 +371,33 @@ def test_two_inboxes_sharing_a_key_path_through_a_yaml_anchor_prompt_once(
     assert prompts == [f"Passphrase for {key_path}: "]
 
 
+def test_a_shared_key_takes_the_passphrase_of_a_later_location_if_the_first_sets_none(
+    tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
+):
+    config = _grzctl_config(
+        tmp_path,
+        unread_file,
+        {
+            "260914050": {
+                "inbox_buckets": {
+                    "inbox-a": {"private_key_path": str(key_path)},
+                    "inbox-b": {"private_key_path": str(key_path), "private_key_passphrase": PASSPHRASE},
+                }
+            }
+        },
+    )
+
+    keys = list(config.iter_decryption_keys("260914050"))
+
+    assert keys == [
+        (
+            "leistungserbringer.260914050.inbox_buckets.inbox-a.private_key_path, "
+            "leistungserbringer.260914050.inbox_buckets.inbox-b.private_key_path",
+            expected_key,
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     ("section", "field"),
     [

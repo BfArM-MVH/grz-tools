@@ -358,7 +358,7 @@ class GrzctlConfig(IgnoringBaseSettings):
 
         Locations that share a key, for example through a YAML anchor, give one entry, so their key is
         loaded once. Two locations share a key if they name the same file or hold the same inline text.
-        The entry takes its place from the first of them, and its passphrase from the first as well.
+        The entry takes its place from the first of them, and its passphrase from the first of them that sets one.
 
         :param submitter_id: Submitter (LE) ID, as in the submission's metadata.
         :yields: Pairs of the config locations of a key, joined by ``", "``, and the key.
@@ -397,9 +397,10 @@ class GrzctlConfig(IgnoringBaseSettings):
                 for prefix, holder in group
             )
             prefix, holder = group[0]
+            passphrase = next(
+                (h.private_key_passphrase for _, h in group if h.private_key_passphrase is not None), None
+            )
             yield (
                 locations,
-                _load_private_key(
-                    f"{prefix}.private_key", holder.private_key, holder.private_key_path, holder.private_key_passphrase
-                ),
+                _load_private_key(f"{prefix}.private_key", holder.private_key, holder.private_key_path, passphrase),
             )
