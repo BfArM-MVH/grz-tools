@@ -1,5 +1,7 @@
 """Tests for VersionFile container behavior."""
 
+import pytest
+from grz_common.exceptions import VersionFileValidationError
 from grz_common.models.version import VersionFile, VersionInfo
 
 
@@ -29,7 +31,17 @@ def test_bundled_version_file_is_valid():
     """The version.json shipped with grz-common must always parse as a valid VersionFile."""
     content = VersionFile.read_bundled_text()
     vf = VersionFile.model_validate_json(content)
-    assert len(vf.grzcli_version) >= 1
+    assert vf.schema_version == 1
+
+
+def test_read_bundled_text_raises_on_invalid_content(mocker):
+    """read_bundled_text must fail fast if the bundled file is ever broken, not silently publish it."""
+    broken = mocker.Mock()
+    broken.joinpath.return_value.read_text.return_value = '{"grzcli_version": [{"minimal_version": "not-a-version"}]}'
+    mocker.patch("grz_common.models.version.importlib.resources.files", return_value=broken)
+
+    with pytest.raises(VersionFileValidationError):
+        VersionFile.read_bundled_text()
 
 
 def test_multiple_policies_parsed():
