@@ -132,7 +132,7 @@ class LeistungserbringerEntry(IgnoringBaseModel):
 
 
 class ArchiveTarget(IgnoringBaseModel):
-    """Encapsulates everything needed to write to a specific archive, and to decrypt submissions from it."""
+    """Encapsulates everything needed to write to a specific archive."""
 
     s3: S3Options
     """S3 connection details and bucket for this archive."""
@@ -143,23 +143,9 @@ class ArchiveTarget(IgnoringBaseModel):
     public_key_path: FilePath | None = None
     """Path to the crypt4gh public key for re-encryption of files destined for this archive."""
 
-    private_key: SecretStr | None = None
-    """The crypt4gh private key of this archive, to decrypt archived submissions (optional)."""
-
-    private_key_path: FilePath | None = None
-    """Path to the crypt4gh private key of this archive, to decrypt archived submissions (optional)."""
-
-    private_key_passphrase: SecretStr | None = None
-    """Passphrase to the crypt4gh private key of this archive."""
-
     @model_validator(mode="after")
     def validate_public_key(self) -> "ArchiveTarget":
         _check_key_fields("public_key", self.public_key, self.public_key_path, required=True)
-        return self
-
-    @model_validator(mode="after")
-    def validate_private_key(self) -> "ArchiveTarget":
-        _check_key_fields("private_key", self.private_key, self.private_key_path, required=False)
         return self
 
     @contextlib.contextmanager
@@ -349,57 +335,55 @@ class GrzctlConfig(IgnoringBaseSettings):
             **inbox_cfg.model_dump(include={"private_key", "private_key_path", "private_key_passphrase"}),
         )
 
-    def iter_decryption_keys(self, submitter_id: str) -> Iterator[tuple[str, bytes]]:
-        """Load the private keys that may decrypt a submission of a submitter, one at a time.
+    def load_decryption_key(self, submitter_id: str) -> bytes:
+        """Load the private key that decrypts the submissions of a submitter.
 
-        First come the keys of all inboxes of the submitter (LE), then the private keys of the consented
-        and the non-consented archive, if set. A submitter missing from the config has no inbox keys.
-        Each key is only loaded, and its passphrase only asked for, when the caller asks for it.
-
-        Locations that share a key, for example through a YAML anchor, give one entry, so their key is
-        loaded once. Two locations share a key if they name the same file or hold the same inline text.
-        The entry takes its place from the first of them, and its passphrase from the first of them that sets one.
+        A submission's metadata names its submitter (LE), but neither the metadata nor the database
+        records the inbox that the submission came from. So all inboxes of the submitter must use one key.
+        Two inboxes use the same key if they name the same file or hold the same inline text,
+        for example through a YAML anchor. The passphrase is the first one that these inboxes set.
 
         :param submitter_id: Submitter (LE) ID, as in the submission's metadata.
-        :yields: Pairs of the config locations of a key, joined by ``", "``, and the key.
-        :raises ConfigurationError: If a key cannot be loaded.
+        :returns: The private key.
+        :raises ConfigurationError: If the submitter is not in the config, if its inboxes use more
+            than one key, or if the key cannot be loaded.
         """
-        candidates: list[tuple[str, InboxConfig | ArchiveTarget]] = []
         entry = self._le_by_id.get(submitter_id)
         if entry is None:
-            log.warning(f"Submitter '{submitter_id}' is not in the config, so no inbox private key is tried.")
-        else:
-            for inbox_name, inbox in entry.inbox_buckets.items():
-                candidates.append((f"leistungserbringer.{submitter_id}.inbox_buckets.{inbox_name}", inbox))
-        for archive_name, target in (
-            ("consented", self.archives.consented),
-            ("non_consented", self.archives.non_consented),
-        ):
-            candidates.append((f"archives.{archive_name}", target))
+            available = ", ".join(self._describe_le(le_id, e) for le_id, e in self.leistungserbringer.items())
+            raise grzexc.ConfigurationError(
+                f"Submitter '{submitter_id}' is not in the config, so no inbox private key decrypts its submissions. "
+                f"Available: {available}"
+            )
 
-        # Group the locations by where their key comes from: the inline text, or the resolved path of the file.
-        # dicts keep their insertion order, so the groups keep the order of their first location.
-        groups: dict[tuple[str, str], list[tuple[str, InboxConfig | ArchiveTarget]]] = {}
-        for prefix, holder in candidates:
-            if holder.private_key is not None:
-                source = ("inline", holder.private_key.get_secret_value())
-            elif holder.private_key_path is not None:
-                source = ("path", str(holder.private_key_path.resolve()))
+        # Group the inboxes by where their key comes from: the inline text, or the resolved path of the file.
+        # dicts keep their insertion order, so the groups keep the order of their first inbox.
+        groups: dict[tuple[str, str], list[tuple[str, InboxConfig]]] = {}
+        for inbox_name, inbox in entry.inbox_buckets.items():
+            prefix = f"leistungserbringer.{submitter_id}.inbox_buckets.{inbox_name}"
+            if inbox.private_key is not None:
+                source = ("inline", inbox.private_key.get_secret_value())
+            elif inbox.private_key_path is not None:
+                source = ("path", str(inbox.private_key_path.resolve()))
             else:
-                # an archive without a private key, since validation leaves no inbox without one
-                continue
-            groups.setdefault(source, []).append((prefix, holder))
+                raise RuntimeError("Validation leaves no inbox without a private key.")
+            groups.setdefault(source, []).append((prefix, inbox))
 
-        for group in groups.values():
-            locations = ", ".join(
-                f"{prefix}.private_key" if holder.private_key is not None else f"{prefix}.private_key_path"
-                for prefix, holder in group
+        if len(groups) > 1:
+            keys = []
+            for number, group in enumerate(groups.values(), start=1):
+                locations = ", ".join(
+                    f"{prefix}.private_key" if inbox.private_key is not None else f"{prefix}.private_key_path"
+                    for prefix, inbox in group
+                )
+                keys.append(f"Key {number}: {locations}.")
+            raise grzexc.ConfigurationError(
+                f"The inboxes of submitter {self._describe_le(submitter_id, entry)} use {len(groups)} different "
+                f"private keys, but a submission does not record its inbox, so they must all use one key. "
+                + " ".join(keys)
             )
-            prefix, holder = group[0]
-            passphrase = next(
-                (h.private_key_passphrase for _, h in group if h.private_key_passphrase is not None), None
-            )
-            yield (
-                locations,
-                _load_private_key(f"{prefix}.private_key", holder.private_key, holder.private_key_path, passphrase),
-            )
+
+        (group,) = groups.values()
+        prefix, inbox = group[0]
+        passphrase = next((i.private_key_passphrase for _, i in group if i.private_key_passphrase is not None), None)
+        return _load_private_key(f"{prefix}.private_key", inbox.private_key, inbox.private_key_path, passphrase)

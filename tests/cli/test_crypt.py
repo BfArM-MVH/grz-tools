@@ -1,7 +1,6 @@
 import contextlib
 import errno
 import re
-import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
@@ -360,13 +359,11 @@ SUBMITTER_ID = "260914050"
 DECRYPTED_FILE = "target_regions.bed"
 
 
-def _write_grzctl_config(
-    tmp_path: Path, leistungserbringer: dict, consented: dict | None = None, non_consented: dict | None = None
-) -> Path:
-    """Write a grzctl config with the given inboxes, and with the given private keys for the archives."""
+def _write_grzctl_config(tmp_path: Path, leistungserbringer: dict) -> Path:
+    """Write a grzctl config with the given inboxes, and with a public key of its own for each archive."""
     config = _grzctl_config_dict(leistungserbringer=leistungserbringer)
-    config["archives"]["consented"] |= {"public_key_path": CONSENTED_PUBLIC_KEY, **(consented or {})}
-    config["archives"]["non_consented"] |= {"public_key_path": NON_CONSENTED_PUBLIC_KEY, **(non_consented or {})}
+    config["archives"]["consented"]["public_key_path"] = CONSENTED_PUBLIC_KEY
+    config["archives"]["non_consented"]["public_key_path"] = NON_CONSENTED_PUBLIC_KEY
     config_path = tmp_path / "config.grzctl.yaml"
     config_path.write_text(yaml.safe_dump(config))
     return config_path
@@ -399,8 +396,8 @@ def _assert_decrypted(working_dir_path: Path):
     assert calculate_sha256(working_dir_path / "files" / DECRYPTED_FILE) == expected_checksum
 
 
-def test_decrypt_uses_the_inbox_keys_of_the_submitter_in_the_metadata(working_dir_path, tmp_path):
-    """Only the inboxes of the metadata's submitter are tried, in order, and the archive keys are never loaded."""
+def test_decrypt_uses_the_inbox_key_of_the_submitter_in_the_metadata(working_dir_path, tmp_path):
+    """Only the inboxes of the metadata's submitter count, and the key that they share loads once."""
     copy_submission(working_dir_path, "encrypted_files", "metadata")
     config_path = _write_grzctl_config(
         tmp_path,
@@ -408,34 +405,29 @@ def test_decrypt_uses_the_inbox_keys_of_the_submitter_in_the_metadata(working_di
             "000000000": {"inbox_buckets": {"inbox": {"private_key_path": SUBMITTER_PRIVATE_KEY}}},
             SUBMITTER_ID: {
                 "inbox_buckets": {
-                    "first": {"private_key_path": NON_CONSENTED_PRIVATE_KEY},
+                    "first": {"private_key_path": GRZ_PRIVATE_KEY},
                     "second": {"private_key_path": GRZ_PRIVATE_KEY},
                 }
             },
         },
-        consented={"private_key_path": str(CONSENTED_PRIVATE_KEY)},
     )
 
     with _loaded_key_paths() as loaded:
         result = _run_grzctl(config_path, "decrypt", working_dir_path)
 
     assert result.exit_code == 0, result.output
-    assert loaded == [NON_CONSENTED_PRIVATE_KEY, GRZ_PRIVATE_KEY]
+    assert loaded == [GRZ_PRIVATE_KEY]
     _assert_decrypted(working_dir_path)
 
 
-def test_decrypt_falls_back_to_an_archive_key(working_dir_path, tmp_path):
-    """Encrypting for an archive, then decrypting, needs the archive's private key.
+def test_grzctl_encrypt_encrypts_for_the_archive_and_signs_with_the_signing_key(working_dir_path, tmp_path):
+    """``grzctl encrypt`` re-encrypts the files for the archive that the consent selects, here the consented one.
 
-    ``grzctl encrypt`` re-encrypts the files for an archive and signs them with the signing key.
-    ``grzctl decrypt`` then finds that the inbox key does not open them, and falls back to the archive's key.
+    grzctl has no archive private key, so the test decrypts a file with the archive's key itself.
     """
     copy_submission(working_dir_path, "files", "metadata")
     config_path = _write_grzctl_config(
-        tmp_path,
-        {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": GRZ_PRIVATE_KEY}}}},
-        consented={"private_key": CONSENTED_PRIVATE_KEY.read_text()},
-        non_consented={"private_key_path": NON_CONSENTED_PRIVATE_KEY},
+        tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": GRZ_PRIVATE_KEY}}}}
     )
     config = yaml.safe_load(config_path.read_text())
     config["archives"]["signing_key_path"] = SUBMITTER_PRIVATE_KEY
@@ -450,97 +442,64 @@ def test_decrypt_falls_back_to_an_archive_key(working_dir_path, tmp_path):
     # an X25519 header packet starts with the 4 bytes of the method, then the sender's public key
     assert packet[4:36] == crypt4gh.keys.get_public_key(SUBMITTER_PUBLIC_KEY), "the signing key signs the files"
 
-    decrypt_dir_path = tmp_path / "decrypt"
-    shutil.copytree(working_dir_path / "metadata", decrypt_dir_path / "metadata")
-    shutil.copytree(working_dir_path / "encrypted_files", decrypt_dir_path / "encrypted_files")
-
-    with _loaded_key_paths() as loaded:
-        result = _run_grzctl(config_path, "decrypt", decrypt_dir_path)
-
-    assert result.exit_code == 0, result.output
-    assert loaded[0] == GRZ_PRIVATE_KEY, "the inbox key comes first"
-    _assert_decrypted(decrypt_dir_path)
-
-
-def test_decrypt_with_private_key_file_uses_no_config_key(working_dir_path, tmp_path):
-    copy_submission(working_dir_path, "encrypted_files", "metadata")
-    config_path = _write_grzctl_config(
-        tmp_path,
-        {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": NON_CONSENTED_PRIVATE_KEY}}}},
-        consented={"private_key_path": str(CONSENTED_PRIVATE_KEY)},
+    decrypted_file_path = tmp_path / DECRYPTED_FILE
+    Crypt4GH.decrypt_file(
+        encrypted_file_path, decrypted_file_path, Crypt4GH.retrieve_private_key(CONSENTED_PRIVATE_KEY)
     )
-
-    with _loaded_key_paths() as loaded:
-        result = _run_grzctl(config_path, "decrypt", working_dir_path, "--private-key-file", GRZ_PRIVATE_KEY)
-
-    assert result.exit_code == 0, result.output
-    assert loaded == [GRZ_PRIVATE_KEY]
-    _assert_decrypted(working_dir_path)
+    assert calculate_sha256(decrypted_file_path) == calculate_sha256(SUBMISSION_DIR / "files" / DECRYPTED_FILE)
 
 
-def test_decrypt_fails_if_no_key_opens_the_header(working_dir_path, tmp_path):
-    """The error names the config location of every key tried, but never the key material."""
+def test_decrypt_fails_if_the_inbox_key_does_not_open_the_files(working_dir_path, tmp_path):
+    """The error says that the key does not fit, but never shows the key material."""
     copy_submission(working_dir_path, "encrypted_files", "metadata")
     config_path = _write_grzctl_config(
-        tmp_path,
-        {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": NON_CONSENTED_PRIVATE_KEY}}}},
-        consented={"private_key": CONSENTED_PRIVATE_KEY.read_text()},
+        tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key": CONSENTED_PRIVATE_KEY.read_text()}}}}
     )
 
     result = _run_grzctl(config_path, "decrypt", working_dir_path)
 
     assert isinstance(result.exception, grzexc.DecryptionError), result.output
     message = str(result.exception)
-    assert (
-        f"Tried: leistungserbringer.{SUBMITTER_ID}.inbox_buckets.testing.private_key_path, "
-        "archives.consented.private_key." in message
-    )
+    assert "the private key does not open its Crypt4GH header" in message
     for line in CONSENTED_PRIVATE_KEY.read_text().splitlines():
         assert line not in message
-    assert not (working_dir_path / "files" / DECRYPTED_FILE).exists()
 
 
-def test_decrypt_tries_only_the_archive_keys_for_a_submitter_missing_from_the_config(working_dir_path, tmp_path):
-    copy_submission(working_dir_path, "encrypted_files", "metadata")
-    config_path = _write_grzctl_config(
-        tmp_path,
-        {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": SUBMITTER_PRIVATE_KEY}}}},
-        non_consented={"private_key_path": GRZ_PRIVATE_KEY},
-    )
-
-    with _loaded_key_paths() as loaded:
-        result = _run_grzctl(config_path, "decrypt", working_dir_path)
-
-    assert result.exit_code == 0, result.output
-    assert loaded == [GRZ_PRIVATE_KEY]
-    _assert_decrypted(working_dir_path)
-
-
-def test_decrypt_without_a_key_to_try_is_a_configuration_error(working_dir_path, tmp_path):
-    """With neither an inbox of the submitter nor an archive private key, the GRZ has to configure a key."""
+def test_decrypt_fails_for_a_submitter_missing_from_the_config(working_dir_path, tmp_path):
+    """Without an inbox of the submitter, no key is loaded, so another submitter's key cannot stand in."""
     copy_submission(working_dir_path, "encrypted_files", "metadata")
     config_path = _write_grzctl_config(
         tmp_path, {"000000000": {"inbox_buckets": {"inbox": {"private_key_path": GRZ_PRIVATE_KEY}}}}
     )
 
-    result = _run_grzctl(config_path, "decrypt", working_dir_path)
+    with _loaded_key_paths() as loaded:
+        result = _run_grzctl(config_path, "decrypt", working_dir_path)
 
     assert isinstance(result.exception, grzexc.ConfigurationError), result.output
-    assert "No private key is configured" in str(result.exception)
+    assert f"Submitter '{SUBMITTER_ID}' is not in the config" in str(result.exception)
+    assert loaded == []
 
 
-def test_decrypt_names_every_location_of_a_shared_key_that_opens_nothing(working_dir_path, tmp_path):
-    """Two inboxes sharing one key make one attempt, and the error names both inboxes."""
+def test_decrypt_fails_if_the_inboxes_of_the_submitter_use_different_keys(working_dir_path, tmp_path):
     copy_submission(working_dir_path, "encrypted_files", "metadata")
-    inbox = {"private_key_path": NON_CONSENTED_PRIVATE_KEY}
-    config_path = _write_grzctl_config(tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"a": inbox, "b": inbox}}})
+    config_path = _write_grzctl_config(
+        tmp_path,
+        {
+            SUBMITTER_ID: {
+                "inbox_buckets": {
+                    "a": {"private_key_path": GRZ_PRIVATE_KEY},
+                    "b": {"private_key_path": NON_CONSENTED_PRIVATE_KEY},
+                }
+            }
+        },
+    )
 
     with _loaded_key_paths() as loaded:
         result = _run_grzctl(config_path, "decrypt", working_dir_path)
 
-    assert isinstance(result.exception, grzexc.DecryptionError), result.output
-    assert (
-        f"Tried: leistungserbringer.{SUBMITTER_ID}.inbox_buckets.a.private_key_path, "
-        f"leistungserbringer.{SUBMITTER_ID}.inbox_buckets.b.private_key_path." in str(result.exception)
-    )
-    assert loaded == [NON_CONSENTED_PRIVATE_KEY]
+    assert isinstance(result.exception, grzexc.ConfigurationError), result.output
+    message = str(result.exception)
+    assert f"Key 1: leistungserbringer.{SUBMITTER_ID}.inbox_buckets.a.private_key_path." in message
+    assert f"Key 2: leistungserbringer.{SUBMITTER_ID}.inbox_buckets.b.private_key_path." in message
+    assert loaded == []
+    assert not (working_dir_path / "files" / DECRYPTED_FILE).exists()
