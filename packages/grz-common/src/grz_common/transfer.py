@@ -9,10 +9,10 @@ from contextlib import contextmanager
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
-import boto3
+import boto3  # type: ignore[import-untyped]
 import grz_common.exceptions as grzexc
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
-from boto3.exceptions import Boto3Error
+from boto3.exceptions import Boto3Error  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
 from botocore.exceptions import (
     BotoCoreError,

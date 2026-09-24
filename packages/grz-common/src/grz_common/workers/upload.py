@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, override
 
 import botocore.handlers
 import grz_common.exceptions as grzexc
-from boto3.exceptions import S3UploadFailedError
+from boto3.exceptions import S3UploadFailedError  # type: ignore[import-untyped]
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError
 from grz_pydantic_models.submission.metadata import redact_metadata_dict
