@@ -1,8 +1,9 @@
-"""Tests for loading crypt4gh private keys in memory, their passphrase order, and decrypting with a key."""
+"""Tests for loading crypt4gh keys in memory, the passphrase order of private keys, and encrypting and
+decrypting with the loaded keys.
+"""
 
-from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import PropertyMock, patch
+from unittest.mock import patch
 
 import crypt4gh.header
 import crypt4gh.keys
@@ -11,8 +12,8 @@ import cryptography.hazmat.primitives.serialization as cryptser
 import grz_common.exceptions as grzexc
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from grz_common.utils.crypt import Crypt4GH
-from grz_common.workers.submission import EncryptedSubmission
 
 PASSPHRASE = "right-passphrase"
 
@@ -53,7 +54,7 @@ def test_load_private_key_matches_crypt4gh_for_a_crypt4gh_key(plain_key_pair, no
 
     loaded = Crypt4GH.load_private_key(private_key_path.read_text())
 
-    assert loaded == crypt4gh.keys.get_private_key(private_key_path, None)
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(private_key_path, None)
 
 
 @pytest.mark.parametrize("passphrase", [None, PASSPHRASE], ids=["unencrypted", "encrypted"])
@@ -71,7 +72,7 @@ def test_load_private_key_matches_crypt4gh_for_an_openssh_key(tmp_path: Path, no
 
     loaded = Crypt4GH.load_private_key(private_key_path.read_text(), passphrase=passphrase)
 
-    assert loaded == crypt4gh.keys.get_private_key(private_key_path, lambda: passphrase)
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(private_key_path, lambda: passphrase)
 
 
 def test_load_private_key_writes_no_file(plain_key_pair, no_prompt):
@@ -85,7 +86,7 @@ def test_load_private_key_writes_no_file(plain_key_pair, no_prompt):
     ):
         loaded = Crypt4GH.load_private_key(private_key_text)
 
-    assert len(loaded) == 32
+    assert isinstance(loaded, X25519PrivateKey)
 
 
 def test_configured_passphrase_comes_before_the_environment(encrypted_key_pair, monkeypatch, no_prompt):
@@ -94,7 +95,7 @@ def test_configured_passphrase_comes_before_the_environment(encrypted_key_pair, 
 
     loaded = Crypt4GH.load_private_key(private_key_path.read_text(), passphrase=PASSPHRASE)
 
-    assert loaded == crypt4gh.keys.get_private_key(private_key_path, lambda: PASSPHRASE)
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(private_key_path, lambda: PASSPHRASE)
 
 
 def test_environment_passphrase_comes_before_the_prompt(encrypted_key_pair, no_prompt, monkeypatch):
@@ -103,7 +104,7 @@ def test_environment_passphrase_comes_before_the_prompt(encrypted_key_pair, no_p
 
     loaded = Crypt4GH.load_private_key(private_key_path.read_text())
 
-    assert loaded == crypt4gh.keys.get_private_key(private_key_path, lambda: PASSPHRASE)
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(private_key_path, lambda: PASSPHRASE)
 
 
 def test_prompt_asks_for_the_passphrase_last(encrypted_key_pair, monkeypatch):
@@ -128,7 +129,7 @@ def test_retrieve_private_key_uses_the_configured_passphrase(encrypted_key_pair,
 
     loaded = Crypt4GH.retrieve_private_key(private_key_path, passphrase=PASSPHRASE)
 
-    assert loaded == crypt4gh.keys.get_private_key(private_key_path, lambda: PASSPHRASE)
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(private_key_path, lambda: PASSPHRASE)
 
 
 def test_wrong_passphrase_raises_instead_of_exiting(encrypted_key_pair, no_prompt):
@@ -148,11 +149,67 @@ def test_unsupported_key_fails(private_key, no_prompt):
         Crypt4GH.load_private_key(private_key)
 
 
-def _encrypt(tmp_path: Path, public_key_path: Path, sender_private_key: bytes | None = None) -> Path:
+def test_load_public_key_matches_crypt4gh_for_a_crypt4gh_key(plain_key_pair):
+    _, public_key_path = plain_key_pair
+
+    loaded = Crypt4GH.load_public_key(public_key_path.read_text())
+
+    assert loaded.public_bytes_raw() == crypt4gh.keys.get_public_key(public_key_path)
+
+
+def test_load_public_key_matches_crypt4gh_for_an_openssh_key(tmp_path: Path):
+    public_key_path = tmp_path / "id_ed25519.pub"
+    public_key_path.write_bytes(
+        Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(encoding=cryptser.Encoding.OpenSSH, format=cryptser.PublicFormat.OpenSSH)
+        + b" comment\n"
+    )
+
+    loaded = Crypt4GH.load_public_key(public_key_path.read_text())
+
+    assert loaded.public_bytes_raw() == crypt4gh.keys.get_public_key(public_key_path)
+
+
+def test_retrieve_public_key_matches_crypt4gh(plain_key_pair):
+    _, public_key_path = plain_key_pair
+
+    loaded = Crypt4GH.retrieve_public_key(public_key_path)
+
+    assert loaded.public_bytes_raw() == crypt4gh.keys.get_public_key(public_key_path)
+
+
+@pytest.mark.parametrize(
+    "public_key",
+    [
+        "not a key",
+        "-----BEGIN CRYPT4GH PUBLIC KEY-----\nbm90IGEga2V5\n-----END CRYPT4GH PUBLIC KEY-----\n",
+        "ssh-ed25519 bm90IGEga2V5",
+        "ssh-rsa bm90IGEga2V5",
+    ],
+    ids=["no key", "not 32 bytes", "malformed ssh-ed25519", "ssh-rsa"],
+)
+def test_unsupported_public_key_fails(public_key):
+    with pytest.raises(grzexc.ConfigurationError, match=r"Public key \(inline\) cannot be read"):
+        Crypt4GH.load_public_key(public_key)
+
+
+def test_a_private_key_is_no_public_key(plain_key_pair):
+    """The error names the key, but does not show it."""
+    private_key_text = plain_key_pair[0].read_text()
+
+    with pytest.raises(grzexc.ConfigurationError, match=r"Public key keys\.grz_public_key cannot be read") as exc_info:
+        Crypt4GH.load_public_key(private_key_text, key_name="keys.grz_public_key")
+
+    for line in private_key_text.splitlines():
+        assert line not in str(exc_info.value)
+
+
+def _encrypt(tmp_path: Path, public_key_path: Path, sender_private_key: X25519PrivateKey | None = None) -> Path:
     encrypted_path = tmp_path / "file.txt.c4gh"
     plain_path = tmp_path / "file.txt"
     plain_path.write_text("content")
-    keys = Crypt4GH.prepare_c4gh_keys(public_key_path, sender_private_key_bytes=sender_private_key)
+    keys = Crypt4GH.prepare_c4gh_keys(Crypt4GH.retrieve_public_key(public_key_path), sender_private_key)
     Crypt4GH.encrypt_file(plain_path, encrypted_path, keys)
     return encrypted_path
 
@@ -178,7 +235,7 @@ def test_decrypt_file_fails_for_a_file_that_is_not_crypt4gh(tmp_path: Path, plai
         )
 
 
-def test_prepare_c4gh_keys_signs_with_the_sender_private_key_bytes(tmp_path: Path, plain_key_pair, no_prompt):
+def test_prepare_c4gh_keys_signs_with_the_sender_private_key(tmp_path: Path, plain_key_pair, no_prompt):
     """The header names the sender's public key, so the recipient can check who encrypted the file."""
     _, public_key_path = plain_key_pair
     sender_private_key_path, sender_public_key_path = _generate_key_pair(tmp_path, "sender")
@@ -189,34 +246,3 @@ def test_prepare_c4gh_keys_signs_with_the_sender_private_key_bytes(tmp_path: Pat
         (packet,) = crypt4gh.header.parse(encrypted_file)
     # an X25519 header packet starts with the 4 bytes of the method, then the sender's public key
     assert packet[4:36] == crypt4gh.keys.get_public_key(sender_public_key_path)
-
-
-def test_prepare_c4gh_keys_takes_one_sender_key(plain_key_pair, no_prompt):
-    private_key_path, public_key_path = plain_key_pair
-
-    with pytest.raises(ValueError, match="Only one of sender_private_key_file_path or sender_private_key_bytes"):
-        Crypt4GH.prepare_c4gh_keys(
-            public_key_path,
-            private_key_path,
-            sender_private_key_bytes=Crypt4GH.retrieve_private_key(private_key_path),
-        )
-
-
-@pytest.fixture
-def encrypted_submission(tmp_path: Path, plain_key_pair) -> Iterator[EncryptedSubmission]:
-    """An encrypted submission with one file, encrypted for the plain key pair."""
-    encrypted_path = _encrypt(tmp_path, plain_key_pair[1])
-    submission = EncryptedSubmission.__new__(EncryptedSubmission)
-    with patch.object(EncryptedSubmission, "encrypted_files", new_callable=PropertyMock) as encrypted_files:
-        encrypted_files.return_value = {encrypted_path: None}
-        yield submission
-
-
-@pytest.mark.parametrize(
-    "keys",
-    [{}, {"recipient_private_key_path": "unused.sec", "recipient_private_key": b"unused"}],
-    ids=["neither", "both"],
-)
-def test_decrypt_takes_exactly_one_key(tmp_path: Path, encrypted_submission, keys: dict):
-    with pytest.raises(ValueError, match="Exactly one of recipient_private_key_path or recipient_private_key"):
-        encrypted_submission.decrypt(tmp_path / "files", tmp_path / "progress_decrypt.cjson", **keys)

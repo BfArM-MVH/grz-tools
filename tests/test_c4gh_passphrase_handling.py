@@ -6,6 +6,7 @@ from stat import S_IRUSR, S_IWUSR
 import crypt4gh.keys.c4gh
 import grz_common.exceptions as grzexc
 import pytest
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from grz_common.utils.crypt import Crypt4GH
 
 
@@ -33,10 +34,9 @@ def test_retrieve_private_key_with_envvar(encrypted_dummy_key, monkeypatch):
     sec_key_path, passphrase = encrypted_dummy_key
     monkeypatch.setenv("C4GH_PASSPHRASE", passphrase.decode("utf-8"))
 
-    key_bytes = Crypt4GH.retrieve_private_key(sec_key_path)
+    private_key = Crypt4GH.retrieve_private_key(sec_key_path)
 
-    assert isinstance(key_bytes, bytes)
-    assert len(key_bytes) == 32
+    assert isinstance(private_key, X25519PrivateKey)
 
 
 def test_a_missing_private_key_is_a_configuration_error(tmp_path):

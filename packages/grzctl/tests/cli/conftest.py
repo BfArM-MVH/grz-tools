@@ -41,7 +41,8 @@ def unread_file() -> str:
 def crypt4gh_public_key() -> str:
     """A crypt4gh public key as text.
 
-    ``Crypt4GHPublicKey`` only checks for the markers, not the payload, so the key need not decode.
+    ``Crypt4GHPublicKey`` only checks for the markers, but ``grzctl encrypt`` loads the key,
+    so its payload decodes to the 32 bytes of an X25519 public key.
     """
     return "-----BEGIN CRYPT4GH PUBLIC KEY-----\n7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n-----END CRYPT4GH PUBLIC KEY-----\n"
 

@@ -69,7 +69,7 @@ def test_both_signing_key_and_signing_key_path_fails(key_path: Path, unread_file
 def test_signing_key_path_loads_with_its_passphrase(key_path: Path, expected_key: bytes, no_prompt, unread_file: str):
     archives = _archives(unread_file, signing_key_path=str(key_path), signing_key_passphrase=PASSPHRASE)
 
-    assert archives.load_signing_key() == expected_key
+    assert archives.load_signing_key().private_bytes_raw() == expected_key
 
 
 def test_inline_signing_key_loads_in_memory(key_path: Path, expected_key: bytes, no_prompt, unread_file: str):
@@ -82,7 +82,7 @@ def test_inline_signing_key_loads_in_memory(key_path: Path, expected_key: bytes,
     ):
         loaded = archives.load_signing_key()
 
-    assert loaded == expected_key
+    assert loaded.private_bytes_raw() == expected_key
 
 
 def test_inline_signing_key_is_named_by_its_config_location_in_errors(no_prompt, unread_file: str):
@@ -157,7 +157,7 @@ def test_inline_private_key_loads_in_memory(
     ):
         loaded = config.load_decryption_key("260914050")
 
-    assert loaded == expected_key
+    assert loaded.private_bytes_raw() == expected_key
 
 
 def test_private_key_path_loads_with_its_passphrase(
@@ -167,7 +167,7 @@ def test_private_key_path_loads_with_its_passphrase(
         tmp_path, unread_file, private_key_path=str(key_path), private_key_passphrase=PASSPHRASE
     )
 
-    assert config.load_decryption_key("260914050") == expected_key
+    assert config.load_decryption_key("260914050").private_bytes_raw() == expected_key
 
 
 @pytest.fixture
@@ -193,7 +193,9 @@ def test_load_decryption_key_takes_only_the_inboxes_of_the_submitter(
         },
     )
 
-    assert config.load_decryption_key("260914050") == crypt4gh.keys.get_private_key(key_paths["first"], None)
+    loaded = config.load_decryption_key("260914050")
+
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(key_paths["first"], None)
 
 
 def test_load_decryption_key_fails_for_inboxes_with_different_keys(
@@ -279,9 +281,9 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
     with patch.object(Crypt4GH, "load_private_key", wraps=Crypt4GH.load_private_key) as load_private_key:
         loaded = config.load_decryption_key("260914050")
 
-    assert loaded == expected_key
+    assert loaded.private_bytes_raw() == expected_key
     assert load_private_key.call_count == 1, "the inline key that both inboxes share loads once"
-    assert config.archives.load_signing_key() == expected_key
+    assert config.archives.load_signing_key().private_bytes_raw() == expected_key
 
 
 def test_two_inboxes_sharing_a_key_path_through_a_yaml_anchor_prompt_once(
@@ -320,7 +322,9 @@ def test_two_inboxes_sharing_a_key_path_through_a_yaml_anchor_prompt_once(
         "identifiers: {grz: GRZK00007}\n"
     )
 
-    assert GrzctlConfig.from_path(config_path).load_decryption_key("260914050") == expected_key
+    loaded = GrzctlConfig.from_path(config_path).load_decryption_key("260914050")
+
+    assert loaded.private_bytes_raw() == expected_key
     assert prompts == [f"Passphrase for {key_path}: "]
 
 
@@ -340,7 +344,7 @@ def test_a_shared_key_takes_the_passphrase_of_a_later_location_if_the_first_sets
         },
     )
 
-    assert config.load_decryption_key("260914050") == expected_key
+    assert config.load_decryption_key("260914050").private_bytes_raw() == expected_key
 
 
 @pytest.mark.parametrize(
@@ -377,4 +381,4 @@ def test_a_key_path_expands_the_home_directory(
     )
 
     assert config.leistungserbringer["260914050"].inbox_buckets["inbox"].private_key_path == key_path
-    assert config.load_decryption_key("260914050") == expected_key
+    assert config.load_decryption_key("260914050").private_bytes_raw() == expected_key

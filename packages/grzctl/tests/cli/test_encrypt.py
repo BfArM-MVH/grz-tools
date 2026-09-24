@@ -1,5 +1,6 @@
 """Tests for the grzctl ``encrypt`` command."""
 
+from base64 import b64decode
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -71,25 +72,14 @@ def _invoke_encrypt(config_path: Path, submission_dir: Path, mock_worker_cls: Ma
 
 
 def test_encrypt_uses_an_inline_archive_public_key(tmp_path, grzctl_config_path, crypt4gh_public_key):
-    """The consented archive's public key may be given inline instead of as a file path.
-
-    ``grzctl encrypt`` writes it to a temporary file, since ``Worker.encrypt`` only takes a path.
-    The file is cleaned up again once ``Worker.encrypt`` returns, so its content has to be read
-    from inside the mocked call rather than after ``invoke`` comes back.
-    """
-    used_key_content = None
-
-    def _capture_key_content(*, recipient_public_key_path, **kwargs):
-        nonlocal used_key_content
-        used_key_content = Path(recipient_public_key_path).read_text()
-
+    """The consented archive's public key may be given inline instead of as a file path."""
     with patch("grzctl.commands.encrypt.Worker") as mock_worker_cls:
-        mock_worker_cls.return_value.encrypt.side_effect = _capture_key_content
         result = _invoke_encrypt(grzctl_config_path, _submission_dir(tmp_path), mock_worker_cls)
 
     assert result.exit_code == 0, result.output
     mock_worker_cls.return_value.encrypt.assert_called_once()
-    assert used_key_content == crypt4gh_public_key
+    recipient_public_key = mock_worker_cls.return_value.encrypt.call_args.kwargs["recipient_public_key"]
+    assert recipient_public_key.public_bytes_raw() == b64decode(crypt4gh_public_key.splitlines()[1])
 
 
 def test_encrypt_signs_with_the_signing_key(tmp_path, grzctl_config_path, signing_key_path, monkeypatch):
@@ -102,8 +92,7 @@ def test_encrypt_signs_with_the_signing_key(tmp_path, grzctl_config_path, signin
     assert result.exit_code == 0, result.output
     encrypt_kwargs = mock_worker_cls.return_value.encrypt.call_args.kwargs
     expected_key = crypt4gh.keys.get_private_key(signing_key_path, lambda: SIGNING_KEY_PASSPHRASE)
-    assert encrypt_kwargs["submitter_private_key"] == expected_key
-    assert "submitter_private_key_path" not in encrypt_kwargs
+    assert encrypt_kwargs["submitter_private_key"].private_bytes_raw() == expected_key
 
 
 def test_encrypt_signs_with_an_inline_signing_key(tmp_path, signing_key_path, crypt4gh_public_key, unread_file):
@@ -115,7 +104,8 @@ def test_encrypt_signs_with_an_inline_signing_key(tmp_path, signing_key_path, cr
 
     assert result.exit_code == 0, result.output
     expected_key = crypt4gh.keys.get_private_key(signing_key_path, lambda: SIGNING_KEY_PASSPHRASE)
-    assert mock_worker_cls.return_value.encrypt.call_args.kwargs["submitter_private_key"] == expected_key
+    signing_key = mock_worker_cls.return_value.encrypt.call_args.kwargs["submitter_private_key"]
+    assert signing_key.private_bytes_raw() == expected_key
 
 
 def test_encrypt_fails_if_the_signing_key_cannot_be_loaded(tmp_path, crypt4gh_public_key, unread_file):

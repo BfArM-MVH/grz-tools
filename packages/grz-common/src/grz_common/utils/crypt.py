@@ -17,8 +17,7 @@ import crypt4gh.keys.c4gh
 import crypt4gh.keys.ssh
 import crypt4gh.lib
 import grz_common.exceptions as grzexc
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
@@ -38,36 +37,20 @@ class Crypt4GH:
 
     @staticmethod
     def prepare_c4gh_keys(
-        recipient_key_file_path: str | PathLike,
-        sender_private_key_file_path: str | PathLike | None = None,
-        *,
-        sender_private_key_bytes: bytes | None = None,
+        recipient_public_key: X25519PublicKey,
+        sender_private_key: X25519PrivateKey | None = None,
     ) -> tuple[Key]:
         """
         Prepare the key format that Crypt4GH needs. While it can contain multiple
          keys for multiple recipients, in our use case there is only a single recipient.
 
-        If neither sender key is given, a random one is generated.
-
-        :param recipient_key_file_path: path to the public key file of the recipient
-        :param sender_private_key_file_path: path to the private key file of the sender.
-        :param sender_private_key_bytes: the private key of the sender, as returned by
-            :meth:`load_private_key`. Mutually exclusive with ``sender_private_key_file_path``.
-        :raises ValueError: If both sender keys are given.
+        :param recipient_public_key: the public key of the recipient
+        :param sender_private_key: the private key of the sender. If ``None``, a random one is generated.
         """
-        if sender_private_key_file_path is not None and sender_private_key_bytes is not None:
-            raise ValueError("Only one of sender_private_key_file_path or sender_private_key_bytes must be given.")
-        if sender_private_key_bytes is not None:
-            sk = sender_private_key_bytes
-        elif sender_private_key_file_path is not None:
-            sk = Crypt4GH.retrieve_private_key(sender_private_key_file_path)
-        else:
-            sk = X25519PrivateKey.generate().private_bytes(
-                encoding=serialization.Encoding.Raw,
-                format=serialization.PrivateFormat.Raw,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        keys = ((0, sk, Crypt4GH.retrieve_public_key(recipient_key_file_path)),)
+        if sender_private_key is None:
+            sender_private_key = X25519PrivateKey.generate()
+        # crypt4gh works with the raw 32 bytes of each key
+        keys = ((0, sender_private_key.private_bytes_raw(), recipient_public_key.public_bytes_raw()),)
         return keys
 
     @staticmethod
@@ -105,28 +88,70 @@ class Crypt4GH:
             )
 
     @staticmethod
-    def retrieve_public_key(pubkey_path: str | PathLike) -> bytes:
+    def retrieve_public_key(pubkey_path: str | PathLike) -> X25519PublicKey:
         """
         Read Crypt4GH public key from specified path.
 
         :param pubkey_path: Path to the public key
-        :returns: Public key bytes
+        :returns: The public key
         :raises ConfigurationError: If the key is missing or cannot be read.
         """
         try:
-            return crypt4gh.keys.get_public_key(Path(pubkey_path).expanduser())
-        except (OSError, ValueError, NotImplementedError) as e:
-            # crypt4gh raises NotImplementedError for a file in no key format it knows
+            public_key = Path(pubkey_path).expanduser().read_bytes()
+        except OSError as e:
             raise grzexc.ConfigurationError(f"Public key {pubkey_path} cannot be read: {e}") from e
+        return Crypt4GH.load_public_key(public_key, key_name=str(pubkey_path))
 
     @staticmethod
-    def retrieve_private_key(seckey_path: str | PathLike, passphrase: str | None = None) -> bytes:
+    def load_public_key(public_key: str | bytes, key_name: str = "(inline)") -> X25519PublicKey:
+        """
+        Load a Crypt4GH public key from its text, in memory.
+
+        Supports the same formats as ``crypt4gh.keys.get_public_key``, which only reads from a file:
+        a Crypt4GH public key in PEM format, and an OpenSSH ``ssh-ed25519`` public key line.
+
+        :param public_key: The public key, as the content of a public key file.
+        :param key_name: Names the key in errors.
+        :returns: The public key
+        :raises ConfigurationError: If the key is in no supported format, or is malformed.
+        """
+        if isinstance(public_key, str):
+            public_key = public_key.encode("utf-8")
+
+        # Reads the lines like crypt4gh.keys.get_public_key does from a file, but checks both PEM markers
+        lines = [line.strip() for line in public_key.splitlines() if line.strip()]
+        if (
+            lines
+            and lines[0].startswith(b"-----BEGIN CRYPT4GH PUBLIC KEY")
+            and lines[-1].startswith(b"-----END CRYPT4GH PUBLIC KEY")
+        ):
+            try:
+                return X25519PublicKey.from_public_bytes(b64decode(b"".join(lines[1:-1])))
+            except ValueError as e:
+                # b64decode and from_public_bytes raise ValueError for a payload that is no base64 or not 32 bytes long
+                raise grzexc.ConfigurationError(f"Public key {key_name} cannot be read: {e}") from e
+
+        if lines and lines[0].startswith(b"ssh-ed25519 "):
+            try:
+                return X25519PublicKey.from_public_bytes(crypt4gh.keys.ssh.get_public_key(lines[0]))
+            except (AssertionError, RuntimeError, ValueError) as e:
+                # crypt4gh asserts the key type, and raises RuntimeError for a key that is no ed25519 point
+                raise grzexc.ConfigurationError(
+                    f"Public key {key_name} cannot be read: it is no valid ssh-ed25519 key"
+                ) from e
+
+        raise grzexc.ConfigurationError(
+            f"Public key {key_name} cannot be read: it is neither a Crypt4GH nor an OpenSSH ssh-ed25519 public key"
+        )
+
+    @staticmethod
+    def retrieve_private_key(seckey_path: str | PathLike, passphrase: str | None = None) -> X25519PrivateKey:
         """
         Read Crypt4GH private key from specified path.
 
         :param seckey_path: Path to the private key
         :param passphrase: Passphrase for the private key. If None, will check C4GH_PASSPHRASE envvar, if that is also undefined, will prompt for user input.
-        :returns: Private key bytes
+        :returns: The private key
         :raises ConfigurationError: If the key is missing, or cannot be read with the passphrase.
         """
         seckeypath = Path(seckey_path).expanduser()
@@ -140,7 +165,9 @@ class Crypt4GH:
         return Crypt4GH.load_private_key(private_key, passphrase=passphrase, key_name=str(seckey_path))
 
     @staticmethod
-    def load_private_key(private_key: str | bytes, passphrase: str | None = None, key_name: str = "(inline)") -> bytes:
+    def load_private_key(
+        private_key: str | bytes, passphrase: str | None = None, key_name: str = "(inline)"
+    ) -> X25519PrivateKey:
         """
         Load a Crypt4GH private key from its text, in memory.
 
@@ -152,7 +179,7 @@ class Crypt4GH:
         :param private_key: The private key, as the content of a private key file.
         :param passphrase: Passphrase for the private key.
         :param key_name: Names the key in the passphrase prompt and in errors, which never show the key itself.
-        :returns: Private key bytes
+        :returns: The private key
         :raises ConfigurationError: If the key is in no supported format, or cannot be read with the passphrase.
         """
         if isinstance(private_key, str):
@@ -178,11 +205,15 @@ class Crypt4GH:
         magic_word = stream.read(len(crypt4gh.keys.c4gh.MAGIC_WORD))
         try:
             if magic_word == crypt4gh.keys.c4gh.MAGIC_WORD:
-                return crypt4gh.keys.c4gh.parse_private_key(stream, passphrase_callback)
+                return X25519PrivateKey.from_private_bytes(
+                    crypt4gh.keys.c4gh.parse_private_key(stream, passphrase_callback)
+                )
 
             magic_word += stream.read(len(crypt4gh.keys.ssh.MAGIC_WORD) - len(crypt4gh.keys.c4gh.MAGIC_WORD))
             if magic_word == crypt4gh.keys.ssh.MAGIC_WORD:
-                return crypt4gh.keys.ssh.parse_private_key(stream, passphrase_callback)[0]
+                return X25519PrivateKey.from_private_bytes(
+                    crypt4gh.keys.ssh.parse_private_key(stream, passphrase_callback)[0]
+                )
         except SystemExit as e:
             # crypt4gh exits the process for a key or a passphrase that it cannot use
             raise grzexc.ConfigurationError(f"Secret key {key_name} cannot be read with the given passphrase") from e
@@ -192,7 +223,7 @@ class Crypt4GH:
         )
 
     @staticmethod
-    def decrypt_file(input_path: Path, output_path: Path, private_key: bytes):
+    def decrypt_file(input_path: Path, output_path: Path, private_key: X25519PrivateKey):
         """
         Decrypt a file using the provided private key
         :param input_path: Path to the encrypted file
@@ -213,7 +244,8 @@ class Crypt4GH:
         ):
             try:
                 crypt4gh.lib.decrypt(
-                    keys=[(0, private_key, None)],  # list of (method, privkey, recipient_pubkey=None),
+                    # list of (method, privkey, recipient_pubkey=None), with the raw 32 bytes of the key
+                    keys=[(0, private_key.private_bytes_raw(), None)],
                     infile=pbar_in_fd,
                     outfile=out_fd,
                 )

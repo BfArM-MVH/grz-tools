@@ -8,6 +8,7 @@ import click.testing
 import pytest
 import sqlalchemy
 import yaml
+from grz_common.utils.crypt import Crypt4GH
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import Submission, SubmissionStateEnum
 from grzctl.cli import build_cli
@@ -354,9 +355,11 @@ def test_db_wrappers(
                 expected_key = (
                     CONSENTED_PUBLIC_KEY_PATH if command_spec.get("consent_value") else NON_CONSENTED_PUBLIC_KEY_PATH
                 )
-                assert mock_worker.encrypt.call_args.kwargs["recipient_public_key_path"] == Path(expected_key), (
-                    "encrypt must use the public key of the archive targeted by the submission's consent"
-                )
+                recipient_public_key = mock_worker.encrypt.call_args.kwargs["recipient_public_key"]
+                assert (
+                    recipient_public_key.public_bytes_raw()
+                    == Crypt4GH.retrieve_public_key(expected_key).public_bytes_raw()
+                ), "encrypt must use the public key of the archive targeted by the submission's consent"
             elif method_name == "archive":
                 expected_bucket = "consented" if command_spec.get("consent_value") else "non_consented"
                 assert mock_worker.archive.call_args.args[0].bucket == expected_bucket, (

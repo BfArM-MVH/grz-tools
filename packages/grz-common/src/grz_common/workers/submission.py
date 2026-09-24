@@ -14,6 +14,7 @@ from pathlib import Path
 
 import grz_check
 import grz_common.exceptions as grzexc
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
@@ -492,46 +493,33 @@ class Submission:
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
-    def encrypt(  # noqa: PLR0913
+    def encrypt(
         self,
         encrypted_files_dir: str | PathLike,
         progress_log_file: str | PathLike,
-        recipient_public_key_path: str | PathLike,
-        submitter_private_key_path: str | PathLike | None = None,
+        recipient_public_key: X25519PublicKey,
+        submitter_private_key: X25519PrivateKey | None = None,
         force: bool = False,
-        *,
-        submitter_private_key: bytes | None = None,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh
 
         :param encrypted_files_dir: Output directory of the encrypted files
         :param progress_log_file: Path to a log file to store the progress of the encryption process
-        :param recipient_public_key_path: Path to the public key file which will be used for encryption
-        :param submitter_private_key_path: Path to the private key file which will be used to sign the encryption
+        :param recipient_public_key: The public key which will be used for encryption
+        :param submitter_private_key: The private key which will be used to sign the encryption
         :param force: Force encryption even if target files already exist
-        :param submitter_private_key: The private key which signs the encryption, as returned by
-            :meth:`Crypt4GH.load_private_key`. Mutually exclusive with ``submitter_private_key_path``.
         :return: EncryptedSubmission instance
-        :raises ConfigurationError: If a key is missing or cannot be read.
         """
         # Import here to avoid circular import issues
         from ..progress import FileProgressLogger  # noqa: PLC0415
 
         encrypted_files_dir = Path(encrypted_files_dir)
 
-        if not submitter_private_key_path and submitter_private_key is None:
+        if submitter_private_key is None:
             self.__log.warning("No submitter private key provided, skipping signing.")
 
-        try:
-            public_keys = Crypt4GH.prepare_c4gh_keys(
-                recipient_public_key_path,
-                submitter_private_key_path or None,
-                sender_private_key_bytes=submitter_private_key,
-            )
-        except Exception as e:
-            self.__log.error(f"Error preparing encryption keys: {e}")
-            raise e
+        public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key, submitter_private_key)
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -698,36 +686,18 @@ class EncryptedSubmission:
         self,
         files_dir: str | PathLike,
         progress_log_file: str | PathLike,
-        recipient_private_key_path: str | PathLike | None = None,
-        *,
-        recipient_private_key: bytes | None = None,
+        recipient_private_key: X25519PrivateKey,
     ) -> Submission:
         """
         Decrypt this encrypted submission with a private key using Crypt4Gh
 
-        Exactly one of ``recipient_private_key_path`` and ``recipient_private_key`` must be given.
-
         :param files_dir: Output directory of the decrypted files
         :param progress_log_file: Path to a log file to store the progress of the decryption process
-        :param recipient_private_key_path: Path to the private key file which will be used for decryption
-        :param recipient_private_key: The private key which will be used for decryption, as returned by
-            :meth:`Crypt4GH.load_private_key`.
+        :param recipient_private_key: The private key which will be used for decryption
         :return: Submission instance
-        :raises ValueError: If not exactly one of the two keys is given.
         """
         # Import here to avoid circular import issues
         from ..progress import FileProgressLogger  # noqa: PLC0415
-
-        if recipient_private_key_path is not None and recipient_private_key is None:
-            try:
-                private_key = Crypt4GH.retrieve_private_key(recipient_private_key_path)
-            except Exception as e:
-                self.__log.error(f"Error preparing private key: {e}")
-                raise e
-        elif recipient_private_key is not None and recipient_private_key_path is None:
-            private_key = recipient_private_key
-        else:
-            raise ValueError("Exactly one of recipient_private_key_path or recipient_private_key must be given.")
 
         files_dir = Path(files_dir)
 
@@ -761,7 +731,7 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
+                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, recipient_private_key)
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(

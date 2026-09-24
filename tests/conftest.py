@@ -537,8 +537,8 @@ def temp_grzctl_s3_db_config_file_path(temp_data_dir_path, db_config_model) -> P
 @pytest.fixture
 def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitter_private_key_file_path):
     keys = Crypt4GH.prepare_c4gh_keys(
-        recipient_key_file_path=crypt4gh_grz_public_key_file_path,
-        sender_private_key=crypt4gh_submitter_private_key_file_path,
+        recipient_public_key=Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path),
+        sender_private_key=Crypt4GH.retrieve_private_key(crypt4gh_submitter_private_key_file_path),
     )
     return keys
 

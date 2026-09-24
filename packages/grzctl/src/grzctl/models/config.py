@@ -1,14 +1,12 @@
-import contextlib
 import logging
 import sys
-import tempfile
-from collections.abc import Iterator
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
 
 import grz_common.exceptions as grzexc
 import yaml
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from grz_common.models.base import (
     Crypt4GHPublicKey,
     FilePath,
@@ -48,7 +46,7 @@ def _check_key_fields(name: str, key: object | None, key_path: Path | None, *, r
 
 def _load_private_key(
     location: str, private_key: SecretStr | None, private_key_path: Path | None, passphrase: SecretStr | None
-) -> bytes:
+) -> X25519PrivateKey:
     """Load a crypt4gh private key in memory, from its inline text or from its file.
 
     The passphrase is only asked for if the key is encrypted. It is the first of: *passphrase*,
@@ -148,24 +146,17 @@ class ArchiveTarget(IgnoringBaseModel):
         _check_key_fields("public_key", self.public_key, self.public_key_path, required=True)
         return self
 
-    @contextlib.contextmanager
-    def public_key_file(self) -> Iterator[Path]:
-        """Give a path to the crypt4gh public key, for callers that need a file.
+    def load_public_key(self) -> X25519PublicKey:
+        """Load the crypt4gh public key, from its inline text or from its file.
 
-        ``public_key_path`` is given as is. ``public_key`` is written to a temporary file first,
-        which is deleted again once the caller is done with it.
-
-        :yields: Path to a file with the crypt4gh public key.
+        :returns: The public key.
+        :raises ConfigurationError: If the key cannot be loaded.
         """
+        if self.public_key is not None:
+            return Crypt4GH.load_public_key(self.public_key, key_name=f"of the archive with bucket {self.s3.bucket}")
         if self.public_key_path is not None:
-            yield self.public_key_path
-            return
-        if self.public_key is None:
-            raise RuntimeError("Either public_key or public_key_path must be set.")
-        with tempfile.NamedTemporaryFile("w") as public_key_file:
-            public_key_file.write(self.public_key)
-            public_key_file.flush()
-            yield Path(public_key_file.name)
+            return Crypt4GH.retrieve_public_key(self.public_key_path)
+        raise grzexc.ConfigurationError("Neither public_key nor public_key_path is set.")
 
 
 class ArchivesConfig(IgnoringBaseModel):
@@ -197,7 +188,7 @@ class ArchivesConfig(IgnoringBaseModel):
         _check_key_fields("signing_key", self.signing_key, self.signing_key_path, required=True)
         return self
 
-    def load_signing_key(self) -> bytes:
+    def load_signing_key(self) -> X25519PrivateKey:
         """Load the signing key in memory.
 
         :returns: The signing key.
@@ -335,7 +326,7 @@ class GrzctlConfig(IgnoringBaseSettings):
             **inbox_cfg.model_dump(include={"private_key", "private_key_path", "private_key_passphrase"}),
         )
 
-    def load_decryption_key(self, submitter_id: str) -> bytes:
+    def load_decryption_key(self, submitter_id: str) -> X25519PrivateKey:
         """Load the private key that decrypts the submissions of a submitter.
 
         A submission's metadata names its submitter (LE), but neither the metadata nor the database

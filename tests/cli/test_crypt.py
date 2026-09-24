@@ -214,9 +214,10 @@ def test_encrypt_signs_with_the_submitter_key(
     result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs, catch_exceptions=False)
     assert result.exit_code == 0, result.output
 
-    keys = [(0, Crypt4GH.retrieve_private_key(str(crypt4gh_grz_private_key_file_path)), None)]
-    submitter_public_key = Crypt4GH.retrieve_public_key(crypt4gh_submitter_public_key_file_path)
-    other_public_key = Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path)
+    # crypt4gh works with the raw 32 bytes of each key
+    keys = [(0, Crypt4GH.retrieve_private_key(crypt4gh_grz_private_key_file_path).private_bytes_raw(), None)]
+    submitter_public_key = Crypt4GH.retrieve_public_key(crypt4gh_submitter_public_key_file_path).public_bytes_raw()
+    other_public_key = Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path).public_bytes_raw()
     encrypted_file = next((working_dir_path / "encrypted_files").rglob("*.c4gh"))
     with open(encrypted_file, "rb") as f:
         crypt4gh.header.deconstruct(f, keys, sender_pubkey=submitter_public_key)

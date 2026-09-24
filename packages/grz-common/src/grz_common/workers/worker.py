@@ -8,6 +8,7 @@ from os import PathLike
 from pathlib import Path
 
 import grz_common.exceptions as grzexc
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
@@ -147,22 +148,17 @@ class Worker:
 
     def encrypt(
         self,
-        recipient_public_key_path: str | PathLike,
-        submitter_private_key_path: str | PathLike | None = None,
+        recipient_public_key: X25519PublicKey,
+        submitter_private_key: X25519PrivateKey | None = None,
         force: bool = False,
         check_validation_logs: bool = True,
-        *,
-        submitter_private_key: bytes | None = None,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
-        :param recipient_public_key_path: Path to the public key file of the recipient.
-        :param submitter_private_key_path: Path to the private key file of the submitter.
+        :param recipient_public_key: The public key of the recipient.
+        :param submitter_private_key: The private key of the submitter, which signs the encryption.
         :param force: Force encryption of already encrypted files
         :param check_validation_logs: Check validation logs before encrypting.
-        :param submitter_private_key: The private key of the submitter, as returned by
-            :meth:`~grz_common.utils.crypt.Crypt4GH.load_private_key`.
-            Mutually exclusive with ``submitter_private_key_path``.
         :return: EncryptedSubmission instance
         """
         submission = self.parse_submission()
@@ -207,10 +203,9 @@ class Worker:
             encrypted_submission = submission.encrypt(
                 encrypted_files_dir=str(self.encrypted_files_dir),
                 progress_log_file=self.progress_file_encrypt,
-                recipient_public_key_path=recipient_public_key_path,
-                submitter_private_key_path=submitter_private_key_path,
-                force=force,
+                recipient_public_key=recipient_public_key,
                 submitter_private_key=submitter_private_key,
+                force=force,
             )
         except grzexc.GrzError:
             raise
@@ -219,22 +214,12 @@ class Worker:
 
         return encrypted_submission
 
-    def decrypt(
-        self,
-        recipient_private_key_path: str | PathLike | None = None,
-        force: bool = False,
-        *,
-        recipient_private_key: bytes | None = None,
-    ) -> Submission:
+    def decrypt(self, recipient_private_key: X25519PrivateKey, force: bool = False) -> Submission:
         """
         Decrypt this submission with a private key using Crypt4Gh.
 
-        Exactly one of ``recipient_private_key_path`` and ``recipient_private_key`` must be given.
-
-        :param recipient_private_key_path: Path to the private key file of the recipient.
+        :param recipient_private_key: The private key of the recipient.
         :param force: Force decryption of already decrypted files
-        :param recipient_private_key: The private key of the recipient, as returned by
-            :meth:`~grz_common.utils.crypt.Crypt4GH.load_private_key`.
         :return: Submission instance
         """
         encrypted_submission = self.parse_encrypted_submission()
@@ -246,7 +231,6 @@ class Worker:
         submission = encrypted_submission.decrypt(
             files_dir=self.files_dir,
             progress_log_file=self.progress_file_decrypt,
-            recipient_private_key_path=recipient_private_key_path,
             recipient_private_key=recipient_private_key,
         )
 

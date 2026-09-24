@@ -1,9 +1,12 @@
 """Tests for ``ArchiveTarget``'s public key: inline text or a path, exactly one, and
-``public_key_file`` giving a file path either way.
+``load_public_key`` loading it either way.
 """
 
+from base64 import b64decode
 from pathlib import Path
+from unittest.mock import patch
 
+import grz_common.exceptions as grzexc
 import pytest
 from grz_common.models.s3 import S3Options
 from grzctl.models.config import ArchiveTarget
@@ -29,18 +32,36 @@ def test_malformed_public_key_fails():
         _archive_target(public_key="not a crypt4gh key")
 
 
-def test_public_key_file_gives_the_path_unchanged(unread_file: str):
-    target = _archive_target(public_key_path=unread_file)
-
-    with target.public_key_file() as path:
-        assert path == Path(unread_file)
-
-
-def test_public_key_file_writes_the_inline_key_to_a_temporary_file(crypt4gh_public_key: str):
+def test_load_public_key_loads_an_inline_key_in_memory(crypt4gh_public_key: str):
     target = _archive_target(public_key=crypt4gh_public_key)
 
-    with target.public_key_file() as path:
-        written_path = Path(path)
-        assert written_path.read_text() == crypt4gh_public_key
+    with (
+        patch("builtins.open", side_effect=AssertionError("no file may be opened")),
+        patch("tempfile.NamedTemporaryFile", side_effect=AssertionError("no temporary file may be written")),
+        patch("tempfile.mkstemp", side_effect=AssertionError("no temporary file may be written")),
+    ):
+        loaded = target.load_public_key()
 
-    assert not written_path.exists(), "the temporary file must be cleaned up once the caller is done with it"
+    assert loaded.public_bytes_raw() == b64decode(crypt4gh_public_key.splitlines()[1])
+
+
+def test_load_public_key_loads_a_key_file(tmp_path: Path, crypt4gh_public_key: str):
+    public_key_path = tmp_path / "archive.pub"
+    public_key_path.write_text(crypt4gh_public_key)
+    target = _archive_target(public_key_path=str(public_key_path))
+
+    loaded = target.load_public_key()
+
+    assert loaded.public_bytes_raw() == b64decode(crypt4gh_public_key.splitlines()[1])
+
+
+def test_load_public_key_names_the_archive_of_an_inline_key_that_does_not_load():
+    """``Crypt4GHPublicKey`` only checks the markers, so a payload that is no key fails only on loading."""
+    target = _archive_target(
+        public_key="-----BEGIN CRYPT4GH PUBLIC KEY-----\nbm90IGEga2V5\n-----END CRYPT4GH PUBLIC KEY-----\n"
+    )
+
+    with pytest.raises(
+        grzexc.ConfigurationError, match="Public key of the archive with bucket consented cannot be read"
+    ):
+        target.load_public_key()

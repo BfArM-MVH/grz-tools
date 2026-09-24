@@ -55,19 +55,16 @@ def encrypt(
 
     archive_target = configuration.archives.consented if consented else configuration.archives.non_consented
 
-    with (
-        DbContext(
-            configuration=configuration,
-            submission_id=submission_id,
-            start_state=SubmissionStateEnum.ENCRYPTING,
-            end_state=SubmissionStateEnum.ENCRYPTED,
-            enabled=update_db,
-        ),
-        archive_target.public_key_file() as recipient_public_key_path,
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.ENCRYPTING,
+        end_state=SubmissionStateEnum.ENCRYPTED,
+        enabled=update_db,
     ):
         worker_inst.encrypt(
-            recipient_public_key_path=recipient_public_key_path,
+            recipient_public_key=archive_target.load_public_key(),
+            submitter_private_key=configuration.archives.load_signing_key(),
             force=force,
             check_validation_logs=check_validation_logs,
-            submitter_private_key=configuration.archives.load_signing_key(),
         )
