@@ -58,19 +58,22 @@ def test_load_private_key_matches_crypt4gh_for_a_crypt4gh_key(plain_key_pair, no
     assert loaded == crypt4gh.keys.get_private_key(private_key_path, None)
 
 
-def test_load_private_key_matches_crypt4gh_for_an_openssh_key(tmp_path: Path, no_prompt):
+@pytest.mark.parametrize("passphrase", [None, PASSPHRASE], ids=["unencrypted", "encrypted"])
+def test_load_private_key_matches_crypt4gh_for_an_openssh_key(tmp_path: Path, no_prompt, passphrase: str | None):
     private_key_path = tmp_path / "id_ed25519"
     private_key_path.write_bytes(
         Ed25519PrivateKey.generate().private_bytes(
             encoding=cryptser.Encoding.PEM,
             format=cryptser.PrivateFormat.OpenSSH,
-            encryption_algorithm=cryptser.NoEncryption(),
+            encryption_algorithm=cryptser.BestAvailableEncryption(passphrase.encode())
+            if passphrase
+            else cryptser.NoEncryption(),
         )
     )
 
-    loaded = Crypt4GH.load_private_key(private_key_path.read_text())
+    loaded = Crypt4GH.load_private_key(private_key_path.read_text(), passphrase=passphrase)
 
-    assert loaded == crypt4gh.keys.get_private_key(private_key_path, None)
+    assert loaded == crypt4gh.keys.get_private_key(private_key_path, lambda: passphrase)
 
 
 def test_load_private_key_writes_no_file(plain_key_pair, no_prompt):
