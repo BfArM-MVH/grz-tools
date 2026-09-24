@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from importlib.metadata import version
 
 from grz_common.models.s3 import S3Options
-from grz_common.models.version import VersionFile, VersionInfo
+from grz_common.models.version import VERSION_FILE_KEY, VersionFile, VersionInfo
 from packaging import version as pkg_version
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def _select_active_policy(
 
 def check_version_and_exit_if_needed(
     s3_options: S3Options,
-    version_file_key: str = "version.json",
+    version_file_key: str = VERSION_FILE_KEY,
 ) -> None:
     """Validate the installed grz-cli version against the policy defined in version.json."""
     version_file = VersionFile.from_s3(s3_options, version_file_key)

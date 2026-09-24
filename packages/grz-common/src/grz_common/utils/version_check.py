@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from packaging import version as pkg_version
 
 from ..models.s3 import S3Options
-from ..models.version import VersionFile, VersionInfo
+from ..models.version import VERSION_FILE_KEY, VersionFile, VersionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _select_active_policy(
 def check_metadata_version_and_exit_if_needed(
     s3_options: S3Options,
     metadata_schema_version: str,
-    version_file_key: str = "version.json",
+    version_file_key: str = VERSION_FILE_KEY,
 ) -> None:
     """Validate the metadata schema version against the policy defined in version.json."""
     version_file = VersionFile.from_s3(s3_options, version_file_key)

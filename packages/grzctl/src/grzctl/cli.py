@@ -21,6 +21,7 @@ from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.encrypt import encrypt
+from .commands.inbox import inbox
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
@@ -101,6 +102,7 @@ def build_cli():
     cli.add_command(consent)
     cli.add_command(pruefbericht)
     cli.add_command(db)
+    cli.add_command(inbox)
     cli.add_command(change_request_template)
     cli.add_command(change_request_validate)
     cli.add_command(report)
