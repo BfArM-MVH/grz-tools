@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 BUNDLED_VERSION_FILE_PACKAGE = "grz_common.version_file"
 
-#: Canonical name of the version-compatibility policy, both as the bundled package
-#: resource filename and as the object key it is published under in an inbox bucket.
 VERSION_FILE_KEY = "version.json"
+"""Canonical name of the version-compatibility policy, both as the bundled package
+resource filename and as the object key it is published under in an inbox bucket."""
 
 
 class PydanticVersion(Version):
@@ -157,6 +157,9 @@ class VersionFile(BaseModel):
             .read_text(encoding="utf-8")
         )
         try:
+            # Validate only - the parsed model is discarded. The exact bundled bytes are
+            # returned as-is, rather than cls(**data).model_dump_json(), so what gets
+            # published to S3 always matches what's actually committed and reviewed here.
             cls.model_validate_json(content)
         except ValidationError as e:
             msg = f"Invalid bundled version file: {e}"
