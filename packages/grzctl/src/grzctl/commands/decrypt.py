@@ -1,7 +1,7 @@
 """Command for decrypting a submission."""
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterable
 from pathlib import Path
 
 import click
@@ -15,14 +15,6 @@ from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
-
-
-def _load_private_key_file(private_key_file: str) -> Iterator[tuple[str, bytes]]:
-    """Load the key of ``--private-key-file`` once the caller asks for it, like the config keys.
-
-    :yields: The option and the key.
-    """
-    yield f"--private-key-file {private_key_file}", Crypt4GH.retrieve_private_key(private_key_file)
 
 
 @click.command()
@@ -69,12 +61,6 @@ def decrypt(
     encrypted_submission = worker_inst.parse_encrypted_submission()
     submission_id = encrypted_submission.submission_id
 
-    if private_key_file is not None:
-        private_keys = _load_private_key_file(private_key_file)
-    else:
-        submitter_id = encrypted_submission.metadata.content.submission.submitter_id
-        private_keys = configuration.iter_decryption_keys(submitter_id)
-
     with DbContext(
         configuration=configuration,
         submission_id=submission_id,
@@ -82,6 +68,12 @@ def decrypt(
         end_state=SubmissionStateEnum.DECRYPTED,
         enabled=update_db,
     ):
+        private_keys: Iterable[tuple[str, bytes]]
+        if private_key_file is not None:
+            private_keys = [(f"--private-key-file {private_key_file}", Crypt4GH.retrieve_private_key(private_key_file))]
+        else:
+            submitter_id = encrypted_submission.metadata.content.submission.submitter_id
+            private_keys = configuration.iter_decryption_keys(submitter_id)
         private_key = encrypted_submission.find_private_key(private_keys)
         worker_inst.decrypt(recipient_private_key=private_key, force=force)
 
