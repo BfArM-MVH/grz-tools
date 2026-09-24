@@ -14,4 +14,5 @@ Command-line tool for internal GRZ operations.
 ## Documentation
 
 - [Registering change requests](docs/change-requests.md) — recording that a submission must be modified, deleted, or transferred, with the who/when/what audit trail.
+- [Crypt4GH keys](docs/crypt4gh-keys.md) — where the Crypt4GH keys go in the config, the primary key layout, and the variants.
 
