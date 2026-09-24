@@ -21,10 +21,9 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from cryptography.exceptions import UnsupportedAlgorithm
-from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes, load_ssh_public_key
 from grz_common.cli import output_json
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
+from grz_common.models.base import get_secret_value
 from grz_common.transfer import init_s3_client
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
@@ -40,6 +39,8 @@ from grz_db.errors import (
 )
 from grz_db.models.author import Author
 from grz_db.models.submission import (
+    CASE_LINK_KEY,
+    DONORS_KEY,
     Case,
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -140,35 +141,6 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
-def _read_known_public_keys(path: str | Path) -> dict[str, list[SSHPublicKeyTypes]]:
-    """Read an OpenSSH public key file with one ``<format> <key> <comment>`` line per key.
-
-    The comment names the key's owner, and signature checks look keys up by it. So the comment
-    is required, and it may contain spaces. Several keys may share a comment, for example across
-    a key rotation, and all of them are kept. Blank lines and lines starting with ``#`` are skipped.
-
-    :param path: Path to the known public keys file.
-    :returns: The public keys, grouped by their comment in file order.
-    :raises DatabaseConfigurationError: for a line without a comment, or with a key that does not load.
-    """
-    public_keys: dict[str, list[SSHPublicKeyTypes]] = {}
-    with open(path) as f:
-        for line_number, line in enumerate(f, start=1):
-            entry = line.strip()
-            if not entry or entry.startswith("#"):
-                continue
-            parts = entry.split(maxsplit=2)
-            if len(parts) < 3:
-                raise DatabaseConfigurationError(
-                    f"{path}:{line_number}: expected '<format> <key> <comment>', where the comment names the key's owner."
-                )
-            try:
-                public_keys.setdefault(parts[2], []).append(load_ssh_public_key(entry.encode()))
-            except (ValueError, UnsupportedAlgorithm) as e:
-                raise DatabaseConfigurationError(f"{path}:{line_number}: cannot load the public key: {e}") from e
-    return public_keys
-
-
 @click.group(help="Database operations")
 @grzctl_configuration
 @click.pass_context
@@ -193,14 +165,14 @@ def db(
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
-    public_keys = _read_known_public_keys(db_config.known_public_keys)
+    public_keys = db_config.public_keys_by_owner
     for comment, keys in public_keys.items():
         log.debug(f"Found {len(keys)} public key(s) labeled '{comment}'")
 
     author = Author(
         name=author_name,
         private_key_bytes=private_key_bytes,
-        private_key_passphrase=db_config.author.private_key_passphrase,
+        private_key_passphrase=get_secret_value(db_config.author.private_key_passphrase),
     )
     ctx.obj.update(
         {
@@ -925,7 +897,9 @@ def update(  # noqa: C901, PLR0913, PLR0917
 
 # Exactly what SubmissionDb.modify_submission accepts. The epilog and the KEY choices both build
 # from this, so --help always advertises what the command accepts. SubmissionBase, not Submission:
-# the table model adds case_id, which `db case relink` sets. Same set as --allow-overwrite.
+# the table model adds case_id, which `db case relink` sets. --ignore-field and --allow-overwrite
+# extend it, each by the one key it takes beyond the columns. Sorted, so --help lists the choices
+# in the same order every run.
 _MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields)
 
 
@@ -959,20 +933,52 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to modify submission: {e}") from e
 
 
 _ignore_field_option = click.option(
     "--ignore-field",
     "ignore_field",
-    type=click.Choice(
-        [*(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), "case_id"],
-        case_sensitive=False,
-    ),
-    help="Do not populate the given field from the metadata to the database. Can be specified multiple times. "
-    "Passing --ignore-field case_id skips case resolution and linking.",
+    type=click.Choice([*_MODIFIABLE_SUBMISSION_KEYS, DONORS_KEY, CASE_LINK_KEY], case_sensitive=False),
+    help="Do not populate the given field from the metadata to the database (may be repeated). "
+    "'case_id' skips case resolution and linking, 'donors' leaves the stored donor rows as they are.",
     multiple=True,
 )
+
+_ALLOW_OVERWRITE_CHOICES = [*_MODIFIABLE_SUBMISSION_KEYS, DONORS_KEY]
+"""What ``--allow-overwrite`` may name.
+
+The case link is absent on purpose: replacing one undoes a deliberate ``db case relink``, so it
+takes ``--force``.
+"""
+
+_force_option = click.option(
+    "--force/--no-force",
+    default=False,
+    help="Overwrite or remove stored values that differ from the metadata (destructive changes): "
+    "non-NULL fields, donors, and the case link. Without this flag, a submission carrying such a "
+    "change is left untouched.",
+)
+
+_allow_overwrite_option = click.option(
+    "--allow-overwrite",
+    "allow_overwrite",
+    type=click.Choice(_ALLOW_OVERWRITE_CHOICES, case_sensitive=False),
+    multiple=True,
+    help="Permit only what these names cover: a field by its key, or every donor update and delete "
+    "as 'donors' (may be repeated). Any other destructive change leaves the submission untouched. "
+    "Mutually exclusive with --force, which permits every overwrite.",
+)
+
+
+def _overwrite_allow_list(force: bool, allow_overwrite: tuple[str, ...]) -> frozenset[str]:
+    """Read the two overwrite options into the allow-list a change set understands.
+
+    :raises click.UsageError: if both are given, since ``--force`` already permits everything.
+    """
+    if force and allow_overwrite:
+        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
+    return frozenset(allow_overwrite)
 
 
 def _prepare_submission_console_table(changes: "SubmissionChangeSet") -> rich.console.RenderableType:
@@ -1043,36 +1049,140 @@ def _prepare_donor_console_table(
     return diff_table
 
 
+def _submission_upload_date(
+    configuration: GrzctlConfig, submission_id: str, override: datetime | None, inbox_name: str | None
+) -> date:
+    """Pick the upload date to store: *override* if given, else the ``LastModified`` of metadata.json in the inbox.
+
+    :param configuration: The grzctl configuration, which names the submitter's inboxes.
+    :param submission_id: The submission. Its first part is the submitter ID.
+    :param override: The date ``--submission-date`` named, if any.
+    :param inbox_name: The inbox ``--inbox`` named, if any. Without it, the submitter's only inbox is used.
+    :returns: The date to record.
+    :raises click.ClickException: if neither *override* nor the inbox gives a date.
+    """
+    if override is not None:
+        return override.date()
+
+    missing = f"No upload date for submission {submission_id}"
+    submitter_id = submission_id.split("_", maxsplit=1)[0]
+    if inbox_name is None:
+        entry = configuration.leistungserbringer.get(submitter_id)
+        if entry is None:
+            raise click.ClickException(
+                f"{missing}: submitter {submitter_id} has no inbox in the configuration. Pass --submission-date."
+            )
+        if len(entry.inbox_buckets) != 1:
+            raise click.ClickException(
+                f"{missing}: submitter {submitter_id} has several inboxes ({', '.join(sorted(entry.inbox_buckets))}). "
+                "Pass --inbox or --submission-date."
+            )
+        inbox_name = next(iter(entry.inbox_buckets))
+
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    key = f"{submission_id}/metadata/metadata.json"
+    url = f"s3://{s3_options.bucket}/{key}"
+    try:
+        response = init_s3_client(s3_options).head_object(Bucket=s3_options.bucket, Key=key)
+    except botocore.exceptions.ClientError as e:
+        if e.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
+            raise
+        raise click.ClickException(f"{missing}: {url} does not exist. Pass --submission-date.") from e
+    # grzctl clean leaves an empty metadata.json, whose LastModified is the time of cleaning
+    if response["ContentLength"] == 0:
+        raise click.ClickException(f"{missing}: {url} is empty, because the inbox was cleaned. Pass --submission-date.")
+    return response["LastModified"].date()
+
+
+def _print_pending_changes(changes: "SubmissionChangeSet") -> None:
+    """Print the change set as one panel: the submission-level diff, then a table per donor."""
+    diff_tables: list[rich.console.RenderableType] = []
+    for donor_diff in changes.donors.added + changes.donors.updated:
+        diff_tables.append(
+            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
+        )
+    for donor_diff in changes.donors.deleted:
+        diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))
+    console.print(
+        rich.panel.Panel.fit(
+            rich.console.Group(_prepare_submission_console_table(changes), *diff_tables, fit=True),
+            title="Pending Changes",
+        )
+    )
+
+
+def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite: frozenset[str]) -> None:
+    """Stop the command before anything is written when a change would replace a stored value.
+
+    :param changes: The pending change set, as :meth:`SubmissionDb.diff` computed it.
+    :param allow_overwrite: What the operator permits; see
+        :meth:`SubmissionChangeSet.undeclared_destructive_changes`.
+    :raises click.Abort: if a destructive change is not covered by *allow_overwrite*.
+    """
+    undeclared = changes.undeclared_destructive_changes(allow_overwrite)
+    if not undeclared:
+        return
+    console_err.print(f"[red]Refusing to overwrite or remove {', '.join(undeclared)}.[/red]")
+    console_err.print(
+        "Nothing was written. Re-run with --force to take every value from the metadata, "
+        "--allow-overwrite to name what may be replaced, or --ignore-field to leave it alone."
+    )
+    raise click.Abort()
+
+
 @submission.command()
 @_submission_id_argument
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
 @click.option(
-    "--submission_date",
+    "--submission-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
     default=None,
-    help="Submission date of the submission; overwrites submissionDate in metadata.json",
+    help="Submission upload date to store. Without it, the date is when metadata.json arrived in the "
+    "submitter's inbox, which is gone once grzctl clean has run. Replacing a stored date takes "
+    "--allow-overwrite submission_uploaded_date or --force.",
+)
+@click.option(
+    "-b",
+    "--inbox",
+    "inbox_name",
+    default=None,
+    help="Inbox to read the upload date from. Needed only if the submitter has several inboxes.",
 )
 @click.option(
     "--confirm/--no-confirm",
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
+@_force_option
+@_allow_overwrite_option
 @_ignore_field_option
 @click.pass_context
-def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
+def populate(  # noqa: C901, PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     metadata_path: str,
     submission_date: datetime | None,
+    inbox_name: str | None,
     confirm: bool,
+    force: bool,
+    allow_overwrite: tuple[str, ...],
     ignore_field: tuple[str, ...],
 ):
     """Populate a submission in the database based on the given metadata.json file.
 
     Also resolves and links the submission's case; an unresolved link is shown rather
     than blocking the rest of the diff.
+
+    Writes the whole change set or none of it. Filling a value the database does not have is
+    always allowed; replacing or removing one takes --force or --allow-overwrite, and otherwise
+    stops the command before anything is written.
+
+    The upload date is --submission-date, or else when metadata.json arrived in the submitter's
+    inbox. Without either, the command stops before anything is written.
     """
     log.debug("Ignored fields for populate: %s", ignore_field)
+
+    allow_overwrite_keys = _overwrite_allow_list(force, allow_overwrite)
 
     if submission_date is not None:
         log.info("Submission date from provided option is used")
@@ -1080,8 +1190,6 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
             raise RuntimeError(
                 f"Submission date ({submission_date.date()}) is set to a future date (today: {date.today()}) which is not allowed"
             )
-    else:
-        log.warning("Submission date from metadata.json is used")
 
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -1095,7 +1203,7 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to load submission: {e}") from e
 
     with open(metadata_path) as fd:
         metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
@@ -1110,15 +1218,9 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
             "or use 'grzctl db submission modify' directly."
         ) from e
 
-    submission_uploaded_date = (
-        submission_date.date() if submission_date is not None else submission.submission_uploaded_date
+    submission_uploaded_date = _submission_upload_date(
+        ctx.obj["configuration"], submission_id, submission_date, inbox_name
     )
-    if submission_date is None:
-        log.warning(
-            "No submission date provided and submission date is missing in the database. "
-            "Will use submission date from metadata.json..."
-        )
-        submission_uploaded_date = metadata.submission.submission_date
 
     try:
         changes = db_service.diff(
@@ -1130,15 +1232,6 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     except SubmissionError as e:
         _abort(e)
 
-    # build donor diff and attach Rich tables for console preview in one pass
-    diff_tables: list[rich.console.RenderableType] = []
-    for donor_diff in changes.donors.added + changes.donors.updated:
-        diff_tables.append(
-            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
-        )
-    for donor_diff in changes.donors.deleted:
-        diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))
-
     if not changes.has_pending:
         console_err.print(
             f"[yellow]Case link unresolved: {changes.case_link_error}[/yellow]"
@@ -1147,12 +1240,10 @@ def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
         )
         return
 
-    console.print(
-        rich.panel.Panel.fit(
-            rich.console.Group(_prepare_submission_console_table(changes), *diff_tables, fit=True),
-            title="Pending Changes",
-        )
-    )
+    _print_pending_changes(changes)
+
+    if not force:
+        _refuse_destructive_changes(changes, allow_overwrite_keys)
 
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?",
@@ -1285,9 +1376,12 @@ def populate_qc(
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
 
-    with open(report_csv_path, encoding="utf-8", newline="") as report_csv_file:
+    with open(report_csv_path, encoding="utf-8-sig", newline="") as report_csv_file:
         reader = csv.reader(report_csv_file)
-        header = next(reader)
+        try:
+            header = next(reader)
+        except StopIteration:
+            raise click.ClickException(f"QC report '{report_csv_path}' is empty.") from None
         reports = []
         for row in reader:
             reports.append(QCReportRow(**dict(zip(header, row, strict=True))))
@@ -1373,8 +1467,7 @@ def populate_qc(
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?", default=False, show_default=True
     ):
-        for result in results:
-            db_service.add_detailed_qc_result(result)
+        db_service.add_detailed_qc_results(results)
 
 
 def _lab_datum_id(donor_index: int, donor: Donor, lab_datum_index: int, lab_datum: LabDatum) -> str:
@@ -1684,7 +1777,7 @@ def change_request(  # noqa: PLR0913, PLR0917
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to register change request: {e}") from e
 
 
 def _research_consented_now(submission: Submission) -> bool | None:
@@ -1893,7 +1986,7 @@ def _fetch_metadata_json_from_archives(
     return found
 
 
-def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
+def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     current_submission: Submission,
     raw_json: str,
     db_service: SubmissionDb,
@@ -1907,13 +2000,13 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
     as ``grzctl db submission populate`` so that every derived field (not only
     *submission_size* and *submission_metadata*) is kept consistent, donor records are
-    synchronised, the case link is resolved and committed (``"case_id"`` in
+    synchronised, the case link is resolved and committed (:data:`CASE_LINK_KEY` in
     *ignore_fields* disables that), and already-up-to-date submissions are detected
     without a write.
 
-    When *force* is False, destructive changes (see
-    :attr:`SubmissionChangeSet.destructive_changes`) are held back instead of committed,
-    preserving manually-corrected values.
+    The submission is written whole or not at all. Without *force*, a destructive change that
+    *allow_overwrite* does not name skips it and preserves every manually-corrected value it
+    holds. The run carries on to the next submission either way.
 
     :param raw_json: The metadata.json content, from the one archive that holds it.
     """
@@ -1947,7 +2040,7 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
         console_err.print(f"[red]  {submission_id}: diff failed: {exc}[/red]")
         return _BackfillOutcome(_BackfillResult.ERROR)
 
-    # See _BackfillOutcome: only the link is withheld, not the rest of the submission.
+    # See _BackfillOutcome: a link that cannot be resolved still lets the rest be written.
     link_unresolved = changes.case_link_error is not None
     if link_unresolved:
         console_err.print(f"[yellow]  {submission_id}: case link unresolved: {changes.case_link_error}[/yellow]")
@@ -1957,26 +2050,13 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
         return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved)
 
     # Filling a NULL destroys nothing, so it is always written. Replacing or removing a stored value
-    # needs saying so: --force permits every such change, --allow-overwrite only the fields it names,
-    # and anything else is held back and reported.
-    if not force:
-        changes, withheld = changes.withhold_destructive(allow_overwrite)
-        # --allow-overwrite is built from SubmissionBase, which has no case_id, so it cannot name the
-        # case link. Replacing one would undo a deliberate case relink, so a held-back link holds the
-        # whole submission back.
-        if withheld.case_link is not None:
-            console_err.print(
-                f"[dim]  {submission_id}: would overwrite {', '.join(withheld.destructive_changes)}. "
-                "A changed case link skips the whole submission (use --force to overwrite).[/dim]"
-            )
-            return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
-        if withheld.has_pending:
-            console_err.print(
-                f"[dim]  {submission_id}: not overwriting {', '.join(withheld.destructive_changes)} "
-                f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
-            )
-
-    if not changes.has_pending:
+    # needs saying so, with --force or --allow-overwrite. One that nobody asked for skips the
+    # submission whole: a row the run half-updated is harder to reason about than one it left alone.
+    if not force and (undeclared := changes.undeclared_destructive_changes(allow_overwrite)):
+        console_err.print(
+            f"[dim]  {submission_id}: would overwrite {', '.join(undeclared)}, skipping the whole "
+            f"submission (use --force for all, or --allow-overwrite for named fields).[/dim]"
+        )
         return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
 
     if dry_run:
@@ -2001,22 +2081,8 @@ def _backfill_submission(  # noqa: C901, PLR0911, PLR0913, PLR0917
     default=False,
     help="Preview which submissions would be updated without writing to the database.",
 )
-@click.option(
-    "--force/--no-force",
-    default=False,
-    help="Overwrite or remove stored values that differ from metadata.json (destructive changes): "
-    "non-NULL fields, donors, and the case link. Without this flag, such changes are reported and "
-    "left alone while the rest is still written. A changed case link holds back the whole submission.",
-)
-@click.option(
-    "--allow-overwrite",
-    "allow_overwrite",
-    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
-    multiple=True,
-    help="Overwrite only these existing non-NULL fields when the metadata.json value differs "
-    "(may be repeated). Other destructive changes are held back and the submission is updated in "
-    "part. Mutually exclusive with --force, which permits every overwrite.",
-)
+@_force_option
+@_allow_overwrite_option
 @click.option(
     "--submission-id",
     "submission_ids",
@@ -2086,9 +2152,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
-    if force and allow_overwrite:
-        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
-
+    allow_overwrite_keys = _overwrite_allow_list(force, allow_overwrite)
     ignore_fields = set(ignore_field)
 
     # ── Build S3 clients for both archive targets ────────────────────────────
@@ -2157,7 +2221,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             dry_run,
             force,
             ignore_fields,
-            frozenset(allow_overwrite),
+            allow_overwrite_keys,
         )
         counts[outcome.status] += 1
         links_unresolved += outcome.link_unresolved

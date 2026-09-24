@@ -171,16 +171,41 @@ class TestCheckPrerequisites:
         return context
 
     def test_first_state_does_not_warn_about_the_history(self, mock_db, caplog):
-        """Uploading a new submission has no prior state to find, so nothing is logged."""
+        """A brand-new submission has no prior state to find, so nothing is logged."""
         mock_db.get_submission.return_value = None
         mock_db.add_submission.return_value.get_latest_state.return_value = None
         mock_db.add_submission.return_value.states = []
-        context = self._context(mock_db, SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED)
+        context = self._context(mock_db, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING)
 
         with caplog.at_level(logging.WARNING):
             context._check_prerequisites()
 
         assert caplog.records == []
+
+    @pytest.mark.parametrize(
+        ("start_state", "end_state"),
+        [
+            (SubmissionStateEnum.PROCESSING, SubmissionStateEnum.PROCESSED),
+            (SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED),
+        ],
+    )
+    def test_entry_state_adds_a_new_submission(self, db, start_state, end_state):
+        """``grzctl process`` and the step-by-step flow both start a submission that the DB does not know yet.
+
+        A real DB, unlike a mock, fails if the new submission's states are not loaded.
+        """
+        context = DbContext(
+            configuration={},
+            submission_id="123456789_2025-01-01_a1b2c3d4",
+            start_state=start_state,
+            end_state=end_state,
+            enabled=True,
+        )
+        context.db = db  # bypass __enter__
+
+        context._check_prerequisites()
+
+        assert db.get_submission(context.submission_id) is not None
 
     def test_later_state_warns_when_the_history_lacks_the_prior_state(self, mock_db, caplog):
         """The history check still runs for every state that has a prior state."""

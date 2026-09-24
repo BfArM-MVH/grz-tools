@@ -30,6 +30,7 @@ test = [
     "pytest-cov",
     "pytest-mock",
     "pytest-sugar",
+    "pytest-xdist",
 ]
 
 

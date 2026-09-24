@@ -59,6 +59,7 @@ test = [
     "pytest-mock",
     "pytest-cov",
     "pytest-sugar",
+    "pytest-xdist",
     "pytest-postgresql",
     "psycopg",
     "moto[s3]",

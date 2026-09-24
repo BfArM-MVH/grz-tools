@@ -74,7 +74,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
                 "private_key_path": str(private_key_path.resolve()),
                 "private_key_passphrase": "",
             },
-            "known_public_keys": str(public_key_path.resolve()),
+            "known_public_keys_file": str(public_key_path.resolve()),
         },
         pruefbericht={},
         keys={
@@ -90,6 +90,12 @@ def _write_config(tmp_path: Path, config: GrzctlConfig) -> Path:
     with open(config_path, "w") as config_file:
         config.to_yaml(config_file)
     return config_path
+
+
+@pytest.fixture
+def offline_config(tmp_path: Path) -> GrzctlConfig:
+    """Config for tests that never open the database."""
+    return _database_config(tmp_path, f"sqlite:///{tmp_path / 'unused.sqlite'}")
 
 
 @pytest.fixture

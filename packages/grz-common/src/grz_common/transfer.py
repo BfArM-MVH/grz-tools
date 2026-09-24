@@ -21,6 +21,7 @@ else:
     S3Client = object
     S3ServiceResource = object
 
+from .models.base import get_secret_value
 from .models.s3 import S3Options
 
 
@@ -51,8 +52,8 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
         use_ssl=s3_options.use_ssl,
         endpoint_url=_empty_str_to_none(str(s3_options.endpoint_url)) if s3_options.endpoint_url else None,
         aws_access_key_id=_empty_str_to_none(s3_options.access_key),
-        aws_secret_access_key=_empty_str_to_none(s3_options.secret),
-        aws_session_token=_empty_str_to_none(s3_options.session_token),
+        aws_secret_access_key=_empty_str_to_none(get_secret_value(s3_options.secret)),
+        aws_session_token=_empty_str_to_none(get_secret_value(s3_options.session_token)),
         config=s3_config,
     )
 
@@ -75,8 +76,8 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
         use_ssl=s3_options.use_ssl,
         endpoint_url=_empty_str_to_none(str(s3_options.endpoint_url)) if s3_options.endpoint_url else None,
         aws_access_key_id=_empty_str_to_none(s3_options.access_key),
-        aws_secret_access_key=_empty_str_to_none(s3_options.secret),
-        aws_session_token=_empty_str_to_none(s3_options.session_token),
+        aws_secret_access_key=_empty_str_to_none(get_secret_value(s3_options.secret)),
+        aws_session_token=_empty_str_to_none(get_secret_value(s3_options.session_token)),
         config=s3_config,
     )
 

@@ -17,6 +17,8 @@ from sqlmodel import Session, select
 
 CONSENTED_PUBLIC_KEY_PATH = str(Path("tests/mock_files/archive_consented.pub").resolve())
 NON_CONSENTED_PUBLIC_KEY_PATH = str(Path("tests/mock_files/archive_non_consented.pub").resolve())
+#: The upload date that populate records. Without --submission-date, populate reads it from an inbox.
+UPLOAD_DATE = "2026-01-01"
 
 
 @pytest.fixture
@@ -96,6 +98,8 @@ def setup_db_state(
                 submission_id,
                 str(metadata_path),
                 "--no-confirm",
+                "--submission-date",
+                UPLOAD_DATE,
             ],
             catch_exceptions=False,
         )
