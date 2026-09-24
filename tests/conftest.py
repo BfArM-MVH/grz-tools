@@ -352,7 +352,7 @@ def db_config_model(db_config_content, grzctl_identifiers_config):
         **db_config_content,
         leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         archives=_grzctl_archives(),
-        pruefbericht={},
+        pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
         identifiers=grzctl_identifiers_config,
     )
 
@@ -363,7 +363,7 @@ def migrated_db_config_model(migrated_db_config_content, grzctl_identifiers_conf
         **migrated_db_config_content,
         leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         archives=_grzctl_archives(),
-        pruefbericht={},
+        pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
         identifiers=grzctl_identifiers_config,
     )
 
@@ -436,6 +436,12 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
 
 # Shared building blocks for GrzctlConfig test fixtures
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
+_GRZCTL_PRUEFBERICHT_DUMMY = {
+    "authorization_url": "https://auth.example.org",
+    "client_id": "example-client",
+    "client_secret": "example-secret",
+    "api_base_url": "https://api.example.org",
+}
 
 
 @pytest.fixture()
@@ -474,7 +480,7 @@ def _grzctl_config_dict(*, leistungserbringer, db=None, pruefbericht=None, ident
         "leistungserbringer": leistungserbringer,
         "archives": _grzctl_archives(endpoint_url=endpoint_url),
         "db": db if db is not None else _GRZCTL_DB_DUMMY,
-        "pruefbericht": pruefbericht if pruefbericht is not None else {},
+        "pruefbericht": pruefbericht if pruefbericht is not None else _GRZCTL_PRUEFBERICHT_DUMMY,
         "identifiers": identifiers if identifiers is not None else {"grz": "GRZK00007"},
     }
 

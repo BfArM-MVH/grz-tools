@@ -14,7 +14,7 @@ from grz_common.models.version import VERSION_FILE_KEY, VersionFile
 from grzctl.models.config import GrzctlConfig
 from moto import mock_aws
 
-from .conftest import _grzctl_archives, _write_config
+from .conftest import PRUEFBERICHT, _grzctl_archives, _write_config
 
 REGION = "us-east-1"
 BUCKET_A = "inbox-a"
@@ -60,7 +60,7 @@ def _two_inbox_config(tmp_path: Path) -> GrzctlConfig:
             },
             "known_public_keys_file": str(public_key_path.resolve()),
         },
-        pruefbericht={},
+        pruefbericht=PRUEFBERICHT,
         identifiers={"grz": "GRZK00007"},
     )
 

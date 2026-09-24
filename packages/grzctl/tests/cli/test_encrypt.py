@@ -12,6 +12,8 @@ import grzctl.cli
 import pytest
 import yaml
 
+from .conftest import PRUEFBERICHT
+
 SIGNING_KEY_PASSPHRASE = "signing-key-passphrase"
 
 
@@ -32,7 +34,7 @@ def _config(public_key: str, unread_file: str, signing_key: dict[str, str]) -> d
             **signing_key,
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
-        "pruefbericht": {},
+        "pruefbericht": PRUEFBERICHT,
         "identifiers": {"grz": "GRZT00000"},
     }
 

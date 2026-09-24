@@ -27,6 +27,14 @@ def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: 
 #: The revision the schema-upgrade tests start from.
 INITIAL_REVISION = "1a9bd994df1b"
 
+#: A ``pruefbericht`` config section with fake values, for tests that never reach BfArM.
+PRUEFBERICHT = {
+    "authorization_url": "https://auth.example.org",
+    "client_id": "example-client",
+    "client_secret": "example-secret",
+    "api_base_url": "https://api.example.org",
+}
+
 
 @pytest.fixture
 def unread_file() -> str:
@@ -97,7 +105,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
             },
             "known_public_keys_file": str(public_key_path.resolve()),
         },
-        pruefbericht={},
+        pruefbericht=PRUEFBERICHT,
         identifiers={"grz": "GRZK00007"},
     )
 

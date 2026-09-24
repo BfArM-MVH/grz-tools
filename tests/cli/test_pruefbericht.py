@@ -411,7 +411,7 @@ def pruefbericht_db_config(tmp_path, migrated_db_connection):
     """Config file for a database already on the latest schema, one per supported backend."""
     import json
 
-    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _GRZCTL_PRUEFBERICHT_DUMMY, _grzctl_archives
 
     config = {
         "leistungserbringer": {
@@ -425,7 +425,7 @@ def pruefbericht_db_config(tmp_path, migrated_db_connection):
         },
         "archives": _grzctl_archives(),
         "db": {"database_url": migrated_db_connection, "author": {"name": "test_author"}},
-        "pruefbericht": {},
+        "pruefbericht": _GRZCTL_PRUEFBERICHT_DUMMY,
         "identifiers": {"grz": "GRZK00007"},
     }
 
