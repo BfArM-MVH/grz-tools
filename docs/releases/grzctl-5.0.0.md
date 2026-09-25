@@ -8,6 +8,7 @@ The main changes:
 - grzctl tracks cases with `grzctl db case` (#633), see [Case tracking](../../packages/grzctl/docs/case-tracking.md).
 - Detailed QC reports a deviation without failing (#656).
 - A failed step records why it failed (#690), see [Error handling](../../packages/grzctl/docs/error-handling.md).
+- The grzctl config names each crypt4gh key where grzctl uses it (#694), see [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md).
 
 ### Versions
 
@@ -16,7 +17,7 @@ The main changes:
 - `grz-db` `4.0.0` (from `3.0.0`)
 - `grz-pydantic-models` `4.0.0` (from `3.0.0`)
 - `grz-pydantic-models-testing` `1.1.0` (from `1.0.0`)
-- `grz-cli` `2.0.1` (from `2.0.0`)
+- `grz-cli` `3.0.0` (from `2.0.0`)
 
 ---
 
@@ -49,7 +50,7 @@ grzctl no longer installs grz-cli (#675). If you use grz-cli, for example for `g
 - `grzctl --config PATH <command>` replaces `--config-file` on each command. grzctl no longer merges several files.
 - Environment variables override the file, for example `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__INBOX__PRIVATE_KEY_PATH`.
 
-All six top-level sections are required:
+All five top-level sections are required:
 
 ```yaml
 leistungserbringer:
@@ -60,7 +61,7 @@ leistungserbringer:
         endpoint_url: https://s3.example.org
         access_key: ...
         secret: ...
-        private_key_path: /path/to/inbox.sec
+        private_key_path: &grz_key /path/to/grz.sec
         # bucket: other-name # optional, defaults to the inbox name
 archives:
   consented:
@@ -73,6 +74,7 @@ archives:
       endpoint_url: https://s3.example.org
       bucket: grz-non-consented
     public_key_path: /path/to/non_consented.pub
+  signing_key_path: *grz_key # the same file as the inbox key
 db:
   database_url: postgresql+psycopg://...
   author:
@@ -81,12 +83,16 @@ db:
   known_public_keys: # optional, one "<format> <key> <author name>" entry per key
     - ssh-ed25519 AAAA... alice
   # known_public_keys_file: /path/to/known_public_keys # the same entries as a file, instead of the list
-keys:
-  grz_private_key_path: /path/to/grz.sec
 identifiers:
   grz: GRZABC123
-pruefbericht: {} # all fields optional
+pruefbericht:
+  authorization_url: https://...
+  client_id: ...
+  client_secret: ...
+  api_base_url: https://...
 ```
+
+`keys.grz_private_key_path` moves to `archives.signing_key_path` (#694). Every key field takes the key inline as `<name>` or a file as `<name>_path`. Setting both is an error. A private key has an optional `<name>_passphrase`. [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md) lists every key and its field.
 
 `db.known_public_keys` now lists the keys. Move a path to a file to `db.known_public_keys_file` (#693). If neither is set, grzctl reads `~/.config/grzctl/known_public_keys`.
 
@@ -126,7 +132,7 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 | Before                                                                | Now                                                                  |
 | --------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `grzctl <command> --config-file FILE`                                 | `grzctl --config FILE <command>`                                     |
-| `grzctl download`, `grzctl clean`                                     | add `--inbox NAME`                                                   |
+| `grzctl download`, `grzctl clean`, `grzctl decrypt`                   | add `--inbox NAME`                                                   |
 | `grzctl list`, `grzctl db sync-from-inbox`                            | add `--submitter-id LE_ID --inbox NAME`                              |
 | `grzctl validate`                                                     | add `--submitter-id LE_ID`                                           |
 | `grzctl submit`, `grzctl upload`                                      | removed, use grz-cli                                                 |
@@ -165,10 +171,23 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 
 ### grzctl: failure reasons (#690)
 
-- A failed step records a failure reason that names the cause and who has to act, see [Error handling](../../packages/grzctl/docs/error-handling.md). The new reasons are `transfer_error`, `configuration_error`, `interrupted`, `detailed_qc_error` and `reporting_error`.
+- A failed step records a failure reason that names the cause and who has to act, see [Error handling](../../packages/grzctl/docs/error-handling.md). The new reasons are `detailed_qc_error`, `transfer_error`, `configuration_error`, `pruefbericht_generation_error`, `pruefbericht_rejected`, `submission_cleaned` and `interrupted`.
 - `network_error` and `upload_error` are retired. Older states keep them, but `--failure-reason` no longer accepts them.
 - SIGTERM stops grzctl the way Ctrl-C does, and the running step records `interrupted`.
 - A rerun of `archive` for an archived submission records `ARCHIVED` instead of failing.
+
+### grzctl: crypt4gh keys (#694)
+
+- `decrypt` requires `--inbox` and decrypts with the key of that inbox. So the inboxes of one LE may use different keys.
+- `encrypt` signs with `archives.signing_key` or `archives.signing_key_path`.
+- Every key path must name a regular file. Otherwise every grzctl command stops.
+- An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`.
+- `archives.*.public_key` takes the public key inline, as `keys.grz_public_key` did in v4.0.0.
+
+### grzctl: Prüfbericht config (#PRUEFBERICHT_PR)
+
+- `pruefbericht.authorization_url`, `client_id`, `client_secret` and `api_base_url` are required.
+- A config without one of them stops every grzctl command.
 
 ### grz-cli (#691, #694)
 
@@ -183,3 +202,5 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 - grz-pydantic-models: `StrictIgnoringBaseModel` is renamed to `LosslessBaseModel` (#654).
 - grz-db: the `withhold_destructive` and `has_pending_destructive` methods are removed. Use `SubmissionChangeSet.undeclared_destructive_changes()` (#681).
 - grz-common: the expected exceptions derive from `grz_common.exceptions.GrzError`. `SubmissionValidationError` moves there from `grz_common.workers.submission`, and `grz_common.workers.download.DownloadError` is removed (#690).
+- grz-common: `Crypt4GH.prepare_c4gh_keys`, `Crypt4GH.decrypt_file`, `Submission.encrypt`, `EncryptedSubmission.decrypt`, `Worker.encrypt` and `Worker.decrypt` take `X25519PrivateKey` and `X25519PublicKey` objects instead of paths. The `Crypt4GH` key loaders return these objects (#694).
+- grz-common, grz-cli: `grz_common.models.keys` is removed. Import `KeyModel` and `KeyConfigModel` from `grz_cli.models.config`. The public key check is the type `grz_common.models.base.Crypt4GHPublicKey` (#694).
