@@ -1281,7 +1281,7 @@ class SubmissionDb:
     def set_submission_inbox(self, submission_id: str, inbox_name: str, session: Session | None = None) -> Submission:
         """Record the inbox a submission was downloaded from.
 
-        The inbox name refers to the corresponding `inbox_name`of the Leistungserbringer configuration.
+        The inbox name refers to the corresponding ``inbox_name`` of the Leistungserbringer configuration.
         The S3 bucket follows at use time from the configuration (``bucket or inbox_name``).
         Renaming a bucket or an inbox's ``bucket:`` entry in the config needs no database change.
         Replacing a recorded inbox is allowed and is logged as a warning.
