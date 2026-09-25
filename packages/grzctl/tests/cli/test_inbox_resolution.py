@@ -156,15 +156,14 @@ def test_scan_finds_no_inbox_without_a_marker(tmp_path, unread_file):
     assert resolved is None
 
 
-def test_a_database_that_errors_falls_through(tmp_path, unread_file):
-    """A database that does not answer (not configured, out of sync) must not block resolution."""
+def test_a_database_that_errors_stops_the_resolution(tmp_path, unread_file):
+    """A command passes a database only with --update-db, and then the database must answer."""
     config = _config(tmp_path, unread_file, ["inbox"])
 
-    resolved = inbox_resolution.resolve_inbox(
-        config, submitter_id=SUBMITTER_ID, submission_id=SUBMISSION_ID, db_service=_db(error=RuntimeError("boom"))
-    )
-
-    assert resolved == "inbox"
+    with pytest.raises(RuntimeError, match="boom"):
+        inbox_resolution.resolve_inbox(
+            config, submitter_id=SUBMITTER_ID, submission_id=SUBMISSION_ID, db_service=_db(error=RuntimeError("boom"))
+        )
 
 
 @pytest.mark.parametrize("scan", [False, True])
@@ -246,9 +245,6 @@ def test_require_inbox_raises_a_usage_error_when_asked(tmp_path, unread_file):
 def test_db_inbox_returns_the_recorded_inbox_or_none(tmp_path, unread_file):
     recorded = inbox_resolution.db_inbox(_db(recorded_inbox="inbox-b"), SUBMISSION_ID)
     assert recorded == "inbox-b"
-
-    errored = inbox_resolution.db_inbox(_db(error=RuntimeError("boom")), SUBMISSION_ID)
-    assert errored is None
 
     unrecorded = inbox_resolution.db_inbox(_db(recorded_inbox=""), SUBMISSION_ID)
     assert unrecorded is None

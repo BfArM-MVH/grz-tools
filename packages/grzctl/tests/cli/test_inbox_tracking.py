@@ -236,17 +236,18 @@ def test_download_records_inbox(migrated_database_config: GrzctlConfig, tmp_path
     worker.download.assert_called_once()
 
 
-def test_download_without_populate_skips_recording_an_unknown_submission(
-    migrated_database_config: GrzctlConfig, tmp_path: Path, db: SubmissionDb
-):
-    """Without populate, an unregistered submission stays unregistered; the download still succeeds."""
+def test_download_without_update_db_touches_no_database(migrated_database_config: GrzctlConfig, tmp_path: Path):
+    """With --no-update-db, download neither reads the recorded inbox nor records one, even with --populate."""
     output_dir = tmp_path / "out"
     output_dir.mkdir()
     config_path = _config_with_inbox(migrated_database_config, tmp_path)
 
-    context = MagicMock()
-    context.__enter__.return_value.db = db
-    with patch("grzctl.commands.download.DbContext", return_value=context), patch("grzctl.commands.download.Worker"):
+    no_database = AssertionError("no database may be opened")
+    with (
+        patch("grzctl.commands.download.get_submission_db_instance", side_effect=no_database),
+        patch("grzctl.dbcontext.get_submission_db_instance", side_effect=no_database),
+        patch("grzctl.commands.download.Worker") as worker_cls,
+    ):
         result = _invoke(
             "--config",
             str(config_path),
@@ -255,13 +256,12 @@ def test_download_without_populate_skips_recording_an_unknown_submission(
             SUBMISSION_ID,
             "--output-dir",
             str(output_dir),
-            "--inbox",
-            INBOX,
-            "--no-populate",
+            "--no-update-db",
+            "--populate",
         )
 
     assert result.exit_code == 0, result.stderr
-    assert db.get_submission(SUBMISSION_ID) is None
+    worker_cls.return_value.download.assert_called_once()
 
 
 def _decrypt_worker() -> MagicMock:

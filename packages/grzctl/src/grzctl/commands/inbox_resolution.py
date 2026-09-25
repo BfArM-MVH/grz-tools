@@ -16,15 +16,14 @@ from ..models.config import GrzctlConfig
 def db_inbox(db_service: SubmissionDb | None, submission_id: str) -> str | None:
     """Return the inbox the database recorded for ``submission_id``, if any.
 
-    A database that is not available, or does not answer, yields ``None`` rather than an error.
-    The inbox simply is not known, and the remaining sources still resolve.
+    :param db_service: Submission database to look the recorded inbox up in, or ``None`` for no lookup.
+    :param submission_id: The submission.
+    :returns: The recorded inbox, or ``None`` if *db_service* is ``None``, the database lacks the
+        submission, or the submission has no recorded inbox.
     """
     if db_service is None:
         return None
-    try:
-        submission = db_service.get_submission(submission_id)
-    except Exception:
-        return None
+    submission = db_service.get_submission(submission_id)
     return submission.inbox if submission is not None and submission.inbox else None
 
 

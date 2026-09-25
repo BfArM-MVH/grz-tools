@@ -144,20 +144,6 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
     return SubmissionDb(db_url=db_url, author=author)
 
 
-def get_submission_db_or_none(configuration: GrzctlConfig) -> SubmissionDb | None:
-    """Build the submission database for best-effort inbox lookups, or ``None``.
-
-    A database that is not usable yields ``None`` rather than an error.
-    Commands that treat the database as optional, e.g. for resolving a recorded inbox,
-    fall back to the other sources instead.
-    """
-    try:
-        return get_submission_db_instance(db_url=configuration.db.database_url)
-    except Exception:
-        log.debug("Database not available for inbox resolution.", exc_info=True)
-        return None
-
-
 @click.group(help="Database operations")
 @grzctl_configuration
 @click.pass_context

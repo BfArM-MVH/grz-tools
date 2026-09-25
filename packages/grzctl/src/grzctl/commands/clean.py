@@ -11,7 +11,7 @@ from grz_db.models.submission import SubmissionStateEnum
 from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
-from .db.cli import get_submission_db_or_none
+from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
 
 log = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def clean(
         submitter_id=submitter_id,
         submission_id=submission_id,
         inbox_name=inbox_name,
-        db_service=get_submission_db_or_none(configuration),
+        db_service=get_submission_db_instance(db_url=configuration.db.database_url) if update_db else None,
     )
     s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
     bucket_name = s3_options.bucket
