@@ -123,8 +123,11 @@ archives:
 
 Each inbox can name its own private key.
 This includes the inboxes of one LE.
-`grzctl decrypt --inbox <name>` decrypts a submission with the key of that inbox.
+`grzctl decrypt` decrypts a submission with the key of the inbox that the submission came from.
 grzctl looks up the inbox under the LE that the submission's metadata names.
+It takes the inbox from `--inbox`.
+Without `--inbox`, it takes the inbox recorded in the database, else the LE's only inbox.
+`grzctl download` records the inbox, and `grzctl db backfill` records it for older submissions.
 
 ```yaml
 leistungserbringer:

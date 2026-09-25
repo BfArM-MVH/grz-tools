@@ -171,6 +171,38 @@ def test_private_key_path_loads_with_its_passphrase(
     assert config.inbox_target("260914050", "inbox").load_private_key().private_bytes_raw() == expected_key
 
 
+@pytest.fixture
+def key_paths(tmp_path: Path) -> dict[str, Path]:
+    """Two crypt4gh private keys without passphrase, by name."""
+    paths = {}
+    for name in ("first", "second"):
+        paths[name] = tmp_path / f"{name}.sec"
+        crypt4gh.keys.c4gh.generate(paths[name], tmp_path / f"{name}.pub", None, comment=None)
+    return paths
+
+
+def test_inbox_target_loads_the_key_of_its_own_inbox(
+    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
+):
+    """Each inbox names its own key, so two inboxes of one submitter may use different keys."""
+    config = _grzctl_config(
+        tmp_path,
+        unread_file,
+        {
+            "260914050": {
+                "inbox_buckets": {
+                    "inbox-a": {"private_key": key_paths["first"].read_text()},
+                    "inbox-b": {"private_key_path": str(key_paths["second"])},
+                }
+            }
+        },
+    )
+
+    loaded = config.inbox_target("260914050", "inbox-b").load_private_key()
+
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(key_paths["second"], None)
+
+
 def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
     tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
 ):

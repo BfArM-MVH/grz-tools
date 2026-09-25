@@ -183,6 +183,10 @@ class SubmissionBase(SQLModel):
         sa_column=Column(JSON().with_variant(sa_psql.JSONB, "postgresql")),
     )
 
+    # names the inbox the submission was downloaded from, so that commands
+    # and the decryption key lookup can locate it without asking for --inbox again
+    inbox: str | None = None
+
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""
@@ -1273,6 +1277,34 @@ class SubmissionDb:
             with self._translating_conflicts(session, case_id=db_submission.case_id):
                 session.flush()
             return db_submission
+
+    def set_submission_inbox(self, submission_id: str, inbox_name: str, session: Session | None = None) -> Submission:
+        """Record the inbox a submission was downloaded from.
+
+        The inbox name refers to the corresponding `inbox_name`of the Leistungserbringer configuration.
+        The S3 bucket follows at use time from the configuration (``bucket or inbox_name``).
+        Renaming a bucket or an inbox's ``bucket:`` entry in the config needs no database change.
+        Replacing a recorded inbox is allowed and is logged as a warning.
+
+        :param submission_id: ID of the submission.
+        :param inbox_name: Inbox name, as it appears under ``leistungserbringer.<le>.inbox_buckets``.
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        :returns: The updated :class:`Submission`.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        """
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            previous_inbox = submission.inbox
+            if previous_inbox is not None and previous_inbox != inbox_name:
+                logger.warning(
+                    "Overwriting inbox of submission %s: '%s' -> '%s'.", submission_id, previous_inbox, inbox_name
+                )
+            submission.inbox = inbox_name
+            active_session.add(submission)
+            active_session.flush()
+            return submission
 
     def set_selected_for_qc(
         self, submission_id: str, selected_for_qc: bool, session: Session | None = None

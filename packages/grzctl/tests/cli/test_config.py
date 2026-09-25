@@ -58,6 +58,25 @@ def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration:
     assert config.archives.consented.public_key_path is None
 
 
+def test_inbox_target_defaults_the_bucket_to_the_inbox_name(configuration: dict):
+    """Without an explicit ``bucket:``, the S3 bucket of an inbox is its name."""
+    config = GrzctlConfig.from_configuration(configuration)
+
+    target = config.inbox_target(LE_ID, BUCKET_NAME)
+
+    assert target.s3.bucket == BUCKET_NAME
+
+
+def test_inbox_target_honors_an_explicit_bucket_override(configuration: dict):
+    """An explicit ``bucket:`` names an S3 bucket that differs from the inbox name."""
+    inbox = {**INBOX, "private_key_path": configuration["archives"]["signing_key_path"], "bucket": "grz-incoming-prod"}
+    configuration["leistungserbringer"] = {LE_ID: {"inbox_buckets": {"inbox-external": inbox}}}
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    assert config.inbox_target(LE_ID, "inbox-external").s3.bucket == "grz-incoming-prod"
+
+
 @pytest.mark.parametrize("field", ["authorization_url", "client_id", "client_secret", "api_base_url"])
 def test_a_config_without_a_pruefbericht_field_fails(configuration: dict, field: str):
     """Every grzctl command loads the whole config.

@@ -1,9 +1,10 @@
 import datetime
 import json
+import logging
 from collections.abc import Callable
 
 import pytest
-from grz_db.errors import DuplicateTanGError, OutdatedDatabaseSchemaError
+from grz_db.errors import DuplicateTanGError, OutdatedDatabaseSchemaError, SubmissionNotFoundError
 from grz_db.models.submission import (
     Donor,
     Submission,
@@ -328,6 +329,40 @@ def test_the_schema_is_checked_once_per_database(db: SubmissionDb, monkeypatch: 
     db.get_submission(SUBMISSION_ID)
 
     assert calls == 1
+
+
+def test_set_submission_inbox_records_the_inbox(db: SubmissionDb, submission) -> None:
+    """Recording the inbox stores only the inbox name; the S3 bucket follows from the config."""
+    db.set_submission_inbox(SUBMISSION_ID, "inbox")
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.inbox == "inbox"
+
+
+def test_set_submission_inbox_overwrites(db: SubmissionDb, submission) -> None:
+    """Recording a new inbox replaces the old one."""
+    db.set_submission_inbox(SUBMISSION_ID, "inbox")
+    db.set_submission_inbox(SUBMISSION_ID, "inbox-2")
+
+    assert (retrieved := db.get_submission(SUBMISSION_ID)) is not None
+    assert retrieved.inbox == "inbox-2"
+
+
+def test_set_submission_inbox_overwrite_is_logged(db: SubmissionDb, submission, caplog) -> None:
+    """Replacing a recorded inbox warns; the first recording and identical rewrites stay silent."""
+    with caplog.at_level(logging.WARNING, logger="grz_db"):
+        db.set_submission_inbox(SUBMISSION_ID, "inbox")
+        db.set_submission_inbox(SUBMISSION_ID, "inbox")
+        db.set_submission_inbox(SUBMISSION_ID, "inbox-2")
+
+    assert caplog.text.count("Overwriting inbox of submission") == 1
+    assert "Overwriting inbox of submission 123456789_2024-01-01_abcdef01: 'inbox' -> 'inbox-2'." in caplog.text
+
+
+def test_set_submission_inbox_unknown_submission_raises(db: SubmissionDb) -> None:
+    with pytest.raises(SubmissionNotFoundError):
+        db.set_submission_inbox(SUBMISSION_ID, "inbox")
 
 
 def test_a_database_that_is_behind_is_asked_again(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
