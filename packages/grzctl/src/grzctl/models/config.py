@@ -203,35 +203,11 @@ class ArchivesConfig(IgnoringBaseModel):
     non_consented: ArchiveTarget
     """Target definition for non-consented submissions."""
 
-    signing_key: SecretStr | None = None
-    """The GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
-
-    signing_key_path: FilePath | None = None
-    """Path to the GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
-
-    signing_key_passphrase: SecretStr | None = None
-    """Passphrase to the GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
-
     @model_validator(mode="after")
     def check_buckets_are_unique(self) -> "ArchivesConfig":
         if self.consented.s3.bucket == self.non_consented.s3.bucket:
             raise ValueError("consented and non-consented buckets must be distinct.")
         return self
-
-    @model_validator(mode="after")
-    def validate_signing_key(self) -> "ArchivesConfig":
-        _check_key_fields("signing_key", self.signing_key, self.signing_key_path, required=True)
-        return self
-
-    def load_signing_key(self) -> X25519PrivateKey:
-        """Load the signing key in memory.
-
-        :returns: The signing key.
-        :raises ConfigurationError: If the key cannot be loaded.
-        """
-        return _load_private_key(
-            self.signing_key, self.signing_key_path, self.signing_key_passphrase, key_name="archives.signing_key"
-        )
 
     def load_private_key(self, archive: Literal["consented", "non_consented"]) -> X25519PrivateKey:
         """Load the private key of an archive in memory, from its inline text or from its file.

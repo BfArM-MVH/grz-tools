@@ -9,6 +9,7 @@ import crypt4gh.keys
 import crypt4gh.keys.c4gh
 import grz_common.exceptions as grzexc
 import pytest
+import yaml
 from grz_common.models.s3 import S3Options
 from grzctl.models.config import ArchivesConfig, ArchiveTarget, GrzctlConfig, InboxConfig
 from pydantic import ValidationError
@@ -35,52 +36,6 @@ def _archive_target(bucket: str, unread_file: str) -> ArchiveTarget:
     return ArchiveTarget(s3=S3Options(bucket=bucket), public_key_path=unread_file)
 
 
-def _archives(unread_file: str, **signing_key_fields) -> ArchivesConfig:
-    return ArchivesConfig(
-        consented=_archive_target("consented", unread_file),
-        non_consented=_archive_target("non_consented", unread_file),
-        **signing_key_fields,
-    )
-
-
-def test_neither_signing_key_nor_signing_key_path_fails(unread_file: str):
-    with pytest.raises(ValidationError, match="Either signing_key or signing_key_path must be set"):
-        _archives(unread_file)
-
-
-def test_both_signing_key_and_signing_key_path_fails(key_path: Path, unread_file: str):
-    with pytest.raises(ValidationError, match="Only one of signing_key or signing_key_path must be set"):
-        _archives(unread_file, signing_key=key_path.read_text(), signing_key_path=str(key_path))
-
-
-def test_signing_key_path_loads_with_its_passphrase(key_path: Path, expected_key: bytes, no_prompt, unread_file: str):
-    archives = _archives(unread_file, signing_key_path=str(key_path), signing_key_passphrase=PASSPHRASE)
-
-    assert archives.load_signing_key().private_bytes_raw() == expected_key
-
-
-def test_inline_signing_key_loads_in_memory(key_path: Path, expected_key: bytes, no_prompt, unread_file: str):
-    archives = _archives(unread_file, signing_key=key_path.read_text(), signing_key_passphrase=PASSPHRASE)
-
-    with (
-        patch("builtins.open", side_effect=AssertionError("no file may be opened")),
-        patch("tempfile.NamedTemporaryFile", side_effect=AssertionError("no temporary file may be written")),
-        patch("tempfile.mkstemp", side_effect=AssertionError("no temporary file may be written")),
-    ):
-        loaded = archives.load_signing_key()
-
-    assert loaded.private_bytes_raw() == expected_key
-
-
-def test_inline_signing_key_is_named_by_its_config_location_in_errors(no_prompt, unread_file: str):
-    archives = _archives(unread_file, signing_key="not a key")
-
-    with pytest.raises(grzexc.ConfigurationError, match=r"Secret key archives\.signing_key cannot be read") as exc_info:
-        archives.load_signing_key()
-
-    assert "not a key" not in str(exc_info.value)
-
-
 def test_both_archive_private_key_and_private_key_path_fails(key_path: Path, unread_file: str):
     with pytest.raises(ValidationError, match="Only one of private_key or private_key_path must be set"):
         ArchiveTarget(
@@ -97,7 +52,6 @@ def test_inline_archive_private_key_is_named_by_its_config_location_in_errors(no
         non_consented=ArchiveTarget(
             s3=S3Options(bucket="non_consented"), public_key_path=unread_file, private_key="not a key"
         ),
-        signing_key_path=unread_file,
     )
 
     with pytest.raises(
@@ -122,19 +76,22 @@ def test_both_inbox_private_key_and_private_key_path_fails(key_path: Path):
         _inbox(private_key=key_path.read_text(), private_key_path=str(key_path))
 
 
+def _other_sections(tmp_path: Path, unread_file: str) -> dict:
+    """The sections of a config other than ``leistungserbringer``."""
+    return {
+        "archives": {
+            name: {"s3": {"bucket": name}, "public_key_path": unread_file} for name in ("consented", "non_consented")
+        },
+        "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
+        "pruefbericht": PRUEFBERICHT,
+        "identifiers": {"grz": "GRZK00007"},
+    }
+
+
 def _grzctl_config(tmp_path: Path, unread_file: str, leistungserbringer: dict) -> GrzctlConfig:
     """A config with the given inboxes."""
-    archives = {
-        name: {"s3": {"bucket": name}, "public_key_path": unread_file} for name in ("consented", "non_consented")
-    }
     return GrzctlConfig.from_configuration(
-        {
-            "leistungserbringer": leistungserbringer,
-            "archives": {**archives, "signing_key_path": unread_file},
-            "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
-            "pruefbericht": PRUEFBERICHT,
-            "identifiers": {"grz": "GRZK00007"},
-        }
+        {"leistungserbringer": leistungserbringer, **_other_sections(tmp_path, unread_file)}
     )
 
 
@@ -216,7 +173,7 @@ def test_inbox_target_loads_the_key_of_its_own_inbox(
     assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(key_paths["second"], None)
 
 
-def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
+def test_yaml_anchors_share_one_key_between_two_inboxes(
     tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
 ):
     """A GRZ with one key pair for all inboxes writes the key once and refers to it with YAML aliases."""
@@ -240,8 +197,6 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
         "  non_consented:\n"
         "    s3: {bucket: non_consented}\n"
         f"    public_key_path: {unread_file}\n"
-        "  signing_key: *grz_key\n"
-        "  signing_key_passphrase: *grz_key_passphrase\n"
         "db:\n"
         f"  database_url: sqlite:///{tmp_path / 'unused.sqlite'}\n"
         "  author: {name: test}\n"
@@ -258,7 +213,64 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
     for inbox_name in ("inbox-a", "inbox-b"):
         loaded = config.inbox_target("260914050", inbox_name).load_private_key()
         assert loaded.private_bytes_raw() == expected_key, inbox_name
-    assert config.archives.load_signing_key().private_bytes_raw() == expected_key
+
+
+INBOX_DEFAULTS_LAYOUT = """\
+inbox_defaults: &inbox_defaults # grzctl ignores this section; the inboxes merge it with <<
+  endpoint_url: https://s3.example.org
+  private_key_path: {private_key_path}
+leistungserbringer:
+  "123456789": # LE ID
+    alias: "FOO" # optional
+    inbox_buckets:
+      main: # the inbox name, which --inbox takes
+        <<: *inbox_defaults
+        bucket: le-123456789 # optional, defaults to the inbox name
+  "000000000":
+    inbox_buckets:
+      main:
+        <<: *inbox_defaults
+        bucket: le-000000000
+"""
+"""The ``inbox_defaults`` layout of ``crypt4gh-keys.md``, with a placeholder for the key file."""
+
+
+def test_inboxes_merge_the_inbox_defaults(tmp_path: Path, key_path: Path, unread_file: str):
+    """Each inbox merges the top-level ``inbox_defaults`` with ``<<``, as ``crypt4gh-keys.md`` shows.
+
+    ``grzctl --config`` loads the file with :meth:`GrzctlConfig.from_path`.
+    """
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        INBOX_DEFAULTS_LAYOUT.format(private_key_path=key_path) + yaml.safe_dump(_other_sections(tmp_path, unread_file))
+    )
+
+    config = GrzctlConfig.from_path(config_path)
+
+    for submitter_id in ("123456789", "000000000"):
+        target = config.inbox_target(submitter_id, "main")
+        assert str(target.s3.endpoint_url) == "https://s3.example.org/", submitter_id
+        assert target.private_key_path == key_path, submitter_id
+        assert target.s3.bucket == f"le-{submitter_id}", submitter_id
+
+
+def test_a_config_with_the_removed_signing_key_fields_still_loads(tmp_path: Path, unread_file: str):
+    """The config ignores ``archives.signing_key``, ``signing_key_path`` and ``signing_key_passphrase``.
+
+    ``grzctl encrypt`` signs with the key of the submission's inbox instead.
+    Not even a missing file in ``signing_key_path`` fails the config.
+    """
+    data = _other_sections(tmp_path, unread_file)
+    data["leistungserbringer"] = {"260914050": {"inbox_buckets": {"inbox": {"private_key_path": unread_file}}}}
+    data["archives"]["signing_key"] = "not a key"
+    data["archives"]["signing_key_path"] = str(tmp_path / "missing.sec")
+    data["archives"]["signing_key_passphrase"] = PASSPHRASE
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data))
+
+    config = GrzctlConfig.from_path(config_path)
+
+    assert "signing_key_path" not in config.archives.model_dump()
 
 
 @pytest.mark.parametrize(
@@ -266,7 +278,6 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
     [
         (("leistungserbringer", "260914050", "inbox_buckets", "inbox"), "private_key_path"),
         (("archives", "consented"), "public_key_path"),
-        (("archives",), "signing_key_path"),
     ],
 )
 def test_a_missing_key_file_fails_loading_the_config(

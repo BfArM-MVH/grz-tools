@@ -465,7 +465,6 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str | Non
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
-        "signing_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
     }
 
 

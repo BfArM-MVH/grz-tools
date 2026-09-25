@@ -36,7 +36,7 @@ def _config(tmp_path, unread_file: str, inbox_names: list[str]) -> GrzctlConfig:
                     "inbox_buckets": {inbox_name: {"private_key_path": unread_file} for inbox_name in inbox_names}
                 }
             },
-            "archives": {**archives, "signing_key_path": unread_file},
+            "archives": archives,
             "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
             "pruefbericht": PRUEFBERICHT,
             "identifiers": {"grz": "GRZK00007"},

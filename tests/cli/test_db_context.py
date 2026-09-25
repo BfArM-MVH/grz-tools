@@ -146,7 +146,7 @@ def mock_command(command_spec, submission_id):
             mock_submission = MagicMock()
             mock_submission.metadata.content.submission_id = submission_id
             mock_submission.submission_id = submission_id
-            # decrypt loads the private key of this submitter's inboxes, which full_config_path configures
+            # decrypt and encrypt load the private key of this submitter's inbox, which full_config_path configures
             mock_submission.metadata.content.submission.submitter_id = submission_id[:9]
 
             if command_spec["id_source"] == "submission":
