@@ -243,6 +243,67 @@ def test_load_decryption_key_fails_for_a_submitter_missing_from_the_config(tmp_p
         config.load_decryption_key("260914050")
 
 
+def test_load_inbox_decryption_key_picks_the_key_of_one_inbox(
+    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
+):
+    """The recorded inbox names its own key, so two inboxes may use different keys."""
+    first_key = key_paths["first"].read_text()
+    config = _grzctl_config(
+        tmp_path,
+        unread_file,
+        {
+            "260914050": {
+                "inbox_buckets": {
+                    "inbox-a": {"private_key": first_key},
+                    "inbox-b": {"private_key_path": str(key_paths["second"])},
+                }
+            }
+        },
+    )
+
+    loaded = config.load_inbox_decryption_key("260914050", "inbox-b")
+
+    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(key_paths["second"], None)
+
+
+def test_load_inbox_decryption_key_disambiguates_inboxes_that_load_decryption_key_refuses(
+    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
+):
+    """The fallback rejects two inboxes with different keys; naming the inbox is what resolves them."""
+    config = _grzctl_config(
+        tmp_path,
+        unread_file,
+        {
+            "260914050": {
+                "inbox_buckets": {
+                    "inbox-a": {"private_key": key_paths["first"].read_text()},
+                    "inbox-b": {"private_key_path": str(key_paths["second"])},
+                }
+            }
+        },
+    )
+    with pytest.raises(grzexc.ConfigurationError, match="different private keys"):
+        config.load_decryption_key("260914050")
+
+    assert config.load_inbox_decryption_key(
+        "260914050", "inbox-a"
+    ).private_bytes_raw() == crypt4gh.keys.get_private_key(key_paths["first"], None)
+
+
+def test_load_inbox_decryption_key_unknown_submitter_exits(tmp_path: Path, unread_file: str):
+    config = _config_with_one_inbox(tmp_path, unread_file, private_key_path=unread_file)
+
+    with pytest.raises(SystemExit):
+        config.load_inbox_decryption_key("999999999", "inbox")
+
+
+def test_load_inbox_decryption_key_unknown_inbox_exits(tmp_path: Path, unread_file: str):
+    config = _config_with_one_inbox(tmp_path, unread_file, private_key_path=unread_file)
+
+    with pytest.raises(SystemExit):
+        config.load_inbox_decryption_key("260914050", "no-such-inbox")
+
+
 def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
     tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
 ):

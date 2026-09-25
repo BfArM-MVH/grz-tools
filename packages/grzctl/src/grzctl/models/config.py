@@ -327,12 +327,15 @@ class GrzctlConfig(IgnoringBaseSettings):
         )
 
     def load_decryption_key(self, submitter_id: str) -> X25519PrivateKey:
-        """Load the private key that decrypts the submissions of a submitter.
+        """Load a private key that decrypts the submissions of a submitter.
 
-        A submission's metadata names its submitter (LE), but neither the metadata nor the database
-        records the inbox that the submission came from. So all inboxes of the submitter must use one key.
+        A submission's metadata names its submitter (LE), but not always the inbox it came from.
+        When the database records the inbox, callers should prefer
+        :meth:`load_inbox_decryption_key`; this is the fallback for when it does not.
+        The fallback requires all inboxes of the submitter to use one key.
         Two inboxes use the same key if they name the same file or hold the same inline text,
-        for example through a YAML anchor. The passphrase is the first one that these inboxes set.
+        for example through a YAML anchor.
+        The passphrase is the first one that these inboxes set.
 
         :param submitter_id: Submitter (LE) ID, as in the submission's metadata.
         :returns: The private key.
@@ -378,3 +381,25 @@ class GrzctlConfig(IgnoringBaseSettings):
         prefix, inbox = group[0]
         passphrase = next((i.private_key_passphrase for _, i in group if i.private_key_passphrase is not None), None)
         return _load_private_key(f"{prefix}.private_key", inbox.private_key, inbox.private_key_path, passphrase)
+
+    def load_inbox_decryption_key(self, submitter_id: str, inbox_name: str) -> X25519PrivateKey:
+        """Load the private key that decrypts the submissions of one specific inbox.
+
+        Unlike :meth:`load_decryption_key`, this does not require all inboxes of the submitter
+        to use the same key.
+        The inbox names its own key, so a submitter may use a different key per inbox.
+        Callers know which inbox a submission came from when the database recorded it.
+
+        :param submitter_id: Submitter (LE) ID.
+        :param inbox_name: Inbox name under ``leistungserbringer.<submitter_id>.inbox_buckets``.
+        :returns: The private key of that inbox.
+        :raises ConfigurationError: If the key cannot be loaded.
+        """
+        target = self.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name)
+        prefix = f"leistungserbringer.{submitter_id}.inbox_buckets.{inbox_name}"
+        return _load_private_key(
+            f"{prefix}.private_key",
+            target.private_key,
+            target.private_key_path,
+            target.private_key_passphrase,
+        )
