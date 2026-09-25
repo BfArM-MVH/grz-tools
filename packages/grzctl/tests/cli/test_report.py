@@ -233,7 +233,7 @@ def quarterly_report_dir(migrated_database_config_path: Path, tmp_path: Path) ->
             "populate",
             "--no-confirm",
             "--submission-date",
-            "2025-09-15",
+            "2025-09-16",
             s3_metadata.submission_id,
             str(s3_metadata_path),
         ],
