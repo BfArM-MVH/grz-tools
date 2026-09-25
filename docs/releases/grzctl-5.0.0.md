@@ -1,6 +1,13 @@
-## grz-tools release (2026-09-22)
+## Upgrade guide: grzctl 5.0.0
 
-This release is mostly for GRZ operators. grz-cli now signs the encrypted files with the submitter's private key (#691). If that key has a passphrase, LEs set `C4GH_PASSPHRASE`, or `grz-cli encrypt` asks for the passphrase.
+This guide is for GRZ operators. It lists what to do before and after the update, and what behaves differently. The changelog of each package lists every change, see the [releases](https://github.com/BfArM-MVH/grz-tools/releases).
+
+The main changes:
+
+- grzctl reads one config file for all commands (#635).
+- grzctl tracks cases with `grzctl db case` (#633), see [Case tracking](../../packages/grzctl/docs/case-tracking.md).
+- Detailed QC reports a deviation without failing (#656).
+- A failed step records why it failed (#690), see [Error handling](../../packages/grzctl/docs/error-handling.md).
 
 ### Versions
 
@@ -163,19 +170,16 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 - SIGTERM stops grzctl the way Ctrl-C does, and the running step records `interrupted`.
 - A rerun of `archive` for an archived submission records `ARCHIVED` instead of failing.
 
+### grz-cli (#691, #694)
+
+- grz-cli signs the encrypted files with the submitter private key if `keys.submitter_private_key` or `keys.submitter_private_key_path` is set. Otherwise it signs them with a random key, as before.
+- LEs need not change anything.
+- Decryption does not check the sender key, so grzctl decrypts these files as before.
+- A key with a passphrase needs `C4GH_PASSPHRASE`, or grz-cli asks for it.
+
 ### Python API
 
 - grz-common, grzctl: the secret config fields are `SecretStr | None`. Read them with `grz_common.models.base.get_secret_value()` (#680).
 - grz-pydantic-models: `StrictIgnoringBaseModel` is renamed to `LosslessBaseModel` (#654).
 - grz-db: the `withhold_destructive` and `has_pending_destructive` methods are removed. Use `SubmissionChangeSet.undeclared_destructive_changes()` (#681).
 - grz-common: the expected exceptions derive from `grz_common.exceptions.GrzError`. `SubmissionValidationError` moves there from `grz_common.workers.submission`, and `grz_common.workers.download.DownloadError` is removed (#690).
-
----
-
-## Highlights
-
-- grzctl: case tracking with `grzctl db case` (#633), see [Case tracking](../../packages/grzctl/docs/case-tracking.md).
-- grzctl: detailed QC reports a deviation without failing (#656).
-- grzctl: a failed step records why it failed (#690), see [Error handling](../../packages/grzctl/docs/error-handling.md).
-
-For more information, see: https://github.com/BfArM-MVH/grz-tools/releases
