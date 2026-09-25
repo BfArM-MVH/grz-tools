@@ -12,6 +12,8 @@ import grzctl.cli
 import pytest
 import yaml
 
+from .conftest import PRUEFBERICHT
+
 SIGNING_KEY_PASSPHRASE = "signing-key-passphrase"
 
 
@@ -32,7 +34,7 @@ def _config(public_key: str, unread_file: str, signing_key: dict[str, str]) -> d
             **signing_key,
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
-        "pruefbericht": {},
+        "pruefbericht": PRUEFBERICHT,
         "identifiers": {"grz": "GRZT00000"},
     }
 
@@ -120,5 +122,5 @@ def test_encrypt_fails_if_the_signing_key_cannot_be_loaded(tmp_path, crypt4gh_pu
         result = _invoke_encrypt(config_path, _submission_dir(tmp_path), mock_worker_cls)
 
     assert isinstance(result.exception, grzexc.ConfigurationError), result.output
-    assert f"archives.signing_key_path: Secret key {not_a_key_path} cannot be read" in str(result.exception)
+    assert f"Secret key {not_a_key_path} cannot be read" in str(result.exception)
     mock_worker_cls.return_value.encrypt.assert_not_called()

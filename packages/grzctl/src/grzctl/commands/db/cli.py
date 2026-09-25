@@ -1114,7 +1114,7 @@ def _submission_upload_date(
     except click.ClickException as e:
         raise click.ClickException(f"{missing}: {e}") from e
 
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
     try:
         uploaded = get_metadata_upload_timestamp(init_s3_client(s3_options), s3_options.bucket, submission_id)
     except (MissingSubmissionFileError, SubmissionCleanedError) as e:
@@ -2345,13 +2345,7 @@ def sync_from_inbox(
     inbox_name = require_inbox(
         configuration, submitter_id=submitter_id, inbox_name=inbox_name, exc_type=click.UsageError
     )
-    try:
-        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
-    except Exception:
-        console_err.print(
-            f"[red]Error resolving S3 configuration for inbox '{inbox_name}': {traceback.format_exc()}[/red]"
-        )
-        sys.exit(1)
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
 
     db_url = ctx.obj["db_url"]
     author = ctx.obj["author"]

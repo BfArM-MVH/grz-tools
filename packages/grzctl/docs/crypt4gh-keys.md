@@ -1,129 +1,138 @@
 # Crypt4GH keys
 
-Every encrypted file in a submission is a Crypt4GH file.
-The GRZ config names the Crypt4GH keys that the different steps need:
+The files of a submission are Crypt4GH files.
+The LE encrypts them for the GRZ with grz-cli.
+The GRZ decrypts them with grzctl and re-encrypts them for an archive.
+This page lists the Crypt4GH keys that each tool needs, and where they go in its config.
 
-- decrypting a downloaded submission needs the key of the inbox that it came from,
-- re-encrypting a validated submission for the archive needs the archive's public key,
-- signing the re-encrypted files needs the GRZ signing key.
+## Which key goes where
 
-This page explains where each key goes in the config, which key layout the primary
-setup uses, and how to deviate from it.
+| Key | Tool and config field | Used for |
+| --- | --------------------- | -------- |
+| GRZ public key | grz-cli: `keys.grz_public_key[_path]` | The LE encrypts a submission for the GRZ. |
+| LE private key | grz-cli: `keys.submitter_private_key[_path]`, optional | grz-cli signs the files that it encrypts. |
+| GRZ private key | grzctl: `leistungserbringer.<LE ID>.inbox_buckets.<inbox>.private_key[_path]` | grzctl decrypts a submission from that inbox. |
+| GRZ signing key | grzctl: `archives.signing_key[_path]` | grzctl signs the files that it re-encrypts for an archive. |
+| Archive public keys | grzctl: `archives.consented.public_key[_path]`, `archives.non_consented.public_key[_path]` | grzctl re-encrypts a submission for the matching archive. |
 
-## Key roles
+`<name>[_path]` stands for the two fields `<name>` and `<name>_path`.
+The GRZ gives its public key to its LEs.
+In the primary setup, the GRZ signing key is the GRZ private key.
+No grzctl command needs the private keys of the archives, so they are in no config.
 
-| Key | Owned by | Where it appears | Used for |
-| --- | -------- | ---------------- | -------- |
-| GRZ key pair | GRZ | `leistungserbringer.<le>.inbox_buckets.<inbox>.private_key[_path]`, and `archives.signing_key[_path]` for signing | decrypting a submission, signing files for the archive |
-| LE key pair | LE (submitter) | `keys.submitter_private_key_path` in the grz-cli config, `keys.grz_public_key` is the GRZ public key | signing for the inbox |
-| Archive key pairs | GRZ | `archives.consented.public_key[_path]`, `archives.non_consented.public_key[_path]` | re-encrypting files for the archive |
+`db.author.private_key[_path]` in the grzctl config is no Crypt4GH key.
+It signs the submission states in the database, and this page does not cover it.
 
-A _key location_ is one of `private_key`, `private_key_path`, `public_key`, or `public_key_path`.
-Every key location is validated the same way:
+## Key fields
 
-- `key` and `key_path` are mutual: setting both is a configuration error.
-- A `key_path` must name an existing file.
-- A required key location must set exactly one of the two fields.
+The field `<name>` holds the key inline, and the field `<name>_path` names a file with the key.
+Setting both is a configuration error.
+Every key except the LE private key is required.
+For a required key, one of the two fields must be set.
+A `_path` field must name an existing regular file.
 
-A private key may be encrypted.
-The passphrase comes from the first of:
+An inline public key must be in the Crypt4GH format.
+A public key file and a private key can also be in the OpenSSH format, as an ed25519 key.
 
-1. the `..._passphrase` config field of the key,
+A private key can have a passphrase.
+grzctl takes the passphrase from the first of:
+
+1. the key's `<name>_passphrase` field, for example `archives.signing_key_passphrase`,
 2. the `C4GH_PASSPHRASE` environment variable,
-3. an interactive prompt.
+3. a prompt.
 
-The LE's private key is a Crypt4GH key in the OpenSSH format.
-`grz-cli encrypt` reads it from `keys.submitter_private_key_path` in the grz-cli config.
-A passphrase-protected LE key uses the same `C4GH_PASSPHRASE` chain.
+grz-cli has no passphrase field, so it starts with `C4GH_PASSPHRASE`.
 
-## Primary scenario: one GRZ key pair
-
-The simplest layout uses a single GRZ key pair for every inbox and for signing.
-The LE encrypts each submission to the GRZ public key.
-The GRZ (grzctl) decrypts it with the matching private key, and re-encrypts it for the
-archive with `archives.<consented|non_consented>.public_key`.
-The GRZ private key signs all files that grzctl writes to an archive.
-A YAML anchor defines the key once and reuses it everywhere.
+## grz-cli (LE)
 
 ```yaml
-x-grz-key: &grz_key_path /etc/grzctl/keys/grz.sec
+keys:
+  grz_public_key_path: /path/to/grz.pub # or grz_public_key with the key inline
+  submitter_private_key_path: /path/to/le.sec # optional, or submitter_private_key with the key inline
+```
 
+`grz-cli encrypt` encrypts every file for the GRZ public key.
+It signs the files with the LE private key if one is set, and with a random key otherwise.
+
+## grzctl (GRZ): one GRZ key pair
+
+The primary setup uses one GRZ key pair for all inboxes of all LEs, and for signing.
+A YAML anchor names the key file once, and the other fields reuse it.
+The two archives have one key pair each, and the config holds only their public keys.
+The example leaves out the S3 credentials.
+
+```yaml
 leistungserbringer:
-  "260914050": # LE ID, the key of the leistungserbringer mapping
-    alias: "GZD_LE" # optional
+  "123456789": # LE ID
+    alias: "FOO" # optional
     inbox_buckets:
-      inbox: # the name that --inbox and --inbox-name take
+      inbox: # the name that --inbox takes
         endpoint_url: https://s3.example.org
-        bucket: le-260914050 # optional, defaults to the inbox name
-        private_key_path: *grz_key_path
-  # …more LEs use the same anchor
+        bucket: le-123456789 # optional, defaults to the inbox name
+        private_key_path: &grz_key /path/to/grz.sec
+  "000000000":
+    inbox_buckets:
+      inbox:
+        endpoint_url: https://s3.example.org
+        bucket: le-000000000
+        private_key_path: *grz_key
 
 archives:
   consented:
     s3:
       endpoint_url: https://s3.example.org
-      bucket: grz-archive-consented
-    public_key_path: /etc/grzctl/keys/archive-consented.pub
+      bucket: grz-consented
+    public_key_path: /path/to/consented.pub
   non_consented:
     s3:
       endpoint_url: https://s3.example.org
-      bucket: grz-archive-non-consented
-    public_key_path: /etc/grzctl/keys/archive-non-consented.pub
-  signing_key_path: *grz_key_path
+      bucket: grz-non-consented
+    public_key_path: /path/to/non_consented.pub
+  signing_key_path: *grz_key
 
 db:
-  database_url: sqlite:////var/lib/grzctl/grz.db
+  database_url: postgresql+psycopg://...
   author:
-    name: alice
-    private_key_path: /etc/grzctl/keys/author.sec
+    name: ...
+    private_key_path: /path/to/author.sec
 
 pruefbericht:
-  base_url: https://example.org
-  auth_url: https://example.org/auth
-  client_id: …
-  client_secret: …
+  authorization_url: https://...
+  client_id: ...
+  client_secret: ...
+  api_base_url: https://...
 
 identifiers:
-  grz: GRZABC123
+  grz: GRZX00000
 ```
 
-The archive public keys are the public halves of two separate key pairs.
-The config holds only the public halves.
-The private halves are not part of the grzctl config, so archived data is no longer open to the
-LE that uploaded it.
+If the GRZ private key has a passphrase, anchor `private_key_passphrase` and `signing_key_passphrase` the same way, or set `C4GH_PASSPHRASE`.
 
-## Variant: a separate signing key
+## grzctl (GRZ): a separate signing key
 
-A GRZ can sign the re-encrypted files with a key of its own that differs from the inbox key.
-Set that key in `archives.signing_key` or `archives.signing_key_path` instead of reusing the
-anchor:
+grzctl can sign with a key other than the inbox key.
+Name that key in `archives.signing_key_path`, or put it inline in `archives.signing_key`, instead of the anchor:
 
 ```yaml
 archives:
-  …
-  # signing_key: <inline crypt4gh private key>  # instead of the _path
-  signing_key_path: /etc/grzctl/keys/signing.sec
+  ...
+  signing_key_path: /path/to/signing.sec
 ```
 
-The inbox private keys stay where the primary scenario puts them.
-Only the signing role moves to the other key.
+## grzctl (GRZ): different keys per inbox
 
-## Variant: several inboxes with different keys
-
-Every inbox can name its own private key:
+Each inbox can name its own private key.
+This includes the inboxes of one LE.
+`grzctl decrypt --inbox <name>` decrypts a submission with the key of that inbox.
+grzctl looks up the inbox under the LE that the submission's metadata names.
 
 ```yaml
 leistungserbringer:
-  "260914050":
+  "123456789":
     inbox_buckets:
-      inbox: { endpoint_url: …, bucket: …, private_key_path: /etc/grzctl/keys/le-a.sec }
-      inbox2: { endpoint_url: …, bucket: …, private_key_path: /etc/grzctl/keys/le-b.sec }
+      inbox: { endpoint_url: ..., bucket: le-123456789, private_key_path: /path/to/key-a.sec }
+      inbox2: { endpoint_url: ..., bucket: le-123456789-2, private_key_path: /path/to/key-b.sec }
+  "000000000":
+    inbox_buckets:
+      inbox: { endpoint_url: ..., bucket: le-000000000, private_key_path: /path/to/key-c.sec }
 ```
-
-Decrypting picks the key by the inbox the submission came from.
-When the database recorded that inbox, `decrypt` loads exactly its key.
-Then each inbox of one LE may use its own key.
-For a submission whose origin is not recorded, decryption falls back to the submitter.
-Then the inboxes of one LE must all use one key.
-Two inboxes use the same key when they name the same file or hold the same inline text,
-for example through a YAML anchor.

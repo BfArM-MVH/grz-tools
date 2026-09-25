@@ -82,14 +82,14 @@ def test_list(
 
 def test_list_with_partial_env(remote_bucket_with_version, working_dir_path, tmp_path):
     """If database configuration is partially-populated via environment variables, config validation must fail."""
-    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _GRZCTL_PRUEFBERICHT_DUMMY, _grzctl_archives
 
     no_db_config = {
         "leistungserbringer": {
             "260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}
         },
         "archives": _grzctl_archives(),
-        "pruefbericht": {},
+        "pruefbericht": _GRZCTL_PRUEFBERICHT_DUMMY,
         "identifiers": {"grz": "GRZK00007"},
     }
     config_file = tmp_path / "config.no_db.yaml"

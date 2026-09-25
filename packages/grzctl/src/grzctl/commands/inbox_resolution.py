@@ -73,7 +73,7 @@ def resolve_inbox(  # noqa: PLR0913
     3. The submitter's only inbox.
     4. With ``scan``, the sole inbox still holding ``submission_id`` in S3.
 
-    The bucket always follows from the inbox via :meth:`GrzctlConfig.resolve_inbox`.
+    The bucket always follows from the inbox via :meth:`GrzctlConfig.inbox_target`.
 
     :param configuration: The grzctl configuration, which names the submitter's inboxes.
     :param submitter_id: The submitter (LE) the submission belongs to.
@@ -167,7 +167,7 @@ def _inbox_listing(configuration: GrzctlConfig, submitter_id: str, inbox_name: s
     """Submission IDs found in one inbox, listing each inbox at most once per process."""
     key = (submitter_id, inbox_name)
     if key not in _inbox_listing_cache:
-        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+        s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
         _inbox_listing_cache[key] = frozenset(
             summary.submission_id for summary in query_submissions(s3_options, show_cleaned=True)
         )

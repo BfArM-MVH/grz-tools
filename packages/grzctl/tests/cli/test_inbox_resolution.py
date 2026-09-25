@@ -12,6 +12,8 @@ import pytest
 from grzctl.models.config import GrzctlConfig
 from moto import mock_aws
 
+from .conftest import PRUEFBERICHT
+
 SUBMITTER_ID = "260914050"
 SUBMISSION_ID = "260914050_2024-01-01_abcdef01"
 REGION = "us-east-1"
@@ -36,7 +38,7 @@ def _config(tmp_path, unread_file: str, inbox_names: list[str]) -> GrzctlConfig:
             },
             "archives": {**archives, "signing_key_path": unread_file},
             "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
-            "pruefbericht": {},
+            "pruefbericht": PRUEFBERICHT,
             "identifiers": {"grz": "GRZK00007"},
         }
     )

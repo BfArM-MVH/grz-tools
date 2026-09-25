@@ -135,7 +135,7 @@ def list_submissions(  # noqa: PLR0913, PLR0917
     resolved_inbox = require_inbox(
         configuration, submitter_id=submitter_id, inbox_name=inbox_name, hint="Pass --inbox to list one of them."
     )
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
 
     submissions = query_submissions(s3_options, show_cleaned)
 

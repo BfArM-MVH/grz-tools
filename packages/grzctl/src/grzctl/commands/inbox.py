@@ -28,7 +28,7 @@ def push_version(configuration: GrzctlConfig, **kwargs):
     failures: list[tuple[str, str]] = []
     for le_id, entry in configuration.leistungserbringer.items():
         for inbox_name in entry.inbox_buckets:
-            s3_options = configuration.resolve_inbox(submitter_id=le_id, inbox_name=inbox_name).s3
+            s3_options = configuration.inbox_target(submitter_id=le_id, inbox_name=inbox_name).s3
             target = f"s3://{s3_options.bucket}/{VERSION_FILE_KEY}"
             try:
                 s3_resource = init_s3_resource(s3_options)

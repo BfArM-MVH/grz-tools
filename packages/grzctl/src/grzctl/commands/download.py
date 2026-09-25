@@ -59,7 +59,7 @@ def download(  # noqa: PLR0913, PLR0917
         db_service=get_submission_db_or_none(configuration),
         scan=True,
     )
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
     bucket_name = s3_options.bucket
     inbox_desc = f"'{resolved_inbox}' (bucket '{bucket_name}')" if resolved_inbox != bucket_name else f"'{bucket_name}'"
 

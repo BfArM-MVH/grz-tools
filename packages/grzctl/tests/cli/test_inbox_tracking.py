@@ -15,7 +15,7 @@ import yaml
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
-from grzctl.models.config import GrzctlConfig
+from grzctl.models.config import GrzctlConfig, InboxTarget
 
 SUBMITTER_ID = "260914050"
 SUBMISSION_ID = "260914050_2025-09-15_c64603a7"
@@ -270,10 +270,10 @@ def _submission_dir(tmp_path: Path, db: SubmissionDb, inbox: str | None) -> Path
     return submission_dir
 
 
-def test_decrypt_uses_the_key_of_the_recorded_inbox(
+def test_decrypt_uses_the_key_of_the_named_inbox(
     migrated_database_config: GrzctlConfig, tmp_path: Path, db: SubmissionDb
 ):
-    """A recorded inbox names its own key: two different keys per inbox still decrypt."""
+    """--inbox names the inbox whose key decrypts the submission."""
     config_path = _config_with_inbox(migrated_database_config, tmp_path)
     submission_dir = _submission_dir(tmp_path, db, inbox=INBOX)
 
@@ -282,36 +282,14 @@ def test_decrypt_uses_the_key_of_the_recorded_inbox(
     with (
         patch("grzctl.commands.decrypt.DbContext", return_value=context),
         patch("grzctl.commands.decrypt.Worker", return_value=_decrypt_worker()) as worker_cls,
-        patch.object(GrzctlConfig, "load_inbox_decryption_key") as inbox_key,
-        patch.object(GrzctlConfig, "load_decryption_key") as fallback_key,
+        patch.object(InboxTarget, "load_private_key", autospec=True) as load_private_key,
     ):
-        result = _invoke("--config", str(config_path), "decrypt", "--submission-dir", str(submission_dir))
-
-    assert result.exit_code == 0, result.stderr
-    worker = worker_cls.return_value
-    worker.decrypt.assert_called_once()
-    inbox_key.assert_called_once_with(SUBMITTER_ID, INBOX)
-    fallback_key.assert_not_called()
-
-
-def test_decrypt_falls_back_when_no_inbox_is_recorded(
-    migrated_database_config: GrzctlConfig, tmp_path: Path, db: SubmissionDb
-):
-    """Without a recorded inbox, decryption keeps the one-key-per-submitter rule."""
-    config_path = _config_with_inbox(migrated_database_config, tmp_path)
-    submission_dir = _submission_dir(tmp_path, db, inbox=None)
-
-    context = MagicMock()
-    context.__enter__.return_value.db = MagicMock()
-    with (
-        patch("grzctl.commands.decrypt.DbContext", return_value=context),
-        patch("grzctl.commands.decrypt.Worker", return_value=_decrypt_worker()) as worker_cls,
-        patch.object(GrzctlConfig, "load_inbox_decryption_key") as inbox_key,
-        patch.object(GrzctlConfig, "load_decryption_key") as fallback_key,
-    ):
-        result = _invoke("--config", str(config_path), "decrypt", "--submission-dir", str(submission_dir))
+        result = _invoke(
+            "--config", str(config_path), "decrypt", "--submission-dir", str(submission_dir), "--inbox", INBOX
+        )
 
     assert result.exit_code == 0, result.stderr
     worker_cls.return_value.decrypt.assert_called_once()
-    inbox_key.assert_not_called()
-    fallback_key.assert_called_once_with(SUBMITTER_ID)
+    (target,) = load_private_key.call_args.args
+    assert target.submitter_id == SUBMITTER_ID
+    assert target.inbox_name == INBOX
