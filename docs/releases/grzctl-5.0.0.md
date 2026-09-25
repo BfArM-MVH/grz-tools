@@ -49,21 +49,23 @@ grzctl no longer installs grz-cli (#675). If you use grz-cli, for example for `g
 
 - grzctl reads one file for all commands, by default `~/.config/grzctl/config.yaml`.
 - `grzctl --config PATH <command>` replaces `--config-file` on each command. grzctl no longer merges several files.
-- Environment variables override the file, for example `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__INBOX__PRIVATE_KEY_PATH`.
+- Environment variables override the file, for example `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__PRIVATE_KEY_PATH`.
 
 All five top-level sections are required:
 
 ```yaml
+inbox_defaults: &inbox_defaults # optional; grzctl ignores this section, and the inboxes merge it with <<
+  endpoint_url: https://s3.example.org
+  private_key_path: /path/to/grz.sec
 leistungserbringer:
   "123456789": # LE ID, quoted
     alias: "FOO" # optional
     inbox_buckets:
-      inbox: # the name that --inbox takes
-        endpoint_url: https://s3.example.org
+      main: # the inbox name, which --inbox takes
+        <<: *inbox_defaults
+        bucket: le-123456789 # optional, defaults to the inbox name
         access_key: ...
         secret: ...
-        private_key_path: &grz_key /path/to/grz.sec
-        # bucket: other-name # optional, defaults to the inbox name
 archives:
   consented:
     s3:
@@ -75,7 +77,6 @@ archives:
       endpoint_url: https://s3.example.org
       bucket: grz-non-consented
     public_key_path: /path/to/non_consented.pub
-  signing_key_path: *grz_key # the same file as the inbox key
 db:
   database_url: postgresql+psycopg://...
   author:
@@ -93,7 +94,7 @@ pruefbericht:
   api_base_url: https://...
 ```
 
-`keys.grz_private_key_path` moves to `archives.signing_key_path` (#694). Every key field takes the key inline as `<name>` or a file as `<name>_path`. Setting both is an error. A private key has an optional `<name>_passphrase`. [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md) lists every key and its field.
+`keys.grz_private_key_path` goes away. Each inbox names its private key, and `encrypt` signs with it (#694, #696). Every key field takes the key inline as `<name>` or a file as `<name>_path`. Setting both is an error. A private key has an optional `<name>_passphrase`. [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md) lists every key and its field.
 
 `db.known_public_keys` now lists the keys. Move a path to a file to `db.known_public_keys_file` (#693). If neither is set, grzctl reads `~/.config/grzctl/known_public_keys`.
 
@@ -182,7 +183,6 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 ### grzctl: crypt4gh keys (#694)
 
 - `decrypt` decrypts with the key of the submission's inbox, which the next section describes. So the inboxes of one LE may use different keys.
-- `encrypt` signs with `archives.signing_key` or `archives.signing_key_path`.
 - Every key path must name a regular file. Otherwise every grzctl command stops.
 - An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`.
 - `archives.*.public_key` takes the public key inline, as `keys.grz_public_key` did in v4.0.0.
@@ -193,6 +193,7 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 - `download`, `clean` and `decrypt` take the inbox from `--inbox`, else from the database, else the LE's only inbox. `download` then also searches the LE's inboxes for the submission.
 - These three commands read the database only with `--update-db`, the default. Then the database must be reachable.
 - If no inbox resolves, `decrypt` fails and records `configuration_error`.
+- `encrypt` signs the files that it re-encrypts for an archive with the private key of the submission's inbox. It takes the inbox from the database, else the LE's only inbox. If no inbox resolves, it signs with a random key and logs a warning.
 - `decrypt --archive consented|non-consented` decrypts an archived submission. It takes the key from `--private-key-path`, else from the new optional `archives.<name>.private_key` or `private_key_path`. `--private-key-path` alone replaces the inbox key. Pass `--no-update-db`, so that the decrypt leaves the state of the submission unchanged.
 - `list` and `db sync-from-inbox` need `--inbox` only if the LE has several inboxes.
 - `db submission show` lists the inbox.
