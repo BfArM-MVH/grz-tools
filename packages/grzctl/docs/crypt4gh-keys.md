@@ -35,13 +35,11 @@ An inline public key must be in the Crypt4GH format.
 A public key file and a private key can also be in the OpenSSH format, as an ed25519 key.
 
 A private key can have a passphrase.
-grzctl takes the passphrase from the first of:
+grzctl and grz-cli take the passphrase from the first of:
 
-1. the key's `<name>_passphrase` field, for example `archives.signing_key_passphrase`,
+1. the key's `<name>_passphrase` field, for example `archives.signing_key_passphrase`, or `keys.submitter_private_key_passphrase` in grz-cli,
 2. the `C4GH_PASSPHRASE` environment variable,
 3. a prompt.
-
-grz-cli has no passphrase field, so it starts with `C4GH_PASSPHRASE`.
 
 ## grz-cli (LE)
 
@@ -49,6 +47,7 @@ grz-cli has no passphrase field, so it starts with `C4GH_PASSPHRASE`.
 keys:
   grz_public_key_path: /path/to/grz.pub # or grz_public_key with the key inline
   submitter_private_key_path: /path/to/le.sec # optional, or submitter_private_key with the key inline
+  submitter_private_key_passphrase: ... # optional
 ```
 
 `grz-cli encrypt` encrypts every file for the GRZ public key.

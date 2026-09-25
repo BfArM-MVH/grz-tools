@@ -34,6 +34,12 @@ class KeyModel(IgnoringBaseModel):
     If neither this field nor ``submitter_private_key`` is set, grz-cli signs them with a random key.
     """
 
+    submitter_private_key_passphrase: SecretStr | None = None
+    """
+    Passphrase to the submitter's crypt4gh private key (optional).
+    grz-cli takes the passphrase from this field, else from ``C4GH_PASSPHRASE``, else from a prompt.
+    """
+
     @model_validator(mode="after")
     def validate_grz_public_key(self) -> Self:
         if self.grz_public_key is None and self.grz_public_key_path is None:
@@ -50,7 +56,7 @@ class KeyModel(IgnoringBaseModel):
 
 
 class KeyConfigModel(IgnoringBaseModel):
-    # errors would show the raw input, and SecretStr does not mask the submitter private key there
+    # errors would show the raw input, and SecretStr does not mask the submitter private key and its passphrase there
     model_config = ConfigDict(hide_input_in_errors=True)
 
     keys: KeyModel
