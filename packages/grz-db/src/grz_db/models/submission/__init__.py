@@ -1045,8 +1045,7 @@ class SubmissionDb:
     ):
         """Initialize the SubmissionDb.
 
-        :param db_url: Database URL. A SQLite URL without a ``timeout`` query parameter gets
-            :data:`_SQLITE_BUSY_TIMEOUT_SECONDS`.
+        :param db_url: Database URL.
         :param author: Author recorded on every write, or ``None`` for a read-only instance.
         :param debug: Whether to echo SQL statements.
         :param case_resolver: Strategy every method here resolves a case with unless handed
