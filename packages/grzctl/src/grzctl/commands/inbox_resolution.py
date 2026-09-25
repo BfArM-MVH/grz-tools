@@ -107,7 +107,7 @@ def require_inbox(  # noqa: PLR0913
     db_service: SubmissionDb | None = None,
     scan: bool = False,
     hint: str = "Pass --inbox.",
-    exc_type: type[click.ClickException] = click.ClickException,
+    exc_type: type[Exception] = click.ClickException,
 ) -> str:
     """Resolve the inbox a command should operate on, or abort.
 
@@ -124,8 +124,9 @@ def require_inbox(  # noqa: PLR0913
     :param scan: Whether to scan the submitter's inboxes for ``submission_id`` when nothing else resolved.
     :param hint: Advice appended to the error, naming options that resolve.
     :param exc_type: The error to raise; ``click.UsageError`` for submitter-scoped commands.
+        ``decrypt`` passes :class:`~grz_common.exceptions.ConfigurationError`, which its ``DbContext`` records.
     :returns: The resolved inbox name.
-    :raises click.ClickException: if no inbox resolves.
+    :raises click.ClickException: if no inbox resolves, or *exc_type* if given.
     """
     resolved = resolve_inbox(
         configuration,

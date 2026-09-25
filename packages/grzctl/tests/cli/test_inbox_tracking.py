@@ -9,13 +9,16 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import click.testing
+import crypt4gh.keys
+import crypt4gh.keys.c4gh
 import grzctl.cli
 import pytest
 import yaml
+from grz_common.exceptions import ConfigurationError
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary
-from grz_db.models.submission import SubmissionDb
+from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
-from grzctl.models.config import GrzctlConfig, InboxTarget
+from grzctl.models.config import GrzctlConfig
 
 SUBMITTER_ID = "260914050"
 SUBMISSION_ID = "260914050_2025-09-15_c64603a7"
@@ -28,12 +31,22 @@ def db(migrated_database_config: GrzctlConfig) -> SubmissionDb:
     return SubmissionDb(db_url=migrated_database_config.db.database_url, author=None)
 
 
-def _config_with_inbox(migrated_database_config: GrzctlConfig, tmp_path: Path, inboxes=("inbox",)) -> Path:
-    """A config file whose submitter :data:`SUBMITTER_ID` has the given inboxes."""
+def _config_with_inbox(
+    migrated_database_config: GrzctlConfig,
+    tmp_path: Path,
+    inboxes=("inbox",),
+    key_paths: dict[str, Path] | None = None,
+) -> Path:
+    """A config file whose submitter :data:`SUBMITTER_ID` has the given inboxes.
+
+    Each inbox uses the private key that *key_paths* names for it, else the key of the DB author.
+    """
     data = migrated_database_config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": True})
+    author_key_path = data["db"]["author"]["private_key_path"]
+    key_paths = key_paths or {}
     data["leistungserbringer"] = {
         SUBMITTER_ID: {
-            "inbox_buckets": {name: {"private_key_path": data["db"]["author"]["private_key_path"]} for name in inboxes}
+            "inbox_buckets": {name: {"private_key_path": str(key_paths.get(name, author_key_path))} for name in inboxes}
         }
     }
     config_path = tmp_path / "config.inbox.yaml"
@@ -270,26 +283,73 @@ def _submission_dir(tmp_path: Path, db: SubmissionDb, inbox: str | None) -> Path
     return submission_dir
 
 
-def test_decrypt_uses_the_key_of_the_named_inbox(
+def _decrypt(config_path: Path, submission_dir: Path, worker: MagicMock) -> click.testing.Result:
+    """Run ``grzctl decrypt`` without --inbox, with the mocked *worker* and the real ``DbContext``."""
+    with patch("grzctl.commands.decrypt.Worker", return_value=worker):
+        return _invoke("--config", str(config_path), "decrypt", "--submission-dir", str(submission_dir))
+
+
+def _latest_state(db: SubmissionDb) -> SubmissionStateLog:
+    submission = db.get_submission(SUBMISSION_ID)
+    assert submission is not None
+    latest_state = submission.get_latest_state()
+    assert latest_state is not None
+    return latest_state
+
+
+def test_decrypt_uses_the_key_of_the_recorded_inbox(
     migrated_database_config: GrzctlConfig, tmp_path: Path, db: SubmissionDb
 ):
-    """--inbox names the inbox whose key decrypts the submission."""
-    config_path = _config_with_inbox(migrated_database_config, tmp_path)
-    submission_dir = _submission_dir(tmp_path, db, inbox=INBOX)
+    """A recorded inbox names its own key, so two inboxes with different keys still decrypt."""
+    key_paths = {}
+    for name in ("inbox-a", "inbox-b"):
+        key_paths[name] = tmp_path / f"{name}.sec"
+        crypt4gh.keys.c4gh.generate(key_paths[name], tmp_path / f"{name}.pub", None, comment=None)
+    config_path = _config_with_inbox(
+        migrated_database_config, tmp_path, inboxes=("inbox-a", "inbox-b"), key_paths=key_paths
+    )
+    submission_dir = _submission_dir(tmp_path, db, inbox="inbox-b")
+    worker = _decrypt_worker()
 
-    context = MagicMock()
-    context.__enter__.return_value.db = MagicMock()
-    with (
-        patch("grzctl.commands.decrypt.DbContext", return_value=context),
-        patch("grzctl.commands.decrypt.Worker", return_value=_decrypt_worker()) as worker_cls,
-        patch.object(InboxTarget, "load_private_key", autospec=True) as load_private_key,
-    ):
-        result = _invoke(
-            "--config", str(config_path), "decrypt", "--submission-dir", str(submission_dir), "--inbox", INBOX
-        )
+    result = _decrypt(config_path, submission_dir, worker)
 
     assert result.exit_code == 0, result.stderr
-    worker_cls.return_value.decrypt.assert_called_once()
-    (target,) = load_private_key.call_args.args
-    assert target.submitter_id == SUBMITTER_ID
-    assert target.inbox_name == INBOX
+    private_key = worker.decrypt.call_args.kwargs["recipient_private_key"]
+    assert private_key.private_bytes_raw() == crypt4gh.keys.get_private_key(key_paths["inbox-b"], None)
+    assert _latest_state(db).state == SubmissionStateEnum.DECRYPTED
+
+
+def test_decrypt_without_a_recorded_inbox_fails_for_several_inboxes(
+    migrated_database_config: GrzctlConfig, tmp_path: Path, db: SubmissionDb
+):
+    """Without --inbox and a recorded inbox, several inboxes leave the key unknown."""
+    config_path = _config_with_inbox(migrated_database_config, tmp_path, inboxes=("inbox-a", "inbox-b"))
+    submission_dir = _submission_dir(tmp_path, db, inbox=None)
+    worker = _decrypt_worker()
+
+    result = _decrypt(config_path, submission_dir, worker)
+
+    assert isinstance(result.exception, ConfigurationError), result.output
+    worker.decrypt.assert_not_called()
+    assert "Pass --inbox, or record the inbox with 'grzctl db backfill'." in str(result.exception)
+    latest_state = _latest_state(db)
+    assert latest_state.state == SubmissionStateEnum.ERROR
+    assert latest_state.failure_reason == FailureReasonEnum.CONFIGURATION_ERROR
+
+
+def test_decrypt_fails_for_a_recorded_inbox_missing_from_the_config(
+    migrated_database_config: GrzctlConfig, tmp_path: Path, db: SubmissionDb
+):
+    """A recorded inbox that the config no longer names is a configuration error."""
+    config_path = _config_with_inbox(migrated_database_config, tmp_path)
+    submission_dir = _submission_dir(tmp_path, db, inbox="removed-inbox")
+    worker = _decrypt_worker()
+
+    result = _decrypt(config_path, submission_dir, worker)
+
+    assert isinstance(result.exception, ConfigurationError), result.output
+    worker.decrypt.assert_not_called()
+    assert "Inbox 'removed-inbox' not configured" in str(result.exception)
+    latest_state = _latest_state(db)
+    assert latest_state.state == SubmissionStateEnum.ERROR
+    assert latest_state.failure_reason == FailureReasonEnum.CONFIGURATION_ERROR

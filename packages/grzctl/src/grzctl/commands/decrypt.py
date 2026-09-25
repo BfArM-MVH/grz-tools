@@ -5,12 +5,14 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
+from grz_common.exceptions import ConfigurationError
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
+from .inbox_resolution import require_inbox
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +35,12 @@ def decrypt(
     Decrypt a submission.
 
     Decrypting a submission requires the _private_ key of the original recipient.
-    That is the private key of the inbox that --inbox names.
+    That is the private key of the inbox that the submission came from.
     grzctl looks up that inbox under the submitter named in the submission's metadata.
+    The inbox is the one that --inbox names.
+    Without --inbox, grzctl takes the inbox recorded in the database, else the submitter's only inbox.
+    It reads the database only with --update-db.
+    `grzctl download` records the inbox, and `grzctl db backfill` records it for older submissions.
     """
     log.info("Starting decryption...")
 
@@ -55,8 +61,18 @@ def decrypt(
         start_state=SubmissionStateEnum.DECRYPTING,
         end_state=SubmissionStateEnum.DECRYPTED,
         enabled=update_db,
-    ):
+    ) as db_context:
         submitter_id = encrypted_submission.metadata.content.submission.submitter_id
+        # raise a ConfigurationError, so that the DbContext records the failure reason configuration_error
+        inbox_name = require_inbox(
+            configuration,
+            submitter_id=submitter_id,
+            submission_id=submission_id,
+            inbox_name=inbox_name,
+            db_service=db_context.db,
+            hint="Pass --inbox, or record the inbox with 'grzctl db backfill'.",
+            exc_type=ConfigurationError,
+        )
         private_key = configuration.inbox_target(submitter_id, inbox_name).load_private_key()
         worker_inst.decrypt(recipient_private_key=private_key, force=force)
 
