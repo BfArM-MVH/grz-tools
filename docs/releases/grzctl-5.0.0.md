@@ -206,7 +206,7 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 - grz-cli signs the encrypted files with the submitter private key if `keys.submitter_private_key` or `keys.submitter_private_key_path` is set. Otherwise it signs them with a random key, as before.
 - LEs need not change anything.
 - Decryption does not check the sender key, so grzctl decrypts these files as before.
-- A key with a passphrase needs `C4GH_PASSPHRASE`, or grz-cli asks for it.
+- grz-cli takes the passphrase of the submitter private key from `keys.submitter_private_key_passphrase`, else from `C4GH_PASSPHRASE`, else from a prompt.
 
 ### Python API
 
