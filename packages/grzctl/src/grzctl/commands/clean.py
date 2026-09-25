@@ -5,6 +5,7 @@ import sys
 
 import click
 import grz_common.cli as grzcli
+from grz_common.models.s3 import S3Options
 from grz_common.transfer import init_s3_resource, s3_errors
 from grz_db.models.submission import SubmissionStateEnum
 
@@ -64,7 +65,7 @@ def clean(
             _clean_submission_from_bucket(bucket_name, s3_options, submission_id, inbox_desc)
 
 
-def _clean_submission_from_bucket(bucket_name: str, s3_options, submission_id: str, inbox_desc: str):
+def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submission_id: str, inbox_desc: str):
     prefix = submission_id
     prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
