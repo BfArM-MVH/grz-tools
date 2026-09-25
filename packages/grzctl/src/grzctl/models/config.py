@@ -1,6 +1,6 @@
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import grz_common.exceptions as grzexc
 import yaml
@@ -162,9 +162,23 @@ class ArchiveTarget(IgnoringBaseModel):
     public_key_path: FilePath | None = None
     """Path to the crypt4gh public key for re-encryption of files destined for this archive."""
 
+    private_key: SecretStr | None = None
+    """The archive's crypt4gh private key (optional). Only ``grzctl decrypt --archive`` uses it."""
+
+    private_key_path: FilePath | None = None
+    """Path to the archive's crypt4gh private key (optional). Only ``grzctl decrypt --archive`` uses it."""
+
+    private_key_passphrase: SecretStr | None = None
+    """Passphrase to the archive's crypt4gh private key."""
+
     @model_validator(mode="after")
     def validate_public_key(self) -> "ArchiveTarget":
         _check_key_fields("public_key", self.public_key, self.public_key_path, required=True)
+        return self
+
+    @model_validator(mode="after")
+    def validate_private_key(self) -> "ArchiveTarget":
+        _check_key_fields("private_key", self.private_key, self.private_key_path, required=False)
         return self
 
     def load_public_key(self) -> X25519PublicKey:
@@ -217,6 +231,29 @@ class ArchivesConfig(IgnoringBaseModel):
         """
         return _load_private_key(
             self.signing_key, self.signing_key_path, self.signing_key_passphrase, key_name="archives.signing_key"
+        )
+
+    def load_private_key(self, archive: Literal["consented", "non_consented"]) -> X25519PrivateKey:
+        """Load the private key of an archive in memory, from its inline text or from its file.
+
+        The passphrase prompt and errors name an inline key by its config location,
+        ``archives.<archive>.private_key``. They name a key file by its path.
+
+        :param archive: Name of the archive, as in this config.
+        :returns: The private key.
+        :raises ConfigurationError: If the archive has no private key, or the key cannot be loaded.
+        """
+        target = self.consented if archive == "consented" else self.non_consented
+        if target.private_key is None and target.private_key_path is None:
+            raise grzexc.ConfigurationError(
+                f"Archive '{archive}' has no private key. "
+                f"Pass --private-key-path, or set archives.{archive}.private_key_path."
+            )
+        return _load_private_key(
+            target.private_key,
+            target.private_key_path,
+            target.private_key_passphrase,
+            key_name=f"archives.{archive}.private_key",
         )
 
 

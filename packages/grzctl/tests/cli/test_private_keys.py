@@ -31,20 +31,6 @@ def expected_key(key_path: Path) -> bytes:
     return crypt4gh.keys.get_private_key(key_path, lambda: PASSPHRASE)
 
 
-@pytest.fixture
-def no_prompt(monkeypatch):
-    """Fail the test if the passphrase prompt opens, and set a wrong ``C4GH_PASSPHRASE``.
-
-    The configured passphrase comes first, so the wrong one in the environment must not matter.
-    """
-    monkeypatch.setenv("C4GH_PASSPHRASE", "wrong-passphrase")
-
-    def _fail(*args, **kwargs):
-        raise AssertionError("the passphrase prompt must not open")
-
-    monkeypatch.setattr("grz_common.utils.crypt.getpass", _fail)
-
-
 def _archive_target(bucket: str, unread_file: str) -> ArchiveTarget:
     return ArchiveTarget(s3=S3Options(bucket=bucket), public_key_path=unread_file)
 
@@ -91,6 +77,33 @@ def test_inline_signing_key_is_named_by_its_config_location_in_errors(no_prompt,
 
     with pytest.raises(grzexc.ConfigurationError, match=r"Secret key archives\.signing_key cannot be read") as exc_info:
         archives.load_signing_key()
+
+    assert "not a key" not in str(exc_info.value)
+
+
+def test_both_archive_private_key_and_private_key_path_fails(key_path: Path, unread_file: str):
+    with pytest.raises(ValidationError, match="Only one of private_key or private_key_path must be set"):
+        ArchiveTarget(
+            s3=S3Options(bucket="consented"),
+            public_key_path=unread_file,
+            private_key=key_path.read_text(),
+            private_key_path=str(key_path),
+        )
+
+
+def test_inline_archive_private_key_is_named_by_its_config_location_in_errors(no_prompt, unread_file: str):
+    archives = ArchivesConfig(
+        consented=_archive_target("consented", unread_file),
+        non_consented=ArchiveTarget(
+            s3=S3Options(bucket="non_consented"), public_key_path=unread_file, private_key="not a key"
+        ),
+        signing_key_path=unread_file,
+    )
+
+    with pytest.raises(
+        grzexc.ConfigurationError, match=r"Secret key archives\.non_consented\.private_key cannot be read"
+    ) as exc_info:
+        archives.load_private_key("non_consented")
 
     assert "not a key" not in str(exc_info.value)
 

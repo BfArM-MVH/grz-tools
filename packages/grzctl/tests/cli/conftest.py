@@ -46,6 +46,20 @@ def unread_file() -> str:
 
 
 @pytest.fixture
+def no_prompt(monkeypatch):
+    """Fail the test if the passphrase prompt opens, and set a wrong ``C4GH_PASSPHRASE``.
+
+    The configured passphrase comes first, so the wrong one in the environment must not matter.
+    """
+    monkeypatch.setenv("C4GH_PASSPHRASE", "wrong-passphrase")
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("the passphrase prompt must not open")
+
+    monkeypatch.setattr("grz_common.utils.crypt.getpass", _fail)
+
+
+@pytest.fixture
 def crypt4gh_public_key() -> str:
     """A crypt4gh public key as text.
 
