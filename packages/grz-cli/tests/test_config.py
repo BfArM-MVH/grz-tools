@@ -86,6 +86,14 @@ def test_the_submitter_private_key_is_masked_in_dumps():
     assert SUBMITTER_PRIVATE_KEY not in keys.model_dump_json()
 
 
+def test_the_submitter_private_key_passphrase_is_masked_in_dumps():
+    passphrase = "submitter-passphrase"
+    keys = KeyModel(grz_public_key=PUBLIC_KEY, submitter_private_key_passphrase=passphrase)
+
+    assert passphrase not in repr(keys)
+    assert passphrase not in keys.model_dump_json()
+
+
 def test_a_config_error_does_not_show_the_submitter_private_key(tmp_path: Path):
     private_key_path = tmp_path / "submitter.sec"
     private_key_path.write_text(SUBMITTER_PRIVATE_KEY)
