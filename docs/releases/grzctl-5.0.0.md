@@ -196,7 +196,7 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 - `list` and `db sync-from-inbox` need `--inbox` only if the LE has several inboxes.
 - `db submission show` lists the inbox.
 
-### grzctl: Prüfbericht config (#PRUEFBERICHT_PR)
+### grzctl: Prüfbericht config (#697)
 
 - `pruefbericht.authorization_url`, `client_id`, `client_secret` and `api_base_url` are required.
 - A config without one of them stops every grzctl command.
