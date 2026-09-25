@@ -33,8 +33,8 @@ inbox_option = click.option(
     "-b",
     "--inbox",
     "inbox_name",
-    required=True,
-    help="Inbox name.",
+    required=False,
+    help="Inbox name. Defaults to the recorded inbox of the submission, or the submitter's only inbox.",
 )
 
 submitter_id_option = click.option(
@@ -47,7 +47,7 @@ submitter_id_option = click.option(
 
 
 def inbox_options(func):
-    """Decorator requiring both --submitter-id and --inbox."""
+    """Decorator requiring --submitter-id, with an optional --inbox."""
     func = inbox_option(func)
     func = submitter_id_option(func)
     return func

@@ -18,6 +18,7 @@ from ..commands import grzctl_configuration, inbox_options
 from ..models.config import GrzctlConfig
 from . import limit
 from .db.cli import get_submission_db_instance
+from .inbox_resolution import require_inbox
 
 log = logging.getLogger(__name__)
 
@@ -131,7 +132,10 @@ def list_submissions(  # noqa: PLR0913, PLR0917
     **kwargs,
 ):
     """List submissions within an inbox from oldest to newest, up to the requested limit."""
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    resolved_inbox = require_inbox(
+        configuration, submitter_id=submitter_id, inbox_name=inbox_name, hint="Pass --inbox to list one of them."
+    )
+    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
 
     submissions = query_submissions(s3_options, show_cleaned)
 
