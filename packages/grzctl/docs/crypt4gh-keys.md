@@ -122,19 +122,17 @@ archives:
 ## grzctl (GRZ): different keys per inbox
 
 Each inbox can name its own private key.
-grzctl decrypt picks the key by the submitter, because a submission's metadata names its submitter (LE) but not its inbox.
-So all inboxes of one LE must use one key.
-Different LEs can use different keys.
-Two inboxes use one key when they name the same file or hold the same inline text, for example through a YAML anchor.
-grzctl decrypt refuses to decrypt for an LE whose inboxes use more than one key.
+This includes the inboxes of one LE.
+`grzctl decrypt --inbox <name>` decrypts a submission with the key of that inbox.
+grzctl looks up the inbox under the LE that the submission's metadata names.
 
 ```yaml
 leistungserbringer:
   "123456789":
     inbox_buckets:
-      inbox: { endpoint_url: ..., bucket: le-123456789, private_key_path: &key_a /path/to/key-a.sec }
-      inbox2: { endpoint_url: ..., bucket: le-123456789-2, private_key_path: *key_a }
+      inbox: { endpoint_url: ..., bucket: le-123456789, private_key_path: /path/to/key-a.sec }
+      inbox2: { endpoint_url: ..., bucket: le-123456789-2, private_key_path: /path/to/key-b.sec }
   "000000000":
     inbox_buckets:
-      inbox: { endpoint_url: ..., bucket: le-000000000, private_key_path: /path/to/key-b.sec }
+      inbox: { endpoint_url: ..., bucket: le-000000000, private_key_path: /path/to/key-c.sec }
 ```

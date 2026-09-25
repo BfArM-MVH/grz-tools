@@ -11,7 +11,6 @@ import crypt4gh.keys.c4gh
 import grz_common.exceptions as grzexc
 import pytest
 from grz_common.models.s3 import S3Options
-from grz_common.utils.crypt import Crypt4GH
 from grzctl.models.config import ArchivesConfig, ArchiveTarget, GrzctlConfig, InboxConfig
 from pydantic import ValidationError
 
@@ -156,7 +155,7 @@ def test_inline_private_key_loads_in_memory(
         patch("tempfile.NamedTemporaryFile", side_effect=AssertionError("no temporary file may be written")),
         patch("tempfile.mkstemp", side_effect=AssertionError("no temporary file may be written")),
     ):
-        loaded = config.load_decryption_key("260914050")
+        loaded = config.inbox_target("260914050", "inbox").load_private_key()
 
     assert loaded.private_bytes_raw() == expected_key
 
@@ -168,80 +167,7 @@ def test_private_key_path_loads_with_its_passphrase(
         tmp_path, unread_file, private_key_path=str(key_path), private_key_passphrase=PASSPHRASE
     )
 
-    assert config.load_decryption_key("260914050").private_bytes_raw() == expected_key
-
-
-@pytest.fixture
-def key_paths(tmp_path: Path) -> dict[str, Path]:
-    """Two crypt4gh private keys without passphrase, by name."""
-    paths = {}
-    for name in ("first", "second"):
-        paths[name] = tmp_path / f"{name}.sec"
-        crypt4gh.keys.c4gh.generate(paths[name], tmp_path / f"{name}.pub", None, comment=None)
-    return paths
-
-
-def test_load_decryption_key_takes_only_the_inboxes_of_the_submitter(
-    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
-):
-    """Another submitter's inbox with another key neither loads nor counts as a second key."""
-    config = _grzctl_config(
-        tmp_path,
-        unread_file,
-        {
-            "111111111": {"inbox_buckets": {"other": {"private_key_path": unread_file}}},
-            "260914050": {"inbox_buckets": {"inbox": {"private_key_path": str(key_paths["first"])}}},
-        },
-    )
-
-    loaded = config.load_decryption_key("260914050")
-
-    assert loaded.private_bytes_raw() == crypt4gh.keys.get_private_key(key_paths["first"], None)
-
-
-def test_load_decryption_key_fails_for_inboxes_with_different_keys(
-    tmp_path: Path, key_paths: dict[str, Path], no_prompt, unread_file: str
-):
-    """A submission does not record its inbox, so grzctl cannot choose between the keys of two inboxes."""
-    first_key = key_paths["first"].read_text()
-    config = _grzctl_config(
-        tmp_path,
-        unread_file,
-        {
-            "260914050": {
-                "inbox_buckets": {
-                    "inbox-a": {"private_key": first_key},
-                    "inbox-b": {"private_key_path": str(key_paths["second"])},
-                    "inbox-c": {"private_key_path": str(key_paths["second"])},
-                }
-            },
-        },
-    )
-
-    with (
-        patch.object(Crypt4GH, "load_private_key") as load_private_key,
-        pytest.raises(grzexc.ConfigurationError, match="use 2 different private keys") as exc_info,
-    ):
-        config.load_decryption_key("260914050")
-
-    message = str(exc_info.value)
-    assert (
-        "Key 1: leistungserbringer.260914050.inbox_buckets.inbox-a.private_key. "
-        "Key 2: leistungserbringer.260914050.inbox_buckets.inbox-b.private_key_path, "
-        "leistungserbringer.260914050.inbox_buckets.inbox-c.private_key_path." in message
-    )
-    for line in first_key.splitlines():
-        assert line not in message
-    load_private_key.assert_not_called()
-
-
-def test_load_decryption_key_fails_for_a_submitter_missing_from_the_config(tmp_path: Path, unread_file: str):
-    config = _grzctl_config(
-        tmp_path, unread_file, {"111111111": {"inbox_buckets": {"other": {"private_key_path": unread_file}}}}
-    )
-
-    with pytest.raises(grzexc.ConfigurationError, match="Submitter '260914050' is not in the config"):
-        config.load_decryption_key("260914050")
+    assert config.inbox_target("260914050", "inbox").load_private_key().private_bytes_raw() == expected_key
 
 
 def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
@@ -279,73 +205,10 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
 
     config = GrzctlConfig.from_path(config_path)
 
-    with patch.object(Crypt4GH, "load_private_key", wraps=Crypt4GH.load_private_key) as load_private_key:
-        loaded = config.load_decryption_key("260914050")
-
-    assert loaded.private_bytes_raw() == expected_key
-    assert load_private_key.call_count == 1, "the inline key that both inboxes share loads once"
+    for inbox_name in ("inbox-a", "inbox-b"):
+        loaded = config.inbox_target("260914050", inbox_name).load_private_key()
+        assert loaded.private_bytes_raw() == expected_key, inbox_name
     assert config.archives.load_signing_key().private_bytes_raw() == expected_key
-
-
-def test_two_inboxes_sharing_a_key_path_through_a_yaml_anchor_prompt_once(
-    tmp_path: Path, key_path: Path, expected_key: bytes, monkeypatch, unread_file: str
-):
-    """Without a configured passphrase, the shared key asks for its passphrase once, not once per inbox."""
-    monkeypatch.delenv("C4GH_PASSPHRASE", raising=False)
-    prompts = []
-
-    def _getpass(prompt):
-        prompts.append(prompt)
-        return PASSPHRASE
-
-    monkeypatch.setattr("grz_common.utils.crypt.getpass", _getpass)
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "leistungserbringer:\n"
-        "  '260914050':\n"
-        "    inbox_buckets:\n"
-        "      inbox-a:\n"
-        f"        private_key_path: &grz_key {key_path}\n"
-        "      inbox-b:\n"
-        "        private_key_path: *grz_key\n"
-        "archives:\n"
-        "  consented:\n"
-        "    s3: {bucket: consented}\n"
-        f"    public_key_path: {unread_file}\n"
-        "  non_consented:\n"
-        "    s3: {bucket: non_consented}\n"
-        f"    public_key_path: {unread_file}\n"
-        "  signing_key_path: *grz_key\n"
-        "db:\n"
-        f"  database_url: sqlite:///{tmp_path / 'unused.sqlite'}\n"
-        "  author: {name: test}\n"
-        "pruefbericht: {}\n"
-        "identifiers: {grz: GRZK00007}\n"
-    )
-
-    loaded = GrzctlConfig.from_path(config_path).load_decryption_key("260914050")
-
-    assert loaded.private_bytes_raw() == expected_key
-    assert prompts == [f"Passphrase for {key_path}: "]
-
-
-def test_a_shared_key_takes_the_passphrase_of_a_later_location_if_the_first_sets_none(
-    tmp_path: Path, key_path: Path, expected_key: bytes, no_prompt, unread_file: str
-):
-    config = _grzctl_config(
-        tmp_path,
-        unread_file,
-        {
-            "260914050": {
-                "inbox_buckets": {
-                    "inbox-a": {"private_key_path": str(key_path)},
-                    "inbox-b": {"private_key_path": str(key_path), "private_key_passphrase": PASSPHRASE},
-                }
-            }
-        },
-    )
-
-    assert config.load_decryption_key("260914050").private_bytes_raw() == expected_key
 
 
 @pytest.mark.parametrize(
@@ -382,7 +245,7 @@ def test_a_key_path_expands_the_home_directory(
     )
 
     assert config.leistungserbringer["260914050"].inbox_buckets["inbox"].private_key_path == key_path
-    assert config.load_decryption_key("260914050").private_bytes_raw() == expected_key
+    assert config.inbox_target("260914050", "inbox").load_private_key().private_bytes_raw() == expected_key
 
 
 def test_inbox_target_fails_for_a_submitter_missing_from_the_config(tmp_path: Path, unread_file: str):
