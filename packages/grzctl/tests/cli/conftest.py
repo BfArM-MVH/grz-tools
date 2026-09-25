@@ -10,7 +10,7 @@ from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metada
 from grzctl.models.config import GrzctlConfig
 
 
-def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: str | None = None) -> dict:
+def _grzctl_archives(public_key_path: str, endpoint_url: str | None = None) -> dict:
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
         if endpoint_url:
@@ -20,7 +20,6 @@ def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: 
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
-        "signing_key_path": signing_key_path,
     }
 
 
@@ -106,10 +105,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
                 },
             }
         },
-        archives=_grzctl_archives(
-            public_key_path=str(public_key_path.resolve()),
-            signing_key_path=str(private_key_path.resolve()),
-        ),
+        archives=_grzctl_archives(public_key_path=str(public_key_path.resolve())),
         db={
             "database_url": database_url,
             "author": {

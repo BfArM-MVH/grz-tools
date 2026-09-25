@@ -328,7 +328,7 @@ def inbox_config_path(
     data["leistungserbringer"] = {
         submitter_id: {
             "inbox_buckets": {
-                INBOX_BUCKET: {"private_key_path": data["archives"]["signing_key_path"], "region_name": REGION}
+                INBOX_BUCKET: {"private_key_path": data["db"]["author"]["private_key_path"], "region_name": REGION}
             }
         }
     }
