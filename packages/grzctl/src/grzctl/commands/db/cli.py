@@ -1074,14 +1074,14 @@ def _submission_upload_date(
 ) -> date:
     """Pick the upload date to store: *override* if given, else the ``LastModified`` of metadata.json in the inbox.
 
-        :param configuration: The grzctl configuration, which names the submitter's inboxes.
-        :param submission_id: The submission. Its first part is the submitter ID.
-        :param override: The date ``--submission-date`` named, if any.
+    :param configuration: The grzctl configuration, which names the submitter's inboxes.
+    :param submission_id: The submission. Its first part is the submitter ID.
+    :param override: The date ``--submission-date`` named, if any.
     :param inbox_name: The inbox ``--inbox`` named, if any.
-            Without it, the inbox recorded for the submission, or the submitter's only inbox, is used.
-            :param db_service: Submission database to read the recorded inbox from, if any.
-        :returns: The date to record.
-        :raises click.ClickException: if neither *override* nor the inbox gives a date.
+        Without it, the inbox recorded for the submission is used, else the submitter's only inbox.
+    :param db_service: Submission database to read the recorded inbox from, if any.
+    :returns: The date to record.
+    :raises click.ClickException: if neither *override* nor the inbox gives a date.
     """
     if override is not None:
         return override.date()
