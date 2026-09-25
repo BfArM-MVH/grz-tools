@@ -14,11 +14,13 @@ This page lists the Crypt4GH keys that each tool needs, and where they go in its
 | GRZ private key | grzctl: `leistungserbringer.<LE ID>.inbox_buckets.<inbox>.private_key[_path]` | grzctl decrypts a submission from that inbox. |
 | GRZ signing key | grzctl: `archives.signing_key[_path]` | grzctl signs the files that it re-encrypts for an archive. |
 | Archive public keys | grzctl: `archives.consented.public_key[_path]`, `archives.non_consented.public_key[_path]` | grzctl re-encrypts a submission for the matching archive. |
+| Archive private keys | grzctl: `archives.consented.private_key[_path]`, `archives.non_consented.private_key[_path]`, optional | `grzctl decrypt --archive` decrypts an archived submission. |
 
 `<name>[_path]` stands for the two fields `<name>` and `<name>_path`.
 The GRZ gives its public key to its LEs.
 In the primary setup, the GRZ signing key is the GRZ private key.
-No grzctl command needs the private keys of the archives, so they are in no config.
+The archive private keys are optional. Only `grzctl decrypt --archive` uses them.
+They decrypt the whole archive, so set them only on a host that needs to decrypt archived submissions.
 
 `db.author.private_key[_path]` in the grzctl config is no Crypt4GH key.
 It signs the submission states in the database, and this page does not cover it.
@@ -27,7 +29,7 @@ It signs the submission states in the database, and this page does not cover it.
 
 The field `<name>` holds the key inline, and the field `<name>_path` names a file with the key.
 Setting both is a configuration error.
-Every key except the LE private key is required.
+Every key except the LE private key and the archive private keys is required.
 For a required key, one of the two fields must be set.
 A `_path` field must name an existing regular file.
 
@@ -57,7 +59,7 @@ It signs the files with the LE private key if one is set, and with a random key 
 
 The primary setup uses one GRZ key pair for all inboxes of all LEs, and for signing.
 A YAML anchor names the key file once, and the other fields reuse it.
-The two archives have one key pair each, and the config holds only their public keys.
+The two archives have one key pair each, and the example config holds only their public keys.
 The example leaves out the S3 credentials.
 
 ```yaml
@@ -122,7 +124,7 @@ archives:
 
 Each inbox can name its own private key.
 This includes the inboxes of one LE.
-`grzctl decrypt` decrypts a submission with the key of the inbox that the submission came from.
+Without `--archive` and `--private-key-path`, `grzctl decrypt` decrypts a submission with the key of the inbox that the submission came from.
 grzctl looks up the inbox under the LE that the submission's metadata names.
 It takes the inbox from `--inbox`.
 Without `--inbox`, it takes the inbox recorded in the database, else the LE's only inbox.
@@ -138,3 +140,28 @@ leistungserbringer:
     inbox_buckets:
       inbox: { endpoint_url: ..., bucket: le-000000000, private_key_path: /path/to/key-c.sec }
 ```
+
+## grzctl (GRZ): decrypt an archived submission
+
+An archived submission is encrypted for its archive.
+`grzctl decrypt --archive` decrypts it with the archive's private key from the config:
+
+```yaml
+archives:
+  consented:
+    ...
+    private_key_path: /path/to/consented.sec
+```
+
+```bash
+grzctl decrypt --archive consented --no-update-db --submission-dir /path/to/submission
+```
+
+`--private-key-path` takes the key file on the command line instead, so the config needs no archive private key.
+Its passphrase comes from `C4GH_PASSPHRASE`, else a prompt.
+
+```bash
+grzctl decrypt --private-key-path /path/to/consented.sec --no-update-db --submission-dir /path/to/submission
+```
+
+`--no-update-db` keeps the state of the submission in the database unchanged.
