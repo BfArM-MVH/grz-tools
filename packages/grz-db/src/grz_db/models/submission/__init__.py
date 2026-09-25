@@ -1022,10 +1022,12 @@ class QCQueueEntry(SQLModel, table=True):
     )
 
 
-#: Seconds a SQLite connection waits for another connection's lock before it fails with
-#: ``database is locked``. The sqlite3 default of 5 s is too short: on a busy disk, one commit
-#: with ``synchronous=FULL`` can wait longer than that for its fsyncs.
 _SQLITE_BUSY_TIMEOUT_SECONDS = 60
+"""Seconds a SQLite connection waits for another connection's lock before it fails with ``database is locked``.
+
+The sqlite3 default of 5 s is too short. On a busy disk, one commit with ``synchronous=FULL`` can wait longer
+than that for its fsyncs.
+"""
 
 
 class SubmissionDb:
