@@ -401,3 +401,16 @@ def test_sqlite_connections_wait_for_a_lock(tmp_path, query: str, busy_timeout_m
         with engine.connect() as connection:
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == busy_timeout_ms
         engine.dispose()
+
+
+def test_the_migrations_get_the_password_of_the_database_url() -> None:
+    """``str(url)`` hides the password as ``***``, so the migrations would log in with a wrong one.
+
+    A ``%`` in the password must survive the interpolation of the alembic config.
+    """
+    db = SubmissionDb(db_url="postgresql+psycopg://grz:p%25ss@localhost/grz", author=None)
+
+    migration_url = sqlalchemy.make_url(db._get_alembic_config().get_main_option("sqlalchemy.url"))
+
+    assert migration_url.password == "p%ss"
+    db.engine.dispose()
