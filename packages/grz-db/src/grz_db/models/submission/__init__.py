@@ -1022,6 +1022,12 @@ class QCQueueEntry(SQLModel, table=True):
     )
 
 
+#: Seconds a SQLite connection waits for another connection's lock before it fails with
+#: ``database is locked``. The sqlite3 default of 5 s is too short: on a busy disk, one commit
+#: with ``synchronous=FULL`` can wait longer than that for its fsyncs.
+_SQLITE_BUSY_TIMEOUT_SECONDS = 60
+
+
 class SubmissionDb:
     """
     API entrypoint for managing submissions.
@@ -1037,7 +1043,8 @@ class SubmissionDb:
     ):
         """Initialize the SubmissionDb.
 
-        :param db_url: Database URL.
+        :param db_url: Database URL. A SQLite URL without a ``timeout`` query parameter gets
+            :data:`_SQLITE_BUSY_TIMEOUT_SECONDS`.
         :param author: Author recorded on every write, or ``None`` for a read-only instance.
         :param debug: Whether to echo SQL statements.
         :param case_resolver: Strategy every method here resolves a case with unless handed
@@ -1046,7 +1053,12 @@ class SubmissionDb:
             here so :meth:`diff` and :meth:`commit_changes` cannot be given different ones and
             write a link other than the one previewed.
         """
-        self.engine = create_engine(db_url, echo=debug)
+        url = sa.make_url(db_url)
+        if url.get_backend_name() == "sqlite" and "timeout" not in url.query:
+            # Set on the URL rather than in connect_args, because the migrations build their own
+            # engine from this URL and should wait as long.
+            url = url.update_query_dict({"timeout": str(_SQLITE_BUSY_TIMEOUT_SECONDS)})
+        self.engine = create_engine(url, echo=debug)
         self._author = author
         self._schema_confirmed = False
         self._case_resolver = case_resolver

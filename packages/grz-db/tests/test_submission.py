@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable
 
 import pytest
+import sqlalchemy
 from grz_db.errors import DuplicateTanGError, OutdatedDatabaseSchemaError, SubmissionNotFoundError
 from grz_db.models.submission import (
     Donor,
@@ -380,3 +381,23 @@ def test_a_database_that_is_behind_is_asked_again(db: SubmissionDb, monkeypatch:
 
     behind = False
     assert db.get_submission(SUBMISSION_ID) is None, "the upgrade must be picked up"
+
+
+@pytest.mark.parametrize(
+    ("query", "busy_timeout_ms"),
+    [("", 60_000), ("?timeout=2", 2_000)],
+    ids=["default", "url-sets-timeout"],
+)
+def test_sqlite_connections_wait_for_a_lock(tmp_path, query: str, busy_timeout_ms: int) -> None:
+    """A SQLite connection waits for another connection's lock rather than failing after 5 s.
+
+    One commit on a busy disk can hold the lock longer than the sqlite3 default. The migrations
+    build their engine from the same URL, so the URL must carry the timeout. A ``timeout`` the
+    URL already sets is kept.
+    """
+    db = SubmissionDb(db_url=f"sqlite:///{tmp_path / 'test.db'}{query}", author=None)
+    migration_engine = sqlalchemy.create_engine(db._get_alembic_config().get_main_option("sqlalchemy.url"))
+    for engine in (db.engine, migration_engine):
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == busy_timeout_ms
+        engine.dispose()
