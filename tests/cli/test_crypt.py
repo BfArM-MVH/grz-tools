@@ -87,6 +87,8 @@ def test_decrypt_submission(working_dir_path, temp_grzctl_keys_config_file_path)
         "decrypt",
         "--submission-dir",
         str(working_dir_path),
+        "--inbox",
+        "testing",
         "--no-update-db",
     ]
     runner = CliRunner()
@@ -130,6 +132,8 @@ def test_decrypt_lets_an_error_the_file_did_not_cause_through(
         "decrypt",
         "--submission-dir",
         str(working_dir_path),
+        "--inbox",
+        "testing",
         "--no-update-db",
     ]
 
@@ -170,6 +174,8 @@ def test_encrypt_decrypt_submission(
         "decrypt",
         "--submission-dir",
         str(working_dir_path),
+        "--inbox",
+        "testing",
         "--no-update-db",
     ]
 
@@ -194,21 +200,29 @@ def test_encrypt_decrypt_submission(
         assert expected_checksum == observed_checksum
 
 
+@pytest.mark.parametrize("inline", [False, True], ids=["submitter_private_key_path", "submitter_private_key"])
 def test_encrypt_signs_with_the_submitter_key(
     working_dir_path,
-    temp_keys_config_file_path,
+    keys_config_content,
+    tmp_path,
+    inline,
     crypt4gh_grz_private_key_file_path,
     crypt4gh_submitter_public_key_file_path,
     crypt4gh_grz_public_key_file_path,
 ):
     """The header of an encrypted file names the submitter's key as the sender, not a random key."""
     copy_submission(working_dir_path, "files", "metadata")
+    if inline:
+        keys_config = keys_config_content["keys"]
+        keys_config["submitter_private_key"] = Path(keys_config.pop("submitter_private_key_path")).read_text()
+    config_file = tmp_path / "config.keys.yaml"
+    config_file.write_text(yaml.dump(keys_config_content))
     testargs = [
         "encrypt",
         "--submission-dir",
         str(working_dir_path),
         "--config-file",
-        temp_keys_config_file_path,
+        str(config_file),
         "--no-check-validation-logs",
     ]
     result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs, catch_exceptions=False)
@@ -397,16 +411,16 @@ def _assert_decrypted(working_dir_path: Path):
     assert calculate_sha256(working_dir_path / "files" / DECRYPTED_FILE) == expected_checksum
 
 
-def test_decrypt_uses_the_inbox_key_of_the_submitter_in_the_metadata(working_dir_path, tmp_path):
-    """Only the inboxes of the metadata's submitter count, and the key that they share loads once."""
+def test_decrypt_uses_the_key_of_the_inbox_that_inbox_names(working_dir_path, tmp_path):
+    """Two inboxes of one LE can use different keys, and only the named inbox of the metadata's submitter counts."""
     copy_submission(working_dir_path, "encrypted_files", "metadata")
     config_path = _write_grzctl_config(
         tmp_path,
         {
-            "000000000": {"inbox_buckets": {"inbox": {"private_key_path": SUBMITTER_PRIVATE_KEY}}},
+            "000000000": {"inbox_buckets": {"second": {"private_key_path": SUBMITTER_PRIVATE_KEY}}},
             SUBMITTER_ID: {
                 "inbox_buckets": {
-                    "first": {"private_key_path": GRZ_PRIVATE_KEY},
+                    "first": {"private_key_path": NON_CONSENTED_PRIVATE_KEY},
                     "second": {"private_key_path": GRZ_PRIVATE_KEY},
                 }
             },
@@ -414,7 +428,7 @@ def test_decrypt_uses_the_inbox_key_of_the_submitter_in_the_metadata(working_dir
     )
 
     with _loaded_key_paths() as loaded:
-        result = _run_grzctl(config_path, "decrypt", working_dir_path)
+        result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "second")
 
     assert result.exit_code == 0, result.output
     assert loaded == [GRZ_PRIVATE_KEY]
@@ -457,7 +471,7 @@ def test_decrypt_fails_if_the_inbox_key_does_not_open_the_files(working_dir_path
         tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key": CONSENTED_PRIVATE_KEY.read_text()}}}}
     )
 
-    result = _run_grzctl(config_path, "decrypt", working_dir_path)
+    result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "testing")
 
     assert isinstance(result.exception, grzexc.DecryptionError), result.output
     message = str(result.exception)
@@ -474,33 +488,28 @@ def test_decrypt_fails_for_a_submitter_missing_from_the_config(working_dir_path,
     )
 
     with _loaded_key_paths() as loaded:
-        result = _run_grzctl(config_path, "decrypt", working_dir_path)
+        result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "inbox")
 
     assert isinstance(result.exception, grzexc.ConfigurationError), result.output
-    assert f"Submitter '{SUBMITTER_ID}' is not in the config" in str(result.exception)
+    assert f"Submitter '{SUBMITTER_ID}' not found" in str(result.exception)
     assert loaded == []
 
 
-def test_decrypt_fails_if_the_inboxes_of_the_submitter_use_different_keys(working_dir_path, tmp_path):
+def test_decrypt_fails_for_an_inbox_that_the_submitter_does_not_have(working_dir_path, tmp_path):
+    """Another submitter's inbox of that name cannot stand in."""
     copy_submission(working_dir_path, "encrypted_files", "metadata")
     config_path = _write_grzctl_config(
         tmp_path,
         {
-            SUBMITTER_ID: {
-                "inbox_buckets": {
-                    "a": {"private_key_path": GRZ_PRIVATE_KEY},
-                    "b": {"private_key_path": NON_CONSENTED_PRIVATE_KEY},
-                }
-            }
+            "000000000": {"inbox_buckets": {"other": {"private_key_path": GRZ_PRIVATE_KEY}}},
+            SUBMITTER_ID: {"inbox_buckets": {"inbox": {"private_key_path": GRZ_PRIVATE_KEY}}},
         },
     )
 
     with _loaded_key_paths() as loaded:
-        result = _run_grzctl(config_path, "decrypt", working_dir_path)
+        result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "other")
 
     assert isinstance(result.exception, grzexc.ConfigurationError), result.output
-    message = str(result.exception)
-    assert f"Key 1: leistungserbringer.{SUBMITTER_ID}.inbox_buckets.a.private_key_path." in message
-    assert f"Key 2: leistungserbringer.{SUBMITTER_ID}.inbox_buckets.b.private_key_path." in message
+    assert f"Inbox 'other' not configured for submitter '{SUBMITTER_ID}'" in str(result.exception)
     assert loaded == []
     assert not (working_dir_path / "files" / DECRYPTED_FILE).exists()

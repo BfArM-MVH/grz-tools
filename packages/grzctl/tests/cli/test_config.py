@@ -1,10 +1,11 @@
-"""GrzctlConfig merges environment variables into the configuration it loads."""
+"""GrzctlConfig checks the configuration it loads, and merges environment variables into it."""
 
 import json
 
 import pytest
 from grz_common.models.base import get_secret_value
 from grzctl.models.config import GrzctlConfig
+from pydantic import ValidationError
 
 LE_ID = "260914050"
 BUCKET_NAME = "grz-inbox-test"
@@ -55,3 +56,14 @@ def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration:
 
     assert config.archives.consented.public_key == crypt4gh_public_key
     assert config.archives.consented.public_key_path is None
+
+
+@pytest.mark.parametrize("field", ["authorization_url", "client_id", "client_secret", "api_base_url"])
+def test_a_config_without_a_pruefbericht_field_fails(configuration: dict, field: str):
+    """Every grzctl command loads the whole config.
+    So a missing field stops even the commands that submit no Prüfbericht.
+    """
+    del configuration["pruefbericht"][field]
+
+    with pytest.raises(ValidationError, match=rf"pruefbericht\.{field}\n  Field required"):
+        GrzctlConfig.from_configuration(configuration)

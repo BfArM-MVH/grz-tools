@@ -12,6 +12,8 @@ from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
+from .conftest import PRUEFBERICHT
+
 
 @pytest.fixture
 def grzctl_config_path(tmp_path, unread_file):
@@ -25,7 +27,7 @@ def grzctl_config_path(tmp_path, unread_file):
             "signing_key_path": unread_file,
         },
         "db": {"database_url": "sqlite:///:memory:", "author": {"name": "test"}},
-        "pruefbericht": {},
+        "pruefbericht": PRUEFBERICHT,
         "identifiers": {"grz": "GRZT00000"},
     }
     config_path = tmp_path / "config.yaml"

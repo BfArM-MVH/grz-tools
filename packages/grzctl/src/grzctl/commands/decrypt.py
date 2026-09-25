@@ -8,7 +8,7 @@ import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
-from ..commands import grzctl_configuration
+from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 
@@ -18,11 +18,13 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
+@inbox_option
 @grzcli.force
 @grzcli.update_db
 def decrypt(
     configuration: GrzctlConfig,
     submission_dir,
+    inbox_name,
     force,
     update_db,
     **kwargs,
@@ -31,7 +33,8 @@ def decrypt(
     Decrypt a submission.
 
     Decrypting a submission requires the _private_ key of the original recipient.
-    That is the private key of the inboxes of the submitter named in the submission's metadata.
+    That is the private key of the inbox that --inbox names.
+    grzctl looks up that inbox under the submitter named in the submission's metadata.
     """
     log.info("Starting decryption...")
 
@@ -54,7 +57,7 @@ def decrypt(
         enabled=update_db,
     ):
         submitter_id = encrypted_submission.metadata.content.submission.submitter_id
-        private_key = configuration.load_decryption_key(submitter_id)
+        private_key = configuration.inbox_target(submitter_id, inbox_name).load_private_key()
         worker_inst.decrypt(recipient_private_key=private_key, force=force)
 
     log.info("Decryption successful!")

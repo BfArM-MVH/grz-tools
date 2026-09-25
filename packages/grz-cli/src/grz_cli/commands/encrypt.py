@@ -40,10 +40,14 @@ def encrypt(configuration: dict[str, Any], submission_dir, force, check_validati
         grz_public_key = Crypt4GH.retrieve_public_key(config.keys.grz_public_key_path)
     else:
         # This case cannot occur here, but an explicit check is needed for type-checking.
-        sys.exit("GRZ public key path is required for encryption.")
+        sys.exit("Either keys.grz_public_key or keys.grz_public_key_path must be set for encryption.")
 
     submitter_private_key = None
-    if config.keys.submitter_private_key_path is not None:
+    if config.keys.submitter_private_key is not None:
+        submitter_private_key = Crypt4GH.load_private_key(
+            config.keys.submitter_private_key.get_secret_value(), key_name="keys.submitter_private_key"
+        )
+    elif config.keys.submitter_private_key_path is not None:
         submitter_private_key = Crypt4GH.retrieve_private_key(config.keys.submitter_private_key_path)
 
     log.info("Starting encryption...")
