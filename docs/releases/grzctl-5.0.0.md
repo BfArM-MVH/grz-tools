@@ -193,6 +193,7 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 - `download`, `clean` and `decrypt` take the inbox from `--inbox`, else from the database, else the LE's only inbox. `download` then also searches the LE's inboxes for the submission.
 - These three commands read the database only with `--update-db`, the default. Then the database must be reachable.
 - If no inbox resolves, `decrypt` fails and records `configuration_error`.
+- `decrypt --archive consented|non-consented` decrypts an archived submission. It takes the key from `--private-key-path`, else from the new optional `archives.<name>.private_key` or `private_key_path`. `--private-key-path` alone replaces the inbox key. Pass `--no-update-db`, so that the decrypt leaves the state of the submission unchanged.
 - `list` and `db sync-from-inbox` need `--inbox` only if the LE has several inboxes.
 - `db submission show` lists the inbox.
 
