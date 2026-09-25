@@ -2,6 +2,7 @@
 path in ``<name>_path``, with an optional ``<name>_passphrase``, and loads in memory.
 """
 
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -382,3 +383,64 @@ def test_a_key_path_expands_the_home_directory(
 
     assert config.leistungserbringer["260914050"].inbox_buckets["inbox"].private_key_path == key_path
     assert config.load_decryption_key("260914050").private_bytes_raw() == expected_key
+
+
+def test_inbox_target_fails_for_a_submitter_missing_from_the_config(tmp_path: Path, unread_file: str):
+    config = _grzctl_config(
+        tmp_path, unread_file, {"111111111": {"inbox_buckets": {"inbox": {"private_key_path": unread_file}}}}
+    )
+
+    with pytest.raises(grzexc.ConfigurationError, match=r"Submitter '260914050' not found\. Available: '111111111'"):
+        config.inbox_target("260914050", "inbox")
+
+
+def test_inbox_target_fails_for_an_inbox_missing_from_the_config(tmp_path: Path, unread_file: str):
+    """Unlike ``resolve_inbox``, it raises rather than exits, so a ``DbContext`` records the error."""
+    config = _config_with_one_inbox(tmp_path, unread_file, private_key_path=unread_file)
+
+    with pytest.raises(
+        grzexc.ConfigurationError, match=r"Inbox 'other' not configured for submitter '260914050'\. Available: inbox"
+    ):
+        config.inbox_target("260914050", "other")
+
+
+def test_resolve_inbox_logs_the_error_and_exits(tmp_path: Path, unread_file: str, caplog):
+    config = _config_with_one_inbox(tmp_path, unread_file, private_key_path=unread_file)
+
+    with caplog.at_level(logging.ERROR, logger="grzctl.models.config"), pytest.raises(SystemExit) as exc_info:
+        config.resolve_inbox("260914050", "other")
+
+    assert exc_info.value.code == 1
+    assert "Inbox 'other' not configured for submitter '260914050'. Available: inbox" in caplog.text
+
+
+def test_inline_inbox_key_asks_for_its_passphrase_by_its_config_location(
+    tmp_path: Path, key_path: Path, expected_key: bytes, monkeypatch, unread_file: str
+):
+    monkeypatch.delenv("C4GH_PASSPHRASE", raising=False)
+    prompts = []
+
+    def _getpass(prompt):
+        prompts.append(prompt)
+        return PASSPHRASE
+
+    monkeypatch.setattr("grz_common.utils.crypt.getpass", _getpass)
+    config = _config_with_one_inbox(tmp_path, unread_file, private_key=key_path.read_text())
+
+    loaded = config.inbox_target("260914050", "inbox").load_private_key()
+
+    assert loaded.private_bytes_raw() == expected_key
+    assert prompts == ["Passphrase for leistungserbringer.260914050.inbox_buckets.inbox.private_key: "]
+
+
+def test_inline_inbox_key_is_named_by_its_config_location_in_errors(tmp_path: Path, no_prompt, unread_file: str):
+    config = _config_with_one_inbox(tmp_path, unread_file, private_key="not a key")
+    inbox = config.inbox_target("260914050", "inbox")
+
+    with pytest.raises(
+        grzexc.ConfigurationError,
+        match=r"Secret key leistungserbringer\.260914050\.inbox_buckets\.inbox\.private_key cannot be read",
+    ) as exc_info:
+        inbox.load_private_key()
+
+    assert "not a key" not in str(exc_info.value)

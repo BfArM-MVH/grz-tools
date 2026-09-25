@@ -45,30 +45,32 @@ def _check_key_fields(name: str, key: object | None, key_path: Path | None, *, r
 
 
 def _load_private_key(
-    location: str, private_key: SecretStr | None, private_key_path: Path | None, passphrase: SecretStr | None
+    private_key: SecretStr | None,
+    private_key_path: Path | None,
+    passphrase: SecretStr | None,
+    *,
+    key_name: str,
 ) -> X25519PrivateKey:
     """Load a crypt4gh private key in memory, from its inline text or from its file.
 
     The passphrase is only asked for if the key is encrypted. It is the first of: *passphrase*,
     the ``C4GH_PASSPHRASE`` environment variable, and an interactive prompt.
 
-    :param location: Config location of the inline key. Errors name the key by it, or by it with a ``_path`` suffix.
     :param private_key: The private key, given inline.
     :param private_key_path: Path to the private key.
     :param passphrase: Passphrase of the private key.
+    :param key_name: Names the inline key in the passphrase prompt and in errors, as in
+        :meth:`Crypt4GH.load_private_key`. A key from *private_key_path* is named by its path instead.
     :returns: The private key.
-    :raises ConfigurationError: If neither the key nor its path is set, or if the key cannot be loaded.
+    :raises ConfigurationError: If the key cannot be loaded.
     """
     if private_key is not None:
         return Crypt4GH.load_private_key(
-            private_key.get_secret_value(), passphrase=get_secret_value(passphrase), key_name=location
+            private_key.get_secret_value(), passphrase=get_secret_value(passphrase), key_name=key_name
         )
     if private_key_path is not None:
-        try:
-            return Crypt4GH.retrieve_private_key(private_key_path, passphrase=get_secret_value(passphrase))
-        except grzexc.ConfigurationError as e:
-            raise grzexc.ConfigurationError(f"{location}_path: {e}") from e
-    raise grzexc.ConfigurationError(f"Neither {location} nor {location}_path is set.")
+        return Crypt4GH.retrieve_private_key(private_key_path, passphrase=get_secret_value(passphrase))
+    raise RuntimeError(f"Validation leaves no {key_name} without its inline text or its path.")
 
 
 class InboxConfig(S3ConnectionBase):
@@ -101,6 +103,12 @@ class InboxTarget(IgnoringBaseModel):
     Encapsulates everything needed to read and decrypt from a specific inbox.
     """
 
+    submitter_id: str
+    """Submitter (LE) ID whose ``inbox_buckets`` hold this inbox."""
+
+    inbox_name: str
+    """Name of this inbox in the submitter's ``inbox_buckets``."""
+
     s3: S3Options
     """Fully resolved S3 options, including the bucket name."""
 
@@ -117,6 +125,23 @@ class InboxTarget(IgnoringBaseModel):
     def validate_private_key(self) -> "InboxTarget":
         _check_key_fields("private_key", self.private_key, self.private_key_path, required=True)
         return self
+
+    def load_private_key(self) -> X25519PrivateKey:
+        """Load the private key of this inbox in memory, from its inline text or from its file.
+
+        The passphrase prompt and errors name an inline key by its config location,
+        ``leistungserbringer.<submitter_id>.inbox_buckets.<inbox_name>.private_key``.
+        They name a key file by its path.
+
+        :returns: The private key.
+        :raises ConfigurationError: If the key cannot be loaded.
+        """
+        return _load_private_key(
+            self.private_key,
+            self.private_key_path,
+            self.private_key_passphrase,
+            key_name=f"leistungserbringer.{self.submitter_id}.inbox_buckets.{self.inbox_name}.private_key",
+        )
 
 
 class LeistungserbringerEntry(IgnoringBaseModel):
@@ -195,7 +220,7 @@ class ArchivesConfig(IgnoringBaseModel):
         :raises ConfigurationError: If the key cannot be loaded.
         """
         return _load_private_key(
-            "archives.signing_key", self.signing_key, self.signing_key_path, self.signing_key_passphrase
+            self.signing_key, self.signing_key_path, self.signing_key_passphrase, key_name="archives.signing_key"
         )
 
 
@@ -300,31 +325,44 @@ class GrzctlConfig(IgnoringBaseSettings):
         finally:
             _config_ctx.reset(token)
 
-    def resolve_inbox(self, submitter_id: str, inbox_name: str) -> InboxTarget:
+    def inbox_target(self, submitter_id: str, inbox_name: str) -> InboxTarget:
         """Retrieve a specific inbox target by exact submitter (LE) ID and inbox name.
 
         No auto-guessing, fallback, or alias lookup.
+
+        :param submitter_id: Submitter (LE) ID, the key in ``leistungserbringer``.
+        :param inbox_name: Inbox name, the key in the submitter's ``inbox_buckets``.
+        :returns: The inbox target.
+        :raises ConfigurationError: If the config lacks the submitter, or the submitter lacks the inbox.
         """
         entry = self._le_by_id.get(submitter_id)
         if entry is None:
             available = ", ".join(self._describe_le(le_id, e) for le_id, e in self.leistungserbringer.items())
-            log.error(f"Submitter '{submitter_id}' not found. Available: {available}")
-            sys.exit(1)
+            raise grzexc.ConfigurationError(f"Submitter '{submitter_id}' not found. Available: {available}")
 
         if inbox_name not in entry.inbox_buckets:
             available = ", ".join(entry.inbox_buckets.keys())
-            log.error(
+            raise grzexc.ConfigurationError(
                 f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(submitter_id, entry)}. "
                 f"Available: {available}"
             )
-            sys.exit(1)
 
         inbox_cfg = entry.inbox_buckets[inbox_name]
         bucket = inbox_cfg.bucket or inbox_name
         return InboxTarget(
+            submitter_id=submitter_id,
+            inbox_name=inbox_name,
             s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
             **inbox_cfg.model_dump(include={"private_key", "private_key_path", "private_key_passphrase"}),
         )
+
+    def resolve_inbox(self, submitter_id: str, inbox_name: str) -> InboxTarget:
+        """Retrieve a specific inbox target like :meth:`inbox_target`, or log its error and exit."""
+        try:
+            return self.inbox_target(submitter_id, inbox_name)
+        except grzexc.ConfigurationError as e:
+            log.error(str(e))
+            sys.exit(1)
 
     def load_decryption_key(self, submitter_id: str) -> X25519PrivateKey:
         """Load the private key that decrypts the submissions of a submitter.
@@ -377,4 +415,6 @@ class GrzctlConfig(IgnoringBaseSettings):
         (group,) = groups.values()
         prefix, inbox = group[0]
         passphrase = next((i.private_key_passphrase for _, i in group if i.private_key_passphrase is not None), None)
-        return _load_private_key(f"{prefix}.private_key", inbox.private_key, inbox.private_key_path, passphrase)
+        return _load_private_key(
+            inbox.private_key, inbox.private_key_path, passphrase, key_name=f"{prefix}.private_key"
+        )
