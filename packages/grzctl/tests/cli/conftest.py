@@ -27,13 +27,13 @@ def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: 
 #: The revision the schema-upgrade tests start from.
 INITIAL_REVISION = "1a9bd994df1b"
 
-#: A ``pruefbericht`` config section with fake values, for tests that never reach BfArM.
 PRUEFBERICHT = {
     "authorization_url": "https://auth.example.org",
     "client_id": "example-client",
     "client_secret": "example-secret",
     "api_base_url": "https://api.example.org",
 }
+"""A ``pruefbericht`` config section with fake values, for tests that never reach BfArM."""
 
 
 @pytest.fixture
