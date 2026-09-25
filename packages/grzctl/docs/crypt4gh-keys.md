@@ -120,27 +120,10 @@ leistungserbringer:
       inbox2: { endpoint_url: …, bucket: …, private_key_path: /etc/grzctl/keys/le-b.sec }
 ```
 
-Decrypting picks the key by the submitter.
-A submission's metadata names its submitter (LE), but not the inbox that it came from.
-So the inboxes of one LE must all use one key for decryption.
+Decrypting picks the key by the inbox the submission came from.
+When the database recorded that inbox, `decrypt` loads exactly its key.
+Then each inbox of one LE may use its own key.
+For a submission whose origin is not recorded, decryption falls back to the submitter.
+Then the inboxes of one LE must all use one key.
 Two inboxes use the same key when they name the same file or hold the same inline text,
 for example through a YAML anchor.
-grzctl refuses to decrypt for an LE whose inboxes use more than one key.
-
-## Tracking the inbox of a submission
-
-The _one key per submitter_ rule exists only because nothing records which inbox a
-downloaded submission came from.
-Recording that origin would let each inbox keep its own key, and it would also save the
-operator from repeating the `--submitter-id` and `--inbox` pair for every later step.
-
-Two options are on the table:
-
-- extend the database: add the inbox (and bucket) to the `submissions` row at download time,
-  and let `decrypt` read the origin from the row,
-- add a companion file: write the origin next to the downloaded `metadata.json` — for example
-  `<submission_dir>/metadata/origin.yaml` or a sidecar `.json` — and read it back in `decrypt`.
-
-A companion file keeps the change local to the submission and works without a database.
-The database row survives archive and reporting queries.
-Both ideas need a follow-up design before they land.
