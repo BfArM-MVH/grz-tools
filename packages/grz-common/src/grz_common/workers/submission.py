@@ -517,7 +517,7 @@ class Submission:
         encrypted_files_dir = Path(encrypted_files_dir)
 
         if submitter_private_key is None:
-            self.__log.warning("No submitter private key provided, skipping signing.")
+            self.__log.warning("No submitter private key provided, so the files are signed with a random key.")
 
         public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key, submitter_private_key)
 
