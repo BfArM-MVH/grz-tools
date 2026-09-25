@@ -9,6 +9,7 @@ The main changes:
 - Detailed QC reports a deviation without failing (#656).
 - A failed step records why it failed (#690), see [Error handling](../../packages/grzctl/docs/error-handling.md).
 - The grzctl config names each crypt4gh key where grzctl uses it (#694), see [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md).
+- The database records the inbox of each submission, so `download`, `clean` and `decrypt` find it without `--inbox` (#696).
 
 ### Versions
 
@@ -100,7 +101,7 @@ Check it with `grzctl dump-config`. Add `--reveal-secrets` to show the secrets (
 
 ### 3. Upgrade the database
 
-1. Run `grzctl db upgrade`. It adds case tracking (#633), the processing states (#681) and the new failure reasons (#690), and renames `submissions.pseudonym` to `local_case_id`.
+1. Run `grzctl db upgrade`. It adds case tracking (#633), the processing states (#681), the new failure reasons (#690) and the inbox of a submission (#696), and renames `submissions.pseudonym` to `local_case_id`.
 2. Run `grzctl db case list-unlinked`, and resolve what it lists as described in [Upgrading an existing database](../../packages/grzctl/docs/case-tracking.md#upgrading-an-existing-database).
 
 ### 4. Backfill the lossless metadata (#654)
@@ -113,6 +114,8 @@ grzctl db backfill --allow-overwrite submission_metadata
 ```
 
 Use `--allow-overwrite submission_metadata`, not `--force`. For a large database, run it in slices with `--start-date` and `--end-date`.
+
+The backfill also records the inbox of each submission that has none (#696). It lists the inboxes of the submission's LE, and it records an inbox only if exactly one of them holds the submission.
 
 ### 5. Recompute the QC verdicts (#656)
 
@@ -148,7 +151,7 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 
 ### grzctl: `db submission populate` (#681)
 
-- Without `--submission-date`, the upload date is the S3 `LastModified` of `metadata/metadata.json` in the inbox. Pass `--inbox` if the submitter has several inboxes.
+- Without `--submission-date`, the upload date is the S3 `LastModified` of `metadata/metadata.json` in the inbox. Pass `--inbox` if the submitter has several inboxes and the database has no inbox for the submission (#696).
 - After `grzctl clean`, pass `--submission-date`.
 - Replacing or removing a stored value needs `--force` or `--allow-overwrite FIELD`.
 
@@ -178,11 +181,20 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 
 ### grzctl: crypt4gh keys (#694)
 
-- `decrypt` requires `--inbox` and decrypts with the key of that inbox. So the inboxes of one LE may use different keys.
+- `decrypt` decrypts with the key of the submission's inbox, which the next section describes. So the inboxes of one LE may use different keys.
 - `encrypt` signs with `archives.signing_key` or `archives.signing_key_path`.
 - Every key path must name a regular file. Otherwise every grzctl command stops.
 - An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`.
 - `archives.*.public_key` takes the public key inline, as `keys.grz_public_key` did in v4.0.0.
+
+### grzctl: the inbox of a submission (#696)
+
+- The database records the inbox that a submission came from. `download` records it, and so do `db sync-from-inbox` and `db submission populate --inbox`. `db backfill` records it for older submissions, see step 4.
+- `download`, `clean` and `decrypt` take the inbox from `--inbox`, else from the database, else the LE's only inbox. `download` then also searches the LE's inboxes for the submission.
+- These three commands read the database only with `--update-db`, the default. Then the database must be reachable.
+- If no inbox resolves, `decrypt` fails and records `configuration_error`.
+- `list` and `db sync-from-inbox` need `--inbox` only if the LE has several inboxes.
+- `db submission show` lists the inbox.
 
 ### grzctl: Prüfbericht config (#PRUEFBERICHT_PR)
 
