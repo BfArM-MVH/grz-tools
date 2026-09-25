@@ -1838,6 +1838,7 @@ def _build_attribute_table(submission: Submission, research_consented_now: bool 
         ("Submission Size", "submission_size"),
         ("Submission Type", "submission_type"),
         ("Submitter ID", "submitter_id"),
+        ("Inbox", "inbox"),
         ("Case ID", "case_id"),
         ("Data Node ID", "data_node_id"),
         ("Disease Type", "disease_type"),

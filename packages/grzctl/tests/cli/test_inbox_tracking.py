@@ -4,6 +4,7 @@
 record the inbox a submission came from; ``grzctl decrypt`` then picks the key of that inbox.
 """
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -262,6 +263,17 @@ def test_download_without_update_db_touches_no_database(migrated_database_config
 
     assert result.exit_code == 0, result.stderr
     worker_cls.return_value.download.assert_called_once()
+
+
+def test_submission_show_lists_the_recorded_inbox(migrated_database_config_path: Path, db: SubmissionDb):
+    """``db submission show`` lists the recorded inbox in its table, as ``--json`` does."""
+    db.add_submission(SUBMISSION_ID)
+    db.set_submission_inbox(SUBMISSION_ID, "inbox-b")
+
+    result = _invoke("--config", str(migrated_database_config_path), "db", "submission", "show", SUBMISSION_ID)
+
+    assert result.exit_code == 0, result.stderr
+    assert re.search(r"Inbox\s+inbox-b", result.stdout), result.stdout
 
 
 def _decrypt_worker() -> MagicMock:
