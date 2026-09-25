@@ -7,6 +7,7 @@ from typing import Any
 
 import click
 import grz_common.cli as grzcli
+from grz_common.models.base import get_secret_value
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.worker import Worker
 
@@ -43,12 +44,17 @@ def encrypt(configuration: dict[str, Any], submission_dir, force, check_validati
         sys.exit("Either keys.grz_public_key or keys.grz_public_key_path must be set for encryption.")
 
     submitter_private_key = None
+    passphrase = get_secret_value(config.keys.submitter_private_key_passphrase)
     if config.keys.submitter_private_key is not None:
         submitter_private_key = Crypt4GH.load_private_key(
-            config.keys.submitter_private_key.get_secret_value(), key_name="keys.submitter_private_key"
+            config.keys.submitter_private_key.get_secret_value(),
+            passphrase=passphrase,
+            key_name="keys.submitter_private_key",
         )
     elif config.keys.submitter_private_key_path is not None:
-        submitter_private_key = Crypt4GH.retrieve_private_key(config.keys.submitter_private_key_path)
+        submitter_private_key = Crypt4GH.retrieve_private_key(
+            config.keys.submitter_private_key_path, passphrase=passphrase
+        )
 
     log.info("Starting encryption...")
 
