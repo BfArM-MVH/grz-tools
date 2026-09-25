@@ -122,5 +122,5 @@ def test_encrypt_fails_if_the_signing_key_cannot_be_loaded(tmp_path, crypt4gh_pu
         result = _invoke_encrypt(config_path, _submission_dir(tmp_path), mock_worker_cls)
 
     assert isinstance(result.exception, grzexc.ConfigurationError), result.output
-    assert f"archives.signing_key_path: Secret key {not_a_key_path} cannot be read" in str(result.exception)
+    assert f"Secret key {not_a_key_path} cannot be read" in str(result.exception)
     mock_worker_cls.return_value.encrypt.assert_not_called()
