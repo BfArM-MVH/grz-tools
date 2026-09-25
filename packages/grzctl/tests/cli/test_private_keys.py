@@ -2,7 +2,6 @@
 path in ``<name>_path``, with an optional ``<name>_passphrase``, and loads in memory.
 """
 
-import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -264,23 +263,12 @@ def test_inbox_target_fails_for_a_submitter_missing_from_the_config(tmp_path: Pa
 
 
 def test_inbox_target_fails_for_an_inbox_missing_from_the_config(tmp_path: Path, unread_file: str):
-    """Unlike ``resolve_inbox``, it raises rather than exits, so a ``DbContext`` records the error."""
     config = _config_with_one_inbox(tmp_path, unread_file, private_key_path=unread_file)
 
     with pytest.raises(
         grzexc.ConfigurationError, match=r"Inbox 'other' not configured for submitter '260914050'\. Available: inbox"
     ):
         config.inbox_target("260914050", "other")
-
-
-def test_resolve_inbox_logs_the_error_and_exits(tmp_path: Path, unread_file: str, caplog):
-    config = _config_with_one_inbox(tmp_path, unread_file, private_key_path=unread_file)
-
-    with caplog.at_level(logging.ERROR, logger="grzctl.models.config"), pytest.raises(SystemExit) as exc_info:
-        config.resolve_inbox("260914050", "other")
-
-    assert exc_info.value.code == 1
-    assert "Inbox 'other' not configured for submitter '260914050'. Available: inbox" in caplog.text
 
 
 def test_inline_inbox_key_asks_for_its_passphrase_by_its_config_location(

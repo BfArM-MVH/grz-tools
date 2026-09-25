@@ -1,5 +1,3 @@
-import logging
-import sys
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
@@ -20,8 +18,6 @@ from grz_common.utils.crypt import Crypt4GH
 from pydantic import Field, PrivateAttr, SecretStr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
-
-log = logging.getLogger(__name__)
 
 from .db import DbModel
 from .pruefbericht import PruefberichtModel
@@ -355,11 +351,3 @@ class GrzctlConfig(IgnoringBaseSettings):
             s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
             **inbox_cfg.model_dump(include={"private_key", "private_key_path", "private_key_passphrase"}),
         )
-
-    def resolve_inbox(self, submitter_id: str, inbox_name: str) -> InboxTarget:
-        """Retrieve a specific inbox target like :meth:`inbox_target`, or log its error and exit."""
-        try:
-            return self.inbox_target(submitter_id, inbox_name)
-        except grzexc.ConfigurationError as e:
-            log.error(str(e))
-            sys.exit(1)

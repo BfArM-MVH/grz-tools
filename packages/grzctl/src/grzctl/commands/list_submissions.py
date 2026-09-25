@@ -131,7 +131,7 @@ def list_submissions(  # noqa: PLR0913, PLR0917
     **kwargs,
 ):
     """List submissions within an inbox from oldest to newest, up to the requested limit."""
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
 
     submissions = query_submissions(s3_options, show_cleaned)
 
