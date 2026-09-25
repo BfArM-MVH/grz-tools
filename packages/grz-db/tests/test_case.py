@@ -640,9 +640,10 @@ def test_diff_reports_pending_case_link_and_commit_applies_it(db: SubmissionDb, 
     assert changes.case_link is None
 
 
-#: A read of the submissions table. SQLAlchemy renders SQL over several lines, so the
-#: statement is collapsed to one before matching.
 _SUBMISSION_READ = re.compile(r"^SELECT\b.*\bFROM submissions\b")
+"""A read of the submissions table. SQLAlchemy renders SQL over several lines, so the
+statement is collapsed to one before matching.
+"""
 
 
 @contextmanager

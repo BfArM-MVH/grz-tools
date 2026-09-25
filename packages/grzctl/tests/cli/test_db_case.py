@@ -13,8 +13,8 @@ import grzctl.cli
 import pytest
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
-#: The upload date that populate records. Without --submission-date, populate reads it from an inbox.
 UPLOAD_DATE = "2026-01-01"
+"""The upload date that populate records. Without --submission-date, populate reads it from an inbox."""
 
 
 def _invoke(cli, config_path: Path, *args: str, input: str | None = None) -> click.testing.Result:

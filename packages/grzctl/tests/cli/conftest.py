@@ -23,8 +23,8 @@ def _grzctl_archives(public_key_path: str, endpoint_url: str | None = None) -> d
     }
 
 
-#: The revision the schema-upgrade tests start from.
 INITIAL_REVISION = "1a9bd994df1b"
+"""The revision the schema-upgrade tests start from."""
 
 PRUEFBERICHT = {
     "authorization_url": "https://auth.example.org",

@@ -31,8 +31,8 @@ from grzctl.commands.db.cli import (
 )
 from moto import mock_aws
 
-#: The archive bucket names that ``tests/cli/conftest.py`` configures.
 ARCHIVE_BUCKETS = ("consented", "non_consented")
+"""The archive bucket names that ``tests/cli/conftest.py`` configures."""
 REGION = "us-east-1"
 DIFFERENT_TAN_G = "b" * 64
 DIFFERENT_LOCAL_CASE_ID = "different-local-case-id"
