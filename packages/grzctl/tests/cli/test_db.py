@@ -30,8 +30,8 @@ from grz_db.models.submission import (
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
 from grzctl.models.config import GrzctlConfig
 
-#: The upload date that populate records. Without --submission-date, populate reads it from an inbox.
 UPLOAD_DATE = "2026-01-01"
+"""The upload date that populate records. Without --submission-date, populate reads it from an inbox."""
 
 
 def test_init_brings_an_empty_database_to_the_latest_schema(empty_database_config_path):

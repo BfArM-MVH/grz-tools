@@ -1022,6 +1022,14 @@ class QCQueueEntry(SQLModel, table=True):
     )
 
 
+_SQLITE_BUSY_TIMEOUT_SECONDS = 60
+"""Seconds a SQLite connection waits for another connection's lock before it fails with ``database is locked``.
+
+The sqlite3 default of 5 s is too short. On a busy disk, one commit with ``synchronous=FULL`` can wait longer
+than that for its fsyncs.
+"""
+
+
 class SubmissionDb:
     """
     API entrypoint for managing submissions.
@@ -1046,7 +1054,12 @@ class SubmissionDb:
             here so :meth:`diff` and :meth:`commit_changes` cannot be given different ones and
             write a link other than the one previewed.
         """
-        self.engine = create_engine(db_url, echo=debug)
+        url = sa.make_url(db_url)
+        if url.get_backend_name() == "sqlite" and "timeout" not in url.query:
+            # Set on the URL rather than in connect_args, because the migrations build their own
+            # engine from this URL and should wait as long.
+            url = url.update_query_dict({"timeout": str(_SQLITE_BUSY_TIMEOUT_SECONDS)})
+        self.engine = create_engine(url, echo=debug)
         self._author = author
         self._schema_confirmed = False
         self._case_resolver = case_resolver
@@ -1084,7 +1097,9 @@ class SubmissionDb:
         """
         alembic_cfg = AlembicConfig()
         alembic_cfg.set_main_option("script_location", "grz_db:migrations")
-        alembic_cfg.set_main_option("sqlalchemy.url", str(self.engine.url))
+        # str(url) hides the password as ***, and the alembic config reads % as interpolation
+        url = self.engine.url.render_as_string(hide_password=False).replace("%", "%%")
+        alembic_cfg.set_main_option("sqlalchemy.url", url)
         return alembic_cfg
 
     def _confirm_schema(self) -> None:

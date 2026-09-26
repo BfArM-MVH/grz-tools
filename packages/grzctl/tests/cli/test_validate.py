@@ -80,11 +80,12 @@ def test_validate_forwards_mmap_to_worker(tmp_path, flag, expected_no_mmap, grzc
         assert mock_worker.validate.call_args.kwargs["no_mmap"] is expected_no_mmap
 
 
-#: The submitterId of the shipped example metadata these tests build their submissions from.
-#: ``validate`` requires it on the command line and checks the metadata against it.
 SUBMITTER_ID = "260914050"
-#: The upload date that populate records. Without --submission-date, populate reads it from an inbox.
+"""The submitterId of the shipped example metadata these tests build their submissions from.
+``validate`` requires it on the command line and checks the metadata against it.
+"""
 UPLOAD_DATE = "2026-01-01"
+"""The upload date that populate records. Without --submission-date, populate reads it from an inbox."""
 
 
 def _set_up_case_with_qc_passed_initial(tmp_path, migrated_database_config_path, test_metadata_path) -> SimpleNamespace:
