@@ -48,7 +48,7 @@ def download(  # noqa: PLR0913, PLR0917
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
     bucket_name = s3_options.bucket
     inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
 

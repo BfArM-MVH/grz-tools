@@ -5,11 +5,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import click.testing
+import grz_common.exceptions as grzexc
 import pytest
 import sqlalchemy
 import yaml
+from grz_common.utils.crypt import Crypt4GH
 from grz_db.errors import SubmissionNotFoundError
-from grz_db.models.submission import Submission, SubmissionStateEnum
+from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionStateEnum
 from grzctl.cli import build_cli
 from grzctl.models.config import GrzctlConfig
 from sqlalchemy.orm import selectinload
@@ -25,10 +27,9 @@ UPLOAD_DATE = "2026-01-01"
 def full_config_path(
     tmp_path,
     migrated_db_config_content,
-    keys_config_content,
     pruefbericht_config_content,
 ):
-    from tests.conftest import _grzctl_archives
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
 
     archives = _grzctl_archives(endpoint_url="http://localhost:9000")
     # Use distinct public keys per archive so tests can assert that the consent
@@ -42,7 +43,7 @@ def full_config_path(
                 "inbox_buckets": {
                     "inbox": {
                         "endpoint_url": "http://localhost:9000",
-                        "private_key_path": "/dev/null",
+                        "private_key_path": _GRZ_PRIVATE_KEY_PATH,
                     }
                 },
             }
@@ -51,7 +52,6 @@ def full_config_path(
         "identifiers": {"grz": "GRZK00007"},
     }
     config_data.update(migrated_db_config_content)
-    config_data.update(keys_config_content)
     config_data.update(pruefbericht_config_content)
 
     if "author" in config_data.get("db", {}):
@@ -146,6 +146,8 @@ def mock_command(command_spec, submission_id):
             mock_submission = MagicMock()
             mock_submission.metadata.content.submission_id = submission_id
             mock_submission.submission_id = submission_id
+            # decrypt loads the private key of this submitter's inboxes, which full_config_path configures
+            mock_submission.metadata.content.submission.submitter_id = submission_id[:9]
 
             if command_spec["id_source"] == "submission":
                 mock_worker.parse_submission.return_value = mock_submission
@@ -210,7 +212,7 @@ def build_args(
             "skip_populate": True,
         },
         {
-            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR"],
+            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.decrypt.Worker",
             "id_source": "encrypted_submission",
             "initial_state": SubmissionStateEnum.DOWNLOADED,
@@ -354,9 +356,11 @@ def test_db_wrappers(
                 expected_key = (
                     CONSENTED_PUBLIC_KEY_PATH if command_spec.get("consent_value") else NON_CONSENTED_PUBLIC_KEY_PATH
                 )
-                assert mock_worker.encrypt.call_args.kwargs["recipient_public_key_path"] == expected_key, (
-                    "encrypt must use the public key of the archive targeted by the submission's consent"
-                )
+                recipient_public_key = mock_worker.encrypt.call_args.kwargs["recipient_public_key"]
+                assert (
+                    recipient_public_key.public_bytes_raw()
+                    == Crypt4GH.retrieve_public_key(expected_key).public_bytes_raw()
+                ), "encrypt must use the public key of the archive targeted by the submission's consent"
             elif method_name == "archive":
                 expected_bucket = "consented" if command_spec.get("consent_value") else "non_consented"
                 assert mock_worker.archive.call_args.args[0].bucket == expected_bucket, (
@@ -375,7 +379,7 @@ def test_db_wrappers(
     "command_spec",
     [
         {
-            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR"],
+            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.decrypt.Worker",
             "id_source": "encrypted_submission",
         },
@@ -450,7 +454,7 @@ def test_db_wrappers_submission_not_in_db(
     "command_spec",
     [
         {
-            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR"],
+            "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.decrypt.Worker",
             "id_source": "encrypted_submission",
             "wrong_state": SubmissionStateEnum.ENCRYPTED,  # expected: DOWNLOADED
@@ -627,6 +631,43 @@ def test_dbcontext_error_handling(db_engine, full_config_path, test_metadata, tm
         assert history[-1] == SubmissionStateEnum.ERROR
         assert history[-2] == SubmissionStateEnum.CLEANING
         assert history[-3] == SubmissionStateEnum.QCED
+
+
+def test_decrypt_records_a_configuration_error_for_an_inbox_that_the_submitter_does_not_have(
+    db_engine, full_config_path, test_metadata, tmp_path
+):
+    """``grzctl decrypt`` looks up the inbox inside the ``DbContext``, so the error state records the failure reason."""
+    runner = click.testing.CliRunner()
+    cli = build_cli()
+
+    parsed_metadata, metadata_path = test_metadata
+    submission_id = parsed_metadata.submission_id
+    setup_db_state(
+        runner, cli, full_config_path, submission_id, metadata_path, initial_state=SubmissionStateEnum.DOWNLOADED
+    )
+    command_spec = {"worker_patch": "grzctl.commands.decrypt.Worker", "id_source": "encrypted_submission"}
+    args = [
+        "--config",
+        str(full_config_path),
+        "decrypt",
+        "--submission-dir",
+        str(tmp_path),
+        "--inbox",
+        "other",
+        "--update-db",
+    ]
+
+    with mock_command(command_spec, submission_id) as (mock_worker, _mock_extra):
+        result = runner.invoke(cli, args)
+
+    assert isinstance(result.exception, grzexc.ConfigurationError), result.output
+    mock_worker.decrypt.assert_not_called()
+    with Session(db_engine) as session:
+        statement = select(Submission).where(Submission.id == submission_id).options(selectinload(Submission.states))
+        latest_state = session.exec(statement).one().get_latest_state()
+        assert latest_state.state == SubmissionStateEnum.ERROR
+        assert latest_state.failure_reason == FailureReasonEnum.CONFIGURATION_ERROR
+        assert "Inbox 'other' not configured for submitter '260914050'" in latest_state.data["error"]
 
 
 @pytest.mark.parametrize(

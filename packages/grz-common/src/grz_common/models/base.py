@@ -18,6 +18,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 FilePath = Annotated[Path, AfterValidator(lambda v: v.expanduser()), PathType("file")]
 
 
+def _check_crypt4gh_public_key(public_key: str) -> str:
+    """Check that a crypt4gh public key given as text is framed like one.
+
+    Only the markers are checked, not the key itself. The check fails only if both the
+    ``BEGIN CRYPT4GH PUBLIC KEY`` and the ``END CRYPT4GH PUBLIC KEY`` marker are missing.
+
+    :param public_key: The public key.
+    :returns: *public_key*, unchanged.
+    :raises ValueError: If both markers are missing.
+    """
+    if "BEGIN CRYPT4GH PUBLIC KEY" not in public_key and "END CRYPT4GH PUBLIC KEY" not in public_key:
+        raise ValueError("Invalid public key format")
+    return public_key
+
+
+Crypt4GHPublicKey = Annotated[str, AfterValidator(_check_crypt4gh_public_key)]
+"""A crypt4gh public key as text. Its validation fails only if both its BEGIN and its END marker are missing."""
+
+
 def get_secret_value(value: SecretStr | None) -> str | None:
     """Extract the plain-text value from a ``SecretStr``.
 
@@ -74,6 +93,8 @@ class IgnoringBaseSettings(_RevealableSecrets, BaseSettings):
         use_enum_values=True,
         env_nested_delimiter="__",
         env_prefix="grz_",
+        # errors would show the raw input, and SecretStr does not mask passphrases and keys there
+        hide_input_in_errors=True,
     )
 
     def to_yaml(self, fd):

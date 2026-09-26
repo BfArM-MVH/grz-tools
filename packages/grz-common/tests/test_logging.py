@@ -1,6 +1,7 @@
 import logging
 from unittest.mock import patch
 
+import pytest
 from grz_common import logging as grz_logging
 
 
@@ -39,3 +40,28 @@ def test_get_hostname_returns_name_when_available():
 def test_get_hostname_returns_none_when_unavailable():
     with patch("socket.gethostname", side_effect=OSError):
         assert grz_logging.get_hostname() is None
+
+
+@pytest.fixture
+def restore_log_levels():
+    """Restore the levels that ``setup_cli_logging`` sets, so that later tests keep theirs."""
+    root_level = logging.getLogger().level
+    crypt4gh_level = logging.getLogger("crypt4gh").level
+    yield
+    logging.getLogger().setLevel(root_level)
+    logging.getLogger("crypt4gh").setLevel(crypt4gh_level)
+
+
+@pytest.mark.usefixtures("restore_log_levels")
+def test_setup_cli_logging_drops_the_crypt4gh_debug_records():
+    """crypt4gh logs private keys in hex at DEBUG."""
+    grz_logging.setup_cli_logging(None, "DEBUG")
+
+    assert not logging.getLogger("crypt4gh.header").isEnabledFor(logging.DEBUG)
+
+
+@pytest.mark.usefixtures("restore_log_levels")
+def test_setup_cli_logging_keeps_crypt4gh_at_a_higher_cli_log_level():
+    grz_logging.setup_cli_logging(None, "WARNING")
+
+    assert not logging.getLogger("crypt4gh.header").isEnabledFor(logging.INFO)

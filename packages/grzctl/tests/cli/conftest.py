@@ -10,7 +10,7 @@ from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metada
 from grzctl.models.config import GrzctlConfig
 
 
-def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
+def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: str | None = None) -> dict:
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
         if endpoint_url:
@@ -20,11 +20,31 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+        "signing_key_path": signing_key_path,
     }
 
 
 #: The revision the schema-upgrade tests start from.
 INITIAL_REVISION = "1a9bd994df1b"
+
+
+@pytest.fixture
+def unread_file() -> str:
+    """An existing file for the key path fields of tests that never read it.
+
+    The key path fields need an existing file, and this conftest module serves as one.
+    """
+    return str(Path(__file__).resolve())
+
+
+@pytest.fixture
+def crypt4gh_public_key() -> str:
+    """A crypt4gh public key as text.
+
+    ``Crypt4GHPublicKey`` only checks for the markers, but ``grzctl encrypt`` loads the key,
+    so its payload decodes to the 32 bytes of an X25519 public key.
+    """
+    return "-----BEGIN CRYPT4GH PUBLIC KEY-----\n7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n-----END CRYPT4GH PUBLIC KEY-----\n"
 
 
 @pytest.fixture
@@ -66,6 +86,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
         },
         archives=_grzctl_archives(
             public_key_path=str(public_key_path.resolve()),
+            signing_key_path=str(private_key_path.resolve()),
         ),
         db={
             "database_url": database_url,
@@ -77,10 +98,6 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
             "known_public_keys_file": str(public_key_path.resolve()),
         },
         pruefbericht={},
-        keys={
-            "grz_private_key_path": str(private_key_path.resolve()),
-            "grz_public_key_path": str(public_key_path.resolve()),
-        },
         identifiers={"grz": "GRZK00007"},
     )
 

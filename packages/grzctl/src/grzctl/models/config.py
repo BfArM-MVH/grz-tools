@@ -1,23 +1,72 @@
-import logging
-import sys
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
 
+import grz_common.exceptions as grzexc
 import yaml
-from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from grz_common.models.base import (
+    Crypt4GHPublicKey,
+    FilePath,
+    IgnoringBaseModel,
+    IgnoringBaseSettings,
+    get_secret_value,
+)
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
+from grz_common.utils.crypt import Crypt4GH
 from pydantic import Field, PrivateAttr, SecretStr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
-
-log = logging.getLogger(__name__)
 
 from .db import DbModel
 from .pruefbericht import PruefberichtModel
 
 _config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", default=None)
+
+
+def _check_key_fields(name: str, key: object | None, key_path: Path | None, *, required: bool) -> None:
+    """Check that no more than one of the fields ``<name>`` and ``<name>_path`` is set, or with *required* exactly one.
+
+    :param name: Name of the field with the inline key.
+    :param key: Value of that field.
+    :param key_path: Value of the field ``<name>_path``.
+    :param required: Whether one of the two fields must be set.
+    :raises ValueError: If both are set, or if neither is set although one is required.
+    """
+    if required and key is None and key_path is None:
+        raise ValueError(f"Either {name} or {name}_path must be set.")
+    if key is not None and key_path is not None:
+        raise ValueError(f"Only one of {name} or {name}_path must be set.")
+
+
+def _load_private_key(
+    private_key: SecretStr | None,
+    private_key_path: Path | None,
+    passphrase: SecretStr | None,
+    *,
+    key_name: str,
+) -> X25519PrivateKey:
+    """Load a crypt4gh private key in memory, from its inline text or from its file.
+
+    The passphrase is only asked for if the key is encrypted. It is the first of: *passphrase*,
+    the ``C4GH_PASSPHRASE`` environment variable, and an interactive prompt.
+
+    :param private_key: The private key, given inline.
+    :param private_key_path: Path to the private key.
+    :param passphrase: Passphrase of the private key.
+    :param key_name: Names the inline key in the passphrase prompt and in errors, as in
+        :meth:`Crypt4GH.load_private_key`. A key from *private_key_path* is named by its path instead.
+    :returns: The private key.
+    :raises ConfigurationError: If the key cannot be loaded.
+    """
+    if private_key is not None:
+        return Crypt4GH.load_private_key(
+            private_key.get_secret_value(), passphrase=get_secret_value(passphrase), key_name=key_name
+        )
+    if private_key_path is not None:
+        return Crypt4GH.retrieve_private_key(private_key_path, passphrase=get_secret_value(passphrase))
+    raise RuntimeError(f"Validation leaves no {key_name} without its inline text or its path.")
 
 
 class InboxConfig(S3ConnectionBase):
@@ -29,11 +78,19 @@ class InboxConfig(S3ConnectionBase):
     bucket: Annotated[str | None, Field(default=None)] = None
     """S3 bucket name. Defaults to the inbox name key if not set."""
 
-    private_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the GRZ private key used to decrypt files from this inbox."""
+    private_key: SecretStr | None = None
+    """The GRZ crypt4gh private key used to decrypt files from this inbox."""
+
+    private_key_path: FilePath | None = None
+    """Path to the GRZ crypt4gh private key used to decrypt files from this inbox."""
 
     private_key_passphrase: SecretStr | None = None
     """Passphrase to the GRZ private key used to decrypt files from this inbox."""
+
+    @model_validator(mode="after")
+    def validate_private_key(self) -> "InboxConfig":
+        _check_key_fields("private_key", self.private_key, self.private_key_path, required=True)
+        return self
 
 
 class InboxTarget(IgnoringBaseModel):
@@ -42,14 +99,45 @@ class InboxTarget(IgnoringBaseModel):
     Encapsulates everything needed to read and decrypt from a specific inbox.
     """
 
+    submitter_id: str
+    """Submitter (LE) ID whose ``inbox_buckets`` hold this inbox."""
+
+    inbox_name: str
+    """Name of this inbox in the submitter's ``inbox_buckets``."""
+
     s3: S3Options
     """Fully resolved S3 options, including the bucket name."""
 
-    private_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the GRZ private key used to decrypt files from this inbox."""
+    private_key: SecretStr | None = None
+    """The GRZ crypt4gh private key used to decrypt files from this inbox."""
+
+    private_key_path: FilePath | None = None
+    """Path to the GRZ crypt4gh private key used to decrypt files from this inbox."""
 
     private_key_passphrase: SecretStr | None = None
     """Passphrase to the GRZ private key used to decrypt files from this inbox."""
+
+    @model_validator(mode="after")
+    def validate_private_key(self) -> "InboxTarget":
+        _check_key_fields("private_key", self.private_key, self.private_key_path, required=True)
+        return self
+
+    def load_private_key(self) -> X25519PrivateKey:
+        """Load the private key of this inbox in memory, from its inline text or from its file.
+
+        The passphrase prompt and errors name an inline key by its config location,
+        ``leistungserbringer.<submitter_id>.inbox_buckets.<inbox_name>.private_key``.
+        They name a key file by its path.
+
+        :returns: The private key.
+        :raises ConfigurationError: If the key cannot be loaded.
+        """
+        return _load_private_key(
+            self.private_key,
+            self.private_key_path,
+            self.private_key_passphrase,
+            key_name=f"leistungserbringer.{self.submitter_id}.inbox_buckets.{self.inbox_name}.private_key",
+        )
 
 
 class LeistungserbringerEntry(IgnoringBaseModel):
@@ -62,24 +150,34 @@ class LeistungserbringerEntry(IgnoringBaseModel):
     """Mapping: InboxName -> InboxConfig."""
 
 
-class GrzctlKeyModel(IgnoringBaseModel):
-    """Key configuration for grzctl commands."""
-
-    grz_private_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the GRZ private key for decryption."""
-
-    grz_public_key_path: Annotated[str | None, Field(default=None)] = None
-    """Path to the GRZ public key (optional; encryption targets are configured via archives instead)."""
-
-
 class ArchiveTarget(IgnoringBaseModel):
     """Encapsulates everything needed to write to a specific archive."""
 
     s3: S3Options
     """S3 connection details and bucket for this archive."""
 
-    public_key_path: Annotated[str, Field(min_length=1)]
-    """Path to the public key for re-encryption of files destined for this archive."""
+    public_key: Crypt4GHPublicKey | None = None
+    """The crypt4gh public key for re-encryption of files destined for this archive."""
+
+    public_key_path: FilePath | None = None
+    """Path to the crypt4gh public key for re-encryption of files destined for this archive."""
+
+    @model_validator(mode="after")
+    def validate_public_key(self) -> "ArchiveTarget":
+        _check_key_fields("public_key", self.public_key, self.public_key_path, required=True)
+        return self
+
+    def load_public_key(self) -> X25519PublicKey:
+        """Load the crypt4gh public key, from its inline text or from its file.
+
+        :returns: The public key.
+        :raises ConfigurationError: If the key cannot be loaded.
+        """
+        if self.public_key is not None:
+            return Crypt4GH.load_public_key(self.public_key, key_name=f"of the archive with bucket {self.s3.bucket}")
+        if self.public_key_path is not None:
+            return Crypt4GH.retrieve_public_key(self.public_key_path)
+        raise grzexc.ConfigurationError("Neither public_key nor public_key_path is set.")
 
 
 class ArchivesConfig(IgnoringBaseModel):
@@ -91,11 +189,35 @@ class ArchivesConfig(IgnoringBaseModel):
     non_consented: ArchiveTarget
     """Target definition for non-consented submissions."""
 
+    signing_key: SecretStr | None = None
+    """The GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
+
+    signing_key_path: FilePath | None = None
+    """Path to the GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
+
+    signing_key_passphrase: SecretStr | None = None
+    """Passphrase to the GRZ crypt4gh private key that signs the files re-encrypted for either archive."""
+
     @model_validator(mode="after")
     def check_buckets_are_unique(self) -> "ArchivesConfig":
         if self.consented.s3.bucket == self.non_consented.s3.bucket:
             raise ValueError("consented and non-consented buckets must be distinct.")
         return self
+
+    @model_validator(mode="after")
+    def validate_signing_key(self) -> "ArchivesConfig":
+        _check_key_fields("signing_key", self.signing_key, self.signing_key_path, required=True)
+        return self
+
+    def load_signing_key(self) -> X25519PrivateKey:
+        """Load the signing key in memory.
+
+        :returns: The signing key.
+        :raises ConfigurationError: If the key cannot be loaded.
+        """
+        return _load_private_key(
+            self.signing_key, self.signing_key_path, self.signing_key_passphrase, key_name="archives.signing_key"
+        )
 
 
 class DictConfigSettingsSource(PydanticBaseSettingsSource):
@@ -139,9 +261,6 @@ class GrzctlConfig(IgnoringBaseSettings):
 
     pruefbericht: PruefberichtModel
     """Configuration for Prüfbericht submission."""
-
-    keys: GrzctlKeyModel
-    """Key configuration for encryption/decryption commands."""
 
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
@@ -202,28 +321,33 @@ class GrzctlConfig(IgnoringBaseSettings):
         finally:
             _config_ctx.reset(token)
 
-    def resolve_inbox(self, submitter_id: str, inbox_name: str) -> InboxTarget:
+    def inbox_target(self, submitter_id: str, inbox_name: str) -> InboxTarget:
         """Retrieve a specific inbox target by exact submitter (LE) ID and inbox name.
 
         No auto-guessing, fallback, or alias lookup.
+
+        :param submitter_id: Submitter (LE) ID, the key in ``leistungserbringer``.
+        :param inbox_name: Inbox name, the key in the submitter's ``inbox_buckets``.
+        :returns: The inbox target.
+        :raises ConfigurationError: If the config lacks the submitter, or the submitter lacks the inbox.
         """
         entry = self._le_by_id.get(submitter_id)
         if entry is None:
             available = ", ".join(self._describe_le(le_id, e) for le_id, e in self.leistungserbringer.items())
-            log.error(f"Submitter '{submitter_id}' not found. Available: {available}")
-            sys.exit(1)
+            raise grzexc.ConfigurationError(f"Submitter '{submitter_id}' not found. Available: {available}")
 
         if inbox_name not in entry.inbox_buckets:
             available = ", ".join(entry.inbox_buckets.keys())
-            log.error(
+            raise grzexc.ConfigurationError(
                 f"Inbox '{inbox_name}' not configured for submitter {self._describe_le(submitter_id, entry)}. "
                 f"Available: {available}"
             )
-            sys.exit(1)
 
         inbox_cfg = entry.inbox_buckets[inbox_name]
         bucket = inbox_cfg.bucket or inbox_name
         return InboxTarget(
+            submitter_id=submitter_id,
+            inbox_name=inbox_name,
             s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
-            **inbox_cfg.model_dump(include={"private_key_path", "private_key_passphrase"}),
+            **inbox_cfg.model_dump(include={"private_key", "private_key_path", "private_key_passphrase"}),
         )

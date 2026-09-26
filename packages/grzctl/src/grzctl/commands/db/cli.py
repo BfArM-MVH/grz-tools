@@ -161,7 +161,7 @@ def db(
     if path := db_config.author.private_key_path:
         with open(path, "rb") as f:
             private_key_bytes = f.read()
-    elif key := db_config.author.private_key:
+    elif key := get_secret_value(db_config.author.private_key):
         private_key_bytes = key.encode("utf-8")
     else:
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
@@ -1101,7 +1101,7 @@ def _submission_upload_date(
             )
         inbox_name = next(iter(entry.inbox_buckets))
 
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
     try:
         uploaded = get_metadata_upload_timestamp(init_s3_client(s3_options), s3_options.bucket, submission_id)
     except SubmissionCleanedError as e:
@@ -2306,13 +2306,7 @@ def sync_from_inbox(
     **kwargs,
 ):
     """Synchronize the database with submissions found in the inbox."""
-    try:
-        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
-    except Exception:
-        console_err.print(
-            f"[red]Error resolving S3 configuration for inbox '{inbox_name}': {traceback.format_exc()}[/red]"
-        )
-        sys.exit(1)
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
 
     db_url = ctx.obj["db_url"]
     author = ctx.obj["author"]

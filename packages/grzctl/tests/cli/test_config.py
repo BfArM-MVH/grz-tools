@@ -12,7 +12,6 @@ INBOX = {
     "endpoint_url": "https://s3.amazonaws.com",
     "access_key": "testing",
     "secret": "testing",
-    "private_key_path": "/path/to/test.sec",
 }
 
 
@@ -20,7 +19,8 @@ INBOX = {
 def configuration(offline_config: GrzctlConfig) -> dict:
     """The offline config as a dict, whose only inbox is ``BUCKET_NAME`` of submitter ``LE_ID``."""
     configuration = offline_config.model_dump(mode="json", exclude_none=True)
-    configuration["leistungserbringer"] = {LE_ID: {"inbox_buckets": {BUCKET_NAME: INBOX}}}
+    inbox = {**INBOX, "private_key_path": configuration["archives"]["signing_key_path"]}
+    configuration["leistungserbringer"] = {LE_ID: {"inbox_buckets": {BUCKET_NAME: inbox}}}
     return configuration
 
 
@@ -42,3 +42,16 @@ def test_pydantic_json_env_var_merging(monkeypatch, configuration: dict):
 
     entry = config.leistungserbringer[LE_ID]
     assert get_secret_value(entry.inbox_buckets[BUCKET_NAME].private_key_passphrase) == "json-secret-passphrase"
+
+
+def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration: dict, crypt4gh_public_key: str):
+    """An operator may put the archive's public key into an environment variable inline,
+    instead of writing it to a file that ``public_key_path`` then points at.
+    """
+    del configuration["archives"]["consented"]["public_key_path"]
+    monkeypatch.setenv("GRZ_ARCHIVES__CONSENTED__PUBLIC_KEY", crypt4gh_public_key)
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    assert config.archives.consented.public_key == crypt4gh_public_key
+    assert config.archives.consented.public_key_path is None

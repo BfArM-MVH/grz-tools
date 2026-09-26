@@ -14,6 +14,7 @@ from pathlib import Path
 
 import grz_check
 import grz_common.exceptions as grzexc
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
@@ -496,8 +497,8 @@ class Submission:
         self,
         encrypted_files_dir: str | PathLike,
         progress_log_file: str | PathLike,
-        recipient_public_key_path: str | PathLike,
-        submitter_private_key_path: str | PathLike | None = None,
+        recipient_public_key: X25519PublicKey,
+        submitter_private_key: X25519PrivateKey | None = None,
         force: bool = False,
     ) -> EncryptedSubmission:
         """
@@ -505,25 +506,20 @@ class Submission:
 
         :param encrypted_files_dir: Output directory of the encrypted files
         :param progress_log_file: Path to a log file to store the progress of the encryption process
-        :param recipient_public_key_path: Path to the public key file which will be used for encryption
-        :param submitter_private_key_path: Path to the private key file which will be used to sign the encryption
+        :param recipient_public_key: The public key which will be used for encryption
+        :param submitter_private_key: The private key which will be used to sign the encryption
         :param force: Force encryption even if target files already exist
         :return: EncryptedSubmission instance
-        :raises ConfigurationError: If a key is missing or cannot be read.
         """
         # Import here to avoid circular import issues
         from ..progress import FileProgressLogger  # noqa: PLC0415
 
         encrypted_files_dir = Path(encrypted_files_dir)
 
-        if not submitter_private_key_path:
+        if submitter_private_key is None:
             self.__log.warning("No submitter private key provided, skipping signing.")
 
-        try:
-            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path, submitter_private_key_path or None)
-        except Exception as e:
-            self.__log.error(f"Error preparing encryption keys: {e}")
-            raise e
+        public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key, submitter_private_key)
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -690,14 +686,14 @@ class EncryptedSubmission:
         self,
         files_dir: str | PathLike,
         progress_log_file: str | PathLike,
-        recipient_private_key_path: str | PathLike,
+        recipient_private_key: X25519PrivateKey,
     ) -> Submission:
         """
         Decrypt this encrypted submission with a private key using Crypt4Gh
 
         :param files_dir: Output directory of the decrypted files
         :param progress_log_file: Path to a log file to store the progress of the decryption process
-        :param recipient_private_key_path: Path to the private key file which will be used for decryption
+        :param recipient_private_key: The private key which will be used for decryption
         :return: Submission instance
         """
         # Import here to avoid circular import issues
@@ -713,12 +709,6 @@ class EncryptedSubmission:
             files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
         progress_logger = FileProgressLogger[DecryptionState](log_file_path=progress_log_file)
-
-        try:
-            private_key = Crypt4GH.retrieve_private_key(recipient_private_key_path)
-        except Exception as e:
-            self.__log.error(f"Error preparing private key: {e}")
-            raise e
 
         for encrypted_file_path, file_metadata in self.encrypted_files.items():
             logged_state = progress_logger.get_state(encrypted_file_path, file_metadata)
@@ -741,7 +731,7 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
+                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, recipient_private_key)
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(

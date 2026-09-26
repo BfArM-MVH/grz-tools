@@ -17,7 +17,7 @@ def test_calculate_sha256(temp_small_file_path: str, temp_small_file_sha256sum):
 
 
 def test_prepare_c4gh_keys(crypt4gh_grz_public_key_file_path: str):
-    keys = Crypt4GH.prepare_c4gh_keys(crypt4gh_grz_public_key_file_path)
+    keys = Crypt4GH.prepare_c4gh_keys(Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path))
     # single key in tuple
     assert len(keys) == 1
     # key method is set to 0

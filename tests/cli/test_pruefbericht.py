@@ -411,24 +411,20 @@ def pruefbericht_db_config(tmp_path, migrated_db_connection):
     """Config file for a database already on the latest schema, one per supported backend."""
     import json
 
-    from tests.conftest import _grzctl_archives, crypt4gh_grz_private_key_file, crypt4gh_grz_public_key_file
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
 
     config = {
         "leistungserbringer": {
             "000000000": {
                 "inbox_buckets": {
                     "inbox": {
-                        "private_key_path": "/dev/null",
+                        "private_key_path": _GRZ_PRIVATE_KEY_PATH,
                     }
                 },
             }
         },
         "archives": _grzctl_archives(),
         "db": {"database_url": migrated_db_connection, "author": {"name": "test_author"}},
-        "keys": {
-            "grz_private_key_path": crypt4gh_grz_private_key_file,
-            "grz_public_key_path": crypt4gh_grz_public_key_file,
-        },
         "pruefbericht": {},
         "identifiers": {"grz": "GRZK00007"},
     }

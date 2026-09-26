@@ -99,5 +99,7 @@ def setup_cli_logging(log_file: str | None, log_level: str):
             log_level.upper(),
         )
     logging.getLogger("alembic.runtime.migration").addFilter(AlembicInfoNoiseFilter())
+    # crypt4gh logs private keys in hex at DEBUG
+    logging.getLogger("crypt4gh").setLevel(max(logging.INFO, logging.getLogger().level))
 
     log.debug("Logging setup complete.")
