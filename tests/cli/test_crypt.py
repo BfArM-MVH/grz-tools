@@ -1,5 +1,6 @@
 import contextlib
 import errno
+import logging
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -365,6 +366,7 @@ def test_encrypt_aborts_if_validation_log_missing(working_dir_path, temp_keys_co
 GRZ_PRIVATE_KEY = str(Path("tests/mock_files/grz_mock_private_key.sec").resolve())
 SUBMITTER_PRIVATE_KEY = str(Path("tests/mock_files/submitter_mock_private_key.sec").resolve())
 SUBMITTER_PUBLIC_KEY = Path("tests/mock_files/submitter_mock_public_key.pub")
+GRZ_PUBLIC_KEY = Path("tests/mock_files/grz_mock_public_key.pub")
 CONSENTED_PUBLIC_KEY = str(Path("tests/mock_files/archive_consented.pub").resolve())
 CONSENTED_PRIVATE_KEY = Path("tests/mock_files/archive_consented.sec").resolve()
 NON_CONSENTED_PUBLIC_KEY = str(Path("tests/mock_files/archive_non_consented.pub").resolve())
@@ -435,33 +437,62 @@ def test_decrypt_uses_the_key_of_the_inbox_that_inbox_names(working_dir_path, tm
     _assert_decrypted(working_dir_path)
 
 
-def test_grzctl_encrypt_encrypts_for_the_archive_and_signs_with_the_signing_key(working_dir_path, tmp_path):
+def _sender_public_key(encrypted_file_path: Path) -> bytes:
+    """Return the sender's public key from the first header packet of a Crypt4GH file."""
+    with open(encrypted_file_path, "rb") as encrypted_file:
+        packet = next(crypt4gh.header.parse(encrypted_file))
+    # an X25519 header packet starts with the 4 bytes of the method, then the sender's public key
+    return packet[4:36]
+
+
+def test_grzctl_encrypt_encrypts_for_the_archive_and_signs_with_the_inbox_key(working_dir_path, tmp_path):
     """``grzctl encrypt`` re-encrypts the files for the archive that the consent selects, here the consented one.
 
+    It signs them with the private key of the submitter's only inbox.
     grzctl has no archive private key, so the test decrypts a file with the archive's key itself.
     """
     copy_submission(working_dir_path, "files", "metadata")
     config_path = _write_grzctl_config(
-        tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": GRZ_PRIVATE_KEY}}}}
+        tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": SUBMITTER_PRIVATE_KEY}}}}
     )
-    config = yaml.safe_load(config_path.read_text())
-    config["archives"]["signing_key_path"] = SUBMITTER_PRIVATE_KEY
-    config_path.write_text(yaml.safe_dump(config))
 
     result = _run_grzctl(config_path, "encrypt", working_dir_path, "--no-check-validation-logs")
     assert result.exit_code == 0, result.output
 
     encrypted_file_path = working_dir_path / "encrypted_files" / f"{DECRYPTED_FILE}.c4gh"
-    with open(encrypted_file_path, "rb") as encrypted_file:
-        packet = next(crypt4gh.header.parse(encrypted_file))
-    # an X25519 header packet starts with the 4 bytes of the method, then the sender's public key
-    assert packet[4:36] == crypt4gh.keys.get_public_key(SUBMITTER_PUBLIC_KEY), "the signing key signs the files"
+    sender_public_key = _sender_public_key(encrypted_file_path)
+    assert sender_public_key == crypt4gh.keys.get_public_key(SUBMITTER_PUBLIC_KEY), "the inbox key signs the files"
 
     decrypted_file_path = tmp_path / DECRYPTED_FILE
     Crypt4GH.decrypt_file(
         encrypted_file_path, decrypted_file_path, Crypt4GH.retrieve_private_key(CONSENTED_PRIVATE_KEY)
     )
     assert calculate_sha256(decrypted_file_path) == calculate_sha256(SUBMISSION_DIR / "files" / DECRYPTED_FILE)
+
+
+def test_grzctl_encrypt_signs_with_a_random_key_if_no_inbox_resolves(working_dir_path, tmp_path, caplog):
+    """Several inboxes and no recorded inbox leave the inbox unknown, so neither inbox key signs the files."""
+    copy_submission(working_dir_path, "files", "metadata")
+    config_path = _write_grzctl_config(
+        tmp_path,
+        {
+            SUBMITTER_ID: {
+                "inbox_buckets": {
+                    "first": {"private_key_path": SUBMITTER_PRIVATE_KEY},
+                    "second": {"private_key_path": GRZ_PRIVATE_KEY},
+                }
+            }
+        },
+    )
+
+    with caplog.at_level(logging.WARNING, logger="grzctl.commands.encrypt"):
+        result = _run_grzctl(config_path, "encrypt", working_dir_path, "--no-check-validation-logs")
+
+    assert result.exit_code == 0, result.output
+    assert "signed with a random key" in caplog.text
+    sender_public_key = _sender_public_key(working_dir_path / "encrypted_files" / f"{DECRYPTED_FILE}.c4gh")
+    inbox_public_keys = [crypt4gh.keys.get_public_key(path) for path in (SUBMITTER_PUBLIC_KEY, GRZ_PUBLIC_KEY)]
+    assert sender_public_key not in inbox_public_keys
 
 
 def test_decrypt_fails_if_the_inbox_key_does_not_open_the_files(working_dir_path, tmp_path):

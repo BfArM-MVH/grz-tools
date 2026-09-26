@@ -81,6 +81,7 @@ from ...commands import grzctl_configuration, inbox_options
 from ...models.config import GrzctlConfig
 from .. import limit
 from ..change_request import resolve_and_validate_change_request
+from ..inbox_resolution import require_inbox, scan_inbox
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
@@ -1064,20 +1065,23 @@ def _prepare_donor_console_table(
     return diff_table
 
 
-def _submission_upload_date(
+def _submission_upload_date(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_id: str,
     override: datetime | None,
     inbox_name: str | None,
     stored: date | None,
+    db_service: SubmissionDb | None = None,
 ) -> date:
     """Pick the upload date to store: *override*, else *stored*, else the ``LastModified`` of metadata.json in the inbox.
 
     :param configuration: The grzctl configuration, which names the submitter's inboxes.
     :param submission_id: The submission. Its first part is the submitter ID.
     :param override: The date ``--submission-date`` named, if any.
-    :param inbox_name: The inbox ``--inbox`` named, if any. Without it, the submitter's only inbox is used.
+    :param inbox_name: The inbox ``--inbox`` named, if any.
+        Without it, the inbox recorded for the submission is used, else the submitter's only inbox.
     :param stored: The upload date that the database already holds, if any.
+    :param db_service: Submission database to read the recorded inbox from, if any.
     :returns: The date to record.
     :raises click.ClickException: if neither *override*, *stored* nor the inbox gives a date.
     """
@@ -1088,18 +1092,17 @@ def _submission_upload_date(
 
     missing = f"No upload date for submission {submission_id}"
     submitter_id = submission_id.split("_", maxsplit=1)[0]
-    if inbox_name is None:
-        entry = configuration.leistungserbringer.get(submitter_id)
-        if entry is None:
-            raise click.ClickException(
-                f"{missing}: submitter {submitter_id} has no inbox in the configuration. Pass --submission-date."
-            )
-        if len(entry.inbox_buckets) != 1:
-            raise click.ClickException(
-                f"{missing}: submitter {submitter_id} has several inboxes ({', '.join(sorted(entry.inbox_buckets))}). "
-                "Pass --inbox or --submission-date."
-            )
-        inbox_name = next(iter(entry.inbox_buckets))
+    try:
+        inbox_name = require_inbox(
+            configuration,
+            submitter_id=submitter_id,
+            submission_id=submission_id,
+            inbox_name=inbox_name,
+            db_service=db_service,
+            hint="Pass --inbox or --submission-date.",
+        )
+    except click.ClickException as e:
+        raise click.ClickException(f"{missing}: {e}") from e
 
     s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
     try:
@@ -1179,7 +1182,7 @@ def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite:
 @_allow_overwrite_option
 @_ignore_field_option
 @click.pass_context
-def populate(  # noqa: C901, PLR0913, PLR0917
+def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     metadata_path: str,
@@ -1240,9 +1243,15 @@ def populate(  # noqa: C901, PLR0913, PLR0917
             "or use 'grzctl db submission modify' directly."
         ) from e
 
+    configuration = ctx.obj["configuration"]
     submission_uploaded_date = _submission_upload_date(
-        ctx.obj["configuration"], submission_id, submission_date, inbox_name, submission.submission_uploaded_date
+        configuration, submission_id, submission_date, inbox_name, submission.submission_uploaded_date, db_service
     )
+
+    # An explicit --inbox names where the submission came from, so record it while we know it.
+    # This happens regardless of how the populate diff resolves or whether the changes are committed.
+    if inbox_name is not None:
+        db_service.set_submission_inbox(submission_id, inbox_name)
 
     try:
         changes = db_service.diff(
@@ -1840,6 +1849,7 @@ def _build_attribute_table(submission: Submission, research_consented_now: bool 
         ("Submission Size", "submission_size"),
         ("Submission Type", "submission_type"),
         ("Submitter ID", "submitter_id"),
+        ("Inbox", "inbox"),
         ("Case ID", "case_id"),
         ("Data Node ID", "data_node_id"),
         ("Disease Type", "disease_type"),
@@ -2214,6 +2224,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     consent_mismatches = 0
     expired_consents = 0
     links_unresolved = 0
+    inboxes_recorded = 0
 
     for submission in tqdm(candidates):
         # Read both archives before writing anything. A metadata.json in both is an error, and
@@ -2272,6 +2283,24 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             except ValidationError:
                 log.warning(f"Error validating submission metadata for {submission.id}: {traceback.format_exc()}")
 
+        # A missing inbox is always filled.
+        # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
+        # inboxes can still name the one the submission came from.
+        # A scan that finds no inbox, or more than one, is ambiguous.
+        # It is left for --inbox on other commands.
+        if submission.inbox is None:
+            submitter_id = submission.id.split("_", maxsplit=1)[0]
+            derived_inbox = scan_inbox(configuration, submitter_id, submission.id)
+            if derived_inbox is None:
+                console_err.print(f"[dim]  {submission.id}: no unambiguous inbox found to record.[/dim]")
+            elif dry_run:
+                console_err.print(
+                    f"[yellow]  [dry-run] {submission.id}: would record inbox '{derived_inbox}'.[/yellow]"
+                )
+            else:
+                db_service.set_submission_inbox(submission.id, derived_inbox)
+                inboxes_recorded += 1
+
     # ── Summary ─────────────────────────────────────────────────────────────
     prefix = "[dry-run] " if dry_run else ""
     verb = "Would update" if dry_run else "Updated"
@@ -2281,6 +2310,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
         f"  Case link unresolved: {links_unresolved} (also counted above)\n"
+        f"  Inbox recorded: {inboxes_recorded}\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
 
@@ -2302,10 +2332,17 @@ def sync_from_inbox(
     ctx: click.Context,
     configuration: GrzctlConfig,
     submitter_id: str,
-    inbox_name: str,
+    inbox_name: str | None,
     **kwargs,
 ):
-    """Synchronize the database with submissions found in the inbox."""
+    """Synchronize the database with submissions found in the inbox.
+
+    Without ``--inbox``, a submitter with exactly one inbox is unambiguous and used.
+    Every submission found is recorded with the inbox it was scanned in.
+    """
+    inbox_name = require_inbox(
+        configuration, submitter_id=submitter_id, inbox_name=inbox_name, exc_type=click.UsageError
+    )
     s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
 
     db_url = ctx.obj["db_url"]
@@ -2321,6 +2358,12 @@ def sync_from_inbox(
 
         console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
         sync_submissions(db_service, s3_submissions, author)
+
+        for s3_submission in s3_submissions:
+            try:
+                db_service.set_submission_inbox(s3_submission.submission_id, inbox_name)
+            except SubmissionNotFoundError as e:
+                log.warning(f"Not recording the inbox of unknown submission {s3_submission.submission_id}: {e}")
 
         console_err.print("[green]Synchronization complete.[/green]")
 

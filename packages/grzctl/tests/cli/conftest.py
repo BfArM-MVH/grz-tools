@@ -10,7 +10,7 @@ from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metada
 from grzctl.models.config import GrzctlConfig
 
 
-def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: str | None = None) -> dict:
+def _grzctl_archives(public_key_path: str, endpoint_url: str | None = None) -> dict:
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
         if endpoint_url:
@@ -20,7 +20,6 @@ def _grzctl_archives(public_key_path: str, signing_key_path: str, endpoint_url: 
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
-        "signing_key_path": signing_key_path,
     }
 
 
@@ -43,6 +42,20 @@ def unread_file() -> str:
     The key path fields need an existing file, and this conftest module serves as one.
     """
     return str(Path(__file__).resolve())
+
+
+@pytest.fixture
+def no_prompt(monkeypatch):
+    """Fail the test if the passphrase prompt opens, and set a wrong ``C4GH_PASSPHRASE``.
+
+    The configured passphrase comes first, so the wrong one in the environment must not matter.
+    """
+    monkeypatch.setenv("C4GH_PASSPHRASE", "wrong-passphrase")
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("the passphrase prompt must not open")
+
+    monkeypatch.setattr("grz_common.utils.crypt.getpass", _fail)
 
 
 @pytest.fixture
@@ -92,10 +105,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
                 },
             }
         },
-        archives=_grzctl_archives(
-            public_key_path=str(public_key_path.resolve()),
-            signing_key_path=str(private_key_path.resolve()),
-        ),
+        archives=_grzctl_archives(public_key_path=str(public_key_path.resolve())),
         db={
             "database_url": database_url,
             "author": {

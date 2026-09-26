@@ -47,10 +47,7 @@ def _two_inbox_config(tmp_path: Path) -> GrzctlConfig:
             "000000000": {"inbox_buckets": {"inbox": {"bucket": BUCKET_A, **inbox}}},
             "111111111": {"inbox_buckets": {"inbox": {"bucket": BUCKET_B, **inbox}}},
         },
-        archives=_grzctl_archives(
-            public_key_path=str(public_key_path.resolve()),
-            signing_key_path=str(private_key_path.resolve()),
-        ),
+        archives=_grzctl_archives(public_key_path=str(public_key_path.resolve())),
         db={
             "database_url": "sqlite:///:memory:",
             "author": {

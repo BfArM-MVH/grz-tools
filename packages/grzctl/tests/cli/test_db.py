@@ -1074,6 +1074,7 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
         "detailed_qc_passed": None,
         "genomic_study_type": metadata.submission.genomic_study_type,
         "genomic_study_subtype": metadata.submission.genomic_study_subtype,
+        "inbox": None,  # populated via download / sync-from-inbox / populate --inbox
         "states": [],
     }
 
