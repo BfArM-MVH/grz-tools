@@ -1,5 +1,48 @@
 # Changelog
 
+## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v3.0.0...grz-common-v4.0.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** the grzctl config has no `keys` section. Each inbox names its private key. An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`.
+* **grz-cli:** `Crypt4GH.prepare_c4gh_keys`, `Crypt4GH.decrypt_file`, `Submission.encrypt`, `EncryptedSubmission.decrypt`, `Worker.encrypt` and `Worker.decrypt` take `X25519PrivateKey` and `X25519PublicKey` objects instead of paths. The `Crypt4GH` key loaders return these objects.
+* **grzctl,grz-common:** `S3ConnectionBase.secret`, `S3ConnectionBase.session_token`, `Author.private_key_passphrase`, `InboxConfig.private_key_passphrase`, `InboxTarget.private_key_passphrase` and `PruefberichtModel.client_secret` are now `SecretStr | None`. Read them with `.get_secret_value()` or `grz_common.models.base.get_secret_value()`.
+* **grzctl:** unified config ([#635](https://github.com/BfArM-MVH/grz-tools/issues/635))
+
+### Features
+
+* **grz-cli,grz-common,grz-db,grzctl:** record why a submission failed and classify S3 errors ([#690](https://github.com/BfArM-MVH/grz-tools/issues/690)) ([f1d3fc8](https://github.com/BfArM-MVH/grz-tools/commit/f1d3fc804387c4fb6de861cccb6a99b521ac0056))
+* **grz-cli:** accept the submitter private key inline ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-cli:** add keys.submitter_private_key_passphrase ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** load crypt4gh keys in memory ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** recommend grz-cli 3.0.0 in the bundled version policy ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grz-common:** sign encrypted files with the submitter's private key ([#691](https://github.com/BfArM-MVH/grz-tools/issues/691)) ([449258c](https://github.com/BfArM-MVH/grz-tools/commit/449258c4bac0d3e65587f5e6744c71f7f759b8fa))
+* **grz-db,grzctl:** track which inbox a submission came from and use it for decryption ([#696](https://github.com/BfArM-MVH/grz-tools/issues/696)) ([ce95f8c](https://github.com/BfArM-MVH/grz-tools/commit/ce95f8c8d472f36ea62b47c7527e0d03a58647b0))
+* **grz-pydantic-models,grz-common:** keep a parsed submission lossless and redact it by one rule ([#654](https://github.com/BfArM-MVH/grz-tools/issues/654)) ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** add get_raw_dict for the document as ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grzctl,grz-common:** store sensitive config values as SecretStr and dump config without revealing them ([#680](https://github.com/BfArM-MVH/grz-tools/issues/680)) ([b383ac4](https://github.com/BfArM-MVH/grz-tools/commit/b383ac49a1f0dd5ec8d05aee7b645c2252ca40b3))
+* **grzctl:** accept every crypt4gh key in the config inline ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl:** Centralized version.json and its distribution using grzctl ([#667](https://github.com/BfArM-MVH/grz-tools/issues/667)) ([6ed9cb0](https://github.com/BfArM-MVH/grz-tools/commit/6ed9cb04bede9fc9b34b7ce6d3aa9a0df9d42ae4))
+* **grzctl:** configure each crypt4gh key where grzctl uses it ([#694](https://github.com/BfArM-MVH/grz-tools/issues/694)) ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl:** sign archived files with the private key of the ([ce95f8c](https://github.com/BfArM-MVH/grz-tools/commit/ce95f8c8d472f36ea62b47c7527e0d03a58647b0))
+* **grzctl:** unified config ([#635](https://github.com/BfArM-MVH/grz-tools/issues/635)) ([f993399](https://github.com/BfArM-MVH/grz-tools/commit/f993399d433c246f4cb4f162d5122397283f6bce))
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common,grz-db,grzctl:** require grz-common 4, grz-db 4 and grz-pydantic-models 4 ([#688](https://github.com/BfArM-MVH/grz-tools/issues/688)) ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grz-common:** keep crypt4gh private keys out of DEBUG logs ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** KeyModel/KeyConfigModel use BaseModel not BaseSettings ([f993399](https://github.com/BfArM-MVH/grz-tools/commit/f993399d433c246f4cb4f162d5122397283f6bce))
+* **grz-common:** leave the raw input out of config validation errors ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** require grz-pydantic-models &gt;=3.1 for ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** apply a change set as one transaction ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** export db_backend from grz_db.testing ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grzctl,grz-common,grz-cli:** drop grzctl submit and grzctl's grz-cli dependency ([#675](https://github.com/BfArM-MVH/grz-tools/issues/675)) ([e6f27c1](https://github.com/BfArM-MVH/grz-tools/commit/e6f27c1714fc73d5159b29356914bc345a797c0a))
+* **grzctl:** keep the stored upload date in db submission populate ([f1d3fc8](https://github.com/BfArM-MVH/grz-tools/commit/f1d3fc804387c4fb6de861cccb6a99b521ac0056))
+* **grzctl:** mask db.author.private_key in dump-config ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl:** name the submission fields the database actually has ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+
 ## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.1.0...grz-common-v3.0.0) (2026-08-13)
 
 
