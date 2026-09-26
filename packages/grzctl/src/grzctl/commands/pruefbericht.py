@@ -43,7 +43,8 @@ def _http_error(error: requests.RequestException, client_error: type[GrzError]) 
         ``client_error`` otherwise.
     """
     status = error.response.status_code if error.response is not None else None
-    if status is None or status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+    # the range of HTTPStatus.is_server_error, which rejects codes that HTTPStatus does not list, such as 520
+    if status is None or 500 <= status <= 599:
         error_class: type[GrzError] = NetworkError
     elif status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
         error_class = ConfigurationError
