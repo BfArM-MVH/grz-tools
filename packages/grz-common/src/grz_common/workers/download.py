@@ -112,7 +112,8 @@ class S3BotoDownloadWorker:
             # Ensure the local target directory exists
             metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-            # download_file sends a HEAD request first, whose error code is the HTTP status alone
+            # The HEAD request of download_file reports only the HTTP status.
+            # head_object also tells a missing file from a faulty setup.
             head_object(self._s3_client, bucket, metadata_key, missing_error=grzexc.MissingSubmissionFileError)
             # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json is empty,
             # and its parsing would fail as if the LE had sent an invalid file.
