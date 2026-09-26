@@ -13,6 +13,8 @@ from grz_common.models.s3 import S3Options
 from grzctl.models.config import ArchivesConfig, ArchiveTarget, GrzctlConfig, InboxConfig
 from pydantic import ValidationError
 
+from .conftest import PRUEFBERICHT
+
 PASSPHRASE = "grz-key-passphrase"
 
 
@@ -117,7 +119,7 @@ def _grzctl_config(tmp_path: Path, unread_file: str, leistungserbringer: dict) -
             "leistungserbringer": leistungserbringer,
             "archives": {**archives, "signing_key_path": unread_file},
             "db": {"database_url": f"sqlite:///{tmp_path / 'unused.sqlite'}", "author": {"name": "test"}},
-            "pruefbericht": {},
+            "pruefbericht": PRUEFBERICHT,
             "identifiers": {"grz": "GRZK00007"},
         }
     )
@@ -198,7 +200,11 @@ def test_yaml_anchors_share_one_key_between_two_inboxes_and_the_signing_key(
         "db:\n"
         f"  database_url: sqlite:///{tmp_path / 'unused.sqlite'}\n"
         "  author: {name: test}\n"
-        "pruefbericht: {}\n"
+        "pruefbericht:\n"
+        "  authorization_url: https://auth.example.org\n"
+        "  client_id: example-client\n"
+        "  client_secret: example-secret\n"
+        "  api_base_url: https://api.example.org\n"
         "identifiers: {grz: GRZK00007}\n"
     )
 
