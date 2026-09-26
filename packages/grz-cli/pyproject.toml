@@ -14,7 +14,7 @@ authors = [
 dynamic = ["version"]
 dependencies = [
     "packaging >=23,<27",
-    "grz-common >=3,<4",
+    "grz-common >=4,<5",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
