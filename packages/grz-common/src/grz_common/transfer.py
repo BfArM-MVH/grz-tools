@@ -132,7 +132,7 @@ def head_object(
     transfer_error: type[grzexc.TransferError] = grzexc.DownloadError,
     missing_error: type[grzexc.GrzError] = grzexc.MissingObjectError,
 ) -> dict[str, Any]:
-    """Return the ``head_object`` response of an S3 object.
+    """Return the ``head_object`` response of an S3 object, or raise the error that its failure stands for.
 
     :param s3_client: boto3 S3 client.
     :param bucket: Name of the bucket.

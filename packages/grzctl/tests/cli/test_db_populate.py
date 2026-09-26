@@ -388,14 +388,14 @@ def test_populate_command_needs_a_date_when_the_inbox_has_none(
     )
 
     assert result.exit_code != 0
-    assert "Pass --submission-date" in result.stderr
+    assert "--submission-date YYYY-MM-DD" in result.stderr
     assert ctx.db.get_submission(ctx.submission_id).local_case_id is None, "nothing is written"
 
 
-def test_populate_command_needs_a_date_even_when_one_is_stored(
+def test_populate_command_keeps_the_stored_date(
     db_ctx: SimpleNamespace, migrated_database_config_path: Path, test_metadata_path: Path
 ):
-    """Without an inbox for the submitter, a re-populate needs --submission-date again."""
+    """A re-populate without --submission-date keeps the stored date and needs no inbox."""
     ctx = db_ctx
     ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
 
@@ -403,8 +403,7 @@ def test_populate_command_needs_a_date_even_when_one_is_stored(
         migrated_database_config_path, ctx.submission_id, test_metadata_path, "--no-confirm", submission_date=None
     )
 
-    assert result.exit_code != 0
-    assert "has no inbox in the configuration" in result.stderr
+    assert result.exit_code == 0, result.output
     assert ctx.db.get_submission(ctx.submission_id).submission_uploaded_date == SUBMISSION_DATE
 
 
