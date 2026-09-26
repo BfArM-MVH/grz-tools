@@ -22,9 +22,10 @@ import rich.table
 import rich.text
 import textual.logging
 from grz_common.cli import output_json
+from grz_common.exceptions import MissingSubmissionFileError, SubmissionCleanedError
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.models.base import get_secret_value
-from grz_common.transfer import init_s3_client
+from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     CaseHasLinkedSubmissionsError,
@@ -41,6 +42,7 @@ from grz_db.models.author import Author
 from grz_db.models.submission import (
     CASE_LINK_KEY,
     DONORS_KEY,
+    RETIRED_FAILURE_REASONS,
     Case,
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -486,8 +488,19 @@ def init(ctx: click.Context):
     """Initializes the database schema using Alembic."""
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
-    console_err.print(f"[cyan]Initializing database {db}[/cyan]")
-    submission_db.initialize_schema()
+    try:
+        console_err.print(f"[cyan]Initializing database {db}[/cyan]")
+        submission_db.initialize_schema()
+        console_err.print("[green]Successfully initialized database![/green]")
+
+    except (DatabaseConfigurationError, RuntimeError) as e:
+        console_err.print(f"[red]Error during schema initialization: {e}[/red]")
+        if isinstance(e, RuntimeError):
+            console_err.print("[yellow]Ensure your database is running and accessible.[/yellow]")
+        raise click.ClickException(str(e)) from e
+    except Exception as e:
+        console_err.print(f"[red]An unexpected error occurred during 'db init': {type(e).__name__} - {e}[/red]")
+        raise click.ClickException(str(e)) from e
 
 
 @db.command()
@@ -821,7 +834,9 @@ def add(ctx: click.Context, submission_id: str):
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.option(
     "--failure-reason",
-    type=click.Choice(FailureReasonEnum.list(), case_sensitive=False),
+    type=click.Choice(
+        [reason.value for reason in FailureReasonEnum if reason not in RETIRED_FAILURE_REASONS], case_sensitive=False
+    ),
     help="Failure reason when state is ERROR.",
 )
 @click.option("--ignore-error-state/--confirm-error-state")
@@ -1050,19 +1065,26 @@ def _prepare_donor_console_table(
 
 
 def _submission_upload_date(
-    configuration: GrzctlConfig, submission_id: str, override: datetime | None, inbox_name: str | None
+    configuration: GrzctlConfig,
+    submission_id: str,
+    override: datetime | None,
+    inbox_name: str | None,
+    stored: date | None,
 ) -> date:
-    """Pick the upload date to store: *override* if given, else the ``LastModified`` of metadata.json in the inbox.
+    """Pick the upload date to store: *override*, else *stored*, else the ``LastModified`` of metadata.json in the inbox.
 
     :param configuration: The grzctl configuration, which names the submitter's inboxes.
     :param submission_id: The submission. Its first part is the submitter ID.
     :param override: The date ``--submission-date`` named, if any.
     :param inbox_name: The inbox ``--inbox`` named, if any. Without it, the submitter's only inbox is used.
+    :param stored: The upload date that the database already holds, if any.
     :returns: The date to record.
-    :raises click.ClickException: if neither *override* nor the inbox gives a date.
+    :raises click.ClickException: if neither *override*, *stored* nor the inbox gives a date.
     """
     if override is not None:
         return override.date()
+    if stored is not None:
+        return stored
 
     missing = f"No upload date for submission {submission_id}"
     submitter_id = submission_id.split("_", maxsplit=1)[0]
@@ -1080,18 +1102,17 @@ def _submission_upload_date(
         inbox_name = next(iter(entry.inbox_buckets))
 
     s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
-    key = f"{submission_id}/metadata/metadata.json"
-    url = f"s3://{s3_options.bucket}/{key}"
     try:
-        response = init_s3_client(s3_options).head_object(Bucket=s3_options.bucket, Key=key)
-    except botocore.exceptions.ClientError as e:
-        if e.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
-            raise
-        raise click.ClickException(f"{missing}: {url} does not exist. Pass --submission-date.") from e
-    # grzctl clean leaves an empty metadata.json, whose LastModified is the time of cleaning
-    if response["ContentLength"] == 0:
-        raise click.ClickException(f"{missing}: {url} is empty, because the inbox was cleaned. Pass --submission-date.")
-    return response["LastModified"].date()
+        uploaded = get_metadata_upload_timestamp(init_s3_client(s3_options), s3_options.bucket, submission_id)
+    except SubmissionCleanedError as e:
+        raise click.ClickException(
+            f"{missing}: {e}. The inbox no longer holds the upload date. Pass it as --submission-date YYYY-MM-DD."
+        ) from e
+    except MissingSubmissionFileError as e:
+        raise click.ClickException(
+            f"{missing}: {e}. Pass --inbox if the submission is in another inbox, else --submission-date YYYY-MM-DD."
+        ) from e
+    return uploaded.date()
 
 
 def _print_pending_changes(changes: "SubmissionChangeSet") -> None:
@@ -1137,8 +1158,9 @@ def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite:
     "--submission-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
     default=None,
-    help="Submission upload date to store. Without it, the date is when metadata.json arrived in the "
-    "submitter's inbox, which is gone once grzctl clean has run. Replacing a stored date takes "
+    help="Submission upload date to store. Without it, populate keeps the stored date, or else takes the date "
+    "when metadata.json arrived in the submitter's inbox, which is gone once grzctl clean has run. "
+    "Replacing a stored date takes "
     "--allow-overwrite submission_uploaded_date or --force.",
 )
 @click.option(
@@ -1219,7 +1241,7 @@ def populate(  # noqa: C901, PLR0913, PLR0917
         ) from e
 
     submission_uploaded_date = _submission_upload_date(
-        ctx.obj["configuration"], submission_id, submission_date, inbox_name
+        ctx.obj["configuration"], submission_id, submission_date, inbox_name, submission.submission_uploaded_date
     )
 
     try:

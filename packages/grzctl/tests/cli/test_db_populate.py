@@ -359,28 +359,39 @@ def test_populate_command_takes_the_upload_date_from_the_inbox(
     assert ctx.db.get_submission(ctx.submission_id).submission_uploaded_date == uploaded
 
 
-@pytest.mark.parametrize("body", [b"", None], ids=["emptied-by-clean", "missing"])
+@pytest.mark.parametrize(
+    ("body", "marker"),
+    [(b"", "cleaned"), (b"{}", "cleaning"), (None, None)],
+    ids=["cleaned", "being-cleaned", "missing"],
+)
 def test_populate_command_needs_a_date_when_the_inbox_has_none(
-    db_ctx: SimpleNamespace, inbox_config_path: Path, test_metadata_path: Path, body: bytes | None
+    db_ctx: SimpleNamespace,
+    inbox_config_path: Path,
+    test_metadata_path: Path,
+    body: bytes | None,
+    marker: str | None,
 ):
     """``grzctl clean`` leaves an empty metadata.json, whose LastModified is the time of cleaning."""
     ctx = db_ctx
     if body is not None:
         _put_inbox_metadata(ctx.submission_id, body)
+    if marker is not None:
+        s3_client = boto3.client("s3", region_name=REGION)
+        s3_client.put_object(Bucket=INBOX_BUCKET, Key=f"{ctx.submission_id}/{marker}", Body=b"")
 
     result = _invoke_populate(
         inbox_config_path, ctx.submission_id, test_metadata_path, "--no-confirm", submission_date=None
     )
 
     assert result.exit_code != 0
-    assert "Pass --submission-date" in result.stderr
+    assert "--submission-date YYYY-MM-DD" in result.stderr
     assert ctx.db.get_submission(ctx.submission_id).local_case_id is None, "nothing is written"
 
 
-def test_populate_command_needs_a_date_even_when_one_is_stored(
+def test_populate_command_keeps_the_stored_date(
     db_ctx: SimpleNamespace, migrated_database_config_path: Path, test_metadata_path: Path
 ):
-    """Without an inbox for the submitter, a re-populate needs --submission-date again."""
+    """A re-populate without --submission-date keeps the stored date and needs no inbox."""
     ctx = db_ctx
     ctx.db.populate(ctx.submission_id, ctx.metadata, SUBMISSION_DATE, force=True)
 
@@ -388,8 +399,7 @@ def test_populate_command_needs_a_date_even_when_one_is_stored(
         migrated_database_config_path, ctx.submission_id, test_metadata_path, "--no-confirm", submission_date=None
     )
 
-    assert result.exit_code != 0
-    assert "has no inbox in the configuration" in result.stderr
+    assert result.exit_code == 0, result.output
     assert ctx.db.get_submission(ctx.submission_id).submission_uploaded_date == SUBMISSION_DATE
 
 

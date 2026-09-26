@@ -5,11 +5,16 @@ Tests for the Prüfbericht submission functionality.
 import importlib.resources
 import json
 
+import botocore.client
 import click.testing
 import grz_cli.cli
+import grz_common.exceptions as grzexc
 import grzctl.cli
+import pytest
+from botocore.exceptions import ClientError
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
+from grzctl.commands.clean import _clean_submission_from_bucket
 
 from .. import mock_files
 from .common import copy_submission
@@ -106,3 +111,25 @@ def test_clean_and_list(
     listed_submissions = json.loads(result_list.stdout.strip())
     assert len(listed_submissions) == 1
     assert listed_submissions[0]["state"] == "cleaned"
+
+
+def _fail_s3_operation(monkeypatch, operation: str, code: str):
+    """Answer every S3 call of *operation* with the error *code*."""
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def fail(self, operation_name, kwargs):
+        if operation_name == operation:
+            raise ClientError({"Error": {"Code": code, "Message": code}}, operation_name)
+        return original_call(self, operation_name, kwargs)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", fail)
+
+
+def test_clean_reports_rejected_credentials_as_a_configuration_error(s3_config_model, remote_bucket, monkeypatch):
+    """Rejected credentials during clean's S3 calls must classify as a configuration error, not a raw ClientError."""
+    _fail_s3_operation(monkeypatch, "PutObject", "InvalidAccessKeyId")
+
+    with pytest.raises(grzexc.ConfigurationError):
+        _clean_submission_from_bucket(
+            s3_config_model.s3.bucket, s3_config_model.s3, "123_2025-01-01_00000000", "'testing'"
+        )

@@ -14,21 +14,73 @@ class VersionFileValidationError(VersionFileError):
     """Raised when the version file content is invalid or cannot be parsed."""
 
 
-class DecryptionError(Exception):
-    """Raised when decryption of a submission file fails."""
+class GrzError(Exception):
+    """Base of every failure that grz-tools accounts for, as opposed to a bug."""
 
 
-class EncryptionError(Exception):
-    """Raised when encryption of a submission file fails."""
+class SubmissionRejectedError(GrzError):
+    """The submission itself is at fault, so the submitter has to send a corrected one."""
 
 
-class NetworkError(Exception):
-    """Raised when a network-related operation fails."""
+class MissingSubmissionFileError(SubmissionRejectedError):
+    """The inbox lacks the metadata or a file that the metadata lists."""
 
 
-class UploadError(Exception):
-    """Raised when uploading a submission file fails."""
+class SubmissionValidationError(SubmissionRejectedError):
+    """The metadata or the content of a file breaks the specification."""
 
 
-class IncompleteSubmissionError(Exception):
-    """Raised when a submission is missing required files or metadata."""
+class DecryptionError(SubmissionRejectedError):
+    """A submission file cannot be decrypted."""
+
+
+class DuplicateUploadError(SubmissionRejectedError):
+    """The bucket already holds a submission with this ID."""
+
+
+class IncompleteSubmissionError(GrzError):
+    """A step ran before an earlier step had passed for every file of the submission."""
+
+
+class SubmissionCleanedError(GrzError):
+    """``grzctl clean`` has started on the submission."""
+
+
+class ConfigurationError(GrzError):
+    """The setup is wrong or incomplete, such as a missing key or credentials that a service rejects."""
+
+
+class TransferError(GrzError):
+    """Moving data to or from S3 or BfArM failed."""
+
+
+class DownloadError(TransferError):
+    """Reading from S3 failed."""
+
+
+class MissingObjectError(DownloadError):
+    """S3 holds no object under the key."""
+
+
+class UploadError(TransferError):
+    """Writing to S3 failed."""
+
+
+class NetworkError(TransferError):
+    """A request to S3 or BfArM did not get through, such as for a lost connection, a timeout, or a server error."""
+
+
+class EncryptionError(GrzError):
+    """Encrypting a submission file failed."""
+
+
+class DetailedQCError(GrzError):
+    """The detailed QC workflow failed."""
+
+
+class PruefberichtGenerationError(GrzError):
+    """The Prüfbericht cannot be generated, for example because the database lacks a field that it needs."""
+
+
+class PruefberichtRejectedError(GrzError):
+    """BfArM rejected the Prüfbericht."""

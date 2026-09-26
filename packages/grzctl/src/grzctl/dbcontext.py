@@ -1,26 +1,61 @@
 import logging
+from collections.abc import Iterator
 from functools import cached_property
-from pathlib import Path
 from typing import Any
 
-from grz_common.exceptions import (
-    DecryptionError,
-    EncryptionError,
-    IncompleteSubmissionError,
-    NetworkError,
-    UploadError,
-)
-from grz_common.models.base import get_secret_value
+import grz_common.exceptions as grzexc
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
-from pydantic import ValidationError
 
 from . import get_versions
 from .commands.db.cli import get_submission_db_instance
 from .models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
+
+_FAILURE_REASONS: dict[type[BaseException], FailureReasonEnum] = {
+    grzexc.MissingSubmissionFileError: FailureReasonEnum.FILE_NOT_FOUND,
+    grzexc.SubmissionValidationError: FailureReasonEnum.VALIDATION_ERROR,
+    grzexc.DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
+    grzexc.DuplicateUploadError: FailureReasonEnum.DUPLICATE_TANG,
+    DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
+    DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
+    grzexc.IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
+    grzexc.SubmissionCleanedError: FailureReasonEnum.SUBMISSION_CLEANED,
+    KeyboardInterrupt: FailureReasonEnum.INTERRUPTED,
+    grzexc.ConfigurationError: FailureReasonEnum.CONFIGURATION_ERROR,
+    grzexc.TransferError: FailureReasonEnum.TRANSFER_ERROR,
+    grzexc.EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
+    grzexc.DetailedQCError: FailureReasonEnum.DETAILED_QC_ERROR,
+    grzexc.PruefberichtGenerationError: FailureReasonEnum.PRUEFBERICHT_GENERATION_ERROR,
+    grzexc.PruefberichtRejectedError: FailureReasonEnum.PRUEFBERICHT_REJECTED,
+}
+"""The failure reason of each expected error. Any other exception records ``unknown``."""
+
+
+def _causes(error: BaseException | None) -> Iterator[BaseException]:
+    """Yield ``error``, then its ``__cause__``, then the cause's ``__cause__``, and so on."""
+    seen: set[int] = set()
+    # a cause can form a cycle, as in ``raise e from e``
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        yield error
+        error = error.__cause__
+
+
+def _classify(error: BaseException | None) -> tuple[FailureReasonEnum, BaseException | None]:
+    """Find the failure reason of ``error``, and the exception that decides it.
+
+    The first exception along the causes of ``error`` whose type is mapped decides the reason.
+
+    :returns: The failure reason and the deciding exception, or ``unknown`` and ``None``.
+    """
+    for exc in _causes(error):
+        for exc_class, failure_reason in _FAILURE_REASONS.items():
+            if isinstance(exc, exc_class):
+                return failure_reason, exc
+    return FailureReasonEnum.UNKNOWN, None
 
 
 class DbContext:
@@ -47,8 +82,8 @@ class DbContext:
       transition still proceeds (no hard failure).
     - If the submission **does not exist** in the DB:
 
-      - and ``None`` is in ``expected_prior_states``: the submission is
-        automatically created and the transition proceeds.
+      - for the entry states, ``PROCESSING`` and ``UPLOADING``, the submission is
+        automatically created and the transition proceeds;
       - otherwise: ``SubmissionNotFoundError`` is raised immediately.
 
     Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError``) are
@@ -76,9 +111,7 @@ class DbContext:
     _SUBMISSION_ENTRY_STATES = frozenset({SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING})
     """States at which a brand-new submission may be created.
 
-    ``grzctl process`` starts at ``PROCESSING``. The step-by-step flow starts at ``UPLOADING``,
-    which the inbox scan records, and continues with ``grzctl download``. These are explicit
-    because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
+    These are explicit because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
     """
 
     def __init__(
@@ -162,16 +195,18 @@ class DbContext:
             return False
 
         if exc_type:
-            error_message = str(exc_val)
             error_state = SubmissionStateEnum.ERROR
-            failure_reason = self._map_exception_to_failure_reason(exc_type, exc_val)  # new
+            failure_reason, deciding = _classify(exc_val)
+            recorded = deciding if deciding is not None else exc_val
+            # an interruption carries no message, so its type names it
+            data: dict[str, Any] = {"error": str(recorded) or type(recorded).__name__}
             log.error(f"Operation failed for {self.submission_id}. Updating DB to {error_state.name}.")
             try:
                 self.db.update_submission_state(
                     self.submission_id,
                     error_state,
                     failure_reason=failure_reason,
-                    data={"error": error_message},
+                    data=data,
                     grzctl_versions=self.grzctl_versions,
                 )
             except Exception as db_exc:
@@ -189,45 +224,15 @@ class DbContext:
 
         return True
 
-    @cached_property
+    @property
     def author(self) -> Author:
-        db_config = self.config.db
-
-        if not db_config.author:
-            raise ValueError("Author configuration is missing")
-
-        if db_config.author.private_key_path is None:
-            raise ValueError("Author private key path is required but was None")
-
-        key_path = Path(db_config.author.private_key_path)
-        if not key_path.exists():
-            raise FileNotFoundError(f"Author private key not found at: {key_path}")
-
-        return Author(
-            name=db_config.author.name,
-            private_key_bytes=key_path.read_bytes(),
-            private_key_passphrase=get_secret_value(db_config.author.private_key_passphrase),
-        )
+        return self.config.db.signing_author
 
     def _map_exception_to_failure_reason(
         self, exc_type: type[BaseException], exc_val: BaseException | None
     ) -> FailureReasonEnum:
-        """Maps an exception to the closest FailureReasonEnum value."""
-        exception_map: dict[type[BaseException], FailureReasonEnum] = {
-            FileNotFoundError: FailureReasonEnum.FILE_NOT_FOUND,
-            ValidationError: FailureReasonEnum.VALIDATION_ERROR,
-            DecryptionError: FailureReasonEnum.DECRYPTION_ERROR,
-            EncryptionError: FailureReasonEnum.ENCRYPTION_ERROR,
-            NetworkError: FailureReasonEnum.NETWORK_ERROR,
-            UploadError: FailureReasonEnum.UPLOAD_ERROR,
-            DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
-            DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
-            IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
-        }
-        for exc_class, failure_reason in exception_map.items():
-            if isinstance(exc_val, exc_class):
-                return failure_reason
-        return FailureReasonEnum.UNKNOWN
+        """Map an exception to its failure reason, see :func:`_classify`."""
+        return _classify(exc_val)[0]
 
     def _check_prerequisites(self):
         """
@@ -250,8 +255,8 @@ class DbContext:
                 f"Expected any of '{self.expected_prior_states}' before updating to '{self.start_state.name}'."
             )
 
-        # The first state has no prior state to find in the history: expected_prior_states is
-        # {None} then, and no state log entry has state None, so the check below would always warn.
+        # The entry states expect no prior state ({None}), and no state-log entry has
+        # state None, so the history check below would always warn for a new submission.
         if None in self.expected_prior_states:
             return
 

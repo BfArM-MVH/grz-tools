@@ -4,10 +4,10 @@ from importlib.metadata import version
 from pathlib import Path
 
 import grz_cli.cli
+import grz_common.exceptions as grzexc
 import grzctl.cli
 import pytest
 from click.testing import CliRunner
-from grz_common.exceptions import IncompleteSubmissionError
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
 
@@ -133,6 +133,27 @@ def test_upload_download_submission(
     ), "Metadata is different!"
 
 
+def test_upload_refuses_a_submission_already_in_the_inbox(
+    working_dir_path, temp_s3_config_file_path, remote_bucket_with_version
+):
+    """A second upload of a submission fails as a duplicate, not as a failed upload."""
+    copy_submission(working_dir_path, "files", "encrypted_files", "metadata")
+    logs_dir = working_dir_path / "logs"
+    logs_dir.mkdir()
+    submission = Submission(metadata_dir=working_dir_path / "metadata", files_dir=working_dir_path / "files")
+    progress_logger = FileProgressLogger[EncryptionState](logs_dir / "progress_encrypt.cjson")
+    for file_path, file_metadata in submission.files.items():
+        progress_logger.set_state(file_path, file_metadata, state=EncryptionState(encryption_successful=True))
+    upload_args = ["upload", "--submission-dir", str(working_dir_path), "--config-file", temp_s3_config_file_path]
+    cli = grz_cli.cli.build_cli()
+    result = CliRunner().invoke(cli, upload_args, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+
+    result = CliRunner().invoke(cli, upload_args)
+
+    assert isinstance(result.exception, grzexc.DuplicateUploadError), result.output
+
+
 def test_upload_aborts_on_incomplete_encryption(working_dir_path, temp_s3_config_file_path, remote_bucket_with_version):
     """Verify that the upload command fails if the encryption log marks a file as not successful."""
     copy_submission(working_dir_path, "files", "metadata")
@@ -178,7 +199,7 @@ def test_upload_aborts_on_incomplete_encryption(working_dir_path, temp_s3_config
     result = runner.invoke(cli, upload_args, catch_exceptions=True)
 
     assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], IncompleteSubmissionError)
+    assert isinstance(result.exc_info[1], grzexc.IncompleteSubmissionError)
     error_message = str(result.exc_info[1])
     assert "Will not upload" in error_message
     relative_failed_path = failed_file_path.relative_to(working_dir_path / "files")
@@ -210,7 +231,7 @@ def test_upload_aborts_if_encryption_log_missing(
     result = runner.invoke(cli, upload_args, catch_exceptions=True)
 
     assert result.exit_code != 0
-    assert isinstance(result.exc_info[1], IncompleteSubmissionError)
+    assert isinstance(result.exc_info[1], grzexc.IncompleteSubmissionError)
     error_message = str(result.exc_info[1])
     assert "Will not upload" in error_message
 

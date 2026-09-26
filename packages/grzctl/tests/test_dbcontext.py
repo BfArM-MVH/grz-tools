@@ -1,17 +1,13 @@
 import logging
+import subprocess
 from unittest import mock
 from unittest.mock import MagicMock
 
+import grz_common.exceptions as grzexc
 import pytest
-from grz_common.exceptions import (
-    DecryptionError,
-    EncryptionError,
-    IncompleteSubmissionError,
-    NetworkError,
-    UploadError,
-)
-from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError
-from grz_db.models.submission import FailureReasonEnum, SubmissionStateEnum
+from grz_common.workers.submission import SubmissionMetadata
+from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
+from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext
 from pydantic import ValidationError
 
@@ -47,13 +43,24 @@ class TestMapExceptionToFailureReason:
     @pytest.mark.parametrize(
         "exception,expected",
         [
-            (FileNotFoundError("missing file"), FailureReasonEnum.FILE_NOT_FOUND),
-            (DecryptionError("failed"), FailureReasonEnum.DECRYPTION_ERROR),
-            (EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
-            (NetworkError("failed"), FailureReasonEnum.NETWORK_ERROR),
-            (UploadError("failed"), FailureReasonEnum.UPLOAD_ERROR),
+            (FileNotFoundError("missing file"), FailureReasonEnum.UNKNOWN),
+            (grzexc.DecryptionError("failed"), FailureReasonEnum.DECRYPTION_ERROR),
+            (grzexc.EncryptionError("failed"), FailureReasonEnum.ENCRYPTION_ERROR),
+            (grzexc.MissingSubmissionFileError("failed"), FailureReasonEnum.FILE_NOT_FOUND),
+            (grzexc.DownloadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.MissingObjectError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.DuplicateUploadError("failed"), FailureReasonEnum.DUPLICATE_TANG),
+            (grzexc.NetworkError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.UploadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (grzexc.ConfigurationError("failed"), FailureReasonEnum.CONFIGURATION_ERROR),
+            (grzexc.PruefberichtGenerationError("failed"), FailureReasonEnum.PRUEFBERICHT_GENERATION_ERROR),
+            (grzexc.PruefberichtRejectedError("failed"), FailureReasonEnum.PRUEFBERICHT_REJECTED),
+            (KeyboardInterrupt(), FailureReasonEnum.INTERRUPTED),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
-            (IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
+            (grzexc.IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
+            (grzexc.SubmissionCleanedError("failed"), FailureReasonEnum.SUBMISSION_CLEANED),
+            (grzexc.DetailedQCError("failed"), FailureReasonEnum.DETAILED_QC_ERROR),
+            (subprocess.CalledProcessError(returncode=3, cmd="some other command"), FailureReasonEnum.UNKNOWN),
             (RuntimeError("unexpected"), FailureReasonEnum.UNKNOWN),
             (Exception("generic"), FailureReasonEnum.UNKNOWN),
             (ValueError("some value error"), FailureReasonEnum.UNKNOWN),
@@ -63,18 +70,27 @@ class TestMapExceptionToFailureReason:
         result = db_context._map_exception_to_failure_reason(type(exception), exception)
         assert result == expected
 
-    def test_validation_error_maps_correctly(self, db_context: DbContext):
-        """ValidationError requires special construction so tested separately."""
-        from pydantic import BaseModel
+    def test_an_unwrapped_pydantic_error_maps_to_unknown(self, db_context: DbContext):
+        """Invalid metadata reaches DbContext as a SubmissionValidationError, so a bare pydantic error is a bug."""
+        exc = ValidationError.from_exception_data("test", [])
+        assert db_context._map_exception_to_failure_reason(type(exc), exc) == FailureReasonEnum.UNKNOWN
 
-        class DummyModel(BaseModel):
-            x: int
+    def test_invalid_metadata_maps_to_a_validation_error(self, db_context: DbContext, tmp_path):
+        metadata_file = tmp_path / "metadata.json"
+        metadata_file.write_text('{"submission": {}}')
 
-        try:
-            DummyModel(x="not_an_int")  # type: ignore
-        except ValidationError as e:
-            result = db_context._map_exception_to_failure_reason(type(e), e)
-            assert result == FailureReasonEnum.VALIDATION_ERROR
+        with pytest.raises(grzexc.SubmissionValidationError) as excinfo:
+            SubmissionMetadata(metadata_file)
+
+        exc = excinfo.value
+        assert db_context._map_exception_to_failure_reason(type(exc), exc) == FailureReasonEnum.VALIDATION_ERROR
+
+    def test_maps_a_cause_of_an_unmapped_exception(self, db_context: DbContext):
+        """An exception raised ``from`` a mapped one gets the failure reason of its cause."""
+        with pytest.raises(RuntimeError) as exc_info:
+            raise RuntimeError("processing failed") from grzexc.UploadError("upload failed")
+        result = db_context._map_exception_to_failure_reason(exc_info.type, exc_info.value)
+        assert result == FailureReasonEnum.TRANSFER_ERROR
 
     def test_none_exception_returns_unknown(self, db_context: DbContext):
         result = db_context._map_exception_to_failure_reason(type(None), None)
@@ -82,41 +98,60 @@ class TestMapExceptionToFailureReason:
 
     def test_all_enum_values_are_covered(self, db_context: DbContext):
         """Ensures every FailureReasonEnum value except UNKNOWN is reachable via a mapped exception."""
-        from pydantic import BaseModel
-        from pydantic import ValidationError as PydanticValidationError
-
-        class _Dummy(BaseModel):
-            x: int
-
-        validation_exc = None
-        try:
-            _Dummy(x="not_an_int")  # type: ignore
-        except PydanticValidationError as e:
-            validation_exc = e
-
-        assert validation_exc is not None, "Failed to construct a ValidationError for testing"
-
         mapped_results = {
             db_context._map_exception_to_failure_reason(type(exc), exc)
             for exc in [
-                FileNotFoundError(),
-                DecryptionError(),
-                EncryptionError(),
-                NetworkError(),
-                UploadError(),
+                grzexc.MissingSubmissionFileError(),
+                grzexc.DecryptionError(),
+                grzexc.EncryptionError(),
+                grzexc.TransferError(),
+                grzexc.ConfigurationError(),
+                grzexc.PruefberichtGenerationError(),
+                grzexc.PruefberichtRejectedError(),
+                KeyboardInterrupt(),
                 DuplicateTanGError(),
                 DuplicateInitialSubmissionError(1),
-                IncompleteSubmissionError(),
-                validation_exc,
+                grzexc.IncompleteSubmissionError(),
+                grzexc.SubmissionCleanedError(),
+                grzexc.DetailedQCError(),
+                grzexc.SubmissionValidationError(),
             ]
         }
-        unmapped = {e for e in FailureReasonEnum if e != FailureReasonEnum.UNKNOWN} - mapped_results
+        recorded = {e for e in FailureReasonEnum if e != FailureReasonEnum.UNKNOWN} - RETIRED_FAILURE_REASONS
+        unmapped = recorded - mapped_results
         assert not unmapped, f"These FailureReasonEnum values have no exception mapping: {unmapped}"
+
+    def test_every_expected_failure_records_a_current_reason(self, db_context: DbContext):
+        """A GrzError that maps to ``unknown`` would be recorded as a bug, and a retired reason not at all.
+
+        This walks every subclass, not only the leaves: a class with subclasses of its own,
+        such as ``TransferError``, can still be raised directly and needs its own reason.
+        """
+
+        def all_subclasses(cls: type[grzexc.GrzError]) -> list[type[grzexc.GrzError]]:
+            direct = cls.__subclasses__()
+            return direct + [sub for subclass in direct for sub in all_subclasses(subclass)]
+
+        # grouping classes that no code raises directly, so they carry no failure reason of their own
+        grouping_classes = {grzexc.GrzError, grzexc.SubmissionRejectedError}
+
+        reasons = {
+            cls.__name__: db_context._map_exception_to_failure_reason(cls, cls("failed"))
+            for cls in all_subclasses(grzexc.GrzError)
+            if cls not in grouping_classes
+        }
+
+        wrong = {
+            name: reason
+            for name, reason in reasons.items()
+            if reason in {FailureReasonEnum.UNKNOWN, *RETIRED_FAILURE_REASONS}
+        }
+        assert not wrong, f"These errors record no current failure reason: {wrong}"
 
 
 class TestDbContextFailureReason:
     def test_file_not_found_maps_correctly(self, ctx, mock_db):
-        exc = FileNotFoundError("missing file")
+        exc = grzexc.MissingSubmissionFileError("missing file")
         ctx.__exit__(type(exc), exc, None)
         mock_db.update_submission_state.assert_called_once_with(
             ctx.submission_id,
@@ -126,14 +161,15 @@ class TestDbContextFailureReason:
             grzctl_versions=mock.ANY,
         )
 
-    def test_validation_error_maps_correctly(self, ctx, mock_db):
-        exc = ValidationError.from_exception_data("test", [])
+    def test_an_interruption_is_recorded_by_its_type(self, ctx, mock_db):
+        """A KeyboardInterrupt carries no message, so the recorded error names its type."""
+        exc = KeyboardInterrupt()
         ctx.__exit__(type(exc), exc, None)
         mock_db.update_submission_state.assert_called_once_with(
             ctx.submission_id,
             SubmissionStateEnum.ERROR,
-            data={"error": str(exc)},
-            failure_reason=FailureReasonEnum.VALIDATION_ERROR,
+            data={"error": "KeyboardInterrupt"},
+            failure_reason=FailureReasonEnum.INTERRUPTED,
             grzctl_versions=mock.ANY,
         )
 
@@ -181,6 +217,30 @@ class TestCheckPrerequisites:
             context._check_prerequisites()
 
         assert caplog.records == []
+        mock_db.add_submission.assert_called_once()
+
+    def test_manual_upload_entry_starts_a_brand_new_submission(self, mock_db, caplog):
+        """The step-by-step flow starts at ``UPLOADING``, which is an entry state too and needs no prior state."""
+        mock_db.get_submission.return_value = None
+        mock_db.add_submission.return_value.get_latest_state.return_value = None
+        mock_db.add_submission.return_value.states = []
+        context = self._context(mock_db, SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED)
+
+        with caplog.at_level(logging.WARNING):
+            context._check_prerequisites()
+
+        assert caplog.records == []
+        mock_db.add_submission.assert_called_once()
+
+    def test_middle_state_raises_when_the_submission_does_not_exist(self, mock_db):
+        """A manual step needs the submission to exist; a missing one is a hard error."""
+        mock_db.get_submission.return_value = None
+        context = self._context(mock_db, SubmissionStateEnum.DOWNLOADING, SubmissionStateEnum.DOWNLOADED)
+
+        with pytest.raises(SubmissionNotFoundError):
+            context._check_prerequisites()
+
+        mock_db.add_submission.assert_not_called()
 
     @pytest.mark.parametrize(
         ("start_state", "end_state"),
@@ -190,7 +250,7 @@ class TestCheckPrerequisites:
         ],
     )
     def test_entry_state_adds_a_new_submission(self, db, start_state, end_state):
-        """``grzctl process`` and the step-by-step flow both start a submission that the DB does not know yet.
+        """Both entry states start a submission that the DB does not know yet.
 
         A real DB, unlike a mock, fails if the new submission's states are not loaded.
         """

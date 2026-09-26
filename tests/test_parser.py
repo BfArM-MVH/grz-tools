@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import grz_common.exceptions as grzexc
+import pytest
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 
 
@@ -47,6 +49,20 @@ def test_submission_metadata_accepts_a_consent_datetime_with_a_timezone(
     submission_metadata = SubmissionMetadata(temp_metadata_file_path)
 
     assert list(submission_metadata.validate(identifiers_config_model.identifiers)) == []
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"[]", b'"x"', '{"note": "Grüße"}'.encode("latin-1")],
+    ids=["array", "string", "latin-1"],
+)
+def test_submission_metadata_reports_a_file_that_holds_no_json_object_as_a_validation_error(tmp_path, content):
+    """A metadata.json that is valid JSON but no object, or that is not UTF-8, is the submitter's fault."""
+    metadata_file = tmp_path / "metadata.json"
+    metadata_file.write_bytes(content)
+
+    with pytest.raises(grzexc.SubmissionValidationError):
+        SubmissionMetadata(metadata_file)
 
 
 def test_encrypted_submission():

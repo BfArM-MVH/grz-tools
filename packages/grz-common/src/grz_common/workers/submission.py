@@ -13,6 +13,7 @@ from os import PathLike
 from pathlib import Path
 
 import grz_check
+import grz_common.exceptions as grzexc
 from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
@@ -53,8 +54,7 @@ class SubmissionMetadata:
         Load, parse and validate the metadata file.
 
         :param metadata_file: path to the metadata.json file
-        :raises json.JSONDecodeError: if failed to read the metadata.json file
-        :raises jsonschema.exceptions.ValidationError: if metadata does not match expected schema
+        :raises SubmissionValidationError: if the file is no JSON, or the metadata breaks the specification
         """
         self.file_path = metadata_file
         self.content = self._read_metadata(self.file_path)
@@ -69,20 +69,17 @@ class SubmissionMetadata:
 
         :param file_path: Path to the metadata JSON file
         :return: Parsed metadata as a dictionary
-        :raises json.JSONDecodeError: if failed to read the metadata.json file
+        :raises SubmissionValidationError: if the file is no JSON, or the metadata breaks the specification
         """
         try:
             with open(file_path, encoding="utf-8") as jsonfile:
                 metadata = json.load(jsonfile)
-                try:
-                    metadata_model = GrzSubmissionMetadata(**metadata)
-                except ValidationError as ve:
-                    cls.__log.error("Invalid metadata format in metadata file: %s", file_path)
-                    raise SystemExit(ve) from ve
-                return metadata_model
-        except json.JSONDecodeError as e:
-            cls.__log.error("Invalid JSON format in metadata file: %s", file_path)
-            raise e
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise grzexc.SubmissionValidationError(f"Invalid JSON in metadata file {file_path}: {e}") from e
+        try:
+            return GrzSubmissionMetadata.model_validate(metadata)
+        except ValidationError as ve:
+            raise grzexc.SubmissionValidationError(f"Invalid metadata in {file_path}: {ve}") from ve
 
     @property
     def transaction_id(self) -> str:
@@ -437,54 +434,61 @@ class Submission:
             concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor,
             tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,  # type: ignore[call-overload]
         ):
-            futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
+            try:
+                futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
 
-            for future in concurrent.futures.as_completed(futures):
-                paths, metas, reports = future.result()
+                for future in concurrent.futures.as_completed(futures):
+                    paths, metas, reports = future.result()
 
-                pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
+                    pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
 
-                for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
-                    checksum_issues = []
+                    for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
+                        checksum_issues = []
 
-                    for w in report.warnings:
-                        self.__log.warning(f"{file_path.name}: {w}")
+                        for w in report.warnings:
+                            self.__log.warning(f"{file_path.name}: {w}")
 
-                    if not report.sha256:
-                        checksum_issues.append("No checksum found.")
+                        if not report.sha256:
+                            checksum_issues.append("No checksum found.")
 
-                    if (
-                        report.sha256
-                        and file_metadata.checksum_type == ChecksumType.sha256
-                        and file_metadata.file_checksum != report.sha256
-                    ):
-                        checksum_issues.append(
-                            f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
-                        )
-
-                    if file_path.exists() and file_path.is_file():
-                        if file_metadata.file_size_in_bytes != file_path.stat().st_size:
+                        if (
+                            report.sha256
+                            and file_metadata.checksum_type == ChecksumType.sha256
+                            and file_metadata.file_checksum != report.sha256
+                        ):
                             checksum_issues.append(
-                                f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
+                                f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
                             )
-                    else:
-                        checksum_issues.append("File not found for size check.")
 
-                    checksum_passed = not checksum_issues
-                    checksum_state = ValidationState(
-                        errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
-                    )
-                    checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
+                        if file_path.exists() and file_path.is_file():
+                            if file_metadata.file_size_in_bytes != file_path.stat().st_size:
+                                checksum_issues.append(
+                                    f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
+                                )
+                        else:
+                            checksum_issues.append("File not found for size check.")
 
-                    if file_metadata.file_type in ("fastq", "bam"):
-                        seq_data_state = ValidationState(
-                            errors=report.errors, validation_passed=report.is_valid, submission_id=self.submission_id
+                        checksum_passed = not checksum_issues
+                        checksum_state = ValidationState(
+                            errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
                         )
-                        seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
+                        checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
 
-                if not no_mmap:
-                    task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
-                    pbar.update(task_bytes)
+                        if file_metadata.file_type in ("fastq", "bam"):
+                            seq_data_state = ValidationState(
+                                errors=report.errors,
+                                validation_passed=report.is_valid,
+                                submission_id=self.submission_id,
+                            )
+                            seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
+
+                    if not no_mmap:
+                        task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
+                        pbar.update(task_bytes)
+            except BaseException:
+                # the with block would otherwise run every queued task before it lets the error through
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
@@ -511,16 +515,18 @@ class Submission:
 
         encrypted_files_dir = Path(encrypted_files_dir)
 
-        if not Path(recipient_public_key_path).expanduser().is_file():
-            msg = f"Public key file does not exist: {recipient_public_key_path}"
-            self.__log.error(msg)
-            raise FileNotFoundError(msg)
         if not submitter_private_key_path:
             self.__log.warning("No submitter private key provided, skipping signing.")
         elif not Path(submitter_private_key_path).expanduser().is_file():
             msg = f"Private key file does not exist: {submitter_private_key_path}"
             self.__log.error(msg)
             raise FileNotFoundError(msg)
+
+        try:
+            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
+        except Exception as e:
+            self.__log.error(f"Error preparing public keys: {e}")
+            raise e
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -530,12 +536,6 @@ class Submission:
             encrypted_files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
         progress_logger = FileProgressLogger[EncryptionState](log_file_path=progress_log_file)
-
-        try:
-            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
-        except Exception as e:
-            self.__log.error(f"Error preparing public keys: {e}")
-            raise e
 
         for file_path, file_metadata in self.files.items():
             # encryption_successful = True
@@ -777,9 +777,3 @@ class EncryptedSubmission:
             metadata_dir=self.metadata_dir,
             files_dir=files_dir,
         )
-
-
-class SubmissionValidationError(Exception):
-    """Exception raised when validation of a submission fails"""
-
-    pass
