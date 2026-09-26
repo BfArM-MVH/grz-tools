@@ -10,6 +10,7 @@ The main changes:
 - A failed step records why it failed (#690), see [Error handling](../../packages/grzctl/docs/error-handling.md).
 - The grzctl config names each crypt4gh key where grzctl uses it (#694), see [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md).
 - The database records the inbox of each submission, so `download`, `clean` and `decrypt` find it without `--inbox` (#696).
+- `grzctl inbox push-version` publishes the grz-cli version policy to every inbox (#667).
 
 ### Versions
 
@@ -94,7 +95,7 @@ pruefbericht:
   api_base_url: https://...
 ```
 
-`keys.grz_private_key_path` goes away. Each inbox names its private key, and `encrypt` signs with it (#694, #696). Every key field takes the key inline as `<name>` or a file as `<name>_path`. Setting both is an error. A private key has an optional `<name>_passphrase`. [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md) lists every key and its field.
+`keys.grz_private_key_path` goes away. Each inbox names its private key, and `grzctl encrypt` signs with it (#694, #696). Every key field takes the key inline as `<name>` or a file as `<name>_path`. Setting both is an error. A private key has an optional `<name>_passphrase`. [Crypt4GH keys](../../packages/grzctl/docs/crypt4gh-keys.md) lists every key and its field.
 
 `db.known_public_keys` now lists the keys. Move a path to a file to `db.known_public_keys_file` (#693). If neither is set, grzctl reads `~/.config/grzctl/known_public_keys`.
 
@@ -146,14 +147,24 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 | `grzctl dump-config` output                                           | YAML with masked secrets; `--reveal-secrets` shows them              |
 | `db submission update --failure-reason network_error`, `upload_error` | `transfer_error`                                                     |
 
+### 7. Publish the grz-cli version policy (#667)
+
+grz-cli reads `version.json` from the inbox before `upload` and `submit`. It stops if its version is too old, or if the inbox has no `version.json`. grzctl 5.0.0 ships a policy file, and this command publishes it to every configured inbox:
+
+```sh
+grzctl inbox push-version
+```
+
+The command replaces the `version.json` in each inbox. The policy recommends grz-cli 3.0.0, and from 2026-10-19 on it requires grz-cli 2.0.0.
+
 ---
 
 ## ⚠️ Breaking / behavior changes
 
 ### grzctl: `db submission populate` (#681)
 
-- Without `--submission-date`, the upload date is the S3 `LastModified` of `metadata/metadata.json` in the inbox. Pass `--inbox` if the submitter has several inboxes and the database has no inbox for the submission (#696).
-- After `grzctl clean`, pass `--submission-date`.
+- Without `--submission-date`, `populate` keeps the stored upload date (#690). If the database holds none, the upload date is the S3 `LastModified` of `metadata/metadata.json` in the inbox. Pass `--inbox` if the submitter has several inboxes and the database has no inbox for the submission (#696).
+- After `grzctl clean`, pass `--submission-date` for a submission without a stored upload date.
 - Replacing or removing a stored value needs `--force` or `--allow-overwrite FIELD`.
 
 ### grzctl: `db backfill` (#676, #677, #681)
@@ -184,7 +195,7 @@ Verdicts change in both directions. A failure caused only by a deviation becomes
 
 - `decrypt` decrypts with the key of the submission's inbox, which the next section describes. So the inboxes of one LE may use different keys.
 - Every key path must name a regular file. Otherwise every grzctl command stops.
-- An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`.
+- An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`. Prefer the grzctl setting to `C4GH_PASSPHRASE`, for example the environment variable `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__PRIVATE_KEY_PASSPHRASE`. `C4GH_PASSPHRASE` applies to every key that has no passphrase of its own.
 - `archives.*.public_key` takes the public key inline, as `keys.grz_public_key` did in v4.0.0.
 
 ### grzctl: the inbox of a submission (#696)
