@@ -1065,19 +1065,26 @@ def _prepare_donor_console_table(
 
 
 def _submission_upload_date(
-    configuration: GrzctlConfig, submission_id: str, override: datetime | None, inbox_name: str | None
+    configuration: GrzctlConfig,
+    submission_id: str,
+    override: datetime | None,
+    inbox_name: str | None,
+    stored: date | None,
 ) -> date:
-    """Pick the upload date to store: *override* if given, else the ``LastModified`` of metadata.json in the inbox.
+    """Pick the upload date to store: *override*, else *stored*, else the ``LastModified`` of metadata.json in the inbox.
 
     :param configuration: The grzctl configuration, which names the submitter's inboxes.
     :param submission_id: The submission. Its first part is the submitter ID.
     :param override: The date ``--submission-date`` named, if any.
     :param inbox_name: The inbox ``--inbox`` named, if any. Without it, the submitter's only inbox is used.
+    :param stored: The upload date that the database already holds, if any.
     :returns: The date to record.
-    :raises click.ClickException: if neither *override* nor the inbox gives a date.
+    :raises click.ClickException: if neither *override*, *stored* nor the inbox gives a date.
     """
     if override is not None:
         return override.date()
+    if stored is not None:
+        return stored
 
     missing = f"No upload date for submission {submission_id}"
     submitter_id = submission_id.split("_", maxsplit=1)[0]
@@ -1097,8 +1104,14 @@ def _submission_upload_date(
     s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
     try:
         uploaded = get_metadata_upload_timestamp(init_s3_client(s3_options), s3_options.bucket, submission_id)
-    except (MissingSubmissionFileError, SubmissionCleanedError) as e:
-        raise click.ClickException(f"{missing}: {e}. Pass --submission-date.") from e
+    except SubmissionCleanedError as e:
+        raise click.ClickException(
+            f"{missing}: {e}. The inbox no longer holds the upload date. Pass it as --submission-date YYYY-MM-DD."
+        ) from e
+    except MissingSubmissionFileError as e:
+        raise click.ClickException(
+            f"{missing}: {e}. Pass --inbox if the submission is in another inbox, else --submission-date YYYY-MM-DD."
+        ) from e
     return uploaded.date()
 
 
@@ -1145,8 +1158,9 @@ def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite:
     "--submission-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
     default=None,
-    help="Submission upload date to store. Without it, the date is when metadata.json arrived in the "
-    "submitter's inbox, which is gone once grzctl clean has run. Replacing a stored date takes "
+    help="Submission upload date to store. Without it, populate keeps the stored date, or else takes the date "
+    "when metadata.json arrived in the submitter's inbox, which is gone once grzctl clean has run. "
+    "Replacing a stored date takes "
     "--allow-overwrite submission_uploaded_date or --force.",
 )
 @click.option(
@@ -1227,7 +1241,7 @@ def populate(  # noqa: C901, PLR0913, PLR0917
         ) from e
 
     submission_uploaded_date = _submission_upload_date(
-        ctx.obj["configuration"], submission_id, submission_date, inbox_name
+        ctx.obj["configuration"], submission_id, submission_date, inbox_name, submission.submission_uploaded_date
     )
 
     try:

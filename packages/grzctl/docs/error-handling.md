@@ -7,9 +7,10 @@ Where the failure happened goes into the state's data.
 
 - [What a failure records](#what-a-failure-records)
 - [Failure reasons](#failure-reasons)
-- [Raising errors](#raising-errors)
 - [S3 errors](#s3-errors)
 - [BfArM errors](#bfarm-errors)
+
+For developers, [Raising errors](../../../CONTRIBUTING.md#raising-errors) describes how code raises these errors.
 
 ## What a failure records
 
@@ -55,55 +56,9 @@ Older states can carry `network_error` or `upload_error`.
 Both mean what `transfer_error` means.
 grzctl no longer writes them, and `grzctl db submission update` does not offer them.
 
-## Raising errors
-
-Every expected failure is a `GrzError`.
-Its class sets the failure reason:
-
-```
-GrzError
-├── SubmissionRejectedError
-│   ├── MissingSubmissionFileError   file_not_found
-│   ├── SubmissionValidationError    validation_error
-│   ├── DecryptionError              decryption_error
-│   └── DuplicateUploadError         duplicate_tang
-├── IncompleteSubmissionError        incomplete_submission
-├── SubmissionCleanedError           submission_cleaned
-├── ConfigurationError               configuration_error
-├── TransferError                    transfer_error
-│   ├── DownloadError
-│   │   └── MissingObjectError
-│   ├── UploadError
-│   └── NetworkError
-├── EncryptionError                  encryption_error
-├── DetailedQCError                  detailed_qc_error
-├── PruefberichtGenerationError      pruefbericht_generation_error
-└── PruefberichtRejectedError        pruefbericht_rejected
-```
-
-The errors of grz-db that reject a duplicate map to `duplicate_tang` and `duplicate_initial`.
-A `KeyboardInterrupt` maps to `interrupted`, and grzctl turns SIGTERM into one.
-Every other exception maps to `unknown`.
-
-When you raise an error:
-
-- Wrap a library error once, at the code that knows what the call meant.
-  An S3 client does not know that a bucket is the inbox, but the download worker does.
-  So the download worker turns a missing inbox object into a `MissingSubmissionFileError`.
-- Chain the cause with `raise ... from e`.
-  The log then keeps the library's traceback.
-- Do not raise a builtin exception, such as `ValueError`, for an expected failure.
-  Its reason is `unknown`.
-- Do not call `sys.exit` below the command line layer.
-  `SystemExit` passes every `except Exception`, so no cleanup runs.
-- Give every new `GrzError` subclass a failure reason.
-  A test fails for a subclass that maps to `unknown`.
-- Cleanup after a failure logs its own errors.
-  It never replaces the original error.
-
 ## S3 errors
 
-The S3 boundary sorts the error codes like this:
+grzctl sorts the answers of S3 like this:
 
 | S3 answer                                                     | Raised as                    | Reason                |
 | ------------------------------------------------------------- | ---------------------------- | --------------------- |
@@ -113,12 +68,6 @@ The S3 boundary sorts the error codes like this:
 | `AccessDenied` and anything else                              | `TransferError`              | `transfer_error`      |
 
 Missing credentials count as a configuration error as well, and so does a bucket name that botocore rejects before it sends a request.
-The upload worker takes the error code from the `ClientError` that `S3Transfer` wraps in `S3UploadFailedError`.
-
-S3 answers a HEAD request without a body, so botocore reports only the HTTP status as the error code.
-A `403` can then mean rejected credentials, and a `404` a missing bucket.
-For these two codes, `head_object()` sends a GET request for the first byte of the object and sorts the error code of that answer.
-Downloads and uploads start with `head_object()`, so their first request already tells a faulty setup from a missing object.
 
 `grzctl clean` puts a `<submission_id>/cleaning` object before it deletes anything, and replaces it with `<submission_id>/cleaned` at the end.
 It also empties the metadata.json, whose `LastModified` then is the time of cleaning.
