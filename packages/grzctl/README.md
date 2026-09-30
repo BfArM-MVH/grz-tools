@@ -21,7 +21,8 @@ Command-line tool for internal GRZ operations.
 
 ## S3 permissions for `grzctl process`
 
-`grzctl process` uploads files to the archive buckets using multipart uploads. The
+`grzctl process` uploads files to the interrogation bucket using multipart uploads,
+and later copies them to an archive bucket, in parts for a large file. The
 credentials you give it must be allowed to **abort** a multipart upload, not just
 to write — these are often separate permissions.
 
@@ -40,16 +41,20 @@ it's easy to grant write while leaving abort ungranted (see
 instance), so verify abort works — or rely on a bucket lifecycle rule that
 deletes incomplete multipart uploads after a few days.
 
+The S3 server copies each file from the interrogation bucket to the archive bucket,
+with the credentials of that archive. So the interrogation bucket must be on the
+same endpoint as both archive buckets, and the credentials of both archives need
+read access to the interrogation bucket.
+
 ## Sensitive configuration
 
 Secret values (S3 secret keys, session tokens, key passphrases, Prüfbericht
 client secret) are read from the environment and stored as Pydantic
-`SecretStr`.  They are never written back to YAML, and `grzctl dump-config`
+`SecretStr`. They are never written back to YAML, and `grzctl dump-config`
 prints `**********` in their place. `grzctl dump-config --reveal-secrets`
 prints the plain values instead, so its YAML output loads back as a config file.
 
 When a passphrase is not configured for a key, `grzctl process` falls back to
-the standard crypt4gh environment variable `C4GH_PASSPHRASE`.  If that is also
-unset, you will be prompted interactively.  Prefer an explicit `GRZ_...__PRIVATE_KEY_PASSPHRASE`
+the standard crypt4gh environment variable `C4GH_PASSPHRASE`. If that is also
+unset, you will be prompted interactively. Prefer an explicit `GRZ_...__PRIVATE_KEY_PASSPHRASE`
 environment variable (or the `private_key_passphrase` config key) for automated runs.
-

@@ -32,9 +32,8 @@ under its archive key, and only copied to the final archive bucket
 once the whole submission has passed. If processing fails, the staged files are
 either cleaned up or kept, depending on `archives.interrogation.keep_failed`.
 
-The S3 server copies the files, with the credentials of the target archive.
-So the interrogation bucket must be on the same endpoint as both archive buckets,
-and the credentials of both archives need read access to the interrogation bucket.
+The [README](../README.md#s3-permissions-for-grzctl-process) lists the S3
+permissions that `process` needs.
 
 A basic invocation:
 
