@@ -6,6 +6,7 @@ from pathlib import Path
 import click
 import grz_common.cli as grzcli
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.utils.paths import ensure_directory_mode
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
@@ -68,10 +69,10 @@ def download(  # noqa: PLR0913, PLR0917
 
     log.info(f"Starting download from inbox {inbox_desc}...")
 
-    submission_dir_path = Path(output_dir)
-    if not submission_dir_path.is_dir():
-        log.debug("Creating submission directory %s", submission_dir_path)
-        submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
+    # the parent of a relative path such as "." is the path itself, so make the path absolute
+    submission_dir_path = Path(output_dir).absolute()
+    log.debug("Setting up submission directory %s", submission_dir_path)
+    ensure_directory_mode(submission_dir_path.parent, submission_dir_path, configuration.local_storage_mode)
 
     worker_inst = Worker(
         metadata_dir=submission_dir_path / "metadata",
@@ -79,6 +80,7 @@ def download(  # noqa: PLR0913, PLR0917
         log_dir=submission_dir_path / "logs",
         encrypted_files_dir=submission_dir_path / "encrypted_files",
         threads=threads,
+        directory_mode=configuration.local_storage_mode,
     )
 
     with DbContext(

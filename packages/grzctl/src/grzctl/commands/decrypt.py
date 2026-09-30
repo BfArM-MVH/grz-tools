@@ -88,6 +88,7 @@ def decrypt(  # noqa: PLR0913, PLR0917
         files_dir=submission_dir / "files",
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
+        directory_mode=configuration.local_storage_mode,
     )
     encrypted_submission = worker_inst.parse_encrypted_submission()
     submission_id = encrypted_submission.submission_id

@@ -3,6 +3,7 @@
 import json
 
 import pytest
+import yaml
 from grz_common.models.base import get_secret_value
 from grzctl.models.config import GrzctlConfig
 from pydantic import ValidationError
@@ -89,4 +90,22 @@ def test_a_config_without_a_pruefbericht_field_fails(configuration: dict, field:
     del configuration["pruefbericht"][field]
 
     with pytest.raises(ValidationError, match=rf"pruefbericht\.{field}\n  Field required"):
+        GrzctlConfig.from_configuration(configuration)
+
+
+def test_local_storage_mode_loads_a_quoted_octal_string_and_dumps_it_back(configuration: dict):
+    """``grzctl dump-config`` writes the mode back as the quoted octal string of the config file."""
+    configuration.update(yaml.safe_load('local_storage_mode: "0750"'))
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    assert config.local_storage_mode == 0o750
+    assert config.model_dump(mode="json")["local_storage_mode"] == "0750"
+
+
+def test_local_storage_mode_without_quotes_fails(configuration: dict):
+    """YAML reads an unquoted ``770`` as decimal, so an unquoted mode fails instead of setting the wrong bits."""
+    configuration.update(yaml.safe_load("local_storage_mode: 770"))
+
+    with pytest.raises(ValidationError, match='write the mode as a quoted octal string, such as "0770"'):
         GrzctlConfig.from_configuration(configuration)
