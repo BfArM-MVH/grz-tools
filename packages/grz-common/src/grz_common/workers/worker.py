@@ -73,11 +73,7 @@ class Worker:
         self.__log.info("Log directory: %s", self.log_dir)
 
         # create log dir if non-existent
-        if self._directory_mode is not None:
-            ensure_directory_mode(self.log_dir.parent, self.log_dir, self._directory_mode)
-        elif not self.log_dir.is_dir():
-            self.__log.debug("Creating log directory...")
-            self.log_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
+        ensure_directory_mode(self.log_dir.parent, self.log_dir, self._directory_mode)
 
         self.progress_file_checksum_validation = self.log_dir / "progress_checksum_validation.cjson"
         self.progress_file_sequencing_data_validation = self.log_dir / "progress_sequencing_data_validation.cjson"

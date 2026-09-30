@@ -88,14 +88,8 @@ class S3BotoDownloadWorker:
         :param log_dir: Path to the logs directory
         """
         for dir_path in [metadata_dir, encrypted_files_dir, log_dir]:
-            if self._directory_mode is not None:
-                self.__log.debug("Setting up directory: %s", dir_path)
-                ensure_directory_mode(dir_path.parent, dir_path, self._directory_mode)
-            elif not dir_path.exists():
-                self.__log.debug("Creating directory: %s", dir_path)
-                dir_path.mkdir(parents=False, exist_ok=False)
-            else:
-                self.__log.debug("Directory exists: %s", dir_path)
+            self.__log.debug("Setting up directory: %s", dir_path)
+            ensure_directory_mode(dir_path.parent, dir_path, self._directory_mode)
 
     def download_metadata(
         self,
@@ -121,10 +115,7 @@ class S3BotoDownloadWorker:
         self.__log.info("Downloading metadata file: '%s'", metadata_key)
         try:
             # Ensure the local target directory exists
-            if self._directory_mode is not None:
-                ensure_directory_mode(metadata_dir.parent, metadata_dir, self._directory_mode)
-            else:
-                metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+            ensure_directory_mode(metadata_dir.parent, metadata_dir, self._directory_mode)
 
             # The HEAD request of download_file reports only the HTTP status.
             # head_object also tells a missing file from a faulty setup.
@@ -235,10 +226,9 @@ class S3BotoDownloadWorker:
             relative_encrypted_path = file_metadata.encrypted_file_path()
             file_key = f"{submission_id}/files/{relative_encrypted_path}"
 
-            if self._directory_mode is not None:
-                ensure_directory_mode(
-                    encrypted_submission.encrypted_files_dir.parent, local_file_path.parent, self._directory_mode
-                )
+            ensure_directory_mode(
+                encrypted_submission.encrypted_files_dir.parent, local_file_path.parent, self._directory_mode
+            )
 
             logged_state = progress_logger.get_state(local_file_path, file_metadata)
             if (
