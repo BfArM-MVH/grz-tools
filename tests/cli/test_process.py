@@ -9,6 +9,8 @@ import hashlib
 import itertools
 import json
 import os
+import signal
+import stat
 import threading
 import time
 from collections import Counter
@@ -533,6 +535,8 @@ class S3Requests:
     """``HeadObject`` on this bucket fails with a server error, as if the endpoint were overloaded."""
     failing_repeat_downloads: set[str] = field(default_factory=set)
     """Every download of these keys after the first fails, as if the object had been deleted in between."""
+    failing_delete_bucket: str | None = None
+    """``DeleteObject`` on this bucket fails with a server error, as if the endpoint were overloaded."""
 
     def per_file(self, operations: set[str], bucket, submission_id: str) -> Counter[str]:
         """Count the requests with one of ``operations`` on each of the submission's files in ``bucket``."""
@@ -561,6 +565,12 @@ def s3_requests(monkeypatch) -> S3Requests:
             }
             raise botocore.exceptions.ClientError(error, operation_name)
         if bucket == recorder.failing_head_bucket and operation_name == "HeadObject":
+            error = {
+                "Error": {"Code": "ServiceUnavailable", "Message": "simulated overload"},
+                "ResponseMetadata": {"HTTPStatusCode": 503},
+            }
+            raise botocore.exceptions.ClientError(error, operation_name)
+        if bucket == recorder.failing_delete_bucket and operation_name == "DeleteObject":
             error = {
                 "Error": {"Code": "ServiceUnavailable", "Message": "simulated overload"},
                 "ResponseMetadata": {"HTTPStatusCode": 503},
@@ -697,8 +707,14 @@ class TestProcessDetailedQc:
         process_config_content,
         working_dir_path,
     ):
-        """When the guess is right, each file is downloaded once, and the QC pass finds it already in QC storage."""
+        """When the guess is right, each file is downloaded once, and the QC pass finds it already in QC storage.
+
+        The QC copies are closed to other users, even in a directory that an earlier run left open.
+        """
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
+        qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / self.SUBMISSION_ID
+        qc_dir.mkdir(parents=True)
+        qc_dir.chmod(0o755)
 
         result = _run_process(qc_process_config_file_path, self.SUBMISSION_ID, working_dir_path)
 
@@ -708,9 +724,10 @@ class TestProcessDetailedQc:
         assert downloads == Counter(dict.fromkeys(checksums, 1))
         assert _qc_files(process_config_content, self.SUBMISSION_ID) == set(checksums)
         metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
-        qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / self.SUBMISSION_ID
         uploaded_metadata = {**metadata, "submission": {**metadata["submission"], "submissionType": "initial"}}
         assert json.loads((qc_dir / "metadata" / "metadata.json").read_text()) == uploaded_metadata
+        for directory in [qc_dir, *(path for path in qc_dir.rglob("*") if path.is_dir())]:
+            assert stat.S_IMODE(directory.stat().st_mode) == 0o770, f"{directory} has the wrong mode"
 
     def test_failed_qc_download_fails_the_run(
         self,
@@ -1507,6 +1524,17 @@ def _upload_submission_without_research_consent(inbox_bucket, submission_id: str
     inbox_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
 
 
+def _upload_submission_with_lapsed_research_consent(inbox_bucket, submission_id: str) -> None:
+    """Upload the valid submission with every research permit ending after the submission date and before today."""
+    upload_submission_to_inbox(inbox_bucket, submission_id)
+    metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+    for donor in metadata["donors"]:
+        for consent in donor["researchConsents"]:
+            for provision in consent["scope"]["provision"]["provision"]:
+                provision["period"]["end"] = "2025-01-01"
+    inbox_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+
+
 class TestProcessConsentRouting:
     """A submission reaches the archive of its consent status, encrypted with that archive's key."""
 
@@ -1547,6 +1575,123 @@ class TestProcessConsentRouting:
         assert result.exit_code == 0, f"Process failed: {result.output}"
         _assert_archived(s3_buckets["non_consented"], sid, MOCK_FILES_DIR / "archive_non_consented.sec")
         assert not {o.key for o in s3_buckets["consented"].objects.all()}
+
+    def test_consent_is_evaluated_at_the_submission_date(
+        self,
+        s3_buckets,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """A permit that lapsed after the submission date still routes to the consented archive, as grzctl archive does."""
+        sid = self.SUBMISSION_ID
+        _upload_submission_with_lapsed_research_consent(s3_buckets["inbox"], sid)
+        config_file_path = _config_with_distinct_archive_keys(tmp_path, process_config_content)
+
+        result = _run_process(config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        _assert_archived(s3_buckets["consented"], sid, MOCK_FILES_DIR / "archive_consented.sec")
+        assert not {o.key for o in s3_buckets["non_consented"].objects.all()}
+
+
+class TestProcessArchiveCommit:
+    """The commit copies a submission into its archive with the metadata last."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_metadata_is_copied_last(self, s3_buckets, s3_requests, temp_process_config_file_path, working_dir_path):
+        """An archived metadata object marks a finished archival, as it does for grzctl archive."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        archive_bucket = s3_buckets["consented"].name
+        archive_writes = [
+            key
+            for operation, bucket, key in s3_requests.requests
+            if operation in S3_WRITE_OPERATIONS and bucket == archive_bucket
+        ]
+        assert archive_writes[-1] == f"{sid}/metadata/metadata.json"
+
+    def test_a_failed_staging_delete_keeps_the_archival(
+        self, s3_buckets, s3_requests, temp_process_config_file_path, working_dir_path
+    ):
+        """Removing the staged copies is cleanup, so its failure leaves the run successful and the copies behind."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.failing_delete_bucket = s3_buckets["interrogation"].name
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        metadata_key = f"{sid}/metadata/metadata.json"
+        assert metadata_key in {o.key for o in s3_buckets["consented"].objects.all()}
+        assert metadata_key in {o.key for o in s3_buckets["interrogation"].objects.all()}
+
+
+class _Panic(BaseException):
+    """Stands in for pyo3's PanicException, which grz-check raises for a Rust panic and which is no Exception."""
+
+
+class TestProcessAbort:
+    """A panic fails its file like any error; an interrupt starts no queued file."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+    VCF = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf"
+
+    def test_a_panic_fails_the_run_and_cleans_up(
+        self, s3_buckets, temp_process_config_file_path, process_config_content, working_dir_path, monkeypatch
+    ):
+        """The run fails with the panic as a file error, and the staged copies are removed."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        stream_file = grzctl.processor.FilePipelineExecutor._stream_file
+
+        def stream_file_or_panic(executor, run_state, file_meta, *args, **kwargs):
+            if file_meta.file_path == self.VCF:
+                raise _Panic("simulated panic")
+            return stream_file(executor, run_state, file_meta, *args, **kwargs)
+
+        monkeypatch.setattr(grzctl.processor.FilePipelineExecutor, "_stream_file", stream_file_or_panic)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert not {o.key for o in s3_buckets["interrogation"].objects.all()}
+        assert _latest_state(process_config_content, sid).state == SubmissionStateEnum.ERROR
+
+    def test_an_interrupt_starts_no_queued_file(
+        self, s3_buckets, s3_requests, temp_process_config_file_path, working_dir_path, monkeypatch
+    ):
+        """With one thread, SIGTERM during the second file lets it finish and starts no other file."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        process_file = grzctl.processor.FilePipelineExecutor._process_file
+        calls = itertools.count()
+
+        def interrupt_then_process_file(executor, **kwargs):
+            # the second file, so that the worker thread is running and the main thread waits for results
+            if next(calls) == 1:
+                main_thread_id = threading.main_thread().ident
+                assert main_thread_id is not None
+                signal.pthread_kill(main_thread_id, signal.SIGTERM)
+            process_file(executor, **kwargs)
+
+        monkeypatch.setattr(grzctl.processor.FilePipelineExecutor, "_process_file", interrupt_then_process_file)
+
+        # grzctl.cli.main() installs this handler, but the test runner calls the CLI without main()
+        previous_handler = signal.signal(signal.SIGTERM, signal.default_int_handler)
+        try:
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--threads", "1")
+        finally:
+            signal.signal(signal.SIGTERM, previous_handler)
+
+        assert result.exit_code != 0, f"Process should have been interrupted: {result.output}"
+        downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
+        assert sum(downloads.values()) == 2
 
 
 class TestProcessAuthorKey:
