@@ -305,7 +305,7 @@ def _submit_pruefbericht_with_retries(pruefbericht: Pruefbericht, pruefbericht_c
     """
     log.info("Submitting Prüfbericht to BfArM...")
 
-    max_attempts = 10
+    max_attempts = 6
     initial_delay = 30.0
     backoff_factor = 2.0
 
