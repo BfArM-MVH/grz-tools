@@ -2,7 +2,7 @@
 
 `grzctl process` runs a submission through the whole pipeline in a single streaming
 pass: download the metadata, validate and re-encrypt each file, stage the result in
-the *interrogation bucket*, decide whether the submission goes through detailed QC,
+the _interrogation bucket_, decide whether the submission goes through detailed QC,
 then commit everything to the target archive bucket and clean up the inbox. It also
 drives the submission's database state and its QC selection.
 
@@ -27,10 +27,14 @@ is the binding decision.
 `decrypt`, `validate`, `encrypt`, `archive`) with one streaming pipeline that avoids
 materialising intermediate files on disk for the main pass.
 
-The *interrogation bucket* is a staging area: each file is uploaded there first,
+The _interrogation bucket_ is a staging area: each file is uploaded there first,
 under its archive key, and only copied to the final archive bucket
 once the whole submission has passed. If processing fails, the staged files are
 either cleaned up or kept, depending on `archives.interrogation.keep_failed`.
+
+The S3 server copies the files, with the credentials of the target archive.
+So the interrogation bucket must be on the same endpoint as both archive buckets,
+and the credentials of both archives need read access to the interrogation bucket.
 
 A basic invocation:
 
@@ -62,7 +66,7 @@ $ grzctl --config $CONFIG_PATH process \
      inbox object ─► decrypt ─► [predicted yes: write decrypted file to
                                  detailed_qc.local_storage/<submission_id>/files/...]
                   ─► validate (checksum; FASTQ/BAM format)
-                  ─► re-encrypt (consented/non-consented key, by consent at run time)
+                  ─► re-encrypt (consented/non-consented key, by consent at the submission date)
                   ─► upload to interrogation bucket (archive key; multipart upload)
    each staged file is recorded in logs/progress_staging.cjson,
    each local copy in logs/progress_local.cjson
@@ -208,10 +212,10 @@ handles the failure as above, with the failure reason `duplicate_initial`.
 
 Two progress logs live under `<output-dir>/logs/`:
 
-| Log file | Written during | What a rerun does with it |
-| --- | --- | --- |
-| `progress_staging.cjson` | Main pass (step 3) | Skips validating and staging a file whose re-encrypted copy is recorded and still in the interrogation bucket. The entry also keeps the file's read counts for the read-pair check of its partner. |
-| `progress_local.cjson` | Main pass (with a "yes" prediction) and the QC pass (step 6) | Skips writing a file whose decrypted copy is recorded and still on local storage. |
+| Log file                 | Written during                                               | What a rerun does with it                                                                                                                                                                          |
+| ------------------------ | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `progress_staging.cjson` | Main pass (step 3)                                           | Skips validating and staging a file whose re-encrypted copy is recorded and still in the interrogation bucket. The entry also keeps the file's read counts for the read-pair check of its partner. |
+| `progress_local.cjson`   | Main pass (with a "yes" prediction) and the QC pass (step 6) | Skips writing a file whose decrypted copy is recorded and still on local storage.                                                                                                                  |
 
 Re-running the command after a partial failure is therefore idempotent at the file
 level: each pass downloads a file only for the outputs it is missing, and leaves the
@@ -220,26 +224,31 @@ after a failed run with `keep_failed: false`, is validated and staged again. A f
 whose local copy is gone is written again, by the main pass if the prediction is
 "yes", otherwise by the QC pass.
 
+An interrupted run (Ctrl-C or SIGTERM) finishes the files it is streaming and starts no other.
+It leaves the staged and local copies in place, so the rerun reuses them.
+
 ## CLI options
 
-| Option | Default | Effect on this flow |
-| --- | --- | --- |
-| `--threads` | `min(cpu_count, 4)` | Number of files processed concurrently in the thread pool (step 3 and the QC pass). |
-| `--concurrent-uploads` | `4` | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. |
-| `--inbox` | `None` | Selects which inbox to read from. Defaults to the inbox recorded in the database, the submitter's only inbox, or the only inbox that holds the submission. |
-| `--clean-inbox` / `--no-clean-inbox` | `--clean-inbox` | Whether step 10 removes the submission from the inbox after success. |
-| `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing. A server error, a timeout or no connection is retried with backoff. |
-| `--save-pruefbericht PATH` | `None` | Also writes the generated Prüfbericht to `PATH`. A copy with redacted TAN always goes to `logs/pruefbericht.json`. |
-| `--redact-pruefbericht` / `--no-redact-pruefbericht` | `--redact-pruefbericht` | Whether the TAN is redacted in the file written by `--save-pruefbericht`. |
+| Option                                               | Default                 | Effect on this flow                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--threads`                                          | `min(cpu_count, 4)`     | Number of files processed concurrently in the thread pool (step 3 and the QC pass).                                                                                                                                                                                  |
+| `--concurrent-uploads`                               | `4`                     | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. Each file holds up to `--concurrent-uploads` + 1 parts of `multipart_chunksize` in memory, so the defaults need about 1.3 GiB per file, and about 5 GiB with `--threads 4`. |
+| `--inbox`                                            | `None`                  | Selects which inbox to read from. Defaults to the inbox recorded in the database, the submitter's only inbox, or the only inbox that holds the submission.                                                                                                           |
+| `--clean-inbox` / `--no-clean-inbox`                 | `--clean-inbox`         | Whether step 10 removes the submission from the inbox after success.                                                                                                                                                                                                 |
+| `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing. A server error, a timeout or no connection is retried with backoff.                                                                                                                                     |
+| `--save-pruefbericht PATH`                           | `None`                  | Also writes the generated Prüfbericht to `PATH`. A copy with redacted TAN always goes to `logs/pruefbericht.json`.                                                                                                                                                   |
+| `--redact-pruefbericht` / `--no-redact-pruefbericht` | `--redact-pruefbericht` | Whether the TAN is redacted in the file written by `--save-pruefbericht`.                                                                                                                                                                                            |
 
 ## Config keys
 
-| Key | Default | Effect on this flow |
-| --- | --- | --- |
-| `detailed_qc.local_storage` | required, no default | Base path for prefetched files and, if selected, the QC pass: `<local_storage>/<submission_id>/files/...` and `/metadata/metadata.json`. |
-| `detailed_qc.salt` | required, no default | Salt for the deterministic random-selection part of `db.should_qc()`. |
-| `detailed_qc.target_percentage` | `2.0` | Target percentage of a submitter's submissions selected for detailed QC. `0` disables prediction and decision entirely. |
-| `detailed_qc.auto_run` | `false` | If `true`, runs `detailed_qc.shell_command` right after a selected submission's QC pass completes. |
-| `detailed_qc.shell_command` | a `nextflow run main.nf ...` template | Shell command run when `auto_run` is `true`; templated with `{submission_basepath}`, `{output_basepath}`, `{submission_id}`. |
-| `archives.interrogation.keep_failed` | `false` | If `true`, leaves a failed submission's staged files in the interrogation bucket instead of deleting them. |
-| `archives.interrogation.s3.multipart_chunksize` | 256 MiB | Preferred part size for uploads to the interrogation bucket. Raised automatically when a file would need more than 1000 parts. |
+| Key                                                                                          | Default                               | Effect on this flow                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `detailed_qc.local_storage`                                                                  | required, no default                  | Base path for prefetched files and, if selected, the QC pass: `<local_storage>/<submission_id>/files/...` and `/metadata/metadata.json`.                                     |
+| `detailed_qc.salt`                                                                           | required, no default                  | Salt for the deterministic random-selection part of `db.should_qc()`.                                                                                                        |
+| `detailed_qc.target_percentage`                                                              | `2.0`                                 | Target percentage of a submitter's submissions selected for detailed QC. `0` disables prediction and decision entirely.                                                      |
+| `detailed_qc.auto_run`                                                                       | `false`                               | If `true`, runs `detailed_qc.shell_command` right after a selected submission's QC pass completes.                                                                           |
+| `detailed_qc.shell_command`                                                                  | a `nextflow run main.nf ...` template | Shell command run when `auto_run` is `true`; templated with `{submission_basepath}`, `{output_basepath}`, `{submission_id}`.                                                 |
+| `archives.interrogation`                                                                     | required, no default                  | S3 connection and bucket of the staging area. Every grzctl command loads the whole config, so a config without this section fails for every command, not only for `process`. |
+| `archives.interrogation.keep_failed`                                                         | `false`                               | If `true`, leaves a failed submission's staged files in the interrogation bucket instead of deleting them.                                                                   |
+| `archives.interrogation.s3.multipart_chunksize`                                              | 256 MiB                               | Preferred part size for uploads to the interrogation bucket. Raised automatically when a file would need more than 1000 parts.                                               |
+| `archives.consented.s3.multipart_chunksize`, `archives.non_consented.s3.multipart_chunksize` | 256 MiB                               | Preferred part size for the copy into the final archive. Raised automatically when a file would need more than 1000 parts.                                                   |
