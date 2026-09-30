@@ -1,20 +1,23 @@
+import io
 import json
 import logging
+import stat
 import subprocess
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from boto3.s3.transfer import TransferConfig
 from grz_common.constants import TQDM_DEFAULTS
 from grz_common.exceptions import DetailedQCError, MissingObjectError, MissingSubmissionFileError, UploadError
 from grz_common.pipeline.components import (
     DevNullSink,
     ObserverWithMetrics,
     PipelineError,
+    ReadStream,
     Tee,
     TqdmObserver,
     WriteStream,
@@ -81,6 +84,41 @@ def _qc_file_path(local_storage: str, submission_id: str, file_meta: File) -> Pa
     return Path(local_storage) / submission_id / "files" / file_meta.file_path
 
 
+QC_DIRECTORY_MODE = 0o770
+"""Mode of the directories below ``detailed_qc.local_storage``, which hold decrypted files and the unredacted metadata."""
+
+
+def _ensure_directory_mode(local_storage: Path, directory: Path, mode: int) -> None:
+    """Create ``directory`` below ``local_storage``, and give it and its parents below ``local_storage`` the mode ``mode``.
+
+    ``mkdir`` applies the umask and leaves an existing directory as it is, so a directory with another mode gets ``chmod``.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    path = local_storage
+    for part in directory.relative_to(local_storage).parts:
+        path /= part
+        if stat.S_IMODE(path.stat().st_mode) != mode:
+            path.chmod(mode)
+
+
+def _copy_object(
+    s3_client: S3Client, source_bucket: str, target_bucket: str, key: str, preferred_part_size: int
+) -> None:
+    """Copy an object between buckets in at most ``MULTIPART_MAX_PARTS`` parts.
+
+    Without a ``TransferConfig``, boto3 copies in 8 MiB parts and allows up to 10000 of them.
+    An object above 7.81 GiB would then exceed the 1000 parts that Ceph/Bluestore/Quobyte allow.
+    """
+    size = head_object(s3_client, source_bucket, key)["ContentLength"]
+    config = TransferConfig(multipart_chunksize=calculate_s3_part_size(size, preferred_part_size))
+    s3_client.copy(CopySource={"Bucket": source_bucket, "Key": key}, Bucket=target_bucket, Key=key, Config=config)
+
+
+def _put_object(s3_client: S3Client, bucket: str, key: str, body: bytes) -> None:
+    """Upload a small object through ``S3MultipartUploader``, which checks its MD5 as it does for the staged files."""
+    ReadStream(io.BytesIO(body)) >> S3MultipartUploader(s3_client, bucket, key)
+
+
 @dataclass
 class SubmissionRunState:
     """Holds all the state needed to run the streaming pipeline for one submission.
@@ -96,6 +134,7 @@ class SubmissionRunState:
     interrogation_part_size: int
     final_s3: S3Client
     final_bucket: str
+    final_part_size: int
     target_public_key: bytes
     context: SubmissionContext = field(default_factory=SubmissionContext)
     consistency_validator: ReadPairConsistencyValidator = field(init=False)
@@ -172,20 +211,25 @@ class FilePipelineExecutor:
             tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global,  # type: ignore[call-overload]
             ThreadPoolExecutor(max_workers=self._threads) as pool,
         ):
-            futures: list[Future] = [
-                pool.submit(
-                    self._process_file,
-                    run_state=run_state,
-                    file_meta=file_meta,
-                    threshold=thresholds.get(file_meta.file_path),
-                    pbar_global=pbar_global,
-                    stage=stage,
-                    write_local=write_local,
-                )
-                for file_meta in files_map.values()
-            ]
-            for future in futures:
-                future.result()
+            try:
+                futures: list[Future] = [
+                    pool.submit(
+                        self._process_file,
+                        run_state=run_state,
+                        file_meta=file_meta,
+                        threshold=thresholds.get(file_meta.file_path),
+                        pbar_global=pbar_global,
+                        stage=stage,
+                        write_local=write_local,
+                    )
+                    for file_meta in files_map.values()
+                ]
+                for future in futures:
+                    future.result()
+            except BaseException:
+                # Ctrl-C and SIGTERM reach only this thread: the running files finish, the queued ones never start
+                pool.shutdown(wait=True, cancel_futures=True)
+                raise
 
     def _process_file(  # noqa: PLR0913, PLR0917
         self,
@@ -287,7 +331,9 @@ class FilePipelineExecutor:
             )
             run_state.context.mark_completed(file_path_str)
 
-        except Exception as e:
+        except BaseException as e:
+            # grz-check reports a Rust panic as pyo3's PanicException, which is no Exception.
+            # A worker thread never receives KeyboardInterrupt, so this catches no interrupt.
             log.exception(
                 "Failed processing file",
                 extra={
@@ -403,7 +449,7 @@ class FilePipelineExecutor:
             # tee to local storage for detailed QC
             if write_local:
                 path = _qc_file_path(self._qc_local_storage, run_state.submission_id, file_meta)
-                path.parent.mkdir(parents=True, exist_ok=True)
+                _ensure_directory_mode(Path(self._qc_local_storage), path.parent, QC_DIRECTORY_MODE)
                 writer = stack.enter_context(open(path, "wb"))
                 pipeline |= Tee(metrics.measure("2b_Write")(writer))
 
@@ -506,7 +552,8 @@ class SubmissionProcessor:
 
     def _new_run_state(self, submission_metadata: SubmissionMetadata) -> SubmissionRunState:
         """Resolve the archive and the re-encryption key from the consent status."""
-        is_research_consented = submission_metadata.content.consents_to_research(date.today())
+        submission_date = submission_metadata.content.submission.submission_date
+        is_research_consented = submission_metadata.content.consents_to_research(submission_date)
         target_archive = self.config.archives.consented if is_research_consented else self.config.archives.non_consented
         interrogation_archive = self.config.archives.interrogation
 
@@ -517,6 +564,7 @@ class SubmissionProcessor:
             interrogation_part_size=interrogation_archive.s3.multipart_chunksize,
             final_s3=init_s3_client(target_archive.s3, max_pool_connections=self._s3_pool_size),
             final_bucket=target_archive.s3.bucket,
+            final_part_size=target_archive.s3.multipart_chunksize,
             target_public_key=self._consented_pub_key if is_research_consented else self._non_consented_pub_key,
         )
 
@@ -563,10 +611,8 @@ class SubmissionProcessor:
         redacted_metadata = submission_metadata.content.to_redacted_dict()
 
         key = _archive_metadata_key(run_state.submission_id)
-        with s3_errors(f"Upload to s3://{run_state.interrogation_bucket}/{key}", UploadError):
-            run_state.interrogation_s3.put_object(
-                Bucket=run_state.interrogation_bucket, Key=key, Body=json.dumps(redacted_metadata).encode("utf-8")
-            )
+        body = json.dumps(redacted_metadata).encode("utf-8")
+        _put_object(run_state.interrogation_s3, run_state.interrogation_bucket, key, body)
 
     def _log_files(self, submission_id: str) -> dict[str, Path]:
         """Map the archive key of each local log file to its path."""
@@ -590,14 +636,19 @@ class SubmissionProcessor:
             else:
                 body = file_path.read_bytes()
 
-            with s3_errors(f"Upload to s3://{run_state.interrogation_bucket}/{dest_key}", UploadError):
-                run_state.interrogation_s3.put_object(Bucket=run_state.interrogation_bucket, Key=dest_key, Body=body)
+            _put_object(run_state.interrogation_s3, run_state.interrogation_bucket, dest_key, body)
 
-    def _get_expected_keys(self, run_state: SubmissionRunState) -> set[str]:
-        keys = {_archive_metadata_key(run_state.submission_id)}
-        keys.update(_archive_file_key(run_state.submission_id, f) for f in run_state.submission_metadata.files.values())
-        keys.update(self._log_files(run_state.submission_id))
-        return keys
+    def _get_expected_keys(self, run_state: SubmissionRunState) -> list[str]:
+        """The keys of a submission in the order they are archived, with the metadata last.
+
+        An archived metadata object marks a finished archival, as it does for ``grzctl archive``.
+        """
+        # a set, because lab data may share a file such as target_regions.bed
+        file_keys = {
+            _archive_file_key(run_state.submission_id, f) for f in run_state.submission_metadata.files.values()
+        }
+        log_keys = list(self._log_files(run_state.submission_id))
+        return [*sorted(file_keys), *log_keys, _archive_metadata_key(run_state.submission_id)]
 
     def _commit_to_archive(self, run_state: SubmissionRunState) -> None:
         """Copy all staged files from the interrogation bucket to the final archive.
@@ -616,17 +667,29 @@ class SubmissionProcessor:
         for key in tqdm(expected_keys, desc="Copying to final archive", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
             log.debug(f"Copying {key}...")
             with s3_errors(f"Copy of {key} to s3://{run_state.final_bucket}", UploadError):
-                run_state.final_s3.copy(
-                    CopySource={"Bucket": run_state.interrogation_bucket, "Key": key},
-                    Bucket=run_state.final_bucket,
-                    Key=key,
+                _copy_object(
+                    run_state.final_s3,
+                    run_state.interrogation_bucket,
+                    run_state.final_bucket,
+                    key,
+                    run_state.final_part_size,
                 )
 
         log.info("Copy complete. Removing files from interrogation bucket...")
-        for key in tqdm(expected_keys, desc="Cleaning staging area", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
-            with s3_errors(f"Removal of s3://{run_state.interrogation_bucket}/{key}"):
-                run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
+        self._delete_staged_copies(run_state, expected_keys)
         log.info("Finished removing temporary files from interrogation bucket.")
+
+    @staticmethod
+    def _delete_staged_copies(run_state: SubmissionRunState, keys: list[str]) -> None:
+        """Delete staged copies from the interrogation bucket, and log each delete that fails instead of raising it.
+
+        A staged copy left behind only costs storage, so a failed delete never decides the outcome of a run.
+        """
+        for key in tqdm(keys, desc="Cleaning staging area", leave=False, **TQDM_DEFAULTS):  # type: ignore[call-overload]
+            try:
+                run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
+            except Exception as e:
+                log.warning(f"Failed to delete {key} from the interrogation bucket: {e}")
 
     def _handle_interrogation_failure(self, run_state: SubmissionRunState) -> None:
         if self.config.archives.interrogation.keep_failed:
@@ -634,11 +697,7 @@ class SubmissionProcessor:
             return
 
         log.warning("Cleaning up interrogation bucket due to failure...")
-        for key in self._get_expected_keys(run_state):
-            try:
-                run_state.interrogation_s3.delete_object(Bucket=run_state.interrogation_bucket, Key=key)
-            except Exception as e:
-                log.warning(f"Failed to delete {key} from interrogation bucket during cleanup: {e}")
+        self._delete_staged_copies(run_state, self._get_expected_keys(run_state))
 
     @staticmethod
     def _raise_on_file_errors(run_state: SubmissionRunState, message: str) -> None:
@@ -661,7 +720,7 @@ class SubmissionProcessor:
         Execute the processing pipeline for a single submission.
 
         High-level view:
-        1. Determine the target archive based on consent status (at the time of execution!).
+        1. Determine the target archive from the consent status at the submission date.
         2. Guess whether the submission will be selected for detailed QC.
         3. Spawn threads to process files (Download -> Decrypt -> Validate -> Encrypt -> Archive).
            If the guess is yes, also write the decrypted data to local QC storage.
@@ -683,7 +742,7 @@ class SubmissionProcessor:
 
         :param submission_metadata: The parsed metadata object containing donor and file information.
         :raises FilesFailedError: If processing a file fails, in the main pass or in the detailed QC pass.
-            Its ``__cause__`` is the first file error.
+            Its ``__cause__`` is the decisive file error.
         """
         submission_run = self._new_run_state(submission_metadata)
         db = SubmissionDb(self.config.db.database_url, self.config.db.signing_author)
@@ -728,7 +787,7 @@ class SubmissionProcessor:
                 # write metadata to local storage for the QC workflow
                 submission_basepath = Path(detailed_qc.local_storage) / submission_run.submission_id
                 metadata_dir = submission_basepath / "metadata"
-                metadata_dir.mkdir(parents=True, exist_ok=True)
+                _ensure_directory_mode(Path(detailed_qc.local_storage), metadata_dir, QC_DIRECTORY_MODE)
                 metadata_file = metadata_dir / "metadata.json"
                 metadata_file.write_text(json.dumps(submission_metadata.content.get_raw_dict(), indent=2))
                 log.info(f"Wrote submission metadata to {metadata_file}")
