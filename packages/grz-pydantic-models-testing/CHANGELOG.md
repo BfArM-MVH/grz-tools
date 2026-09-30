@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-testing-v1.0.0...grz-pydantic-models-testing-v1.1.0) (2026-09-26)
+
+
+### Features
+
+* **grz-common:** recommend grz-cli 3.0.0 in the bundled version policy ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grz-pydantic-models,grz-common:** keep a parsed submission lossless and redact it by one rule ([#654](https://github.com/BfArM-MVH/grz-tools/issues/654)) ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** add get_raw_dict for the document as ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common,grz-db,grzctl:** require grz-common 4, grz-db 4 and grz-pydantic-models 4 ([#688](https://github.com/BfArM-MVH/grz-tools/issues/688)) ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grz-common:** require grz-pydantic-models &gt;=3.1 for ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** apply a change set as one transaction ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** export db_backend from grz_db.testing ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grzctl:** name the submission fields the database actually has ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+
 ## [1.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-testing-v0.1.0...grz-pydantic-models-testing-v1.0.0) (2026-08-13)
 
 

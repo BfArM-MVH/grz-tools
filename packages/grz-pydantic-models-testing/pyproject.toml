@@ -1,6 +1,6 @@
 [project]
 name = "grz-pydantic-models-testing"
-version = "1.0.0"
+version = "1.1.0"
 description = "Installable test fixtures and example metadata for grz-pydantic-models."
 readme = "README.md"
 requires-python = ">=3.12"

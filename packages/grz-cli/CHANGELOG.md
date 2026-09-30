@@ -1,5 +1,34 @@
 # Changelog
 
+## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v2.0.0...grz-cli-v3.0.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** the grzctl config has no `keys` section. Each inbox names its private key. An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`.
+* **grz-cli:** `Crypt4GH.prepare_c4gh_keys`, `Crypt4GH.decrypt_file`, `Submission.encrypt`, `EncryptedSubmission.decrypt`, `Worker.encrypt` and `Worker.decrypt` take `X25519PrivateKey` and `X25519PublicKey` objects instead of paths. The `Crypt4GH` key loaders return these objects.
+
+### Features
+
+* **grz-cli,grz-common,grz-db,grzctl:** record why a submission failed and classify S3 errors ([#690](https://github.com/BfArM-MVH/grz-tools/issues/690)) ([f1d3fc8](https://github.com/BfArM-MVH/grz-tools/commit/f1d3fc804387c4fb6de861cccb6a99b521ac0056))
+* **grz-cli:** accept the submitter private key inline ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-cli:** add keys.submitter_private_key_passphrase ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** load crypt4gh keys in memory ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** recommend grz-cli 3.0.0 in the bundled version policy ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grzctl:** accept every crypt4gh key in the config inline ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl:** Centralized version.json and its distribution using grzctl ([#667](https://github.com/BfArM-MVH/grz-tools/issues/667)) ([6ed9cb0](https://github.com/BfArM-MVH/grz-tools/commit/6ed9cb04bede9fc9b34b7ce6d3aa9a0df9d42ae4))
+* **grzctl:** configure each crypt4gh key where grzctl uses it ([#694](https://github.com/BfArM-MVH/grz-tools/issues/694)) ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common,grz-db,grzctl:** require grz-common 4, grz-db 4 and grz-pydantic-models 4 ([#688](https://github.com/BfArM-MVH/grz-tools/issues/688)) ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grz-common:** keep crypt4gh private keys out of DEBUG logs ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** leave the raw input out of config validation errors ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl,grz-common,grz-cli:** drop grzctl submit and grzctl's grz-cli dependency ([#675](https://github.com/BfArM-MVH/grz-tools/issues/675)) ([e6f27c1](https://github.com/BfArM-MVH/grz-tools/commit/e6f27c1714fc73d5159b29356914bc345a797c0a))
+* **grzctl:** keep the stored upload date in db submission populate ([f1d3fc8](https://github.com/BfArM-MVH/grz-tools/commit/f1d3fc804387c4fb6de861cccb6a99b521ac0056))
+* **grzctl:** mask db.author.private_key in dump-config ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+
 ## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v1.8.0...grz-cli-v2.0.0) (2026-08-13)
 
 
