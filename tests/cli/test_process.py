@@ -1440,7 +1440,7 @@ class TestProcessPruefbericht:
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
-        assert len(_submitted_tans(bfarm_api)) == 10, "the run should have used its ten attempts"
+        assert len(_submitted_tans(bfarm_api)) == 6, "the run should have used its six attempts"
         assert _states(process_config_content, sid)[-2:] == [
             SubmissionStateEnum.REPORTING,
             SubmissionStateEnum.ERROR,
