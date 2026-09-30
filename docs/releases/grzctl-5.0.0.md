@@ -29,7 +29,9 @@ The main changes:
 
 > ⚠️ **Back up the database before `grzctl db upgrade`.** For PostgreSQL, for example: `pg_dump --format=custom --file=grz-db-before-5.0.0.dump <database>`. For SQLite, copy the database file.
 
-### 1. Update to grzctl v5.0.0
+### 1. Update grzctl and GRZ_QC_Workflow
+
+#### 1.1 grzctl v5.0.0
 
 Check the versions after the update:
 
@@ -43,6 +45,10 @@ grz-check v0.4.0
 ```
 
 grzctl no longer installs grz-cli (#675). If you use grz-cli, for example for `grz-cli upload`, install it as well.
+
+#### 1.2 GRZ_QC_Workflow v4.0.0
+
+grzctl 4.0.0 rejects the reports of GRZ_QC_Workflow 4.0.0, so update grzctl first. Step 5 explains the new QC verdicts.
 
 ### 2. Write the unified config file (#635)
 
