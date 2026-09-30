@@ -39,6 +39,21 @@ def test_ensure_directory_mode_ignores_the_umask(tmp_path: Path):
     assert _mode(tmp_path / "submission") == 0o770
 
 
+def test_ensure_directory_mode_without_a_mode_leaves_it_to_the_umask(tmp_path: Path):
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    existing.chmod(0o755)
+
+    previous_umask = os.umask(0o022)
+    try:
+        ensure_directory_mode(tmp_path, existing / "new", None)
+    finally:
+        os.umask(previous_umask)
+
+    assert _mode(existing) == 0o755
+    assert _mode(existing / "new") == 0o750
+
+
 def test_ensure_directory_mode_refuses_a_directory_outside_base(tmp_path: Path):
     base = tmp_path / "base"
     base.mkdir()

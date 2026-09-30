@@ -528,14 +528,7 @@ class Submission:
 
         public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key, submitter_private_key)
 
-        if directory_mode is not None:
-            ensure_directory_mode(encrypted_files_dir.parent, encrypted_files_dir, directory_mode)
-        elif not encrypted_files_dir.is_dir():
-            self.__log.debug(
-                "Creating encrypted submission files directory: %s...",
-                encrypted_files_dir,
-            )
-            encrypted_files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
+        ensure_directory_mode(encrypted_files_dir.parent, encrypted_files_dir, directory_mode)
 
         progress_logger = FileProgressLogger[EncryptionState](log_file_path=progress_log_file)
 
@@ -547,10 +540,7 @@ class Submission:
             encrypted_file_path = encrypted_files_dir / EncryptedSubmission.get_encrypted_file_path(
                 file_metadata.file_path
             )
-            if directory_mode is not None:
-                ensure_directory_mode(encrypted_files_dir.parent, encrypted_file_path.parent, directory_mode)
-            else:
-                encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+            ensure_directory_mode(encrypted_files_dir.parent, encrypted_file_path.parent, directory_mode)
 
             if (
                 (logged_state is None)
@@ -719,14 +709,7 @@ class EncryptedSubmission:
 
         files_dir = Path(files_dir)
 
-        if directory_mode is not None:
-            ensure_directory_mode(files_dir.parent, files_dir, directory_mode)
-        elif not files_dir.is_dir():
-            self.__log.debug(
-                "Creating decrypted submission files directory: %s...",
-                files_dir,
-            )
-            files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
+        ensure_directory_mode(files_dir.parent, files_dir, directory_mode)
 
         progress_logger = FileProgressLogger[DecryptionState](log_file_path=progress_log_file)
 
@@ -735,10 +718,7 @@ class EncryptedSubmission:
             self.__log.debug("state for %s: %s", encrypted_file_path, logged_state)
 
             decrypted_file_path = files_dir / file_metadata.file_path
-            if directory_mode is not None:
-                ensure_directory_mode(files_dir.parent, decrypted_file_path.parent, directory_mode)
-            elif not decrypted_file_path.parent.is_dir():
-                decrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=False)
+            ensure_directory_mode(files_dir.parent, decrypted_file_path.parent, directory_mode)
 
             if (
                 (logged_state is None)
