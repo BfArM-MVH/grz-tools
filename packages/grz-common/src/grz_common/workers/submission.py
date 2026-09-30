@@ -36,6 +36,7 @@ from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
+from ..utils.paths import ensure_directory_mode
 
 log = logging.getLogger(__name__)
 
@@ -493,13 +494,15 @@ class Submission:
 
         yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
-    def encrypt(
+    def encrypt(  # noqa: PLR0913
         self,
         encrypted_files_dir: str | PathLike,
         progress_log_file: str | PathLike,
         recipient_public_key: X25519PublicKey,
         submitter_private_key: X25519PrivateKey | None = None,
         force: bool = False,
+        *,
+        directory_mode: int | None = None,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh
@@ -509,6 +512,10 @@ class Submission:
         :param recipient_public_key: The public key which will be used for encryption
         :param submitter_private_key: The private key which will be used to sign the encryption
         :param force: Force encryption even if target files already exist
+        :param directory_mode: Permission bits, such as ``0o770``, for the output directory and its subdirectories.
+            They are set with ``chmod``, so the umask does not change them. The parent of the output directory keeps
+            its mode. With ``None``, the umask filters the mode of each new directory, and existing directories keep
+            their mode.
         :return: EncryptedSubmission instance
         """
         # Import here to avoid circular import issues
@@ -521,7 +528,9 @@ class Submission:
 
         public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key, submitter_private_key)
 
-        if not encrypted_files_dir.is_dir():
+        if directory_mode is not None:
+            ensure_directory_mode(encrypted_files_dir.parent, encrypted_files_dir, directory_mode)
+        elif not encrypted_files_dir.is_dir():
             self.__log.debug(
                 "Creating encrypted submission files directory: %s...",
                 encrypted_files_dir,
@@ -538,7 +547,10 @@ class Submission:
             encrypted_file_path = encrypted_files_dir / EncryptedSubmission.get_encrypted_file_path(
                 file_metadata.file_path
             )
-            encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+            if directory_mode is not None:
+                ensure_directory_mode(encrypted_files_dir.parent, encrypted_file_path.parent, directory_mode)
+            else:
+                encrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
             if (
                 (logged_state is None)
@@ -687,6 +699,8 @@ class EncryptedSubmission:
         files_dir: str | PathLike,
         progress_log_file: str | PathLike,
         recipient_private_key: X25519PrivateKey,
+        *,
+        directory_mode: int | None = None,
     ) -> Submission:
         """
         Decrypt this encrypted submission with a private key using Crypt4Gh
@@ -694,6 +708,10 @@ class EncryptedSubmission:
         :param files_dir: Output directory of the decrypted files
         :param progress_log_file: Path to a log file to store the progress of the decryption process
         :param recipient_private_key: The private key which will be used for decryption
+        :param directory_mode: Permission bits, such as ``0o770``, for the output directory and its subdirectories.
+            They are set with ``chmod``, so the umask does not change them. The parent of the output directory keeps
+            its mode. With ``None``, the umask filters the mode of each new directory, and existing directories keep
+            their mode.
         :return: Submission instance
         """
         # Import here to avoid circular import issues
@@ -701,7 +719,9 @@ class EncryptedSubmission:
 
         files_dir = Path(files_dir)
 
-        if not files_dir.is_dir():
+        if directory_mode is not None:
+            ensure_directory_mode(files_dir.parent, files_dir, directory_mode)
+        elif not files_dir.is_dir():
             self.__log.debug(
                 "Creating decrypted submission files directory: %s...",
                 files_dir,
@@ -715,7 +735,9 @@ class EncryptedSubmission:
             self.__log.debug("state for %s: %s", encrypted_file_path, logged_state)
 
             decrypted_file_path = files_dir / file_metadata.file_path
-            if not decrypted_file_path.parent.is_dir():
+            if directory_mode is not None:
+                ensure_directory_mode(files_dir.parent, decrypted_file_path.parent, directory_mode)
+            elif not decrypted_file_path.parent.is_dir():
                 decrypted_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=False)
 
             if (

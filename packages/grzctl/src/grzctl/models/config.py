@@ -15,7 +15,7 @@ from grz_common.models.base import (
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from grz_common.utils.crypt import Crypt4GH
-from pydantic import Field, PrivateAttr, SecretStr, model_validator
+from pydantic import BeforeValidator, Field, PlainSerializer, PrivateAttr, SecretStr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
 
@@ -23,6 +23,21 @@ from .db import DbModel
 from .pruefbericht import PruefberichtModel
 
 _config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", default=None)
+
+
+def _parse_octal_mode(value: object) -> int:
+    """Parse permission bits from an octal string, such as ``"0770"``.
+
+    PyYAML reads an unquoted ``0770`` as octal, but an unquoted ``770`` as decimal.
+    So the mode must be a quoted string, which always reads as octal.
+
+    :param value: The value from the config file or the environment.
+    :returns: The permission bits.
+    :raises ValueError: If *value* is no string, or no octal number.
+    """
+    if not isinstance(value, str):
+        raise ValueError('write the mode as a quoted octal string, such as "0770"')
+    return int(value, 8)
 
 
 def _check_key_fields(name: str, key: object | None, key_path: Path | None, *, required: bool) -> None:
@@ -277,6 +292,23 @@ class GrzctlConfig(IgnoringBaseSettings):
 
     identifiers: IdentifiersModel
     """Identifiers for the GRZ and LE."""
+
+    local_storage_mode: Annotated[
+        int,
+        BeforeValidator(_parse_octal_mode),
+        # BaseSettings validates defaults, and the validator above accepts only strings
+        Field(ge=0, le=0o777, validate_default=False),
+        PlainSerializer(lambda mode: f"{mode:04o}", return_type=str),
+    ] = 0o770
+    """Permission bits of the local directories that hold submission data, as a quoted octal string, such as ``"0750"``.
+
+    ``grzctl download`` sets this mode on the submission directory.
+    ``download``, ``decrypt``, ``encrypt``, ``validate`` and ``archive`` set it on each directory below the
+    submission directory that they create or write into.
+    They set it with ``chmod``, so the umask does not change it.
+    The directories hold the unredacted ``metadata.json``, and the default ``"0770"`` shuts out other users.
+    An unquoted value fails, because YAML reads ``0770`` as octal but ``770`` as decimal.
+    """
 
     @model_validator(mode="after")
     def build_le_lookups(self) -> "GrzctlConfig":
