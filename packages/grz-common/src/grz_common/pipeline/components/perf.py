@@ -33,6 +33,8 @@ class StreamMetricsRegistry:
     def measure(self, name: str) -> Callable[[Readable | Writable], ReadStream | WriteStream]:
         """Return a pipeline stage that times the reads or writes of the stream before it.
 
+        A stream that is readable gets the read timing, even if it is writable too, such as ``io.BytesIO``.
+
         Usage::
 
             pipeline = pipeline | Crypt4GHEncryptor(...) | metrics.measure("4_Encrypt")

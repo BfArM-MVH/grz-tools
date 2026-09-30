@@ -4,7 +4,6 @@ Uses '|' (or) for chaining and '>>' (rshift) for execution.
 """
 
 import abc
-import contextlib
 import io
 import logging
 import queue
@@ -129,14 +128,16 @@ class Pipeable:
         # Drive everything through the destination's context manager: it finalizes the write
         # on a clean exit and aborts it on error. Close the source inside the block so that a
         # validation failure there also triggers the abort, rather than leaving a half-uploaded
-        # object behind. If streaming itself failed, report that error, not a follow-up one
-        # from closing the stages.
+        # object behind. If streaming itself failed, report that error, and only log a follow-up
+        # one from closing the stages.
         with other:
             try:
                 shutil.copyfileobj(self, other, length=READ_CHUNK_SIZE)
             except BaseException:
-                with contextlib.suppress(Exception):
+                try:
                     self.close()
+                except BaseException:
+                    log.warning("Closing the pipeline after a failed stream failed as well", exc_info=True)
                 raise
             self.close()
         return other
