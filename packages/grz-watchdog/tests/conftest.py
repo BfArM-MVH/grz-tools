@@ -172,8 +172,11 @@ def container_test_env(test_environment, setup_mc_alias, request):
         run_in_container(*PIXI_RUN_PREFIX, "rm", "-rf", "/workdir/results", "/workdir/.snakemake", "/tmp/*")
         run_in_container(*PIXI_RUN_PREFIX, "mkdir", "-p", "/workdir/results")
 
-        print("Initializing a fresh database for the test...")
         grzctl_config_path_in_container = "/workdir/config/configs/grzctl.yaml"
+        # grz-cli refuses to upload to an inbox without a version.json
+        run_in_container(*PIXI_RUN_PREFIX, "grzctl", "--config", grzctl_config_path_in_container, "inbox", "push-version")
+
+        print("Initializing a fresh database for the test...")
         try:
             run_in_container(
                 *PIXI_RUN_PREFIX,
