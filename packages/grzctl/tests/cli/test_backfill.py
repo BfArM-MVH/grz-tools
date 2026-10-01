@@ -8,6 +8,7 @@ is not a dev/test dependency of `grz-db`, but `moto[s3]`, `pytest-postgresql`, a
 `grz-pydantic-models-testing` are all in `grzctl`'s [test] dependency group.
 """
 
+import copy
 import datetime
 import importlib.resources
 import json
@@ -23,7 +24,7 @@ import grzctl.cli
 import pytest
 import sqlalchemy
 from grz_db.models.submission import DONORS_KEY, Submission, SubmissionDb
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata import Donor, GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.db.cli import (
     _backfill_submission,
@@ -31,6 +32,7 @@ from grzctl.commands.db.cli import (
     _BackfillResult,
     _fetch_metadata_json_from_archives,
     _logs_about,
+    _missing_research_consent,
     _report,
 )
 from moto import mock_aws
@@ -841,13 +843,13 @@ def test_backfill_dry_run_counts_what_it_would_do(
     """A dry run counts the inbox it would record, and checks the consent of the archived copy.
 
     The row has no stored metadata yet, so the consent check can only read the archived copy.
+    In the example metadata the father states only a noScopeJustification, so the submission has no
+    research consent on its submission date. That is not an expiry.
     """
-    raw = metadata.get_raw_dict()
-    raw["donors"][0]["researchConsents"][0]["scope"]["status"] = "inactive"
     db.add_submission(submission_id)
     for bucket in ARCHIVE_BUCKETS:
         s3_client_mock.create_bucket(Bucket=bucket)
-    _put_metadata(s3_client_mock, "consented", submission_id, GrzSubmissionMetadata.model_validate(raw))
+    _put_metadata(s3_client_mock, "consented", submission_id, metadata)
 
     with patch("grzctl.commands.db.cli.scan_inbox", return_value="inbox"):
         result = _invoke_backfill_command(migrated_database_config_path, submission_id, "--dry-run")
@@ -855,7 +857,78 @@ def test_backfill_dry_run_counts_what_it_would_do(
     assert result.exit_code == 0, result.output
     assert f"[dry-run] {submission_id}: would record inbox 'inbox'." in result.stdout
     assert "Would record inbox: 1" in result.stdout
-    assert "Expired consents in consented archive: 1" in result.stdout
+    assert "donor 'father': no scope, noScopeJustification" in result.stdout
+    assert "No research consent at submission date in consented archive: 1" in result.stdout
+    assert "Expired consents in consented archive: 0" in result.stdout
     persisted = db.get_submission(submission_id)
     assert persisted.inbox is None
     assert persisted.submission_metadata is None
+
+
+def _with_research_consent_ending(metadata: GrzSubmissionMetadata, end: datetime.date) -> GrzSubmissionMetadata:
+    """Give every donor the index donor's research consent, with every period ending on *end*."""
+    raw = metadata.get_raw_dict()
+    consents = raw["donors"][0]["researchConsents"]
+    root = consents[0]["scope"]["provision"]
+    for provision in (root, *root["provision"]):
+        provision["period"]["end"] = end.isoformat()
+    for donor in raw["donors"][1:]:
+        donor["researchConsents"] = copy.deepcopy(consents)
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+def test_backfill_reports_a_consent_that_ended_after_the_submission_date_as_expired(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """Only a consent in force on the submission date but no longer today has expired."""
+    day_after_submission = metadata.submission.submission_date + datetime.timedelta(days=1)
+    db.add_submission(submission_id)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    _put_metadata(
+        s3_client_mock, "consented", submission_id, _with_research_consent_ending(metadata, day_after_submission)
+    )
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id, "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert f"CONSENT EXPIRED: {submission_id}" in result.stdout
+    assert "donor 'index': no research consent in force on" in result.stdout
+    assert "No research consent at submission date in consented archive: 0" in result.stdout
+    assert "Expired consents in consented archive: 1" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("change", "on", "reason"),
+    [
+        (lambda donor: None, datetime.date(2030, 1, 1), None),
+        (lambda donor: donor.update(researchConsents=[]), datetime.date(2030, 1, 1), "no researchConsents"),
+        (
+            lambda donor: donor["researchConsents"][0].update(scope={"resourceType": "Consent"}),
+            datetime.date(2030, 1, 1),
+            "scope is not a valid FHIR Consent",
+        ),
+        (lambda donor: None, datetime.date(2019, 1, 1), "no research consent in force on 2019-01-01"),
+    ],
+    ids=["consented", "no consents", "unreadable scope", "before the consent"],
+)
+def test_missing_research_consent_names_the_reason(
+    metadata: GrzSubmissionMetadata, change: Any, on: datetime.date, reason: str | None
+) -> None:
+    donor_raw = metadata.get_raw_dict()["donors"][0]
+    change(donor_raw)
+
+    assert _missing_research_consent(Donor.model_validate(donor_raw), on) == reason
+
+
+def test_missing_research_consent_quotes_the_no_scope_justification(metadata: GrzSubmissionMetadata) -> None:
+    father = next(donor for donor in metadata.donors if donor.relation == "father")
+    justification = father.research_consents[0].no_scope_justification
+
+    assert _missing_research_consent(father, datetime.date(2030, 1, 1)) == (
+        f"no scope, noScopeJustification '{justification}'"
+    )

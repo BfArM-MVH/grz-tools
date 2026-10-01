@@ -61,6 +61,7 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.dates import quarter_date_bounds
+from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import (
     Donor,
     GenomicStudySubtype,
@@ -1994,6 +1995,43 @@ def _logs_about(submission_id: str) -> Iterator[None]:
         logging.setLogRecordFactory(factory)
 
 
+def _missing_research_consent(donor: Donor, on: date) -> str | None:
+    """Say why *donor* gives no research consent on *on*.
+
+    :param donor: The donor to check.
+    :param on: The date to evaluate the research consent at.
+    :returns: The reason, or ``None`` if the donor gives research consent on that date.
+    """
+    if donor.consents_to_research(on):
+        return None
+    consents = donor.research_consents
+    if not consents:
+        return "no researchConsents"
+    if any(consent.scope is not None and not isinstance(consent.scope, Consent) for consent in consents):
+        return "scope is not a valid FHIR Consent"
+    if all(consent.scope is None for consent in consents):
+        # a consent without a scope always states a noScopeJustification
+        justifications = sorted({str(consent.no_scope_justification) for consent in consents})
+        return f"no scope, noScopeJustification '{', '.join(justifications)}'"
+    return f"no research consent in force on {on}"
+
+
+def _donors_without_research_consent(metadata: GrzSubmissionMetadata, on: date) -> str | None:
+    """List every donor of *metadata* that gives no research consent on *on*, with the reason.
+
+    The submission consents to research only if every donor does.
+    So a single donor without research consent decides the result, and the report names it.
+
+    :returns: The donors and reasons as one line, or ``None`` if every donor gives research consent.
+    """
+    reasons = [
+        f"donor '{donor.relation}': {reason}"
+        for donor in metadata.donors
+        if (reason := _missing_research_consent(donor, on)) is not None
+    ]
+    return "; ".join(reasons) or None
+
+
 def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str | None:
     """Return the raw metadata.json content for *submission_id*, or None when not found.
 
@@ -2266,6 +2304,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
     consent_mismatches = 0
+    without_consent_at_submission = 0
     expired_consents = 0
     links_unresolved = 0
     inboxes_recorded = 0
@@ -2316,19 +2355,26 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                         "bold red",
                     )
 
-            # Check the archived copy for an expired consent, not the stored one.
+            # Check the consent of the archived copy, not the stored one.
             # The stored one is missing before the first backfill, and a dry run does not store it.
-            if (
-                actual_archive == "consented"
-                and outcome.metadata is not None
-                and not outcome.metadata.consents_to_research(date=date.today())
-            ):
-                expired_consents += 1
-                _report(
-                    f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
-                    f"but research consent has expired as of today ({date.today()}).",
-                    "yellow",
-                )
+            # Archive placement and the stored `consented` evaluate the consent at the submission date.
+            # So a consent missing on that date is no expiry: the submission was never consented.
+            if actual_archive == "consented" and outcome.metadata is not None:
+                submission_date = outcome.metadata.submission.submission_date
+                if missing := _donors_without_research_consent(outcome.metadata, submission_date):
+                    without_consent_at_submission += 1
+                    _report(
+                        f"  NO RESEARCH CONSENT: {submission.id} is in 'consented' archive, "
+                        f"but has no research consent on its submission date ({submission_date}): {missing}",
+                        "yellow",
+                    )
+                elif missing := _donors_without_research_consent(outcome.metadata, date.today()):
+                    expired_consents += 1
+                    _report(
+                        f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
+                        f"but research consent has expired as of today ({date.today()}): {missing}",
+                        "yellow",
+                    )
 
             # A missing inbox is always filled.
             # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
@@ -2362,10 +2408,11 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         "cyan",
     )
 
-    if consent_mismatches or expired_consents:
+    if consent_mismatches or without_consent_at_submission or expired_consents:
         _report(
             f"\nConsent issues:\n"
             f"  Bucket ↔ DB consent mismatches: {consent_mismatches}\n"
+            f"  No research consent at submission date in consented archive: {without_consent_at_submission}\n"
             f"  Expired consents in consented archive: {expired_consents}",
             "bold yellow",
         )
