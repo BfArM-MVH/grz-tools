@@ -28,7 +28,7 @@ def select_submissions(inbox_scans, grzctl_config, limit):
             if timestamp.tzinfo is None:
                 timestamp = timestamp.replace(tzinfo=UTC)
         else:
-            timestamp_str = submission.get("latest_modification", "1970-01-01T00:00:00Z")
+            timestamp_str = submission.get("oldest_upload") or "1970-01-01T00:00:00Z"
             timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
 
         submission["timestamp_key"] = timestamp
