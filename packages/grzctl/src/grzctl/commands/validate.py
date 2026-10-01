@@ -1,7 +1,6 @@
 """Command for validating a submission."""
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
@@ -15,6 +14,7 @@ from ..commands import grzctl_configuration
 from ..commands.db.cli import get_submission_db_instance
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
+from .paths import resolve_dirs
 
 if TYPE_CHECKING:
     from grz_db.models.submission import SubmissionDb
@@ -63,6 +63,9 @@ def _warn_on_duplicate_initial(configuration: GrzctlConfig, metadata: GrzSubmiss
 @click.command()
 @grzctl_configuration
 @grzcli.submission_dir
+@grzcli.metadata_dir
+@grzcli.files_dir
+@grzcli.logs_dir
 @grzcli.force
 @grzcli.threads
 @click.option(
@@ -84,6 +87,9 @@ def _warn_on_duplicate_initial(configuration: GrzctlConfig, metadata: GrzSubmiss
 def validate(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_dir,
+    metadata_dir,
+    files_dir,
+    logs_dir,
     force,
     threads,
     submitter_id,
@@ -92,13 +98,22 @@ def validate(  # noqa: PLR0913, PLR0917
     **kwargs,
 ):
     """Validate the submission (standalone with DB updates)."""
-    submission_dir = Path(submission_dir)
+    paths = resolve_dirs(
+        bundled_dir=submission_dir,
+        bundled_option="--submission-dir",
+        explicit={
+            "--metadata-dir": metadata_dir,
+            "--files-dir": files_dir,
+            "--logs-dir": logs_dir,
+        },
+    )
+    metadata_path = paths["--metadata-dir"]
 
     worker_inst = Worker(
-        metadata_dir=submission_dir / "metadata",
-        files_dir=submission_dir / "files",
-        log_dir=submission_dir / "logs",
-        encrypted_files_dir=submission_dir / "encrypted_files",
+        metadata_dir=metadata_path,
+        files_dir=paths["--files-dir"],
+        log_dir=paths["--logs-dir"],
+        encrypted_files_dir=metadata_path.parent / "encrypted_files",
         threads=threads,
     )
     submission = worker_inst.parse_submission()
