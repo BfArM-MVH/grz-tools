@@ -1,6 +1,5 @@
 """Fixtures for the tests."""
 
-import hashlib
 import json
 import os
 from datetime import datetime
@@ -21,7 +20,6 @@ from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadat
 from grz_db import testing as grz_db_testing
 from grz_db.models.submission import SubmissionDb
 from moto import mock_aws
-from sqlmodel import SQLModel
 
 # These names are bound by assignment rather than imported directly, because fixtures below take
 # ``db_test_connection`` as a parameter name, which ruff would otherwise read as redefining an
@@ -59,11 +57,6 @@ db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
 _GRZ_PRIVATE_KEY_PATH = str(Path(crypt4gh_grz_private_key_file).resolve())
 """An existing key file for the key path fields of the grzctl config, which need an existing file."""
 db_known_keys_file = "tests/mock_files/db/known_keys"
-
-
-@pytest.fixture(autouse=True)
-def clear_sqlmodel_metadata():
-    SQLModel.metadata.clear()
 
 
 @pytest.fixture()
@@ -217,6 +210,8 @@ def temp_fastq_file_path(temp_data_dir_path) -> Path:
 
 @pytest.fixture
 def temp_fastq_file_md5sum(temp_fastq_file_path):
+    import hashlib
+
     with open(temp_fastq_file_path, "rb") as f:
         file_hash = hashlib.md5()
         while chunk := f.read(8192):
@@ -227,6 +222,8 @@ def temp_fastq_file_md5sum(temp_fastq_file_path):
 
 @pytest.fixture
 def temp_fastq_file_sha256sum(temp_fastq_file_path):
+    import hashlib
+
     with open(temp_fastq_file_path, "rb") as f:
         file_hash = hashlib.sha256()
         while chunk := f.read(8192):
