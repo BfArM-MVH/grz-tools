@@ -103,61 +103,17 @@ def monitor_and_queue_submissions(shutdown_event):
                             e,
                         )
 
-            # sync with db
-            initial_db_submission_list = _run_grzctl_db_command(
-                "list", "--json", "--limit", "1000000"
-            )
-            if initial_db_submission_list is None:
-                daemon_logger.critical(
-                    "The database is unavailable. Shutting down monitoring."
+            # sync with db: grzctl registers new submissions as 'uploading' or 'uploaded',
+            # moves completed uploads to 'uploaded' and records the inbox of each submission.
+            # A failure is logged by _run_grzctl_db_command; the db list below detects a database outage.
+            for submitter, inbox_name in ALL_INBOX_PAIRS:
+                _run_grzctl_db_command(
+                    "sync-from-inbox",
+                    "--submitter-id",
+                    submitter,
+                    "--inbox",
+                    inbox_name,
                 )
-                submission_queue.put(finish_sentinel)
-                return
-
-            db_states = {
-                e["id"]: e.get("latest_state", {}).get("state", "").casefold()
-                for e in json.loads(initial_db_submission_list.stdout or "[]")
-            }
-
-            for submission in all_s3_submissions:
-                submission_id, s3_state = (
-                    submission["submission_id"],
-                    submission["state"],
-                )
-
-                if s3_state == "complete":
-                    target_db_state = "uploaded"
-                elif s3_state == "incomplete":
-                    target_db_state = "uploading"
-                else:
-                    daemon_logger.debug(
-                        "Skipping submission '%s' because its S3-state is '%s'.",
-                        submission_id,
-                        s3_state,
-                    )
-                    continue
-
-                if submission_id not in db_states:
-                    daemon_logger.info(
-                        "Found a new submission '%s' and registered it in the database with state '%s'.",
-                        submission_id,
-                        target_db_state,
-                    )
-                    _run_grzctl_db_command("submission", "add", submission_id)
-                    _run_grzctl_db_command(
-                        "submission", "update", submission_id, target_db_state
-                    )
-                elif (
-                    db_states.get(submission_id) == "uploading"
-                    and target_db_state == "uploaded"
-                ):
-                    daemon_logger.info(
-                        "Submission '%s' has completed its upload. The database state is being updated to 'uploaded'.",
-                        submission_id,
-                    )
-                    _run_grzctl_db_command(
-                        "submission", "update", submission_id, "uploaded"
-                    )
 
             # select pending submissions
             db_submissions_list = _run_grzctl_db_command(
@@ -165,7 +121,7 @@ def monitor_and_queue_submissions(shutdown_event):
             )
             if db_submissions_list is None:
                 daemon_logger.critical(
-                    "The database became unavailable after the sync operation. Shutting down monitoring."
+                    "The database is unavailable. Shutting down monitoring."
                 )
                 submission_queue.put(finish_sentinel)
                 return
