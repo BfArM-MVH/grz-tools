@@ -43,6 +43,8 @@ def cleanup_stale_temp_outputs():
     relevant_temp_outputs = [
         str(rules.scan_inbox.output.submissions),
         str(rules.sync_db_from_inbox.output.marker),
+        # Snakemake keeps this checkpoint output, so the next batch run would reuse the old batch.
+        str(rules.select_submissions.output.submissions_batch),
     ]
     if hasattr(rules, "daemon_keepalive"):
         relevant_temp_outputs.append(str(rules.daemon_keepalive.output.marker))
