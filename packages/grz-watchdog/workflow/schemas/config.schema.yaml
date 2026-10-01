@@ -48,8 +48,8 @@ properties:
             default: 200
           qc:
             type: integer
-            minimum 1:
-              default: 10
+            minimum: 1
+            default: 10
     required:
       - speed
   on-failed-validation:
