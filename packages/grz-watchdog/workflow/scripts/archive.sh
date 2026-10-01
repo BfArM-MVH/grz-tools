@@ -9,36 +9,12 @@ metadata_file_path="${snakemake_input[metadata]}"
 re_encrypted_files_dir="${snakemake_input[re_encrypted_files_dir]}"
 
 read -r -a progress_logs_to_archive <<<"${snakemake_input[progress_logs_to_archive]}"
-
-staging_dir=$(mktemp -d -p "$(dirname ${snakemake_output[marker]})" "archive_staging_XXXXXX")
-trap 'rm -rf "$staging_dir"' EXIT
-echo "Created temporary archive staging directory: $staging_dir" >"$log_stdout"
-
-echo "Assembling archive package..." >>"$log_stdout"
-redacted_metadata_dir="${staging_dir}/metadata"
-mkdir -p "${staging_dir}/metadata"
-cp "${metadata_file_path}" "${redacted_metadata_dir}/metadata.json"
-mkdir -p "${staging_dir}/logs"
-cp "${progress_logs_to_archive[@]}" "${staging_dir}/logs/"
-
-echo "Redacting sensitive data from staged logs..." >>"$log_stdout"
-staged_metadata_file="${staging_dir}/metadata/metadata.json"
-redacted_logs_dir="${staging_dir}/logs"
-
-tanG=$(jq --raw-output '.submission.tanG' "$staged_metadata_file" || true)
-localCaseId=$(jq --raw-output '.submission.localCaseId' "$staged_metadata_file" || true)
-
-if [ -n "$tanG" ] && [ "$tanG" != "null" ]; then
-	rg --files-with-matches --fixed-strings "$tanG" "$redacted_logs_dir" | xargs --no-run-if-empty sed -i "s/$tanG/$(printf '0'%.0s {1..64})/g" || true
-fi
-if [ -n "$localCaseId" ] && [ "$localCaseId" != "null" ]; then
-	rg --files-with-matches --fixed-strings "$localCaseId" "$redacted_logs_dir" | xargs --no-run-if-empty sed -i "s/$localCaseId/REDACTED_LOCAL_CASE_ID/g" || true
-fi
-echo "Redaction complete." >>"$log_stdout"
+progress_logs_dir="$(dirname "${progress_logs_to_archive[0]}")"
 
 # grzctl archive derives consent from metadata and handles DB state transitions (ARCHIVING → ARCHIVED) via DbContext.
+# It redacts the metadata and the logs before it uploads them.
 grzctl --config "${grzctl_config}" archive \
-	--metadata-dir "${redacted_metadata_dir}" \
-	--logs-dir "${redacted_logs_dir}" \
+	--metadata-dir "$(dirname "$metadata_file_path")" \
+	--logs-dir "${progress_logs_dir}" \
 	--encrypted-files-dir "${re_encrypted_files_dir}" \
-	>>"$log_stdout" 2>>"$log_stderr"
+	>"$log_stdout" 2>"$log_stderr"
