@@ -11,6 +11,55 @@ from pathlib import Path
 from typing import Any
 
 import click
+from grz_common.cli import DIR_R_E, DIR_RW_C
+
+submission_dir_option = click.option(
+    "--submission-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Base directory for all submission components. Mutually exclusive with explicit path options.",
+)
+
+metadata_dir_option = click.option(
+    "--metadata-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing 'metadata.json'.",
+)
+
+files_dir_option = click.option(
+    "--files-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing the unencrypted data files.",
+)
+
+encrypted_files_dir_option = click.option(
+    "--encrypted-files-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing the 'encrypted_files/'.",
+)
+
+logs_dir_option = click.option(
+    "--logs-dir",
+    metavar="PATH",
+    type=DIR_R_E,
+    required=False,
+    help="Path to the directory containing the log files.",
+)
+
+output_encrypted_files_dir_option = click.option(
+    "--output-encrypted-files-dir",
+    metavar="PATH",
+    type=DIR_RW_C,
+    required=False,
+    help="Output directory where the 'encrypted_files/' subdirectory will be created.",
+)
 
 SUBDIR_BY_OPTION: dict[str, str] = {
     "--metadata-dir": "metadata",

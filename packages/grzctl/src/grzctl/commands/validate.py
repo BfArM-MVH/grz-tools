@@ -14,7 +14,7 @@ from ..commands import grzctl_configuration
 from ..commands.db.cli import get_submission_db_instance
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
-from .paths import resolve_dirs
+from .paths import files_dir_option, logs_dir_option, metadata_dir_option, resolve_dirs, submission_dir_option
 
 if TYPE_CHECKING:
     from grz_db.models.submission import SubmissionDb
@@ -62,10 +62,10 @@ def _warn_on_duplicate_initial(configuration: GrzctlConfig, metadata: GrzSubmiss
 
 @click.command()
 @grzctl_configuration
-@grzcli.submission_dir
-@grzcli.metadata_dir
-@grzcli.files_dir
-@grzcli.logs_dir
+@submission_dir_option
+@metadata_dir_option
+@files_dir_option
+@logs_dir_option
 @grzcli.force
 @grzcli.threads
 @click.option(

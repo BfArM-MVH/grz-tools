@@ -15,7 +15,14 @@ from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from .inbox_resolution import require_inbox
-from .paths import resolve_dirs
+from .paths import (
+    encrypted_files_dir_option,
+    files_dir_option,
+    logs_dir_option,
+    metadata_dir_option,
+    resolve_dirs,
+    submission_dir_option,
+)
 
 log = logging.getLogger(__name__)
 
@@ -28,11 +35,11 @@ _ARCHIVES: dict[str, Literal["consented", "non_consented"]] = {
 
 @click.command()
 @grzctl_configuration
-@grzcli.submission_dir
-@grzcli.metadata_dir
-@grzcli.files_dir
-@grzcli.encrypted_files_dir
-@grzcli.logs_dir
+@submission_dir_option
+@metadata_dir_option
+@files_dir_option
+@encrypted_files_dir_option
+@logs_dir_option
 @inbox_option
 @click.option(
     "--archive",

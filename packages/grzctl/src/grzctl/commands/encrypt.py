@@ -11,18 +11,25 @@ from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from .inbox_resolution import resolve_inbox
-from .paths import resolve_dirs
+from .paths import (
+    files_dir_option,
+    logs_dir_option,
+    metadata_dir_option,
+    output_encrypted_files_dir_option,
+    resolve_dirs,
+    submission_dir_option,
+)
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
 @grzctl_configuration
-@grzcli.submission_dir
-@grzcli.metadata_dir
-@grzcli.files_dir
-@grzcli.output_encrypted_files_dir
-@grzcli.logs_dir
+@submission_dir_option
+@metadata_dir_option
+@files_dir_option
+@output_encrypted_files_dir_option
+@logs_dir_option
 @grzcli.force
 @click.option(
     "--check-validation-logs/--no-check-validation-logs",

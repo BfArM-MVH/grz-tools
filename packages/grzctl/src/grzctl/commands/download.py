@@ -15,7 +15,7 @@ from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
-from .paths import resolve_dirs
+from .paths import encrypted_files_dir_option, logs_dir_option, metadata_dir_option, resolve_dirs
 
 log = logging.getLogger(__name__)
 
@@ -30,9 +30,9 @@ log = logging.getLogger(__name__)
     default=None,
     help="Path to the target submission output directory.",
 )
-@grzcli.metadata_dir
-@grzcli.encrypted_files_dir
-@grzcli.logs_dir
+@metadata_dir_option
+@encrypted_files_dir_option
+@logs_dir_option
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db

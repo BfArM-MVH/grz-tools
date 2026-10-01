@@ -10,17 +10,17 @@ from grz_db.models.submission import SubmissionStateEnum
 from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
-from .paths import resolve_dirs
+from .paths import encrypted_files_dir_option, logs_dir_option, metadata_dir_option, resolve_dirs, submission_dir_option
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
 @grzctl_configuration
-@grzcli.submission_dir
-@grzcli.metadata_dir
-@grzcli.logs_dir
-@grzcli.encrypted_files_dir
+@submission_dir_option
+@metadata_dir_option
+@logs_dir_option
+@encrypted_files_dir_option
 @grzcli.threads
 @grzcli.update_db
 def archive(  # noqa: PLR0913, PLR0917
