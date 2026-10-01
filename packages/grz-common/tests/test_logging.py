@@ -1,8 +1,10 @@
+import io
 import logging
 from unittest.mock import patch
 
 import pytest
 from grz_common import logging as grz_logging
+from tqdm.auto import tqdm
 
 
 def _format_test_record(logging_format: str) -> tuple[str, str, str]:
@@ -65,3 +67,26 @@ def test_setup_cli_logging_keeps_crypt4gh_at_a_higher_cli_log_level():
     grz_logging.setup_cli_logging(None, "WARNING")
 
     assert not logging.getLogger("crypt4gh.header").isEnabledFor(logging.INFO)
+
+
+@pytest.mark.usefixtures("restore_log_levels")
+def test_setup_cli_logging_logs_to_the_console_apart_from_progress_bars():
+    """While pytest's handlers are on the root logger, basicConfig adds none, so they are set aside."""
+    with patch.object(logging.getLogger(), "handlers", []):
+        grz_logging.setup_cli_logging(None, "INFO")
+        handlers = list(logging.getLogger().handlers)
+
+    assert [type(handler) for handler in handlers] == [grz_logging.TqdmAwareStreamHandler]
+
+
+def test_tqdm_aware_stream_handler_writes_the_record_on_its_own_line():
+    stream = io.StringIO()
+    handler = grz_logging.TqdmAwareStreamHandler(stream)
+    record = logging.LogRecord("test.logger", logging.WARNING, __file__, 123, "hello", (), None)
+
+    with tqdm(total=2, file=stream):
+        handler.handle(record)
+        written = stream.getvalue()
+
+    assert "\rhello\n" in written, "the bar is cleared before the record"
+    assert "0/2" in written.split("hello\n", 1)[1], "the bar is redrawn below the record"

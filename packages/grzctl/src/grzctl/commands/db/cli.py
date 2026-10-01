@@ -77,7 +77,6 @@ from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
 from sqlmodel import Session, select
 from tqdm.auto import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 from ... import get_versions
 from ...commands import grzctl_configuration, inbox_options
@@ -2271,85 +2270,83 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     links_unresolved = 0
     inboxes_recorded = 0
 
-    # Logs go through tqdm, which prints them above the progress bar instead of into it.
-    with logging_redirect_tqdm(tqdm_class=tqdm):
-        for submission in tqdm(candidates, disable=None):
-            with _logs_about(submission.id):
-                # Read both archives before writing anything. A metadata.json in both is an error, and
-                # committing the first copy found would already have changed the row.
-                found_in = _fetch_metadata_json_from_archives(submission.id, archive_targets)
+    for submission in tqdm(candidates, disable=None):
+        with _logs_about(submission.id):
+            # Read both archives before writing anything. A metadata.json in both is an error, and
+            # committing the first copy found would already have changed the row.
+            found_in = _fetch_metadata_json_from_archives(submission.id, archive_targets)
 
-                if found_in is None:
-                    counts[_BackfillResult.ERROR] += 1
-                    continue
+            if found_in is None:
+                counts[_BackfillResult.ERROR] += 1
+                continue
 
-                if len(found_in) > 1:
-                    _report(
-                        f"  {submission.id}: ERROR: metadata.json found in both consented and non_consented archives",
-                        "red",
-                    )
-                    counts[_BackfillResult.ERROR] += 1
-                    continue
-
-                if not found_in:
-                    counts[_BackfillResult.NOT_FOUND] += 1
-                    continue
-
-                actual_archive = next(iter(found_in))  # "consented" or "non_consented"
-                outcome = _backfill_submission(
-                    submission,
-                    found_in[actual_archive],
-                    db_service,
-                    dry_run,
-                    force,
-                    ignore_fields,
-                    allow_overwrite_keys,
+            if len(found_in) > 1:
+                _report(
+                    f"  {submission.id}: ERROR: metadata.json found in both consented and non_consented archives",
+                    "red",
                 )
-                counts[outcome.status] += 1
-                links_unresolved += outcome.link_unresolved
+                counts[_BackfillResult.ERROR] += 1
+                continue
 
-                # check DB `consented` vs actual archive
-                if submission.consented is not None:
-                    expected_archive = "consented" if submission.consented else "non_consented"
-                    if actual_archive != expected_archive:
-                        consent_mismatches += 1
-                        _report(
-                            f"  CONSENT MISMATCH: {submission.id} has DB consented={submission.consented} "
-                            f"(expected '{expected_archive}'), but was found in '{actual_archive}' bucket!",
-                            "bold red",
-                        )
+            if not found_in:
+                counts[_BackfillResult.NOT_FOUND] += 1
+                continue
 
-                # Check the archived copy for an expired consent, not the stored one.
-                # The stored one is missing before the first backfill, and a dry run does not store it.
-                if (
-                    actual_archive == "consented"
-                    and outcome.metadata is not None
-                    and not outcome.metadata.consents_to_research(date=date.today())
-                ):
-                    expired_consents += 1
+            actual_archive = next(iter(found_in))  # "consented" or "non_consented"
+            outcome = _backfill_submission(
+                submission,
+                found_in[actual_archive],
+                db_service,
+                dry_run,
+                force,
+                ignore_fields,
+                allow_overwrite_keys,
+            )
+            counts[outcome.status] += 1
+            links_unresolved += outcome.link_unresolved
+
+            # check DB `consented` vs actual archive
+            if submission.consented is not None:
+                expected_archive = "consented" if submission.consented else "non_consented"
+                if actual_archive != expected_archive:
+                    consent_mismatches += 1
                     _report(
-                        f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
-                        f"but research consent has expired as of today ({date.today()}).",
-                        "yellow",
+                        f"  CONSENT MISMATCH: {submission.id} has DB consented={submission.consented} "
+                        f"(expected '{expected_archive}'), but was found in '{actual_archive}' bucket!",
+                        "bold red",
                     )
 
-                # A missing inbox is always filled.
-                # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
-                # inboxes can still name the one the submission came from.
-                # A scan that finds no inbox, or more than one, is ambiguous.
-                # It is left for --inbox on other commands.
-                if submission.inbox is None:
-                    submitter_id = submission.id.split("_", maxsplit=1)[0]
-                    derived_inbox = scan_inbox(configuration, submitter_id, submission.id)
-                    if derived_inbox is None:
-                        _report(f"  {submission.id}: no unambiguous inbox found to record.", "dim")
-                    elif dry_run:
-                        _report(f"  [dry-run] {submission.id}: would record inbox '{derived_inbox}'.", "yellow")
-                        inboxes_recorded += 1
-                    else:
-                        db_service.set_submission_inbox(submission.id, derived_inbox)
-                        _report(f"  {submission.id}: recorded inbox '{derived_inbox}'.", "green")
-                        inboxes_recorded += 1
+            # Check the archived copy for an expired consent, not the stored one.
+            # The stored one is missing before the first backfill, and a dry run does not store it.
+            if (
+                actual_archive == "consented"
+                and outcome.metadata is not None
+                and not outcome.metadata.consents_to_research(date=date.today())
+            ):
+                expired_consents += 1
+                _report(
+                    f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
+                    f"but research consent has expired as of today ({date.today()}).",
+                    "yellow",
+                )
+
+            # A missing inbox is always filled.
+            # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
+            # inboxes can still name the one the submission came from.
+            # A scan that finds no inbox, or more than one, is ambiguous.
+            # It is left for --inbox on other commands.
+            if submission.inbox is None:
+                submitter_id = submission.id.split("_", maxsplit=1)[0]
+                derived_inbox = scan_inbox(configuration, submitter_id, submission.id)
+                if derived_inbox is None:
+                    _report(f"  {submission.id}: no unambiguous inbox found to record.", "dim")
+                elif dry_run:
+                    _report(f"  [dry-run] {submission.id}: would record inbox '{derived_inbox}'.", "yellow")
+                    inboxes_recorded += 1
+                else:
+                    db_service.set_submission_inbox(submission.id, derived_inbox)
+                    _report(f"  {submission.id}: recorded inbox '{derived_inbox}'.", "green")
+                    inboxes_recorded += 1
 
     # ── Summary ─────────────────────────────────────────────────────────────
     verb = "Would update" if dry_run else "Updated"
