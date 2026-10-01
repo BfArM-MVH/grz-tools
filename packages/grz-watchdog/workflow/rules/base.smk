@@ -593,14 +593,8 @@ rule finalize_fail:
     priority: 1
     resources:
         db_handles=1,
-    shell:
-        """
-        (
-            echo "Submission {wildcards.submission_id} failed validation."
-            grzctl --config {input.grzctl_config_path} db submission update --ignore-error-state {wildcards.submission_id} error --data '{{"reason": "validation failed"}}'
-            echo "Submission {wildcards.submission_id} processing finished due to validation failure." >{output.target}
-        ) >{log.stdout} 2>{log.stderr}
-        """
+    script:
+        "../scripts/finalize_fail.sh"
 
 
 rule finalize_success:
