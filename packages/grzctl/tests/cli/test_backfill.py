@@ -24,7 +24,7 @@ import grzctl.cli
 import pytest
 import sqlalchemy
 from grz_db.models.submission import DONORS_KEY, Submission, SubmissionDb
-from grz_pydantic_models.submission.metadata import Donor, GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.db.cli import (
     _backfill_submission,
@@ -32,7 +32,6 @@ from grzctl.commands.db.cli import (
     _BackfillResult,
     _fetch_metadata_json_from_archives,
     _logs_about,
-    _missing_research_consent,
     _report,
 )
 from moto import mock_aws
@@ -857,7 +856,7 @@ def test_backfill_dry_run_counts_what_it_would_do(
     assert result.exit_code == 0, result.output
     assert f"[dry-run] {submission_id}: would record inbox 'inbox'." in result.stdout
     assert "Would record inbox: 1" in result.stdout
-    assert "donors[1] (father): no scope, noScopeJustification" in result.stdout
+    assert "donors[1] (father): researchConsents[0] has no scope, noScopeJustification" in result.stdout
     assert "No research consent at submission date in consented archive: 1" in result.stdout
     assert "Expired consents in consented archive: 0" in result.stdout
     persisted = db.get_submission(submission_id)
@@ -897,46 +896,6 @@ def test_backfill_reports_a_consent_that_ended_after_the_submission_date_as_expi
 
     assert result.exit_code == 0, result.output
     assert f"CONSENT EXPIRED: {submission_id}" in result.stdout
-    assert "donors[0] (index): research not permitted" in result.stdout
+    assert "donors[0] (index): researchConsents[0] is outside the root provision period" in result.stdout
     assert "No research consent at submission date in consented archive: 0" in result.stdout
     assert "Expired consents in consented archive: 1" in result.stdout
-
-
-@pytest.mark.parametrize(
-    ("change", "on", "reason"),
-    [
-        (lambda donor: None, datetime.date(2030, 1, 1), None),
-        (lambda donor: donor.update(researchConsents=[]), datetime.date(2030, 1, 1), "no researchConsents"),
-        (
-            lambda donor: donor["researchConsents"][0].update(scope={"resourceType": "Consent"}),
-            datetime.date(2030, 1, 1),
-            "scope is not a valid FHIR Consent",
-        ),
-        (lambda donor: None, datetime.date(2019, 1, 1), "research not permitted"),
-        (
-            lambda donor: donor["researchConsents"].append(
-                {**donor["researchConsents"][0], "scope": {"resourceType": "Consent"}}
-            ),
-            datetime.date(2019, 1, 1),
-            "research not permitted",
-        ),
-    ],
-    ids=["consented", "no consents", "unreadable scope", "before the consent", "unreadable scope next to a valid one"],
-)
-def test_missing_research_consent_names_the_reason(
-    metadata: GrzSubmissionMetadata, change: Any, on: datetime.date, reason: str | None
-) -> None:
-    donor_raw = metadata.get_raw_dict()["donors"][0]
-    change(donor_raw)
-
-    assert _missing_research_consent(Donor.model_validate(donor_raw), on) == reason
-
-
-def test_missing_research_consent_quotes_each_no_scope_justification(metadata: GrzSubmissionMetadata) -> None:
-    father_raw = next(donor for donor in metadata.get_raw_dict()["donors"] if donor["relation"] == "father")
-    consents = father_raw["researchConsents"]
-    consents.append({**consents[0], "noScopeJustification": "patient refuses to sign consent"})
-
-    assert _missing_research_consent(Donor.model_validate(father_raw), datetime.date(2030, 1, 1)) == (
-        "no scope, noScopeJustification 'other patient-related reason', 'patient refuses to sign consent'"
-    )

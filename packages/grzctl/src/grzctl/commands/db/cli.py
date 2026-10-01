@@ -61,7 +61,6 @@ from grz_db.models.submission import (
 )
 from grz_pydantic_models.common import StrictBaseModel
 from grz_pydantic_models.dates import quarter_date_bounds
-from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import (
     Donor,
     GenomicStudySubtype,
@@ -1995,50 +1994,6 @@ def _logs_about(submission_id: str) -> Iterator[None]:
         logging.setLogRecordFactory(factory)
 
 
-def _missing_research_consent(donor: Donor, on: date) -> str | None:
-    """Say why *donor* gives no research consent on *on*.
-
-    A scope that is not a valid FHIR Consent grants nothing.
-    So it is the reason only if no other scope of the donor is a valid FHIR Consent.
-    The reason leaves out the date, because the report line already states it.
-
-    :param donor: The donor to check.
-    :param on: The date to evaluate the research consent at.
-    :returns: The reason, or ``None`` if the donor gives research consent on that date.
-    """
-    if donor.consents_to_research(on):
-        return None
-    consents = donor.research_consents
-    if not consents:
-        return "no researchConsents"
-    if any(isinstance(consent.scope, Consent) for consent in consents):
-        # a consent that is not in force, is outside its period, denies research or states no research code
-        return "research not permitted"
-    if any(consent.scope is not None for consent in consents):
-        return "scope is not a valid FHIR Consent"
-    # a consent without a scope always states a noScopeJustification
-    justifications = sorted({str(consent.no_scope_justification) for consent in consents})
-    return "no scope, noScopeJustification " + ", ".join(f"'{justification}'" for justification in justifications)
-
-
-def _donors_without_research_consent(metadata: GrzSubmissionMetadata, on: date) -> str | None:
-    """List every donor of *metadata* that gives no research consent on *on*, with the reason.
-
-    The submission consents to research only if every donor does.
-    So each donor without research consent decides the result on its own, and the report names all of them.
-
-    :param metadata: The submission metadata to check.
-    :param on: The date to evaluate the research consent at.
-    :returns: The donors and reasons as one line, or ``None`` if every donor gives research consent.
-    """
-    reasons = [
-        f"donors[{index}] ({donor.relation}): {reason}"
-        for index, donor in enumerate(metadata.donors)
-        if (reason := _missing_research_consent(donor, on)) is not None
-    ]
-    return "; ".join(reasons) or None
-
-
 def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str | None:
     """Return the raw metadata.json content for *submission_id*, or None when not found.
 
@@ -2369,14 +2324,14 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             # Under the current rules, the submission was never consented.
             if actual_archive == "consented" and outcome.metadata is not None:
                 submission_date = outcome.metadata.submission.submission_date
-                if missing := _donors_without_research_consent(outcome.metadata, submission_date):
+                if missing := outcome.metadata.explain_no_research_consent(submission_date):
                     without_consent_at_submission += 1
                     _report(
                         f"  NO RESEARCH CONSENT: {submission.id} is in 'consented' archive, "
                         f"but has no research consent on its submission date ({submission_date}): {missing}",
                         "bold red",
                     )
-                elif missing := _donors_without_research_consent(outcome.metadata, date.today()):
+                elif missing := outcome.metadata.explain_no_research_consent(date.today()):
                     expired_consents += 1
                     _report(
                         f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
