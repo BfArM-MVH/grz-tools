@@ -897,7 +897,7 @@ def test_backfill_reports_a_consent_that_ended_after_the_submission_date_as_expi
 
     assert result.exit_code == 0, result.output
     assert f"CONSENT EXPIRED: {submission_id}" in result.stdout
-    assert "donor 'index': no research consent in force on" in result.stdout
+    assert "donor 'index': research not permitted" in result.stdout
     assert "No research consent at submission date in consented archive: 0" in result.stdout
     assert "Expired consents in consented archive: 1" in result.stdout
 
@@ -912,9 +912,16 @@ def test_backfill_reports_a_consent_that_ended_after_the_submission_date_as_expi
             datetime.date(2030, 1, 1),
             "scope is not a valid FHIR Consent",
         ),
-        (lambda donor: None, datetime.date(2019, 1, 1), "no research consent in force on 2019-01-01"),
+        (lambda donor: None, datetime.date(2019, 1, 1), "research not permitted"),
+        (
+            lambda donor: donor["researchConsents"].append(
+                {**donor["researchConsents"][0], "scope": {"resourceType": "Consent"}}
+            ),
+            datetime.date(2019, 1, 1),
+            "research not permitted",
+        ),
     ],
-    ids=["consented", "no consents", "unreadable scope", "before the consent"],
+    ids=["consented", "no consents", "unreadable scope", "before the consent", "unreadable scope next to a valid one"],
 )
 def test_missing_research_consent_names_the_reason(
     metadata: GrzSubmissionMetadata, change: Any, on: datetime.date, reason: str | None
@@ -925,10 +932,11 @@ def test_missing_research_consent_names_the_reason(
     assert _missing_research_consent(Donor.model_validate(donor_raw), on) == reason
 
 
-def test_missing_research_consent_quotes_the_no_scope_justification(metadata: GrzSubmissionMetadata) -> None:
-    father = next(donor for donor in metadata.donors if donor.relation == "father")
-    justification = father.research_consents[0].no_scope_justification
+def test_missing_research_consent_quotes_each_no_scope_justification(metadata: GrzSubmissionMetadata) -> None:
+    father_raw = next(donor for donor in metadata.get_raw_dict()["donors"] if donor["relation"] == "father")
+    consents = father_raw["researchConsents"]
+    consents.append({**consents[0], "noScopeJustification": "patient refuses to sign consent"})
 
-    assert _missing_research_consent(father, datetime.date(2030, 1, 1)) == (
-        f"no scope, noScopeJustification '{justification}'"
+    assert _missing_research_consent(Donor.model_validate(father_raw), datetime.date(2030, 1, 1)) == (
+        "no scope, noScopeJustification 'other patient-related reason', 'patient refuses to sign consent'"
     )
