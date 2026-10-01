@@ -30,12 +30,12 @@ def get_inbox_s3_details(submitter_id, inbox):
 
 def cleanup_stale_temp_outputs():
     """
-    For use with the `onerror` hook: Make sure to remove relevant temp files (scan_inbox and sync_database outputs),
-    so subsequent runs are forced to re-run scan_inbox and sync_database (if they need their outputs).
+    For use with the `onerror` hook: Make sure to remove relevant temp files (scan_inbox and sync_db_from_inbox outputs),
+    so subsequent runs are forced to re-run scan_inbox and sync_db_from_inbox (if they need their outputs).
 
     For example, this covers the following case where:
      - invalid submission A is processed, the workflow fails, is terminated (but the temp files aren't removed automatically)
-     - a subsequent valid submission B is processed, which needs to re-run scan_inbox and sync_database, otherwise submission B can't be found because the old scan_inbox / sync_database outputs may only include submission A.
+     - a subsequent valid submission B is processed, which needs to re-run scan_inbox and sync_db_from_inbox, otherwise submission B can't be found because the old scan_inbox / sync_db_from_inbox outputs may only include submission A.
     """
     from snakemake.logging import logger
 
@@ -127,18 +127,6 @@ def should_run_qc(
 
     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
     return result.stdout.strip() == "true"
-
-
-def get_validation_state(wildcards):
-    """
-    If validation is complete (i.e., flag exists), prevent Snakemake from looking for missing upstream (temp) files.
-    """
-    flag = rules.validate.output.validation_flag.format(**wildcards)
-
-    if os.path.exists(flag):
-        return ancient(flag)
-
-    return flag
 
 
 def anchor(target_pattern, source):
@@ -420,18 +408,6 @@ def get_run_qc_nextflow_profiles(wildcards: Wildcards):
 
 def get_nextflow_tmpdir(wildcards: Wildcards) -> str:
     return config.get("qc", {}).get("tmpdir", tempfile.gettempdir())
-
-
-def get_target_qc_percentage(wildcards: Wildcards) -> float | None:
-    """
-    If automatic qc selection strategy is enabled, returns the target qc percentage.
-    Otherwise, returns None.
-    """
-    selection_strategy = config["qc"].get("selection_strategy", {})
-    if bool(selection_strategy.get("enabled", False)):
-        return selection_strategy.get("target_qc_percentage", 2.0)
-    else:
-        return None
 
 
 ## RESOURCE ESTIMATION FUNCTIONS

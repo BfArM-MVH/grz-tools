@@ -15,14 +15,6 @@ _error_handler() {
 
 trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
 
-if [ -n "${snakemake_params[db_author_key_passphrase]:-}" ]; then
-	export GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE="${snakemake_params[db_author_key_passphrase]}"
-fi
-
-if [ -n "${snakemake_params[grz_private_key_passphrase]:-}" ]; then
-	export C4GH_PASSPHRASE="${snakemake_params[grz_private_key_passphrase]}"
-fi
-
 submission_id="${snakemake_wildcards[submission_id]}"
 grzctl_config="${snakemake_input[grzctl_config_path]}"
 report_csv="${snakemake_params[report_csv]}"

@@ -19,16 +19,6 @@ CONTINUABLE_STATES = {
 }
 
 
-def log_print(*args, **kwargs):
-    print(*args, **kwargs, file=sys.stdout)
-    sys.stdout.flush()
-
-
-def error_print(*args, **kwargs):
-    print(*args, **kwargs, file=sys.stderr)
-    sys.stderr.flush()
-
-
 def run_grzctl_command(cmd, check=True):
     """Helper to run a grzctl command."""
     try:
@@ -85,36 +75,3 @@ def get_db_states(grzctl_config):
                 "timestamp": latest_state.get("timestamp"),
             }
     return db_states
-
-
-def add_submission_to_db(grzctl_config, submission_id):
-    """Runs 'grzctl db submission add {submission_id}'."""
-    try:
-        run_grzctl_command(["--config", grzctl_config, "db", "submission", "add", submission_id])
-    except subprocess.CalledProcessError as e:
-        error_print(f"An unexpected error occurred for {submission_id}:")
-        error_print(e.stderr)
-        raise e
-    except subprocess.TimeoutExpired as e:
-        error_print(f"Timeout occurred while processing {submission_id}.")
-        if e.stderr:
-            error_print(e.stderr)
-
-
-def update_submission_state_in_db(grzctl_config, submission_id, state):
-    """Runs 'grzctl db submission update {submission_id} {state}'."""
-    try:
-        run_grzctl_command(["--config", grzctl_config, "db", "submission", "update", submission_id, state])
-    except subprocess.CalledProcessError as e:
-        if "Submission is currently in an 'Error' state" in e.stderr:
-            error_print(f"The state for {submission_id} cannot be updated from 'Error' in non-interactive mode.")
-            error_print(f"Captured error:\n{e.stderr}")
-        else:
-            error_print(f"An unexpected error occurred for {submission_id}:")
-            error_print(e.stderr)
-        raise e
-    except subprocess.TimeoutExpired as e:
-        error_print(f"Timeout occurred while updating {submission_id}.")
-        if e.stderr:
-            error_print(e.stderr)
-        raise e

@@ -41,30 +41,6 @@ rule scan_inbox:
         "../scripts/scan_inbox.py"
 
 
-rule filter_single_submission:
-    """
-    Takes a JSON file from scan_inbox and filters it to contain only the single submission specified by the wildcards.
-
-    """
-    input:
-        submissions=rules.scan_inbox.output.submissions,
-    output:
-        filtered_submission=temp(
-            "<results>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.json"
-        ),
-    log:
-        stderr="<logs>/scan_inbox/filtered/{submitter_id}/{inbox}/{submission_id}.stderr.log",
-    priority: 1
-    params:
-        submission_id=lambda wildcards: wildcards.submission_id,
-    shell:
-        """
-        (
-            jq --arg sid "{params.submission_id}" '[.[] | select(.submission_id == $sid)]' {input.submissions} >{output.filtered_submission}
-        ) >{log.stderr} 2>&1
-        """
-
-
 rule sync_db_from_inbox:
     """
     Scan an inbox and register all new/updated submissions in the database.
@@ -131,7 +107,6 @@ rule metadata:
         metadata=temp(
             "<results>/{submitter_id}/{inbox}/{submission_id}/metadata/metadata.json"
         ),
-        timestamp=temp("<results>/{submitter_id}/{inbox}/{submission_id}/timestamp.txt"),
     log:
         stdout="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stdout.log",
         stderr="<logs>/{submitter_id}/{inbox}/{submission_id}/download.metadata.stderr.log",
@@ -146,7 +121,6 @@ rule metadata:
         """
         (
             s5cmd --endpoint-url {params.s3_endpoint_url} cp s3://{params.s3_bucket}/{params.s3_metadata_key} {output.metadata}
-            s5cmd --endpoint-url {params.s3_endpoint_url} head s3://{params.s3_bucket}/{params.s3_metadata_key} | jq -r '.last_modified | fromdate | strftime("%Y-%m-%d")' >{output.timestamp}
         ) >{log.stdout} 2>{log.stderr}
         """
 
@@ -368,7 +342,6 @@ rule generate_pruefbericht:
     """
     input:
         metadata=rules.metadata.output.metadata,
-        timestamp=rules.metadata.output.timestamp,
         validation_flag=rules.validate.output.validation_flag,
         archived_marker=rules.archive.output.marker,
         grzctl_config_path=GRZCTL_CONFIG_PATH,
