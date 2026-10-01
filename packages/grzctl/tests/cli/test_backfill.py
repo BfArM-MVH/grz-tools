@@ -857,7 +857,7 @@ def test_backfill_dry_run_counts_what_it_would_do(
     assert result.exit_code == 0, result.output
     assert f"[dry-run] {submission_id}: would record inbox 'inbox'." in result.stdout
     assert "Would record inbox: 1" in result.stdout
-    assert "donor 'father': no scope, noScopeJustification" in result.stdout
+    assert "donors[1] (father): no scope, noScopeJustification" in result.stdout
     assert "No research consent at submission date in consented archive: 1" in result.stdout
     assert "Expired consents in consented archive: 0" in result.stdout
     persisted = db.get_submission(submission_id)
@@ -897,7 +897,7 @@ def test_backfill_reports_a_consent_that_ended_after_the_submission_date_as_expi
 
     assert result.exit_code == 0, result.output
     assert f"CONSENT EXPIRED: {submission_id}" in result.stdout
-    assert "donor 'index': research not permitted" in result.stdout
+    assert "donors[0] (index): research not permitted" in result.stdout
     assert "No research consent at submission date in consented archive: 0" in result.stdout
     assert "Expired consents in consented archive: 1" in result.stdout
 

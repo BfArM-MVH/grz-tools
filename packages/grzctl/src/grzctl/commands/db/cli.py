@@ -2032,8 +2032,8 @@ def _donors_without_research_consent(metadata: GrzSubmissionMetadata, on: date) 
     :returns: The donors and reasons as one line, or ``None`` if every donor gives research consent.
     """
     reasons = [
-        f"donor '{donor.relation}': {reason}"
-        for donor in metadata.donors
+        f"donors[{index}] ({donor.relation}): {reason}"
+        for index, donor in enumerate(metadata.donors)
         if (reason := _missing_research_consent(donor, on)) is not None
     ]
     return "; ".join(reasons) or None
@@ -2362,10 +2362,11 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                         "bold red",
                     )
 
-            # Check the consent of the archived copy, not the stored one.
-            # The stored one is missing before the first backfill, and a dry run does not store it.
+            # Check the consent of the archived metadata.json, not of the stored metadata.
+            # The stored metadata is missing before the first backfill, and a dry run does not store it.
             # Archive placement and the stored `consented` evaluate the consent at the submission date.
-            # So a consent missing on that date is no expiry: the submission was never consented.
+            # So a consent missing on that date is no expiry.
+            # Under the current rules, the submission was never consented.
             if actual_archive == "consented" and outcome.metadata is not None:
                 submission_date = outcome.metadata.submission.submission_date
                 if missing := _donors_without_research_consent(outcome.metadata, submission_date):
@@ -2373,7 +2374,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                     _report(
                         f"  NO RESEARCH CONSENT: {submission.id} is in 'consented' archive, "
                         f"but has no research consent on its submission date ({submission_date}): {missing}",
-                        "yellow",
+                        "bold red",
                     )
                 elif missing := _donors_without_research_consent(outcome.metadata, date.today()):
                     expired_consents += 1
