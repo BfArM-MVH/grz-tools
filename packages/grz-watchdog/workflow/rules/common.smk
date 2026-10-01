@@ -202,7 +202,7 @@ def get_final_submission_target(wildcards: Wildcards):
         )
 
     strategy = config["qc"]["selection_strategy"]
-    run_qc = should_run_qc(
+    run_qc = strategy["enabled"] and should_run_qc(
         grzctl_config_path=GRZCTL_CONFIG_PATH,
         submission_id=wildcards.submission_id,
         target_percentage=strategy["target_percentage"],
