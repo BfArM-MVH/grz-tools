@@ -5,11 +5,12 @@ import json
 import logging
 import sys
 import traceback
-from collections import Counter, namedtuple
+from collections import Counter
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple, NoReturn
 
 import botocore.exceptions
 import click
@@ -20,18 +21,29 @@ import rich.panel
 import rich.table
 import rich.text
 import textual.logging
-from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from grz_common.cli import output_json
+from grz_common.exceptions import MissingSubmissionFileError, SubmissionCleanedError
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
-from grz_common.transfer import init_s3_client
+from grz_common.models.base import get_secret_value
+from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
+    CaseHasLinkedSubmissionsError,
+    CaseNotFoundError,
     DatabaseConfigurationError,
+    DuplicateCaseError,
+    DuplicatePsnError,
     SubmissionError,
     SubmissionNotFoundError,
+    SubmissionTypeAlreadySetError,
+    SubmissionTypeInvalidForCaseError,
 )
 from grz_db.models.author import Author
 from grz_db.models.submission import (
+    CASE_LINK_KEY,
+    DONORS_KEY,
+    RETIRED_FAILURE_REASONS,
+    Case,
     ChangeRequestEnum,
     ChangeRequestLog,
     DetailedQCResult,
@@ -39,21 +51,29 @@ from grz_db.models.submission import (
     FieldDiff,
     Submission,
     SubmissionBase,
+    SubmissionChangeSet,
     SubmissionDb,
-    SubmissionDiffCollection,
     SubmissionStateEnum,
     SubmissionStateFilterModeEnum,
     SubmissionStateLog,
 )
 from grz_pydantic_models.common import StrictBaseModel
+from grz_pydantic_models.dates import quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
+    Donor,
     GenomicStudySubtype,
     GrzSubmissionMetadata,
+    LabDatum,
     LibraryType,
+    MissingThresholdsException,
+    Relation,
+    SequenceData,
     SequenceSubtype,
     SequenceType,
 )
+from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
+from sqlmodel import Session, select
 from tqdm.auto import tqdm
 
 from ... import get_versions
@@ -61,6 +81,7 @@ from ...commands import grzctl_configuration, inbox_options
 from ...models.config import GrzctlConfig
 from .. import limit
 from ..change_request import resolve_and_validate_change_request
+from ..inbox_resolution import require_inbox, scan_inbox
 from . import SignatureStatus, _verify_signature
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
@@ -69,6 +90,53 @@ console = rich.console.Console()
 console_err = rich.console.Console(stderr=True)
 log = logging.getLogger(__name__)
 _TEXT_MISSING = rich.text.Text("missing", style="italic yellow")
+
+
+def _attribute_table(rows: Iterable[tuple[str, Any]]) -> rich.table.Table:
+    """Build the two-column Attribute/Value table the ``show`` commands render.
+
+    A ``None`` renders as *missing* rather than as the string "None", so a column that was
+    never populated cannot be mistaken for one holding that text.
+
+    :param rows: ``(label, value)`` pairs, in display order.
+    """
+    table = rich.table.Table(box=None)
+    table.add_column("Attribute", justify="right")
+    table.add_column("Value")
+    for label, value in rows:
+        table.add_row(
+            rich.text.Text(label, style="cyan"),
+            rich.text.Text(str(value)) if value is not None else _TEXT_MISSING,
+        )
+    return table
+
+
+def _dump_json(payload: Any) -> None:
+    """Write *payload* to stdout as JSON, indented, and nothing else.
+
+    Not through the rich console: it decides on ANSI colour when it is constructed, which for
+    this module happens at import, and it honours ``FORCE_COLOR`` even when stdout is a pipe.
+    A consumer then parses escape codes. ``TTY_COMPATIBLE=0`` suppresses that, but only the
+    test suite sets it. Indented because a case is read by eye as often as by a program.
+    """
+    json.dump(payload, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+
+
+def _abort(e: Exception) -> NoReturn:
+    """Print *e* as a red error on stderr and abort the command."""
+    console_err.print(f"[red]Error: {e}[/red]")
+    raise click.Abort() from e
+
+
+def _abort_missing_submission(e: SubmissionNotFoundError, submission_id: str) -> NoReturn:
+    """Like :func:`_abort`, plus a hint on how to add the missing submission."""
+    console_err.print(f"[red]Error: {e}[/red]")
+    console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
+    raise click.Abort() from e
+
+
+_submission_id_argument = click.argument("submission_id", type=str)
 
 
 def get_submission_db_instance(db_url: str, author: Author | None = None) -> SubmissionDb:
@@ -94,25 +162,20 @@ def db(
     if path := db_config.author.private_key_path:
         with open(path, "rb") as f:
             private_key_bytes = f.read()
-    elif key := db_config.author.private_key:
+    elif key := get_secret_value(db_config.author.private_key):
         private_key_bytes = key.encode("utf-8")
     else:
         raise DatabaseConfigurationError("Either private_key or private_key_path must be provided.")
 
     log.debug("Reading known public keys...")
-    KnownKeyEntry = namedtuple("KnownKeyEntry", ["key_format", "public_key_base64", "comment"])
-    with open(db_config.known_public_keys) as f:
-        public_key_list = list(map(lambda v: KnownKeyEntry(*v), map(lambda s: s.strip().split(), f.readlines())))
-        public_keys = {
-            comment: load_ssh_public_key(f"{fmt}\t{key}\t{comment}".encode()) for fmt, key, comment in public_key_list
-        }
-        for comment in public_keys:
-            log.debug(f"Found public key labeled '{comment}'")
+    public_keys = db_config.public_keys_by_owner
+    for comment, keys in public_keys.items():
+        log.debug(f"Found {len(keys)} public key(s) labeled '{comment}'")
 
     author = Author(
         name=author_name,
         private_key_bytes=private_key_bytes,
-        private_key_passphrase=db_config.author.private_key_passphrase,
+        private_key_passphrase=get_secret_value(db_config.author.private_key_passphrase),
     )
     ctx.obj.update(
         {
@@ -130,14 +193,315 @@ def submission(ctx: click.Context):
     pass
 
 
+@db.group()
+@click.pass_context
+def case(ctx: click.Context):
+    """Case operations"""
+    pass
+
+
+_CASE_MUTABLE_KEYS = sorted(Case.mutable_fields())
+
+_case_id_argument = click.argument("case_id", type=int)
+
+
+@case.command("list")
+@output_json
+@click.pass_context
+def case_list(ctx: click.Context, output_json: bool):
+    """List all cases with their linked-submission counts."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    cases = db_service.list_cases()
+
+    if output_json:
+        payload = [{**case_obj.model_dump(mode="json"), "submission_count": count} for case_obj, count in cases]
+        _dump_json(payload)
+        return
+
+    table = rich.table.Table(title="Cases")
+    table.add_column("ID", justify="right")
+    table.add_column("PSN")
+    table.add_column("Submitter ID")
+    table.add_column("Local Case ID")
+    table.add_column("Submissions", justify="right")
+    for case_obj, count in cases:
+        table.add_row(
+            str(case_obj.id),
+            case_obj.psn if case_obj.psn is not None else "-",
+            case_obj.submitter_id if case_obj.submitter_id is not None else "-",
+            case_obj.local_case_id if case_obj.local_case_id is not None else "-",
+            str(count),
+        )
+    console.print(table)
+
+
+@case.command("list-unlinked")
+@output_json
+@click.pass_context
+def case_list_unlinked(ctx: click.Context, output_json: bool):
+    """List submissions that carry no case, and why each carries none.
+
+    Test submissions are excluded, since they are never case-tracked. A submission whose type
+    is not known yet, or that is simply not linked yet, resolves itself on the next populate or
+    backfill. The other two reasons need an operator: see 'db case list-ambiguous-keys'.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    unlinked = db_service.list_unlinked_submissions()
+
+    if output_json:
+        _dump_json(
+            [
+                {
+                    "submission_id": row.submission_id,
+                    "submitter_id": row.submitter_id,
+                    "local_case_id": row.local_case_id,
+                    "submission_type": row.submission_type,
+                    "reason": row.reason,
+                }
+                for row in unlinked
+            ]
+        )
+        return
+
+    if not unlinked:
+        console_err.print("[green]Every case-trackable submission is linked to a case.[/green]")
+        return
+
+    table = rich.table.Table(title="Unlinked submissions")
+    table.add_column("Submission ID")
+    table.add_column("Type")
+    table.add_column("Submitter ID")
+    table.add_column("Local Case ID")
+    table.add_column("Reason")
+    for row in unlinked:
+        table.add_row(
+            row.submission_id,
+            str(row.submission_type) if row.submission_type is not None else _TEXT_MISSING,
+            row.submitter_id if row.submitter_id is not None else _TEXT_MISSING,
+            row.local_case_id if row.local_case_id is not None else _TEXT_MISSING,
+            str(row.reason).replace("_", " "),
+        )
+    console.print(table)
+
+    needs_operator = sum(1 for row in unlinked if row.reason.needs_operator)
+    console_err.print(f"[cyan]{len(unlinked)} unlinked, {needs_operator} of which will not resolve on a re-run.[/cyan]")
+
+
+@case.command("list-ambiguous-keys")
+@output_json
+@click.pass_context
+def case_list_ambiguous_keys(ctx: click.Context, output_json: bool):
+    """List submitter-local case keys that name more than one patient.
+
+    A patient has one initial submission that passes basic QC, so a key carrying several was
+    reused across patients. Such a key opens no case and its submissions keep case_id NULL.
+    This is the list the cases migration logs once during 'db upgrade'.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    keys = db_service.list_ambiguous_case_keys()
+
+    if output_json:
+        _dump_json(
+            [
+                {
+                    "submitter_id": key.submitter_id,
+                    "local_case_id": key.local_case_id,
+                    "qc_passed_initials": key.qc_passed_initials,
+                    "submissions": key.submissions,
+                }
+                for key in keys
+            ]
+        )
+        return
+
+    if not keys:
+        console_err.print("[green]Every submitter-local case key names a single patient.[/green]")
+        return
+
+    table = rich.table.Table(title="Keys naming more than one patient")
+    table.add_column("Submitter ID")
+    table.add_column("Local Case ID")
+    table.add_column("QC-passed initials", justify="right")
+    table.add_column("Submissions", justify="right")
+    for key in keys:
+        table.add_row(
+            key.submitter_id,
+            key.local_case_id,
+            str(key.qc_passed_initials),
+            str(key.submissions),
+        )
+    console.print(table)
+    console_err.print(
+        "[cyan]Each key stands for as many patients as it has QC-passed initial submissions. "
+        "Create a case per patient with 'db case create', then link with 'db case relink'.[/cyan]"
+    )
+
+
+@case.command("show")
+@_case_id_argument
+@output_json
+@click.pass_context
+def case_show(ctx: click.Context, case_id: int, output_json: bool):
+    """Show a case and its linked submissions."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    case_obj = db_service.get_case(case_id)
+    if case_obj is None:
+        _abort(CaseNotFoundError(case_id))
+    submissions = db_service.list_submissions_for_case(case_id)
+
+    if output_json:
+        payload = {
+            **case_obj.model_dump(mode="json"),
+            "submissions": [
+                {
+                    "id": s.id,
+                    "submission_type": s.submission_type,
+                    "basic_qc_passed": s.basic_qc_passed,
+                    "latest_state": (latest.state if (latest := s.get_latest_state()) else None),
+                }
+                for s in submissions
+            ],
+        }
+        _dump_json(payload)
+        return
+
+    attribute_table = _attribute_table(
+        (
+            ("ID", case_obj.id),
+            ("PSN", case_obj.psn),
+            ("Submitter ID", case_obj.submitter_id),
+            ("Local Case ID", case_obj.local_case_id),
+        )
+    )
+
+    submissions_table = rich.table.Table(title="Submissions")
+    submissions_table.add_column("Submission ID")
+    submissions_table.add_column("Type")
+    # Shows which initial submission holds the case's QC-passed slot.
+    submissions_table.add_column("Basic QC")
+    submissions_table.add_column("Latest State")
+    for s in submissions:
+        latest = s.get_latest_state()
+        submissions_table.add_row(
+            s.id,
+            str(s.submission_type) if s.submission_type is not None else "-",
+            "pending" if s.basic_qc_passed is None else ("passed" if s.basic_qc_passed else "failed"),
+            str(latest.state) if latest is not None else "-",
+        )
+    console.print(rich.panel.Panel.fit(rich.console.Group(attribute_table, submissions_table), title=f"Case {case_id}"))
+
+
+@case.command("modify", epilog="Currently available KEYs are: " + ", ".join(_CASE_MUTABLE_KEYS))
+@_case_id_argument
+@click.argument("key", metavar="KEY", type=click.Choice(_CASE_MUTABLE_KEYS))
+@click.argument("value", metavar="VALUE", type=str)
+@click.pass_context
+def case_modify(ctx: click.Context, case_id: int, key: str, value: str):
+    """Modify a mutable field of a case."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.modify_case(case_id, key, value)
+        console_err.print(f"[green]Updated {key} of case {case_id}[/green]")
+    except (CaseNotFoundError, DuplicateCaseError, DuplicatePsnError, ValueError) as e:
+        _abort(e)
+
+
+@case.command("create")
+@click.argument("submitter_id", type=str)
+@click.argument("local_case_id", type=str)
+@click.option("--psn", default=None, help="RKI pseudonym (must be unique).")
+@click.pass_context
+def case_create(ctx: click.Context, submitter_id: str, local_case_id: str, psn: str | None):
+    """Manually create a case (cases are normally created during populate)."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        case_obj = db_service.create_case(submitter_id=submitter_id, local_case_id=local_case_id, psn=psn)
+        console_err.print(
+            f"[green]Created case {case_obj.id} for submitter '{submitter_id}', local case '{local_case_id}'[/green]"
+        )
+    except (DuplicateCaseError, DuplicatePsnError, ValueError) as e:
+        _abort(e)
+
+
+@case.command("relink")
+@_submission_id_argument
+@_case_id_argument
+@click.pass_context
+def case_relink(ctx: click.Context, submission_id: str, case_id: int):
+    """Relink a submission to a different case for repair.
+
+    A case may still have at most one initial submission that passed basic QC. The case
+    being vacated is left as-is and may become empty.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.set_submission_case(submission_id, case_id)
+        console_err.print(f"[green]Linked submission '{submission_id}' to case {case_id}[/green]")
+    # DuplicateInitialSubmissionError subclasses SubmissionTypeInvalidForCaseError, so the case's
+    # one-initial rule is caught here too.
+    except (SubmissionNotFoundError, CaseNotFoundError, SubmissionTypeInvalidForCaseError) as e:
+        _abort(e)
+
+
+@case.command("unlink")
+@_submission_id_argument
+@click.pass_context
+def case_unlink(ctx: click.Context, submission_id: str):
+    """Unlink a submission from its case, leaving it linked to none.
+
+    The counterpart to `relink`, which can only move a submission between cases. The case
+    being vacated is left as-is and may become empty. Unlinking an already unlinked
+    submission changes nothing.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.clear_submission_case(submission_id)
+        console_err.print(f"[green]Unlinked submission '{submission_id}' from its case[/green]")
+    except SubmissionNotFoundError as e:
+        _abort(e)
+
+
+@case.command("delete")
+@_case_id_argument
+@click.pass_context
+def case_delete(ctx: click.Context, case_id: int):
+    """Delete an empty case (refuses when submissions are still linked)."""
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    try:
+        db_service.delete_case(case_id)
+        console_err.print(f"[green]Deleted case {case_id}[/green]")
+    except (CaseNotFoundError, CaseHasLinkedSubmissionsError) as e:
+        _abort(e)
+
+
 @db.command()
 @click.pass_context
 def init(ctx: click.Context):
     """Initializes the database schema using Alembic."""
     db = ctx.obj["db_url"]
     submission_db = get_submission_db_instance(db, author=ctx.obj["author"])
-    console_err.print(f"[cyan]Initializing database {db}[/cyan]")
-    submission_db.initialize_schema()
+    try:
+        console_err.print(f"[cyan]Initializing database {db}[/cyan]")
+        submission_db.initialize_schema()
+        console_err.print("[green]Successfully initialized database![/green]")
+
+    except (DatabaseConfigurationError, RuntimeError) as e:
+        console_err.print(f"[red]Error during schema initialization: {e}[/red]")
+        if isinstance(e, RuntimeError):
+            console_err.print("[yellow]Ensure your database is running and accessible.[/yellow]")
+        raise click.ClickException(str(e)) from e
+    except Exception as e:
+        console_err.print(f"[red]An unexpected error occurred during 'db init': {type(e).__name__} - {e}[/red]")
+        raise click.ClickException(str(e)) from e
 
 
 @db.command()
@@ -217,6 +581,7 @@ def list_submissions(
     table.add_column("ID", style="dim", min_width=29, width=29)
     table.add_column("tanG", style="cyan")
     table.add_column("Pseudonym", style="magenta")
+    table.add_column("Local Case ID", style="magenta")
     table.add_column("Latest State", style="green")
     table.add_column("Last State Timestamp (UTC)", style="yellow")
     table.add_column("Data Steward")
@@ -255,6 +620,7 @@ def list_submissions(
                 submission.id,
                 submission.tan_g[:8] + "…" if submission.tan_g is not None else _TEXT_MISSING,
                 submission.pseudonym if submission.pseudonym is not None else _TEXT_MISSING,
+                submission.local_case_id if submission.local_case_id is not None else _TEXT_MISSING,
                 latest_state_str,
                 latest_timestamp_str,
                 author_name_str,
@@ -285,6 +651,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
     table.add_column("ID", style="dim", width=12)
     table.add_column("tanG", style="cyan")
     table.add_column("Pseudonym", style="magenta")
+    table.add_column("Local Case ID", style="magenta")
     table.add_column("Change", style="green")
     table.add_column("Last State Timestamp (UTC)", style="yellow")
     table.add_column("Data Steward")
@@ -316,6 +683,7 @@ def list_change_requests(ctx: click.Context, output_json: bool = False):
                     submission.id,
                     submission.tan_g[:8] + "…" if submission.tan_g is not None else _TEXT_MISSING,
                     submission.pseudonym if submission.pseudonym is not None else _TEXT_MISSING,
+                    submission.local_case_id if submission.local_case_id is not None else _TEXT_MISSING,
                     latest_change_str,
                     latest_timestamp_str,
                     author_name_str,
@@ -366,7 +734,7 @@ def tui(ctx: click.Context, quarter: int | None, year: int | None):
 
 
 @db.command("should-qc")
-@click.argument("submission_id")
+@_submission_id_argument
 @click.option(
     "--target-percentage",
     "target_percentage",
@@ -415,6 +783,7 @@ def _build_submission_dict_from(
         "id": submission.id,
         "tan_g": submission.tan_g,
         "pseudonym": submission.pseudonym,
+        "local_case_id": submission.local_case_id,
         "latest_state": None,
     }
     if log_obj:
@@ -442,7 +811,7 @@ def _build_submission_dict_from(
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.pass_context
 def add(ctx: click.Context, submission_id: str):
     """
@@ -454,25 +823,26 @@ def add(ctx: click.Context, submission_id: str):
         db_submission = db_service.add_submission(submission_id)
         console_err.print(f"[green]Submission '{db_submission.id}' added successfully.[/green]")
     except SubmissionError as e:
-        console_err.print(f"[red]Error: {e}[/red]")
-        raise click.Abort() from e
+        _abort(e)
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         raise click.ClickException(f"Failed to add submission: {e}") from e
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("state_str", metavar="STATE", type=click.Choice(SubmissionStateEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Additional JSON data (e.g., \'{"k":"v"}\').')
 @click.option(
     "--failure-reason",
-    type=click.Choice(FailureReasonEnum.list(), case_sensitive=False),
+    type=click.Choice(
+        [reason.value for reason in FailureReasonEnum if reason not in RETIRED_FAILURE_REASONS], case_sensitive=False
+    ),
     help="Failure reason when state is ERROR.",
 )
 @click.option("--ignore-error-state/--confirm-error-state")
 @click.pass_context
-def update(  # noqa: C901, PLR0913
+def update(  # noqa: C901, PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     state_str: str,
@@ -531,9 +901,7 @@ def update(  # noqa: C901, PLR0913
         if new_state_log.data:
             console_err.print(f"  Data: {new_state_log.data}")
     except SubmissionNotFoundError as e:
-        console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
-        raise click.Abort() from e
+        _abort_missing_submission(e, submission_id)
     except click.exceptions.Exit as e:
         if e.exit_code != 0:
             raise e
@@ -543,14 +911,21 @@ def update(  # noqa: C901, PLR0913
         raise click.ClickException(f"Failed to update submission state: {e}") from e
 
 
-# Exactly what SubmissionDb.modify_submission accepts. The epilog and the KEY choices below both
-# build from this, so --help always advertises what the command accepts. Same set as the
-# --allow-overwrite choices.
+# Exactly what SubmissionDb.modify_submission accepts. The epilog and the KEY choices both build
+# from this, so --help always advertises what the command accepts. SubmissionBase, not Submission:
+# the table model adds case_id, which `db case relink` sets. --ignore-field and --allow-overwrite
+# extend it, each by the one key it takes beyond the columns. Sorted, so --help lists the choices
+# in the same order every run.
 _MODIFIABLE_SUBMISSION_KEYS = sorted(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields)
 
 
-@submission.command(epilog="Currently available KEYs are: " + ", ".join(_MODIFIABLE_SUBMISSION_KEYS))
-@click.argument("submission_id", type=str)
+@submission.command(
+    epilog="Currently available KEYs are: "
+    + ", ".join(_MODIFIABLE_SUBMISSION_KEYS)
+    + ". A submission's case cannot be changed here: use 'db case relink' to change it, "
+    + "or 'db case unlink' to remove it. A submission_type can only be set while it is empty."
+)
+@_submission_id_argument
 @click.argument("key", metavar="KEY", type=click.Choice(_MODIFIABLE_SUBMISSION_KEYS))
 @click.argument("value", metavar="VALUE", type=str)
 @click.pass_context
@@ -568,46 +943,101 @@ def modify(ctx: click.Context, submission_id: str, key: str, value: str):
         _ = db_service.modify_submission(submission_id, key, value)
         console_err.print(f"[green]Updated {key} of submission '{submission_id}'[/green]")
     except SubmissionNotFoundError as e:
-        console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
-        raise click.Abort() from e
+        _abort_missing_submission(e, submission_id)
+    except (SubmissionTypeAlreadySetError, SubmissionTypeInvalidForCaseError) as e:
+        _abort(e)
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to modify submission: {e}") from e
 
 
 _ignore_field_option = click.option(
     "--ignore-field",
     "ignore_field",
-    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
-    help="Do not populate the given field from the metadata to the database. Can be specified multiple times.",
+    type=click.Choice([*_MODIFIABLE_SUBMISSION_KEYS, DONORS_KEY, CASE_LINK_KEY], case_sensitive=False),
+    help="Do not populate the given field from the metadata to the database (may be repeated). "
+    "'case_id' skips case resolution and linking, 'donors' leaves the stored donor rows as they are.",
     multiple=True,
 )
 
+_ALLOW_OVERWRITE_CHOICES = [*_MODIFIABLE_SUBMISSION_KEYS, DONORS_KEY]
+"""What ``--allow-overwrite`` may name.
 
-def _prepare_submission_console_table(submission_diff: "SubmissionDiffCollection") -> rich.console.RenderableType:
+The case link is absent on purpose: replacing one undoes a deliberate ``db case relink``, so it
+takes ``--force``.
+"""
+
+_force_option = click.option(
+    "--force/--no-force",
+    default=False,
+    help="Overwrite or remove stored values that differ from the metadata (destructive changes): "
+    "non-NULL fields, donors, and the case link. Without this flag, a submission carrying such a "
+    "change is left untouched.",
+)
+
+_allow_overwrite_option = click.option(
+    "--allow-overwrite",
+    "allow_overwrite",
+    type=click.Choice(_ALLOW_OVERWRITE_CHOICES, case_sensitive=False),
+    multiple=True,
+    help="Permit only what these names cover: a field by its key, or every donor update and delete "
+    "as 'donors' (may be repeated). Any other destructive change leaves the submission untouched. "
+    "Mutually exclusive with --force, which permits every overwrite.",
+)
+
+
+def _overwrite_allow_list(force: bool, allow_overwrite: tuple[str, ...]) -> frozenset[str]:
+    """Read the two overwrite options into the allow-list a change set understands.
+
+    :raises click.UsageError: if both are given, since ``--force`` already permits everything.
+    """
+    if force and allow_overwrite:
+        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
+    return frozenset(allow_overwrite)
+
+
+def _prepare_submission_console_table(changes: "SubmissionChangeSet") -> rich.console.RenderableType:
     """Build a Rich renderable that shows pending submission-level metadata changes.
 
-    :param submission_diff: :class:`SubmissionDiff` instance produced by :func:`diff_metadata`.
+    :param changes: :class:`SubmissionChangeSet` instance produced by :meth:`SubmissionDb.diff`.
     :returns: A :class:`rich.table.Table` when there are pending changes, or a plain text message otherwise.
     """
-    pending = [d for d in submission_diff.pending if d.key != "submission_metadata"]
-    if pending:
+    rows = [
+        (d.key, str(d.diff.before) if d.diff.before is not None else _TEXT_MISSING, str(d.diff.after))
+        for d in changes.fields.pending
+        if d.key != "submission_metadata"
+    ]
+    if (link := changes.case_link) is not None:
+        rows.append(
+            (
+                "case_id",
+                str(link.before) if link.before is not None else _TEXT_MISSING,
+                str(link.after) if link.after is not None else "new case",
+            )
+        )
+    elif changes.case_link_error is not None:
+        # Shown rather than raised: the operator decides whether the rest is worth recording
+        # while the case itself waits on them to resolve it.
+        rows.append(("case_id", _TEXT_MISSING, f"unresolved: {changes.case_link_error}"))
+    if rows:
         diff_table_tbl = rich.table.Table(title="Submission Metadata")
         diff_table_tbl.add_column("Key")
         diff_table_tbl.add_column("Before")
         diff_table_tbl.add_column("After")
-        for field_diff in sorted(pending, key=lambda d: d.key):
-            diff_table_tbl.add_row(
-                field_diff.key,
-                str(field_diff.diff.before) if field_diff.diff.before is not None else _TEXT_MISSING,
-                str(field_diff.diff.after),
-            )
+        for key, before, after in sorted(rows, key=lambda row: row[0]):
+            diff_table_tbl.add_row(key, before, after)
         diff_table: rich.console.RenderableType = diff_table_tbl
     else:
         diff_table = rich.padding.Padding(rich.text.Text("No changes to submission-level metadata."), pad=(0, 0, 0, 0))
     return diff_table
+
+
+def _report_case_link(db_service: SubmissionDb, submission_id: str) -> None:
+    """Print which case a submission is linked to; call after committing a change set that includes a case link."""
+    linked = db_service.get_submission(submission_id)
+    if linked is not None and linked.case_id is not None:
+        console_err.print(f"[green]Submission linked to case {linked.case_id}.[/green]")
 
 
 def _prepare_donor_console_table(
@@ -635,32 +1065,149 @@ def _prepare_donor_console_table(
     return diff_table
 
 
+def _submission_upload_date(  # noqa: PLR0913, PLR0917
+    configuration: GrzctlConfig,
+    submission_id: str,
+    override: datetime | None,
+    inbox_name: str | None,
+    stored: date | None,
+    db_service: SubmissionDb | None = None,
+) -> date:
+    """Pick the upload date to store: *override*, else *stored*, else the ``LastModified`` of metadata.json in the inbox.
+
+    :param configuration: The grzctl configuration, which names the submitter's inboxes.
+    :param submission_id: The submission. Its first part is the submitter ID.
+    :param override: The date ``--submission-date`` named, if any.
+    :param inbox_name: The inbox ``--inbox`` named, if any.
+        Without it, the inbox recorded for the submission is used, else the submitter's only inbox.
+    :param stored: The upload date that the database already holds, if any.
+    :param db_service: Submission database to read the recorded inbox from, if any.
+    :returns: The date to record.
+    :raises click.ClickException: if neither *override*, *stored* nor the inbox gives a date.
+    """
+    if override is not None:
+        return override.date()
+    if stored is not None:
+        return stored
+
+    missing = f"No upload date for submission {submission_id}"
+    submitter_id = submission_id.split("_", maxsplit=1)[0]
+    try:
+        inbox_name = require_inbox(
+            configuration,
+            submitter_id=submitter_id,
+            submission_id=submission_id,
+            inbox_name=inbox_name,
+            db_service=db_service,
+            hint="Pass --inbox or --submission-date.",
+        )
+    except click.ClickException as e:
+        raise click.ClickException(f"{missing}: {e}") from e
+
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    try:
+        uploaded = get_metadata_upload_timestamp(init_s3_client(s3_options), s3_options.bucket, submission_id)
+    except SubmissionCleanedError as e:
+        raise click.ClickException(
+            f"{missing}: {e}. The inbox no longer holds the upload date. Pass it as --submission-date YYYY-MM-DD."
+        ) from e
+    except MissingSubmissionFileError as e:
+        raise click.ClickException(
+            f"{missing}: {e}. Pass --inbox if the submission is in another inbox, else --submission-date YYYY-MM-DD."
+        ) from e
+    return uploaded.date()
+
+
+def _print_pending_changes(changes: "SubmissionChangeSet") -> None:
+    """Print the change set as one panel: the submission-level diff, then a table per donor."""
+    diff_tables: list[rich.console.RenderableType] = []
+    for donor_diff in changes.donors.added + changes.donors.updated:
+        diff_tables.append(
+            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
+        )
+    for donor_diff in changes.donors.deleted:
+        diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))
+    console.print(
+        rich.panel.Panel.fit(
+            rich.console.Group(_prepare_submission_console_table(changes), *diff_tables, fit=True),
+            title="Pending Changes",
+        )
+    )
+
+
+def _refuse_destructive_changes(changes: "SubmissionChangeSet", allow_overwrite: frozenset[str]) -> None:
+    """Stop the command before anything is written when a change would replace a stored value.
+
+    :param changes: The pending change set, as :meth:`SubmissionDb.diff` computed it.
+    :param allow_overwrite: What the operator permits; see
+        :meth:`SubmissionChangeSet.undeclared_destructive_changes`.
+    :raises click.Abort: if a destructive change is not covered by *allow_overwrite*.
+    """
+    undeclared = changes.undeclared_destructive_changes(allow_overwrite)
+    if not undeclared:
+        return
+    console_err.print(f"[red]Refusing to overwrite or remove {', '.join(undeclared)}.[/red]")
+    console_err.print(
+        "Nothing was written. Re-run with --force to take every value from the metadata, "
+        "--allow-overwrite to name what may be replaced, or --ignore-field to leave it alone."
+    )
+    raise click.Abort()
+
+
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("metadata_path", metavar="path/to/metadata.json", type=str)
 @click.option(
-    "--submission_date",
+    "--submission-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
     default=None,
-    help="Submission date of the submission; overwrites submissionDate in metadata.json",
+    help="Submission upload date to store. Without it, populate keeps the stored date, or else takes the date "
+    "when metadata.json arrived in the submitter's inbox, which is gone once grzctl clean has run. "
+    "Replacing a stored date takes "
+    "--allow-overwrite submission_uploaded_date or --force.",
+)
+@click.option(
+    "-b",
+    "--inbox",
+    "inbox_name",
+    default=None,
+    help="Inbox to read the upload date from. Needed only if the submitter has several inboxes.",
 )
 @click.option(
     "--confirm/--no-confirm",
     default=True,
     help="Whether to confirm changes before committing to database. (Default: confirm)",
 )
+@_force_option
+@_allow_overwrite_option
 @_ignore_field_option
 @click.pass_context
-def populate(  # noqa: C901, PLR0913
+def populate(  # noqa: C901, PLR0912, PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     metadata_path: str,
     submission_date: datetime | None,
+    inbox_name: str | None,
     confirm: bool,
+    force: bool,
+    allow_overwrite: tuple[str, ...],
     ignore_field: tuple[str, ...],
 ):
-    """Populate a submission in the database based on the given metadata.json file."""
+    """Populate a submission in the database based on the given metadata.json file.
+
+    Also resolves and links the submission's case; an unresolved link is shown rather
+    than blocking the rest of the diff.
+
+    Writes the whole change set or none of it. Filling a value the database does not have is
+    always allowed; replacing or removing one takes --force or --allow-overwrite, and otherwise
+    stops the command before anything is written.
+
+    The upload date is --submission-date, or else when metadata.json arrived in the submitter's
+    inbox. Without either, the command stops before anything is written.
+    """
     log.debug("Ignored fields for populate: %s", ignore_field)
+
+    allow_overwrite_keys = _overwrite_allow_list(force, allow_overwrite)
 
     if submission_date is not None:
         log.info("Submission date from provided option is used")
@@ -668,8 +1215,6 @@ def populate(  # noqa: C901, PLR0913
             raise RuntimeError(
                 f"Submission date ({submission_date.date()}) is set to a future date (today: {date.today()}) which is not allowed"
             )
-    else:
-        log.warning("Submission date from metadata.json is used")
 
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
@@ -679,13 +1224,11 @@ def populate(  # noqa: C901, PLR0913
         if not submission:
             raise SubmissionNotFoundError(submission_id)
     except SubmissionNotFoundError as e:
-        console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
-        raise click.Abort() from e
+        _abort_missing_submission(e, submission_id)
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to load submission: {e}") from e
 
     with open(metadata_path) as fd:
         metadata = GrzSubmissionMetadata.model_validate_json(fd.read())
@@ -696,61 +1239,114 @@ def populate(  # noqa: C901, PLR0913
         raise ValueError(
             f"Refusing to populate a seemingly-redacted submission: {e} "
             f"(from {metadata_path}). "
-            "Add 'tan_g'/'pseudonym' to --ignore-field to bypass, "
+            "Add 'tan_g'/'local_case_id' to --ignore-field to bypass, "
             "or use 'grzctl db submission modify' directly."
         ) from e
 
-    submission_uploaded_date = (
-        submission_date.date() if submission_date is not None else submission.submission_uploaded_date
-    )
-    if submission_date is None:
-        log.warning(
-            "No submission date provided and submission date is missing in the database. "
-            "Will use submission date from metadata.json..."
-        )
-        submission_uploaded_date = metadata.submission.submission_date
-
-    submission_diff, donors_diff = db_service.diff(
-        submission_id,
-        metadata,
-        submission_uploaded_date=submission_uploaded_date,
-        ignore_fields=set(ignore_field),
+    configuration = ctx.obj["configuration"]
+    submission_uploaded_date = _submission_upload_date(
+        configuration, submission_id, submission_date, inbox_name, submission.submission_uploaded_date, db_service
     )
 
-    # build donor diff and attach Rich tables for console preview in one pass
-    diff_tables: list[rich.console.RenderableType] = []
-    for donor_diff in donors_diff.added + donors_diff.updated:
-        diff_tables.append(
-            _prepare_donor_console_table(donor_diff.changes, donor_diff.pseudonym or "", donor_diff.state)
-        )
-    for donor_diff in donors_diff.deleted:
-        diff_tables.append(rich.text.Text(f"Donor {donor_diff.pseudonym} deleted", style="red"))
+    # An explicit --inbox names where the submission came from, so record it while we know it.
+    # This happens regardless of how the populate diff resolves or whether the changes are committed.
+    if inbox_name is not None:
+        db_service.set_submission_inbox(submission_id, inbox_name)
 
-    if not submission_diff.has_pending and not donors_diff.has_pending:
-        console_err.print("[green]Database is already up to date with the provided metadata![/green]")
+    try:
+        changes = db_service.diff(
+            submission_id,
+            metadata,
+            submission_uploaded_date=submission_uploaded_date,
+            ignore_fields=set(ignore_field),
+        )
+    except SubmissionError as e:
+        _abort(e)
+
+    if not changes.has_pending:
+        console_err.print(
+            f"[yellow]Case link unresolved: {changes.case_link_error}[/yellow]"
+            if changes.case_link_error is not None
+            else "[green]Database is already up to date with the provided metadata![/green]"
+        )
         return
 
-    console.print(
-        rich.panel.Panel.fit(
-            rich.console.Group(_prepare_submission_console_table(submission_diff), *diff_tables, fit=True),
-            title="Pending Changes",
-        )
-    )
+    _print_pending_changes(changes)
+
+    if not force:
+        _refuse_destructive_changes(changes, allow_overwrite_keys)
 
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?",
         default=False,
         show_default=True,
     ):
-        db_service.commit_changes(submission_id, submission_diff, donors_diff)
+        try:
+            db_service.commit_changes(submission_id, changes)
+        except SubmissionError as e:
+            _abort(e)
+        if changes.case_link is not None:
+            _report_case_link(db_service, submission_id)
         console_err.print("[green]Database populated successfully.[/green]")
 
 
 class QCStatus(StrEnum):
     PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
+    DEVIATION = "DEVIATION"
+    # Superseded by DEVIATION in GRZ_QC_Workflow >= 4.0.0; kept to parse reports from older versions.
     TOO_LOW = "TOO LOW"
     THRESHOLD_NOT_MET = "THRESHOLD NOT MET"
+
+
+# Absolute tolerance (in percentage points) below which a stored and a recomputed percent
+# deviation are considered equal, so that float noise (e.g. from CSV round-trips) does not
+# count as a change.
+DEVIATION_TOLERANCE = 1e-6
+
+
+class MetricVerdict(NamedTuple):
+    """Verdict of one recomputed detailed QC metric."""
+
+    meets_threshold: bool
+    """Whether the computed value meets the required BfArM threshold."""
+    deviation: float | None
+    """Percent deviation of the provided value from the computed value, if computable."""
+    passed_qc: bool
+    """Per-metric passed_qc flag (meets the threshold and deviates at most PCT_DEV_CUTOFF percent)."""
+
+
+class RecomputeOutcome(NamedTuple):
+    """Outcome of recomputing the detailed QC metrics of a result row or a submission."""
+
+    meets_thresholds: bool
+    """Whether all computed values meet their required BfArM thresholds."""
+    metrics_changed: int
+    """Number of per-metric fields that would change (or have been changed, with apply_changes)."""
+
+
+def _recompute_metric(measured: float, provided: float | None, required: float) -> MetricVerdict:
+    """Re-evaluate a single detailed QC metric under the GRZ_QC_Workflow >= 4.0.0 rules.
+
+    ``measured``, ``provided``, and ``required`` must all be in the metric's native unit
+    (fold coverage, percent 0-100, or proportion 0-1); the relative deviation is then
+    unit-independent. The returned deviation is expressed in percent (e.g. ``-42.0`` for
+    -42%), matching the ``*_percent_deviation`` columns and ``PCT_DEV_CUTOFF``, signed
+    (negative when the provided value exceeds the computed one), and not bounded to [0, 100].
+
+    :param measured: value computed by the QC pipeline (stored in the database)
+    :param provided: value provided by the Leistungserbringer in the submission metadata
+    :param required: threshold required by BfArM (0 for non-index donors)
+    :return: verdict with the threshold check, the deviation, and the per-metric passed_qc flag
+    """
+    meets_threshold = measured >= required
+    # A provided value of zero is treated like a missing one, mirroring the QC workflow
+    # (whose Nextflow module omits zero-valued provided metrics entirely); a computed value
+    # of zero leaves the relative deviation undefined.
+    if provided is None or provided == 0 or measured == 0:
+        return MetricVerdict(meets_threshold, None, meets_threshold)
+    deviation = (measured - provided) / measured * 100
+    return MetricVerdict(meets_threshold, deviation, meets_threshold and abs(deviation) <= PCT_DEV_CUTOFF)
 
 
 class QCReportRow(StrictBaseModel):
@@ -787,7 +1383,7 @@ class QCReportRow(StrictBaseModel):
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("report_csv_path", metavar="path/to/report.csv", type=grzcli.FILE_R_E)
 @click.option(
     "--qc-workflow-version",
@@ -811,9 +1407,12 @@ def populate_qc(
     db = ctx.obj["db_url"]
     db_service = get_submission_db_instance(db, author=ctx.obj["author"])
 
-    with open(report_csv_path, encoding="utf-8", newline="") as report_csv_file:
+    with open(report_csv_path, encoding="utf-8-sig", newline="") as report_csv_file:
         reader = csv.reader(report_csv_file)
-        header = next(reader)
+        try:
+            header = next(reader)
+        except StopIteration:
+            raise click.ClickException(f"QC report '{report_csv_path}' is empty.") from None
         reports = []
         for row in reader:
             reports.append(QCReportRow(**dict(zip(header, row, strict=True))))
@@ -899,12 +1498,230 @@ def populate_qc(
     if not confirm or click.confirm(
         "Are you sure you want to commit these changes to the database?", default=False, show_default=True
     ):
-        for result in results:
-            db_service.add_detailed_qc_result(result)
+        db_service.add_detailed_qc_results(results)
+
+
+def _lab_datum_id(donor_index: int, donor: Donor, lab_datum_index: int, lab_datum: LabDatum) -> str:
+    """Derive the lab datum ID under which the QC workflow reports a lab datum.
+
+    Must match the sample ID scheme of GRZ_QC_Workflow's metadata_to_samplesheet.py
+    (``{relation}{donor_index}_{sequence_subtype}{lab_datum_index}``), which ends up as
+    ``DetailedQCResult.lab_datum_id`` via populate-qc. It is the only unambiguous link
+    between a stored QC result and its lab datum in the submission metadata.
+
+    :param donor_index: position of the donor in the submission metadata
+    :param donor: the donor
+    :param lab_datum_index: position of the lab datum within the donor's lab data
+    :param lab_datum: the lab datum
+    :return: the lab datum ID, e.g. ``index0_germline0``
+    """
+    return f"{donor.relation}{donor_index}_{lab_datum.sequence_subtype}{lab_datum_index}"
+
+
+def _metadata_lab_data(metadata: GrzSubmissionMetadata) -> dict[str, tuple[Thresholds | None, SequenceData]]:
+    """Map lab datum IDs to (required thresholds, provided sequence data) from the metadata.
+
+    Only index donors have required thresholds; for all other donors the thresholds are
+    ``None`` (mirroring metadata_to_samplesheet.py, which sets their requirements to 0).
+
+    :param metadata: the submission metadata stored in the database
+    :return: mapping of lab datum ID to (required thresholds or ``None``, provided sequence
+        data) for every lab datum with sequence data
+    """
+    lab_data = {}
+    for donor_index, donor in enumerate(metadata.donors):
+        for lab_datum_index, lab_datum in enumerate(donor.lab_data):
+            if lab_datum.sequence_data is None:
+                continue
+            lab_datum_id = _lab_datum_id(donor_index, donor, lab_datum_index, lab_datum)
+            try:
+                thresholds = metadata.determine_thresholds_for(donor, lab_datum)
+            except MissingThresholdsException:
+                thresholds = None
+            if donor.relation != Relation.index_:
+                thresholds = None
+            lab_data[lab_datum_id] = (thresholds, lab_datum.sequence_data)
+    return lab_data
+
+
+def _recompute_result(
+    result: DetailedQCResult, thresholds: Thresholds | None, sequence_data: SequenceData, apply_changes: bool
+) -> RecomputeOutcome:
+    """Recompute the three metrics of one detailed QC result row.
+
+    Mutates the row in place when ``apply_changes`` is set (the enclosing session tracks the
+    changes).
+
+    :param result: the stored detailed QC result row
+    :param thresholds: thresholds required by BfArM, or ``None`` for non-index donors
+    :param sequence_data: sequence data of the lab datum as provided in the submission metadata
+    :param apply_changes: whether to write the recomputed values to the row
+    :return: whether all computed values meet their thresholds and how many metric fields
+        differ from the recomputed values
+    """
+    meets_all_thresholds = True
+    metrics_changed = 0
+    # One (prefix, verdict) pair per metric.
+    # prefix: name prefix of the row's `<prefix>_passed_qc` and `<prefix>_percent_deviation` columns.
+    # verdict: the MetricVerdict recomputed for that metric.
+    verdicts = (
+        (
+            "mean_depth_of_coverage",
+            _recompute_metric(
+                measured=result.mean_depth_of_coverage,
+                provided=sequence_data.mean_depth_of_coverage,
+                required=thresholds.mean_depth_of_coverage if thresholds else 0,
+            ),
+        ),
+        (
+            "percent_bases_above_quality_threshold",
+            _recompute_metric(
+                measured=result.percent_bases_above_quality_threshold_percent,
+                provided=sequence_data.percent_bases_above_quality_threshold.percent,
+                required=thresholds.percent_bases_above_quality_threshold.percent_bases_above if thresholds else 0,
+            ),
+        ),
+        (
+            "targeted_regions_above_min_coverage",
+            _recompute_metric(
+                measured=result.targeted_regions_above_min_coverage,
+                provided=sequence_data.targeted_regions_above_min_coverage,
+                required=thresholds.targeted_regions_above_min_coverage.fraction_above if thresholds else 0,
+            ),
+        ),
+    )
+    for prefix, verdict in verdicts:
+        meets_all_thresholds &= verdict.meets_threshold
+        passed_attr = f"{prefix}_passed_qc"
+        deviation_attr = f"{prefix}_percent_deviation"
+        changed = getattr(result, passed_attr) != verdict.passed_qc or (
+            verdict.deviation is not None
+            and abs(getattr(result, deviation_attr) - verdict.deviation) > DEVIATION_TOLERANCE
+        )
+        if not changed:
+            continue
+        metrics_changed += 1
+        if apply_changes:
+            setattr(result, passed_attr, verdict.passed_qc)
+            if verdict.deviation is not None:
+                setattr(result, deviation_attr, verdict.deviation)
+    return RecomputeOutcome(meets_all_thresholds, metrics_changed)
+
+
+def _recompute_submission(session: Session, submission: Submission, apply_changes: bool) -> RecomputeOutcome | None:
+    """Recompute the detailed QC results of one submission.
+
+    :param session: open database session the submission and its results are loaded in
+    :param submission: the submission to recompute
+    :param apply_changes: whether to write the recomputed values to the result rows
+    :return: the combined outcome over the most recent QC result of each lab datum, or
+        ``None`` if the submission has no QC results or they cannot be matched to its metadata
+    """
+    results = session.exec(select(DetailedQCResult).where(DetailedQCResult.submission_id == submission.id)).all()
+    if not results:
+        return None
+    if not submission.submission_metadata:
+        console_err.print(f"[yellow]Skipping {submission.id}: no submission metadata stored.[/yellow]")
+        return None
+    metadata = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
+    lab_data = _metadata_lab_data(metadata)
+
+    # only the most recent QC run per lab datum decides
+    latest_results: dict[str, DetailedQCResult] = {}
+    for result in results:
+        current = latest_results.get(result.lab_datum_id)
+        if current is None or result.timestamp > current.timestamp:
+            latest_results[result.lab_datum_id] = result
+
+    unmatched = set(latest_results) - set(lab_data)
+    if unmatched:
+        console_err.print(
+            f"[yellow]Skipping {submission.id}: QC results {sorted(unmatched)} cannot be matched "
+            f"to the submission metadata.[/yellow]"
+        )
+        return None
+
+    submission_meets_thresholds = True
+    metrics_updated = 0
+    for result in latest_results.values():
+        thresholds, sequence_data = lab_data[result.lab_datum_id]
+        outcome = _recompute_result(result, thresholds, sequence_data, apply_changes)
+        submission_meets_thresholds &= outcome.meets_thresholds
+        metrics_updated += outcome.metrics_changed
+    return RecomputeOutcome(submission_meets_thresholds, metrics_updated)
+
+
+@submission.command(name="recompute-qc")
+@click.option("--year", "year", type=click.IntRange(min=2025), required=True, help="Year of the quarter to recompute.")
+@click.option("--quarter", "quarter", type=click.IntRange(min=1, max=4), required=True, help="Quarter to recompute.")
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    default=False,
+    help="Write the recomputed verdicts to the database. Without this flag, only report what would change.",
+)
+@click.pass_context
+def recompute_qc(ctx: click.Context, year: int, quarter: int, apply_changes: bool):
+    """Recompute detailed QC verdicts under the current rules (GRZ_QC_Workflow >= 4.0.0).
+
+    Re-evaluates the stored detailed QC results of all submissions uploaded in the given
+    quarter: a metric fails only if the value computed by the pipeline is below the required
+    BfArM threshold, and a deviation of more than 10% between the computed and provided
+    values (in either direction, relative to the computed value) is flagged without failing
+    quality control. Use this to backfill verdicts produced by older workflow versions
+    before generating the quarterly report.
+    """
+    db = ctx.obj["db_url"]
+    db_service = get_submission_db_instance(db, author=ctx.obj["author"])
+    quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
+
+    table = rich.table.Table(
+        "Submission ID",
+        "Detailed QC Passed",
+        "Metrics Updated",
+        title=f"Recomputed Detailed QC Verdicts Q{quarter}/{year}",
+    )
+    verdict_changes: dict[str, bool] = {}
+    total_metrics_updated = 0
+    with db_service.transaction() as session:
+        submissions = session.exec(
+            select(Submission).where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+        ).all()
+        for submission in sorted(submissions, key=lambda s: s.id):
+            outcome = _recompute_submission(session, submission, apply_changes)
+            if outcome is None:
+                continue
+
+            if submission.detailed_qc_passed is not outcome.meets_thresholds:
+                verdict_changes[submission.id] = outcome.meets_thresholds
+            total_metrics_updated += outcome.metrics_changed
+            if outcome.metrics_changed or submission.id in verdict_changes:
+                old_verdict = {True: "yes", False: "no", None: "unset"}[submission.detailed_qc_passed]
+                new_verdict = "yes" if outcome.meets_thresholds else "no"
+                table.add_row(
+                    submission.id,
+                    old_verdict if old_verdict == new_verdict else f"{old_verdict} -> {new_verdict}",
+                    str(outcome.metrics_changed),
+                )
+        if apply_changes:
+            session.commit()
+
+    console.print(table)
+    if apply_changes:
+        # modify_submission logs the change with the configured author
+        for submission_id, passed in verdict_changes.items():
+            db_service.modify_submission(submission_id, "detailed_qc_passed", passed)
+        console.print(f"Updated {total_metrics_updated} metric(s) and {len(verdict_changes)} verdict(s).")
+    else:
+        console.print(
+            f"Would update {total_metrics_updated} metric(s) and {len(verdict_changes)} verdict(s). "
+            "Run with --apply to write these changes."
+        )
 
 
 @submission.command()
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @click.argument("change_str", metavar="CHANGE", type=click.Choice(ChangeRequestEnum.list(), case_sensitive=False))
 @click.option("--data", "data_json", type=str, default=None, help='Inline JSON data (e.g., \'{"k":"v"}\').')
 @click.option(
@@ -932,7 +1749,7 @@ def populate_qc(
     help="Validate inputs and check the submission exists, but do not write the change request.",
 )
 @click.pass_context
-def change_request(  # noqa: PLR0913
+def change_request(  # noqa: PLR0913, PLR0917
     ctx: click.Context,
     submission_id: str,
     change_str: str,
@@ -964,7 +1781,7 @@ def change_request(  # noqa: PLR0913
         if existing is None:
             console_err.print(
                 f"[red]Dry run: submission '{submission_id}' not found. "
-                f"You might need to add it first: grz-cli db submission add {submission_id}[/red]"
+                f"You might need to add it first: grzctl db submission add {submission_id}[/red]"
             )
             raise click.Abort()
         console_err.print(
@@ -987,13 +1804,11 @@ def change_request(  # noqa: PLR0913
             console_err.print(f"  Data: {new_change_request_log.data}")
 
     except SubmissionNotFoundError as e:
-        console_err.print(f"[red]Error: {e}[/red]")
-        console_err.print(f"You might need to add it first: grzctl db submission add {submission_id}")
-        raise click.Abort() from e
+        _abort_missing_submission(e, submission_id)
     except Exception as e:
         console_err.print(f"[red]An unexpected error occurred: {e}[/red]")
         traceback.print_exc()
-        raise click.ClickException(f"Failed to update submission state: {e}") from e
+        raise click.ClickException(f"Failed to register change request: {e}") from e
 
 
 def _research_consented_now(submission: Submission) -> bool | None:
@@ -1025,16 +1840,17 @@ def _build_attribute_table(submission: Submission, research_consented_now: bool 
         (see :func:`_research_consented_now`), or ``None`` when unavailable.
     :returns: A populated rich table of submission attributes.
     """
-    attribute_table = rich.table.Table(box=None)
-    attribute_table.add_column("Attribute", justify="right")
-    attribute_table.add_column("Value")
+    rows: list[tuple[str, Any]] = []
     for label, attr_name in (
         ("tanG", "tan_g"),
         ("Pseudonym", "pseudonym"),
+        ("Local Case ID", "local_case_id"),
         ("Submission Uploaded Date", "submission_uploaded_date"),
         ("Submission Size", "submission_size"),
         ("Submission Type", "submission_type"),
         ("Submitter ID", "submitter_id"),
+        ("Inbox", "inbox"),
+        ("Case ID", "case_id"),
         ("Data Node ID", "data_node_id"),
         ("Disease Type", "disease_type"),
         ("Genomic Study Type", "genomic_study_type"),
@@ -1044,21 +1860,15 @@ def _build_attribute_table(submission: Submission, research_consented_now: bool 
         ("Selected For QC", "selected_for_qc"),
         ("Detailed QC Passed", "detailed_qc_passed"),
     ):
-        attr = getattr(submission, attr_name)
-        attribute_table.add_row(
-            rich.text.Text(f"{label}", style="cyan"), rich.text.Text(str(attr)) if attr is not None else _TEXT_MISSING
-        )
+        rows.append((label, getattr(submission, attr_name)))
         if attr_name == "consented":
             # Adjacent row: research consent re-evaluated as of now (recomputed from stored metadata).
-            attribute_table.add_row(
-                rich.text.Text("Research consent (now)", style="cyan"),
-                rich.text.Text(str(research_consented_now)) if research_consented_now is not None else _TEXT_MISSING,
-            )
-    return attribute_table
+            rows.append(("Research consent (now)", research_consented_now))
+    return _attribute_table(rows)
 
 
 @submission.command("show")
-@click.argument("submission_id", type=str)
+@_submission_id_argument
 @output_json
 @click.pass_context
 def show(ctx: click.Context, submission_id: str, output_json: bool):
@@ -1076,6 +1886,8 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
 
     if output_json:
         submission_dict = submission.model_dump(mode="json")
+        # the case's psn is a hybrid property, not a field, so model_dump leaves it out
+        submission_dict["pseudonym"] = submission.pseudonym
         submission_dict["research_consented_now"] = research_consented_now
         submission_dict["states"] = []
 
@@ -1158,12 +1970,6 @@ def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str
         raise
 
 
-# Archival redacts before writing, so a metadata.json re-read from S3 always carries placeholders
-# for these two and is never authoritative about them. Diffing them would only offer to overwrite
-# a real value with a placeholder.
-_BACKFILL_IGNORE_FIELDS = frozenset({"tan_g", "pseudonym"})
-
-
 class _BackfillResult(StrEnum):
     UPDATED = "updated"
     UP_TO_DATE = "up_to_date"
@@ -1173,46 +1979,80 @@ class _BackfillResult(StrEnum):
     CONSENT_MISMATCH = "consent_mismatch"
 
 
-def _backfill_submission(  # noqa: PLR0911, PLR0913
+class _BackfillOutcome(NamedTuple):
+    """What one submission's backfill did, and whether its case link is still missing.
+
+    The two are independent: a submission whose case key could not be resolved is still
+    written, since the reason is rarely about that submission and the rest of the metadata is
+    what the Prüfbericht is built from. Reporting the unresolved link *instead* of the outcome
+    would count such a submission as not updated when it was.
+
+    :param status: What happened to the submission's fields, donors and case link.
+    :param link_unresolved: Whether the case could not be resolved. Re-running once the cause
+        is cleared links it.
+    """
+
+    status: _BackfillResult
+    link_unresolved: bool = False
+
+
+def _fetch_metadata_json_from_archives(
+    submission_id: str, archive_targets: list[tuple[str, str, Any]]
+) -> dict[str, str] | None:
+    """Fetch the metadata.json for *submission_id* from every archive.
+
+    :param submission_id: Submission to fetch.
+    :param archive_targets: ``(label, bucket, s3_client)`` per archive.
+    :returns: The raw content per label of each archive that holds the file, or None when an
+        archive could not be read. An unread archive might hold a second copy.
+    """
+    found: dict[str, str] = {}
+    for label, bucket, client in archive_targets:
+        try:
+            raw_json = _fetch_metadata_json(client, bucket, submission_id)
+        except Exception as exc:
+            console_err.print(f"[red]  {submission_id}: S3 error in {label} archive: {exc}[/red]")
+            return None
+        if raw_json is not None:
+            found[label] = raw_json
+    return found
+
+
+def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     current_submission: Submission,
-    s3_client: Any,
-    bucket: str,
+    raw_json: str,
     db_service: SubmissionDb,
     dry_run: bool,
     force: bool,
     ignore_fields: set[str],
     allow_overwrite: frozenset[str] = frozenset(),
-) -> _BackfillResult:
-    """Fetch metadata.json from S3 for one submission and commit a diff to the database.
+) -> _BackfillOutcome:
+    """Commit the diff between one submission's metadata.json and the database.
 
     Uses the same :func:`SubmissionDb.diff` / :func:`SubmissionDb.commit_changes` path
     as ``grzctl db submission populate`` so that every derived field (not only
     *submission_size* and *submission_metadata*) is kept consistent, donor records are
-    synchronised, and already-up-to-date submissions are detected without a write.
+    synchronised, the case link is resolved and committed (:data:`CASE_LINK_KEY` in
+    *ignore_fields* disables that), and already-up-to-date submissions are detected
+    without a write.
 
-    When *force* is False, a destructive diff (existing non-NULL field would change)
-    is skipped instead of committed, preserving manually-corrected values. The caller
-    is expected to pre-filter already-populated rows so re-runs do not re-pay the S3
-    network cost for them.
+    The submission is written whole or not at all. Without *force*, a destructive change that
+    *allow_overwrite* does not name skips it and preserves every manually-corrected value it
+    holds. The run carries on to the next submission either way.
+
+    :param raw_json: The metadata.json content, from the one archive that holds it.
     """
     submission_id = current_submission.id
 
     try:
-        raw_json = _fetch_metadata_json(s3_client, bucket, submission_id)
-    except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: S3 error – {exc}[/red]")
-        return _BackfillResult.ERROR
-
-    if raw_json is None:
-        # this is expected for submissions residing in the other consent bucket, so we do not explicitly log that here
-        # but still report them in the final stats
-        return _BackfillResult.NOT_FOUND
-
-    try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: failed to parse metadata.json – {exc}[/red]")
-        return _BackfillResult.ERROR
+        console_err.print(f"[red]  {submission_id}: failed to parse metadata.json: {exc}[/red]")
+        return _BackfillOutcome(_BackfillResult.ERROR)
+
+    # The archived copy is redacted; the stored row holds the submitter's values.
+    still_redacted = current_submission.restore_redacted_fields(metadata)
+    ignore_fields = set(ignore_fields) | still_redacted
 
     try:
         # Backfill has no authoritative date to offer: the archive does not carry one, and the
@@ -1222,48 +2062,48 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
         # construction and then exclude the field, so backfill never writes it. Passing the row's
         # own value instead would compare a snapshot taken before the run against the row diff()
         # re-reads, and write the stale one.
-        submission_diff, donors_diff = db_service.diff(
+        changes = db_service.diff(
             submission_id,
             metadata,
             submission_uploaded_date=None,
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: diff failed – {exc}[/red]")
-        return _BackfillResult.ERROR
+        console_err.print(f"[red]  {submission_id}: diff failed: {exc}[/red]")
+        return _BackfillOutcome(_BackfillResult.ERROR)
 
-    if not submission_diff.has_pending and not donors_diff.has_pending:
+    # See _BackfillOutcome: a link that cannot be resolved still lets the rest be written.
+    link_unresolved = changes.case_link_error is not None
+    if link_unresolved:
+        console_err.print(f"[yellow]  {submission_id}: case link unresolved: {changes.case_link_error}[/yellow]")
+
+    if not changes.has_pending:
         console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
-        return _BackfillResult.UP_TO_DATE
+        return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved)
 
-    # Filling a field that was NULL destroys nothing, so it is always written. Replacing one that
-    # already has a value needs saying so: --force permits every such overwrite, --allow-overwrite
-    # only the fields it names, and anything else is held back and reported.
-    allowed = {diff.key for diff in submission_diff.pending} if force else allow_overwrite
-    submission_diff, withheld = submission_diff.withhold_destructive(allowed)
-    if withheld:
+    # Filling a NULL destroys nothing, so it is always written. Replacing or removing a stored value
+    # needs saying so, with --force or --allow-overwrite. One that nobody asked for skips the
+    # submission whole: a row the run half-updated is harder to reason about than one it left alone.
+    if not force and (undeclared := changes.undeclared_destructive_changes(allow_overwrite)):
         console_err.print(
-            f"[dim]  {submission_id}: not overwriting {', '.join(diff.key for diff in withheld)} "
-            f"(use --force for all, or --allow-overwrite for named fields).[/dim]"
+            f"[dim]  {submission_id}: would overwrite {', '.join(undeclared)}, skipping the whole "
+            f"submission (use --force for all, or --allow-overwrite for named fields).[/dim]"
         )
-    if not submission_diff.has_pending and not donors_diff.has_pending:
-        return _BackfillResult.WOULD_OVERWRITE
+        return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
 
     if dry_run:
         console_err.print(
-            f"[yellow]  [dry-run] {submission_id}: would update fields: {[d.key for d in submission_diff.pending]}[/yellow]"
+            f"[yellow]  [dry-run] {submission_id}: would update: {', '.join(changes.pending_changes)}[/yellow]"
         )
-        return _BackfillResult.UPDATED
+        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved)
 
     try:
-        db_service.commit_changes(submission_id, submission_diff, donors_diff)
-        console_err.print(
-            f"[green]  {submission_id}: updated ({', '.join(d.key for d in submission_diff.pending) or 'no scalar changes'}).[/green]"
-        )
-        return _BackfillResult.UPDATED
+        db_service.commit_changes(submission_id, changes)
+        console_err.print(f"[green]  {submission_id}: updated ({', '.join(changes.pending_changes)}).[/green]")
+        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved)
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: failed to commit – {exc}[/red]")
-        return _BackfillResult.ERROR
+        console_err.print(f"[red]  {submission_id}: failed to commit: {exc}[/red]")
+        return _BackfillOutcome(_BackfillResult.ERROR)
 
 
 @db.command("backfill")
@@ -1273,21 +2113,8 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
     default=False,
     help="Preview which submissions would be updated without writing to the database.",
 )
-@click.option(
-    "--force/--no-force",
-    default=False,
-    help="Overwrite existing non-NULL fields when the metadata.json value differs (destructive diffs). "
-    "Without this flag, such fields are reported and left alone while the rest is still written.",
-)
-@click.option(
-    "--allow-overwrite",
-    "allow_overwrite",
-    type=click.Choice(list(SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields), case_sensitive=False),
-    multiple=True,
-    help="Overwrite only these existing non-NULL fields when the metadata.json value differs "
-    "(may be repeated). Other destructive changes are held back and the submission is updated in "
-    "part. Mutually exclusive with --force, which permits every overwrite.",
-)
+@_force_option
+@_allow_overwrite_option
 @click.option(
     "--submission-id",
     "submission_ids",
@@ -1309,7 +2136,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913
 )
 @_ignore_field_option
 @click.pass_context
-def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ctx: click.Context,
     configuration: GrzctlConfig,
     dry_run: bool,
@@ -1332,8 +2159,17 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     any other overwrite is reported and held back, so a submission is updated in part
     rather than skipped entirely.
 
-    Both the consented and non-consented archive buckets are always scanned.
-    If a submission's metadata.json is found in both, an error is raised.
+    A donor that is missing in the database is always added. Updating or deleting a stored
+    donor needs --force, which --allow-overwrite cannot grant. Without it, only the donor
+    changes are held back.
+
+    Both the consented and non-consented archive buckets are always scanned, before
+    anything is written. A submission whose metadata.json is found in both, or whose
+    lookup fails in either, is reported as an error and left unchanged.
+
+    The case link is resolved and written like any other missing value, but --allow-overwrite
+    cannot name it, so replacing an existing link holds the whole submission back until
+    --force is passed. Pass --ignore-field case_id to skip case linking altogether.
 
     Candidate selection (mutually exclusive):
 
@@ -1348,10 +2184,8 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if submission_ids and (start_date != datetime.min or end_date != datetime.max):
         raise click.UsageError("--submission-id and --start-date/--end-date are mutually exclusive.")
 
-    if force and allow_overwrite:
-        raise click.UsageError("--force and --allow-overwrite are mutually exclusive; --force already permits all.")
-
-    ignore_fields = set(ignore_field) | _BACKFILL_IGNORE_FIELDS
+    allow_overwrite_keys = _overwrite_allow_list(force, allow_overwrite)
+    ignore_fields = set(ignore_field)
 
     # ── Build S3 clients for both archive targets ────────────────────────────
     archive_targets = [
@@ -1376,7 +2210,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     else:
         candidates = list(db_service.list_processed_between(start_date.date(), end_date.date()))
         console_err.print(
-            f"[cyan]Date window: {start_date.date()} – {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
+            f"[cyan]Date window: {start_date.date()} to {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
         )
 
     counts: Counter[_BackfillResult] = Counter()
@@ -1389,27 +2223,21 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
     consent_mismatches = 0
     expired_consents = 0
+    links_unresolved = 0
+    inboxes_recorded = 0
 
     for submission in tqdm(candidates):
-        # fetch from archive targets
-        results: dict[str, _BackfillResult] = {}
-        for label, bucket, client in archive_targets:
-            results[label] = _backfill_submission(
-                submission,
-                client,
-                bucket,
-                db_service,
-                dry_run,
-                force,
-                ignore_fields,
-                frozenset(allow_overwrite),
-            )
+        # Read both archives before writing anything. A metadata.json in both is an error, and
+        # committing the first copy found would already have changed the row.
+        found_in = _fetch_metadata_json_from_archives(submission.id, archive_targets)
 
-        found_in = [label for label, res in results.items() if res != _BackfillResult.NOT_FOUND]
+        if found_in is None:
+            counts[_BackfillResult.ERROR] += 1
+            continue
 
         if len(found_in) > 1:
             console_err.print(
-                f"[red]  {submission.id}: ERROR — metadata.json found in both consented and non_consented archives[/red]"
+                f"[red]  {submission.id}: ERROR: metadata.json found in both consented and non_consented archives[/red]"
             )
             counts[_BackfillResult.ERROR] += 1
             continue
@@ -1418,8 +2246,18 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
             counts[_BackfillResult.NOT_FOUND] += 1
             continue
 
-        actual_archive = found_in[0]  # "consented" or "non_consented"
-        counts[results[actual_archive]] += 1
+        actual_archive = next(iter(found_in))  # "consented" or "non_consented"
+        outcome = _backfill_submission(
+            submission,
+            found_in[actual_archive],
+            db_service,
+            dry_run,
+            force,
+            ignore_fields,
+            allow_overwrite_keys,
+        )
+        counts[outcome.status] += 1
+        links_unresolved += outcome.link_unresolved
 
         # check DB `consented` vs actual archive
         if submission.consented is not None:
@@ -1445,6 +2283,24 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
             except ValidationError:
                 log.warning(f"Error validating submission metadata for {submission.id}: {traceback.format_exc()}")
 
+        # A missing inbox is always filled.
+        # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
+        # inboxes can still name the one the submission came from.
+        # A scan that finds no inbox, or more than one, is ambiguous.
+        # It is left for --inbox on other commands.
+        if submission.inbox is None:
+            submitter_id = submission.id.split("_", maxsplit=1)[0]
+            derived_inbox = scan_inbox(configuration, submitter_id, submission.id)
+            if derived_inbox is None:
+                console_err.print(f"[dim]  {submission.id}: no unambiguous inbox found to record.[/dim]")
+            elif dry_run:
+                console_err.print(
+                    f"[yellow]  [dry-run] {submission.id}: would record inbox '{derived_inbox}'.[/yellow]"
+                )
+            else:
+                db_service.set_submission_inbox(submission.id, derived_inbox)
+                inboxes_recorded += 1
+
     # ── Summary ─────────────────────────────────────────────────────────────
     prefix = "[dry-run] " if dry_run else ""
     verb = "Would update" if dry_run else "Updated"
@@ -1453,6 +2309,8 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915
         f"  Up to date: {counts[_BackfillResult.UP_TO_DATE]}\n"
         f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
+        f"  Case link unresolved: {links_unresolved} (also counted above)\n"
+        f"  Inbox recorded: {inboxes_recorded}\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
     )
 
@@ -1474,17 +2332,18 @@ def sync_from_inbox(
     ctx: click.Context,
     configuration: GrzctlConfig,
     submitter_id: str,
-    inbox_name: str,
+    inbox_name: str | None,
     **kwargs,
 ):
-    """Synchronize the database with submissions found in the inbox."""
-    try:
-        s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
-    except Exception:
-        console_err.print(
-            f"[red]Error resolving S3 configuration for inbox '{inbox_name}': {traceback.format_exc()}[/red]"
-        )
-        sys.exit(1)
+    """Synchronize the database with submissions found in the inbox.
+
+    Without ``--inbox``, a submitter with exactly one inbox is unambiguous and used.
+    Every submission found is recorded with the inbox it was scanned in.
+    """
+    inbox_name = require_inbox(
+        configuration, submitter_id=submitter_id, inbox_name=inbox_name, exc_type=click.UsageError
+    )
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=inbox_name).s3
 
     db_url = ctx.obj["db_url"]
     author = ctx.obj["author"]
@@ -1499,6 +2358,12 @@ def sync_from_inbox(
 
         console_err.print(f"[cyan]Synchronizing {len(s3_submissions)} submissions with database...[/cyan]")
         sync_submissions(db_service, s3_submissions, author)
+
+        for s3_submission in s3_submissions:
+            try:
+                db_service.set_submission_inbox(s3_submission.submission_id, inbox_name)
+            except SubmissionNotFoundError as e:
+                log.warning(f"Not recording the inbox of unknown submission {s3_submission.submission_id}: {e}")
 
         console_err.print("[green]Synchronization complete.[/green]")
 

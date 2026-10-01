@@ -63,7 +63,7 @@ def _setup_workspace(workspace: Path) -> Path:
                         "private_key_path": str(private_key_path),
                         "private_key_passphrase": "",
                     },
-                    "known_public_keys": str(public_key_path),
+                    "known_public_keys_file": str(public_key_path),
                 }
             }
         )

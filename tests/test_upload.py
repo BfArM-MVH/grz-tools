@@ -1,11 +1,16 @@
 """Tests for the upload module"""
 
+from http import HTTPStatus
 from pathlib import Path
 
+import botocore.client
+import grz_common.exceptions as grzexc
 import pytest
+from botocore.exceptions import ClientError
 from grz_common.progress.progress_logging import FileProgressLogger
 from grz_common.progress.states import UploadState
 from grz_common.utils.checksums import calculate_sha256
+from grz_common.workers.submission import EncryptedSubmission
 from grz_common.workers.upload import S3BotoUploadWorker
 
 
@@ -215,3 +220,120 @@ def test_upload_rereuploads_file_after_failed_upload(
     assert upload_spy.call_count == expected, (
         f"Expected {expected} failed files to be retried, but only {upload_spy.call_count} were uploaded"
     )
+
+
+def test_upload_of_a_submission_already_in_the_inbox_raises(
+    s3_config_model, remote_bucket, encrypted_submission, tmp_path
+):
+    """An inbox that already holds the submission's metadata means that the submission was uploaded before."""
+    _, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+    remote_bucket.put_object(Key=metadata_s3_object_id, Body=b"{}")
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    with pytest.raises(grzexc.DuplicateUploadError):
+        upload_worker.upload(encrypted_submission)
+
+
+def test_archive_of_an_archived_submission_uploads_nothing(
+    s3_config_model, remote_bucket, encrypted_submission, tmp_path, mocker
+):
+    """Archive uploads the metadata last, so a rerun after a finished archival returns without an upload."""
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+    upload_worker.archive(encrypted_submission)
+    _, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+    assert metadata_s3_object_id in {o.key for o in remote_bucket.objects.all()}
+
+    upload_spy = mocker.spy(upload_worker, "upload_file")
+    upload_worker.archive(encrypted_submission)
+
+    assert upload_spy.call_count == 0, "a rerun must not upload anything"
+
+
+def test_upload_of_a_submission_with_a_missing_local_file_raises(
+    s3_config_model, remote_bucket, submission_metadata_dir, tmp_path
+):
+    """A file that the encryption did not produce is a step that has not passed, not a failed upload."""
+    submission = EncryptedSubmission(submission_metadata_dir, tmp_path / "encrypted_files")
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    with pytest.raises(grzexc.IncompleteSubmissionError):
+        upload_worker.upload(submission)
+
+
+def _fail_s3_operation(monkeypatch, operation: str, code: str, status: HTTPStatus = HTTPStatus.FORBIDDEN):
+    """Answer every S3 call of *operation* with the error *code* and the HTTP *status*."""
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def fail(self, operation_name, kwargs):
+        if operation_name == operation:
+            raise ClientError(
+                {"Error": {"Code": code, "Message": code}, "ResponseMetadata": {"HTTPStatusCode": status.value}},
+                operation_name,
+            )
+        return original_call(self, operation_name, kwargs)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", fail)
+
+
+def test_upload_file_reports_rejected_credentials_as_a_configuration_error(
+    s3_config_model, remote_bucket, temp_small_file_path, tmp_path, monkeypatch
+):
+    """S3Transfer wraps the ClientError in S3UploadFailedError, and the upload worker takes it out again."""
+    _fail_s3_operation(monkeypatch, "PutObject", "InvalidAccessKeyId")
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    with pytest.raises(grzexc.ConfigurationError) as excinfo:
+        upload_worker.upload_file(temp_small_file_path, "small_test_file.bed")
+
+    assert isinstance(excinfo.value.__cause__, ClientError)
+
+
+def test_upload_file_reports_any_other_s3_error_as_a_failed_upload(
+    s3_config_model, remote_bucket, temp_small_file_path, tmp_path, monkeypatch
+):
+    """``AccessDenied`` is no configuration error, since S3 also answers it for a missing object."""
+    _fail_s3_operation(monkeypatch, "PutObject", "AccessDenied")
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    with pytest.raises(grzexc.UploadError):
+        upload_worker.upload_file(temp_small_file_path, "small_test_file.bed")
+
+
+def test_upload_reports_a_faulty_setup_as_a_configuration_error(
+    s3_config_model, faulty_s3_setup, encrypted_submission, tmp_path
+):
+    """The check for an earlier upload is the first request, and it already finds a faulty setup."""
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    with pytest.raises(grzexc.ConfigurationError):
+        upload_worker.upload(encrypted_submission)
+
+
+@pytest.mark.parametrize("method", ["upload", "archive"])
+def test_upload_goes_ahead_with_a_warning_if_access_is_denied(
+    s3_config_model, remote_bucket, encrypted_submission, tmp_path, monkeypatch, caplog, method
+):
+    """Credentials that may not list the bucket get ``AccessDenied`` for a missing object, so the check cannot tell."""
+    _fail_s3_operation(monkeypatch, "HeadObject", "403")
+    _fail_s3_operation(monkeypatch, "GetObject", "AccessDenied")
+    upload_worker = S3BotoUploadWorker(
+        s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
+    )
+
+    getattr(upload_worker, method)(encrypted_submission)
+
+    _, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
+    assert metadata_s3_object_id in {o.key for o in remote_bucket.objects.all()}
+    assert "because S3 denies access" in caplog.text

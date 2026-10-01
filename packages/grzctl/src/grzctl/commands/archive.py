@@ -1,7 +1,6 @@
 """Command for archiving a submission."""
 
 import logging
-from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
@@ -11,6 +10,7 @@ from grz_db.models.submission import SubmissionStateEnum
 from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
+from .paths import resolve_dirs
 
 log = logging.getLogger(__name__)
 
@@ -36,39 +36,24 @@ def archive(  # noqa: PLR0913
     """
     Archive a submission within a GRZ/GDC.
     """
-    bundled_mode = submission_dir is not None
-    granular_mode = any(v is not None for v in [metadata_dir, logs_dir, encrypted_files_dir])
-
-    if bundled_mode and granular_mode:
-        raise click.UsageError("'--submission-dir' is mutually exclusive with explicit path options.")
-
-    if bundled_mode:
-        base = Path(submission_dir)
-        _metadata_dir = base / "metadata"
-        _logs_dir = base / "logs"
-        _encrypted_files_dir = base / "encrypted_files"
-    elif granular_mode:
-        required = {
+    paths = resolve_dirs(
+        bundled_dir=submission_dir,
+        bundled_option="--submission-dir",
+        explicit={
             "--metadata-dir": metadata_dir,
             "--logs-dir": logs_dir,
             "--encrypted-files-dir": encrypted_files_dir,
-        }
-        missing = [name for name, path in required.items() if path is None]
-        if missing:
-            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
-        _metadata_dir = Path(metadata_dir)
-        _logs_dir = Path(logs_dir)
-        _encrypted_files_dir = Path(encrypted_files_dir)
-    else:
-        raise click.UsageError("You must specify either '--submission-dir' or the required explicit path options.")
+        },
+    )
+    metadata_path = paths["--metadata-dir"]
 
     log.info("Starting archival...")
 
     worker_inst = Worker(
-        metadata_dir=_metadata_dir,
-        files_dir=_metadata_dir.parent / "files",
-        log_dir=_logs_dir,
-        encrypted_files_dir=_encrypted_files_dir,
+        metadata_dir=metadata_path,
+        files_dir=metadata_path.parent / "files",
+        log_dir=paths["--logs-dir"],
+        encrypted_files_dir=paths["--encrypted-files-dir"],
         threads=threads,
     )
     encrypted_submission = worker_inst.parse_encrypted_submission()

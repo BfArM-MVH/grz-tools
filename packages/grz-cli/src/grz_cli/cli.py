@@ -11,6 +11,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import click
+import grz_common.exceptions as grzexc
 import grz_pydantic_models.submission.metadata
 from grz_common.cli import config_file
 from grz_common.cli.dump_config import dump_config
@@ -95,7 +96,12 @@ def main():
     Main entry point for the CLI application.
     """
     cli = build_cli()
-    cli()
+    try:
+        cli()
+    except grzexc.GrzError as e:
+        # an expected failure, such as an invalid metadata.json: log its message, not a traceback
+        log.error(e)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import AnyHttpUrl, AnyUrl
+from pydantic import AnyHttpUrl, AnyUrl, SecretStr
 
 from .base import IgnoringBaseModel, IgnoringBaseSettings
 
@@ -39,13 +39,13 @@ class S3ConnectionBase(IgnoringBaseModel):
     If undefined, it is read from the AWS_ACCESS_KEY_ID environment variable.
     """
 
-    secret: str | None = None
+    secret: SecretStr | None = None
     """
     The secret key for the S3 bucket.
     If undefined, it is read from the AWS_SECRET_ACCESS_KEY environment variable.
     """
 
-    session_token: str | None = None
+    session_token: SecretStr | None = None
     """
     The session token for temporary credentials (optional).
     """

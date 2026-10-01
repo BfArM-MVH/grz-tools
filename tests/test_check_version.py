@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
-from grz_cli.utils.version_check import check_metadata_version_and_exit_if_needed, check_version_and_exit_if_needed
+from grz_cli.utils.version_check import check_version_and_exit_if_needed
+from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from packaging.version import Version
 
 
@@ -103,7 +104,7 @@ def test_metadata_version_too_old_after_enforcement():
     vf = DummyVersionFile([], metadata_policies=[policy])
 
     with (
-        patch("grz_cli.utils.version_check.VersionFile.from_s3", return_value=vf),
+        patch("grz_common.utils.version_check.VersionFile.from_s3", return_value=vf),
         patch("sys.exit", side_effect=SystemExit) as mock_exit,
     ):
         with pytest.raises(SystemExit):

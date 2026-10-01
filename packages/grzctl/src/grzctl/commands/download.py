@@ -5,14 +5,17 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
-from grz_cli.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
+from .db.cli import get_submission_db_instance
+from .inbox_resolution import require_inbox
+from .paths import resolve_dirs
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +42,7 @@ log = logging.getLogger(__name__)
     default=True,
     help="Update the submission metadata with information from metadata.json and S3.",
 )
-def download(  # noqa: PLR0913
+def download(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_id: str,
     output_dir: str,
@@ -58,51 +61,49 @@ def download(  # noqa: PLR0913
 
     Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
+
+    With --update-db (the default), download records the inbox of the submission in the database.
+    With --populate (also the default), it also fills the submission metadata in the database.
+    With --no-update-db, download touches no database, and --populate only logs a warning.
     """
     bundled_mode = output_dir is not None
-    granular_mode = any(map(lambda v: v is not None, [metadata_dir, encrypted_files_dir, logs_dir]))
-
-    if bundled_mode and granular_mode:
-        raise click.UsageError("'--output-dir' is mutually exclusive with explicit path options.")
-
-    if bundled_mode:
-        base = Path(output_dir)
-        _metadata_dir = base / "metadata"
-        _encrypted_files_dir = base / "encrypted_files"
-        _logs_dir = base / "logs"
-    elif granular_mode:
-        required = {
+    paths = resolve_dirs(
+        bundled_dir=output_dir,
+        bundled_option="--output-dir",
+        explicit={
             "--metadata-dir": metadata_dir,
             "--encrypted-files-dir": encrypted_files_dir,
             "--logs-dir": logs_dir,
-        }
-        missing = [name for name, path in required.items() if path is None]
-        if missing:
-            raise click.UsageError(f"Granular mode requires: {', '.join(missing)}")
-        _metadata_dir = Path(metadata_dir)
-        _encrypted_files_dir = Path(encrypted_files_dir)
-        _logs_dir = Path(logs_dir)
-    else:
-        raise click.UsageError("You must specify either '--output-dir' or the required explicit path options.")
+        },
+    )
+    metadata_path = paths["--metadata-dir"]
 
     submitter_id = submission_id.split("_", maxsplit=1)[0]
-    s3_options = configuration.resolve_inbox(submitter_id=submitter_id, inbox_name=inbox_name).s3
+    resolved_inbox = require_inbox(
+        configuration,
+        submitter_id=submitter_id,
+        submission_id=submission_id,
+        inbox_name=inbox_name,
+        db_service=get_submission_db_instance(db_url=configuration.db.database_url) if update_db else None,
+        scan=True,
+    )
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
     bucket_name = s3_options.bucket
-    inbox_desc = f"'{inbox_name}' (bucket '{bucket_name}')" if inbox_name != bucket_name else f"'{bucket_name}'"
+    inbox_desc = f"'{resolved_inbox}' (bucket '{bucket_name}')" if resolved_inbox != bucket_name else f"'{bucket_name}'"
 
     log.info(f"Starting download from inbox {inbox_desc}...")
 
     if bundled_mode:
-        submission_dir_path = base
+        submission_dir_path = Path(output_dir)
         if not submission_dir_path.is_dir():
             log.debug("Creating submission directory %s", submission_dir_path)
             submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
 
     worker_inst = Worker(
-        metadata_dir=_metadata_dir,
-        files_dir=_metadata_dir.parent / "files",
-        log_dir=_logs_dir,
-        encrypted_files_dir=_encrypted_files_dir,
+        metadata_dir=metadata_path,
+        files_dir=metadata_path.parent / "files",
+        log_dir=paths["--logs-dir"],
+        encrypted_files_dir=paths["--encrypted-files-dir"],
         threads=threads,
     )
 
@@ -122,19 +123,28 @@ def download(  # noqa: PLR0913
                 metadata_schema_version,
             ),
         )
-        if populate:
-            if not db_context.db:
-                log.warning("Database context is not available, skipping population of submission metadata in DB.")
-            else:
+        if update_db:
+            db = db_context.db
+            if db is None:
+                raise RuntimeError("A DbContext that update_db enables holds the database.")
+            if populate:
                 s3_client = init_s3_client(s3_options)
                 submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
                 metadata = worker_inst.parse_submission().metadata.content
-                db_context.db.populate(
+                db.populate(
                     submission_id,
                     metadata,
                     submission_date,
                     force=force,
                     on_missing="create",
                 )
+            # The download knows the inbox, so record it.
+            # Commands and the decryption key lookup can then find the submission without
+            # being told the inbox again.
+            # The DbContext has already refused a submission that the database lacks.
+            log.info(f"Recording inbox {resolved_inbox} for submission {submission_id}...")
+            db.set_submission_inbox(submission_id, resolved_inbox)
+        elif populate:
+            log.warning("Not populating the submission metadata in the database, because of --no-update-db.")
 
     log.info("Download finished!")

@@ -1,10 +1,26 @@
 import datetime
+import json
+import logging
 from collections.abc import Callable
 
 import pytest
-from grz_db.errors import DuplicateTanGError
-from grz_db.models.submission import Submission, SubmissionDb
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+import sqlalchemy
+from grz_db.errors import DuplicateTanGError, OutdatedDatabaseSchemaError, SubmissionNotFoundError
+from grz_db.models.submission import (
+    Donor,
+    Submission,
+    SubmissionDb,
+    SubmissionStateEnum,
+    SubmissionStateLog,
+)
+from grz_db.models.submission.diff import DiffState, DonorDiff
+from grz_pydantic_models.submission.metadata import (
+    REDACTED_LOCAL_CASE_ID,
+    REDACTED_TAN,
+    GrzSubmissionMetadata,
+    Relation,
+)
+from sqlmodel import Session
 
 TWO_TB = 2 * 1024**4  # 2,199,023,255,552 bytes
 SUBMISSION_ID = "123456789_2024-01-01_abcdef01"
@@ -50,6 +66,78 @@ def test_submission_metadata_json_roundtrip(db: SubmissionDb, submission) -> Non
     assert result.submission_metadata == metadata
 
 
+@pytest.mark.parametrize("state", list(SubmissionStateEnum))
+def test_every_submission_state_can_be_stored(db: SubmissionDb, submission, state: SubmissionStateEnum) -> None:
+    """Every state must exist in the database's state type, which is a native enum on PostgreSQL."""
+    db.update_submission_state(SUBMISSION_ID, state)
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.get_latest_state().state == state
+
+
+def test_get_latest_state_breaks_timestamp_ties_by_id(db: SubmissionDb, submission) -> None:
+    """State logs sharing a timestamp must resolve to the highest id, like the SQL tie-breaker."""
+    fixed_timestamp = datetime.datetime(2025, 1, 1, 12, 0, tzinfo=datetime.UTC)
+    with Session(db.engine) as session:
+        for state in (SubmissionStateEnum.UPLOADED, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.FINISHED):
+            session.add(
+                SubmissionStateLog(
+                    submission_id=SUBMISSION_ID,
+                    state=state,
+                    timestamp=fixed_timestamp,
+                    author_name="alice",
+                    signature="dummy",
+                )
+            )
+        session.commit()
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.get_latest_state().state == SubmissionStateEnum.FINISHED
+
+
+def _donor(submission_id: str, pseudonym: str, mv_consented: bool) -> Donor:
+    """A Donor row filled with constant values except for ``mv_consented``."""
+    return Donor(
+        submission_id=submission_id,
+        pseudonym=pseudonym,
+        relation=Relation.brother,
+        library_types=set(),
+        sequence_types=set(),
+        sequence_subtypes=set(),
+        mv_consented=mv_consented,
+        research_consented=True,
+    )
+
+
+def test_donor_diff_changes_exclude_unchanged_fields() -> None:
+    """DonorDiff.changes must list only the fields whose value differs, per its docstring."""
+    donor_diff = DonorDiff.classify(_donor(SUBMISSION_ID, "P001", True), _donor(SUBMISSION_ID, "P001", False))
+
+    assert donor_diff.state == DiffState.UPDATED
+    assert [field_diff.key for field_diff in donor_diff.changes] == ["mv_consented"]
+
+
+def test_diff_does_not_mutate_callers_ignore_fields(
+    db: SubmissionDb, submission, metadata: GrzSubmissionMetadata
+) -> None:
+    """diff() must leave the caller's ignore_fields set untouched when it extends its own."""
+    ignore_fields = {"tan_g"}
+    db.diff(SUBMISSION_ID, metadata, submission_uploaded_date=None, ignore_fields=ignore_fields)
+
+    assert ignore_fields == {"tan_g"}
+
+
+def test_added_submission_reads_its_relationships(db: SubmissionDb) -> None:
+    """The submission from add_submission reads its state history, change requests and case after its session closed."""
+    submission = db.add_submission(SUBMISSION_ID)
+
+    assert submission.get_latest_state() is None
+    assert submission.changes == []
+    assert submission.pseudonym is None
+
+
 def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata) -> None:
     """Submission.from_metadata must map every metadata field correctly and leave system fields unset."""
     explicit_date = datetime.date(2025, 3, 1)
@@ -64,7 +152,7 @@ def test_from_metadata_sets_fields_from_metadata(metadata: GrzSubmissionMetadata
     assert submission.disease_type == metadata.submission.disease_type
     assert submission.genomic_study_type == metadata.submission.genomic_study_type
     assert submission.genomic_study_subtype == metadata.submission.genomic_study_subtype
-    assert submission.pseudonym == metadata.submission.local_case_id
+    assert submission.local_case_id == metadata.submission.local_case_id
     assert submission.data_node_id == metadata.submission.genomic_data_center_id
     assert submission.submission_uploaded_date == explicit_date  # explicit date takes precedence
     assert submission.submission_size == metadata.get_submission_size()
@@ -145,3 +233,184 @@ def test_raises_on_duplicate_tan_g(
     sub2 = db.add_submission(SUBMISSION_ID_2)
     with pytest.raises(DuplicateTanGError):
         set_tan_g(db, sub2, TAN_G_1)
+
+
+def _redacted(metadata: GrzSubmissionMetadata, local_case_id: str) -> GrzSubmissionMetadata:
+    """A copy of *metadata* redacted the way archival redacts it, with *local_case_id* as the
+    placeholder. See ``LOCAL_CASE_ID_PLACEHOLDERS`` for why the archive holds two spellings.
+    """
+    raw = json.loads(metadata.model_dump_json(by_alias=True))
+    raw["submission"]["tanG"] = REDACTED_TAN
+    raw["submission"]["localCaseId"] = local_case_id
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+@pytest.mark.parametrize("placeholder", ["", REDACTED_LOCAL_CASE_ID], ids=["empty", "sentinel"])
+def test_restore_redacted_fields_uses_the_stored_row(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, placeholder: str
+) -> None:
+    """Both redaction spellings are restored from the columns populate wrote."""
+    submission = db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "tan_g", TAN_G_1)
+    db.modify_submission(SUBMISSION_ID, "local_case_id", "the-real-case")
+    submission = db.get_submission(SUBMISSION_ID)
+
+    archived = _redacted(metadata, placeholder)
+    unrestored = submission.restore_redacted_fields(archived)
+
+    assert unrestored == frozenset()
+    assert archived.submission.tan_g == TAN_G_1
+    assert archived.submission.local_case_id == "the-real-case"
+
+
+@pytest.mark.parametrize("placeholder", ["", REDACTED_LOCAL_CASE_ID], ids=["empty", "sentinel"])
+def test_restore_redacted_fields_reports_what_it_cannot_restore(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata, placeholder: str
+) -> None:
+    """A row with nothing stored leaves the placeholders in place and names the columns."""
+    submission = db.add_submission(SUBMISSION_ID)
+
+    archived = _redacted(metadata, placeholder)
+    unrestored = submission.restore_redacted_fields(archived)
+
+    assert unrestored == frozenset({"tan_g", "local_case_id"})
+    assert archived.submission.tan_g == REDACTED_TAN
+    assert archived.submission.local_case_id == placeholder
+
+
+def test_restore_redacted_fields_leaves_unredacted_values_alone(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+) -> None:
+    """An unredacted copy is authoritative, so it is diffed rather than overwritten."""
+    db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "tan_g", TAN_G_1)
+    db.modify_submission(SUBMISSION_ID, "local_case_id", "stored-case")
+    submission = db.get_submission(SUBMISSION_ID)
+
+    unrestored = submission.restore_redacted_fields(metadata)
+
+    assert unrestored == frozenset()
+    assert metadata.submission.tan_g != TAN_G_1
+    assert metadata.submission.local_case_id != "stored-case"
+
+
+def test_restore_redacted_fields_restores_each_column_independently(
+    db: SubmissionDb, metadata: GrzSubmissionMetadata
+) -> None:
+    """A stored local case ID still helps even when the tanG cannot be recovered."""
+    db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "local_case_id", "the-real-case")
+    submission = db.get_submission(SUBMISSION_ID)
+
+    archived = _redacted(metadata, "")
+    unrestored = submission.restore_redacted_fields(archived)
+
+    assert unrestored == frozenset({"tan_g"})
+    assert archived.submission.local_case_id == "the-real-case"
+
+
+def test_the_schema_is_checked_once_per_database(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three writes should cost one schema check, not three.
+
+    See :meth:`SubmissionDb._confirm_schema` for why the answer is cached.
+    """
+    calls = 0
+    original = SubmissionDb._at_latest_schema
+
+    def counted(self: SubmissionDb) -> bool:
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    monkeypatch.setattr(SubmissionDb, "_at_latest_schema", counted)
+    db._schema_confirmed = False  # a freshly constructed instance has not asked yet
+
+    db.add_submission(SUBMISSION_ID)
+    db.modify_submission(SUBMISSION_ID, "basic_qc_passed", True)
+    db.get_submission(SUBMISSION_ID)
+
+    assert calls == 1
+
+
+def test_set_submission_inbox_records_the_inbox(db: SubmissionDb, submission) -> None:
+    """Recording the inbox stores only the inbox name; the S3 bucket follows from the config."""
+    db.set_submission_inbox(SUBMISSION_ID, "inbox")
+
+    result = db.get_submission(SUBMISSION_ID)
+    assert result is not None
+    assert result.inbox == "inbox"
+
+
+def test_set_submission_inbox_overwrites(db: SubmissionDb, submission) -> None:
+    """Recording a new inbox replaces the old one."""
+    db.set_submission_inbox(SUBMISSION_ID, "inbox")
+    db.set_submission_inbox(SUBMISSION_ID, "inbox-2")
+
+    assert (retrieved := db.get_submission(SUBMISSION_ID)) is not None
+    assert retrieved.inbox == "inbox-2"
+
+
+def test_set_submission_inbox_overwrite_is_logged(db: SubmissionDb, submission, caplog) -> None:
+    """Replacing a recorded inbox warns; the first recording and identical rewrites stay silent."""
+    with caplog.at_level(logging.WARNING, logger="grz_db"):
+        db.set_submission_inbox(SUBMISSION_ID, "inbox")
+        db.set_submission_inbox(SUBMISSION_ID, "inbox")
+        db.set_submission_inbox(SUBMISSION_ID, "inbox-2")
+
+    assert caplog.text.count("Overwriting inbox of submission") == 1
+    assert "Overwriting inbox of submission 123456789_2024-01-01_abcdef01: 'inbox' -> 'inbox-2'." in caplog.text
+
+
+def test_set_submission_inbox_unknown_submission_raises(db: SubmissionDb) -> None:
+    with pytest.raises(SubmissionNotFoundError):
+        db.set_submission_inbox(SUBMISSION_ID, "inbox")
+
+
+def test_a_database_that_is_behind_is_asked_again(db: SubmissionDb, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pins the other half of :meth:`SubmissionDb._confirm_schema`'s cache.
+
+    A remembered failure would outlive the upgrade that fixed it, and ``db upgrade`` could
+    never get past it.
+    """
+    behind = True
+    monkeypatch.setattr(SubmissionDb, "_at_latest_schema", lambda self: not behind)
+    db._schema_confirmed = False
+
+    with pytest.raises(OutdatedDatabaseSchemaError):
+        db.get_submission(SUBMISSION_ID)
+
+    behind = False
+    assert db.get_submission(SUBMISSION_ID) is None, "the upgrade must be picked up"
+
+
+@pytest.mark.parametrize(
+    ("query", "busy_timeout_ms"),
+    [("", 60_000), ("?timeout=2", 2_000)],
+    ids=["default", "url-sets-timeout"],
+)
+def test_sqlite_connections_wait_for_a_lock(tmp_path, query: str, busy_timeout_ms: int) -> None:
+    """A SQLite connection waits for another connection's lock rather than failing after 5 s.
+
+    One commit on a busy disk can hold the lock longer than the sqlite3 default. The migrations
+    build their engine from the same URL, so the URL must carry the timeout. A ``timeout`` the
+    URL already sets is kept.
+    """
+    db = SubmissionDb(db_url=f"sqlite:///{tmp_path / 'test.db'}{query}", author=None)
+    migration_engine = sqlalchemy.create_engine(db._get_alembic_config().get_main_option("sqlalchemy.url"))
+    for engine in (db.engine, migration_engine):
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == busy_timeout_ms
+        engine.dispose()
+
+
+def test_the_migrations_get_the_password_of_the_database_url() -> None:
+    """``str(url)`` hides the password as ``***``, so the migrations would log in with a wrong one.
+
+    A ``%`` in the password must survive the interpolation of the alembic config.
+    """
+    db = SubmissionDb(db_url="postgresql+psycopg://grz:p%25ss@localhost/grz", author=None)
+
+    migration_url = sqlalchemy.make_url(db._get_alembic_config().get_main_option("sqlalchemy.url"))
+
+    assert migration_url.password == "p%ss"
+    db.engine.dispose()

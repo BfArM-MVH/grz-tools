@@ -4,7 +4,7 @@ GRZ Control CLI for GRZ administrators.
 
 from importlib.metadata import PackageNotFoundError, version
 
-__version__ = "4.0.0"  # This version is managed by release-please
+__version__ = "5.0.0"  # This version is managed by release-please
 
 
 def get_versions() -> dict[str, str | None]:
@@ -16,7 +16,6 @@ def get_versions() -> dict[str, str | None]:
 
     return {
         "grzctl": get_version("grzctl"),
-        "grz-cli": get_version("grz-cli"),
         "grz-common": get_version("grz-common"),
         "grz-db": get_version("grz-db"),
         "grz-pydantic-models": get_version("grz-pydantic-models"),

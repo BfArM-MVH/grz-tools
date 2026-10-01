@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import botocore.handlers
+import grz_common.exceptions as grzexc
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
 from pydantic import BaseModel
@@ -24,7 +25,7 @@ from tqdm.auto import tqdm
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import DownloadState, FileProgressLogger
-from ..transfer import init_s3_client
+from ..transfer import head_object, init_s3_client, raise_if_cleaned, s3_errors
 
 MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
 MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
@@ -37,12 +38,6 @@ log = logging.getLogger(__name__)
 
 # see discussion: https://github.com/boto/boto3/discussions/4251 to accept bucket names with ":" in the name
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")
-
-
-class DownloadError(Exception):
-    """Exception raised when an upload fails"""
-
-    pass
 
 
 class S3BotoDownloadWorker:
@@ -103,7 +98,12 @@ class S3BotoDownloadWorker:
         :param submission_id: submission folder on S3 structure
         :param metadata_dir: Path of the metadir folder
         :param metadata_file_name: name of the metadata.json
+        :raises MissingSubmissionFileError: If the bucket holds no such metadata file.
+        :raises SubmissionCleanedError: If ``grzctl clean`` has started on the submission.
+        :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+        :raises DownloadError: For any other error of the S3 client.
         """
+        bucket = self._s3_options.bucket
         metadata_key = str(Path(submission_id) / metadata_dir.name / metadata_file_name)
         metadata_file_path = metadata_dir / metadata_file_name
 
@@ -112,17 +112,18 @@ class S3BotoDownloadWorker:
             # Ensure the local target directory exists
             metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
-            self._s3_client.download_file(self._s3_options.bucket, metadata_key, str(metadata_file_path))
+            # The HEAD request of download_file reports only the HTTP status.
+            # head_object also tells a missing file from a faulty setup.
+            head_object(self._s3_client, bucket, metadata_key, missing_error=grzexc.MissingSubmissionFileError)
+            # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json is empty,
+            # and its parsing would fail as if the LE had sent an invalid file.
+            raise_if_cleaned(self._s3_client, bucket, submission_id)
+            with s3_errors(f"Download of s3://{bucket}/{metadata_key}", grzexc.DownloadError):
+                self._s3_client.download_file(bucket, metadata_key, str(metadata_file_path))
             self.__log.info("Metadata download complete.")
-        except botocore.exceptions.ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                error_msg = f"Metadata file '{metadata_key}' not found in S3 bucket '{self._s3_options.bucket}'."
-                self.__log.error(error_msg)
-                raise DownloadError(error_msg) from e
-            raise e
         except Exception as e:
-            self.__log.error("Download failed for metadata '%s'", metadata_key)
-            raise e
+            self.__log.error("Download failed for metadata '%s': %s", metadata_key, e)
+            raise
 
     def _download_with_progress(self, local_file_path: str, s3_object_id: str):
         """
@@ -130,8 +131,14 @@ class S3BotoDownloadWorker:
 
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
+        :raises MissingSubmissionFileError: If the bucket holds no such object.
+        :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+        :raises DownloadError: For any other error of the S3 client.
         """
-        s3_object_meta = self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
+        bucket = self._s3_options.bucket
+        s3_object_meta = head_object(
+            self._s3_client, bucket, s3_object_id, missing_error=grzexc.MissingSubmissionFileError
+        )
         filesize = s3_object_meta["ContentLength"]
 
         chunksize = (
@@ -150,9 +157,12 @@ class S3BotoDownloadWorker:
         )
 
         transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
-        with tqdm(total=filesize, postfix=f"{s3_object_id}", **TQDM_DEFAULTS) as progress_bar:  # type: ignore[call-overload]
+        with (
+            tqdm(total=filesize, postfix=f"{s3_object_id}", **TQDM_DEFAULTS) as progress_bar,  # type: ignore[call-overload]
+            s3_errors(f"Download of s3://{bucket}/{s3_object_id}", grzexc.DownloadError),
+        ):
             transfer.download_file(
-                self._s3_options.bucket,
+                bucket,
                 s3_object_id,
                 local_file_path,
                 callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
@@ -186,20 +196,6 @@ class S3BotoDownloadWorker:
                 state=DownloadState(download_successful=True, submission_id=submission_id),
             )
 
-        except botocore.exceptions.ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                error_msg = f"File '{s3_object_id}' not found in S3 bucket '{self._s3_options.bucket}'."
-                exc = DownloadError(error_msg)
-            else:
-                error_msg = f"S3 client error for '{s3_object_id}': {e}"
-                exc = e  # type: ignore[assignment]
-            self.__log.error(error_msg)
-            progress_logger.set_state(
-                local_file_path,
-                file_metadata,
-                state=DownloadState(download_successful=False, errors=[str(exc)], submission_id=submission_id),
-            )
-            raise exc from e
         except Exception as e:
             self.__log.error("Download failed for '%s': %s", str(local_file_path), e)
             progress_logger.set_state(

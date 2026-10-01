@@ -1,23 +1,26 @@
+import importlib.resources
 import json
 import logging
 from datetime import datetime
 from typing import Any, Self
 
 import botocore
+import grz_common.exceptions as grzexc
 from grz_pydantic_models.common import as_aware_datetime
 from packaging.version import Version
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_core import core_schema
 
-from ..exceptions import (
-    VersionFileAccessError,
-    VersionFileNotFoundError,
-    VersionFileValidationError,
-)
 from ..transfer import init_s3_client
 from .s3 import S3Options
 
 logger = logging.getLogger(__name__)
+
+BUNDLED_VERSION_FILE_PACKAGE = "grz_common.version_file"
+
+VERSION_FILE_KEY = "version.json"
+"""Canonical name of the version-compatibility policy, both as the bundled package
+resource filename and as the object key it is published under in an inbox bucket."""
 
 
 class PydanticVersion(Version):
@@ -124,13 +127,38 @@ class VersionFile(BaseModel):
             if error_code == "NoSuchKey":
                 msg = f"Version file not found at s3://{s3_options.bucket}/{version_file_key}."
                 logger.critical(msg)
-                raise VersionFileNotFoundError(msg) from e
+                raise grzexc.VersionFileNotFoundError(msg) from e
 
             msg = f"Unable to access s3://{s3_options.bucket}/{version_file_key} (Error code: {error_code})."
             logger.error(msg, exc_info=e)
-            raise VersionFileAccessError(msg) from e
+            raise grzexc.VersionFileAccessError(msg) from e
 
         except (ValidationError, json.JSONDecodeError, ValueError) as e:
             msg = f"Invalid version file format or content: {e}"
             logger.error(msg, exc_info=e)
-            raise VersionFileValidationError(msg) from e
+            raise grzexc.VersionFileValidationError(msg) from e
+
+    @classmethod
+    def read_bundled_text(cls) -> str:
+        """Return the raw JSON text of the canonical version.json policy bundled with grz-common.
+
+        Shipped as package data (rather than fetched over the network) so the policy a given
+        grz-common release publishes always matches the schema that release understands.
+
+        :raises VersionFileValidationError: If the bundled version file is invalid.
+        """
+        content = (
+            importlib.resources.files(BUNDLED_VERSION_FILE_PACKAGE)
+            .joinpath(VERSION_FILE_KEY)
+            .read_text(encoding="utf-8")
+        )
+        try:
+            # Validate only - the parsed model is discarded. The exact bundled bytes are
+            # returned as-is, rather than cls(**data).model_dump_json(), so what gets
+            # published to S3 always matches what's actually committed and reviewed here.
+            cls.model_validate_json(content)
+        except ValidationError as e:
+            msg = f"Invalid bundled version file: {e}"
+            logger.error(msg, exc_info=e)
+            raise grzexc.VersionFileValidationError(msg) from e
+        return content

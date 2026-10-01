@@ -29,6 +29,7 @@ from grz_pydantic_models.submission.metadata import (
     get_accepted_versions,
 )
 from grz_pydantic_models.submission.metadata.v1 import (
+    LOCAL_CASE_ID_PLACEHOLDERS,
     PROFILES_REQUIRING_PERIOD_END,
     REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
@@ -40,6 +41,7 @@ from grz_pydantic_models.submission.metadata.v1 import (
     LibraryType,
     ResearchConsent,
     ResearchConsentCodes,
+    is_redacted_local_case_id,
     redact_metadata_dict,
 )
 from grz_pydantic_models_testing import example_metadata, example_research_consent, example_terminology
@@ -285,7 +287,7 @@ def test_wgs_trio_1_3_fail_missing_presentation_date(version: str):
     itertools.product(["panel_tumor_only", "wes_tumor_germline", "wgs_tumor_germline", "wgs_trio"], TESTED_VERSIONS),
 )
 def test_invalid_short_read_submission_with_bam(dataset: str, version: str):
-    """BAM files should only be allowed in *_lr lab data"""
+    """BAM files should only be allowed in ``*_lr`` lab data."""
     metadata = json.loads(_metadata_raw(dataset, version))
     # add a BAM file
     metadata["donors"][0]["labData"][0]["sequenceData"]["files"].append(
@@ -1748,6 +1750,63 @@ def test_no_scope_justification_standard_passes_after_cutoff(version: str, justi
             consent.pop("scope", None)
 
     GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
+
+
+def _archived(metadata: GrzSubmissionMetadata, local_case_id: str) -> GrzSubmissionMetadata:
+    """A copy redacted the way archival redacts it, with *local_case_id* as the placeholder."""
+    raw = json.loads(metadata.model_dump_json(by_alias=True))
+    raw["submission"]["tanG"] = REDACTED_TAN
+    raw["submission"]["localCaseId"] = local_case_id
+    for donor in raw["donors"]:
+        if donor["relation"] == "index":
+            donor["donorPseudonym"] = "index"
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+@pytest.mark.parametrize("placeholder", LOCAL_CASE_ID_PLACEHOLDERS, ids=["empty", "sentinel"])
+def test_restore_redacted_fields_replaces_both_placeholder_spellings(placeholder: str) -> None:
+    original = _metadata("wgs_tumor_germline", "1.3.0")
+    archived = _archived(original, placeholder)
+    assert archived.submission.tan_g == REDACTED_TAN
+
+    unrestored = archived.restore_redacted_fields(
+        tan_g=original.submission.tan_g,
+        local_case_id=original.submission.local_case_id,
+    )
+
+    assert unrestored == frozenset()
+    assert archived.submission.tan_g == original.submission.tan_g
+    assert archived.submission.local_case_id == original.submission.local_case_id
+
+
+@pytest.mark.parametrize("supplied", [None, *LOCAL_CASE_ID_PLACEHOLDERS], ids=["none", "empty", "sentinel"])
+def test_restore_redacted_fields_reports_what_it_could_not_restore(supplied: str | None) -> None:
+    """A placeholder is no better than nothing, so supplying one restores neither field."""
+    archived = _archived(_metadata("wgs_tumor_germline", "1.3.0"), "")
+
+    unrestored = archived.restore_redacted_fields(tan_g=None, local_case_id=supplied)
+
+    assert unrestored == frozenset({"tan_g", "local_case_id"})
+    assert archived.submission.tan_g == REDACTED_TAN
+    assert is_redacted_local_case_id(archived.submission.local_case_id)
+
+
+def test_restore_redacted_fields_leaves_an_unredacted_copy_alone() -> None:
+    """An unredacted value is authoritative and must survive untouched."""
+    metadata = _metadata("wgs_tumor_germline", "1.3.0")
+    original_tan_g = metadata.submission.tan_g
+    original_local_case_id = metadata.submission.local_case_id
+
+    unrestored = metadata.restore_redacted_fields(tan_g="f" * 64, local_case_id="something-else")
+
+    assert unrestored == frozenset()
+    assert metadata.submission.tan_g == original_tan_g
+    assert metadata.submission.local_case_id == original_local_case_id
+
+
+def test_is_redacted_local_case_id_distinguishes_a_real_identifier_from_every_placeholder() -> None:
+    assert not is_redacted_local_case_id("case-4711")
+    assert all(is_redacted_local_case_id(value) for value in (None, *LOCAL_CASE_ID_PLACEHOLDERS))
 
 
 ALL_EXAMPLES = sorted(

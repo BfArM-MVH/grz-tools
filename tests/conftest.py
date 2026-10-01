@@ -10,10 +10,12 @@ from pathlib import Path
 from shutil import copyfile
 
 import boto3
+import botocore.client
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
 import pytest
+from botocore.exceptions import ClientError
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
 from grz_db import testing as grz_db_testing
@@ -54,6 +56,8 @@ crypt4gh_grz_public_key_file = "tests/mock_files/grz_mock_public_key.pub"
 crypt4gh_submitter_private_key_file = "tests/mock_files/submitter_mock_private_key.sec"
 crypt4gh_submitter_public_key_file = "tests/mock_files/submitter_mock_public_key.pub"
 db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
+_GRZ_PRIVATE_KEY_PATH = str(Path(crypt4gh_grz_private_key_file).resolve())
+"""An existing key file for the key path fields of the grzctl config, which need an existing file."""
 db_known_keys_file = "tests/mock_files/db/known_keys"
 
 
@@ -259,13 +263,11 @@ def temp_metadata_file_path(temp_data_dir_path) -> Path:
 @pytest.fixture
 def keys_config_content(
     crypt4gh_grz_public_key_file_path,
-    crypt4gh_grz_private_key_file_path,
     crypt4gh_submitter_private_key_file_path,
 ):
     return {
         "keys": {
             "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
-            "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
             "submitter_private_key_path": str(crypt4gh_submitter_private_key_file_path),
         }
     }
@@ -288,7 +290,7 @@ def _db_config_content(private_key_path, known_keys_path, database_url):
         "db": {
             "database_url": database_url,
             "author": {"name": "Alice", "private_key_path": str(private_key_path)},
-            "known_public_keys": str(known_keys_path),
+            "known_public_keys_file": str(known_keys_path),
         }
     }
 
@@ -346,25 +348,23 @@ def encrypt_config_model(keys_config_content):
 
 
 @pytest.fixture
-def db_config_model(db_config_content, grzctl_keys_config, grzctl_identifiers_config):
+def db_config_model(db_config_content, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **db_config_content,
-        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         archives=_grzctl_archives(),
-        pruefbericht={},
-        keys=grzctl_keys_config,
+        pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
         identifiers=grzctl_identifiers_config,
     )
 
 
 @pytest.fixture
-def migrated_db_config_model(migrated_db_config_content, grzctl_keys_config, grzctl_identifiers_config):
+def migrated_db_config_model(migrated_db_config_content, grzctl_identifiers_config):
     return grzctl.models.config.GrzctlConfig(
         **migrated_db_config_content,
-        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         archives=_grzctl_archives(),
-        pruefbericht={},
-        keys=grzctl_keys_config,
+        pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
         identifiers=grzctl_identifiers_config,
     )
 
@@ -426,7 +426,7 @@ def temp_identifiers_config_file_path(temp_data_dir_path, identifiers_config_mod
 def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_content) -> Path:
     config_file = temp_data_dir_path / "config.pruefbericht.yaml"
     config = _grzctl_model(
-        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
         db=_GRZCTL_DB_DUMMY,
         pruefbericht=pruefbericht_config_content["pruefbericht"],
     )
@@ -437,15 +437,12 @@ def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_c
 
 # Shared building blocks for GrzctlConfig test fixtures
 _GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
-
-
-@pytest.fixture()
-def grzctl_keys_config():
-    """Keys section for GrzctlConfig: GRZ private + public key, using distinct mock files."""
-    return {
-        "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
-        "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
-    }
+_GRZCTL_PRUEFBERICHT_DUMMY = {
+    "authorization_url": "https://auth.example.org",
+    "client_id": "example-client",
+    "client_secret": "example-secret",
+    "api_base_url": "https://api.example.org",
+}
 
 
 @pytest.fixture()
@@ -454,8 +451,13 @@ def grzctl_identifiers_config():
     return {"grz": "GRZK00007"}
 
 
-def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
-    """Build archives config dict. Pass *endpoint_url* for moto-backed tests."""
+def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str | None = None) -> dict:
+    """Build archives config dict. Pass *endpoint_url* for moto-backed tests.
+
+    *public_key_path* defaults to the GRZ mock public key.
+    """
+    if public_key_path is None:
+        public_key_path = str(Path(crypt4gh_grz_public_key_file).resolve())
 
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
@@ -469,26 +471,16 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     }
 
 
-def _grzctl_config_dict(
-    *, leistungserbringer, db=None, keys=None, pruefbericht=None, identifiers=None, endpoint_url=None
-) -> dict:
+def _grzctl_config_dict(*, leistungserbringer, db=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
 
-    *keys* and *identifiers* default to valid placeholders for tests that don't
-    exercise those sections.  In tests that need real key material, pass values
-    from the ``grzctl_keys_config`` / ``grzctl_identifiers_config`` fixtures.
+    *identifiers* defaults to a valid placeholder for tests that don't exercise that section.
     """
     return {
         "leistungserbringer": leistungserbringer,
         "archives": _grzctl_archives(endpoint_url=endpoint_url),
         "db": db if db is not None else _GRZCTL_DB_DUMMY,
-        "keys": keys
-        if keys is not None
-        else {
-            "grz_private_key_path": str(Path(crypt4gh_grz_private_key_file).resolve()),
-            "grz_public_key_path": str(Path(crypt4gh_grz_public_key_file).resolve()),
-        },
-        "pruefbericht": pruefbericht if pruefbericht is not None else {},
+        "pruefbericht": pruefbericht if pruefbericht is not None else _GRZCTL_PRUEFBERICHT_DUMMY,
         "identifiers": identifiers if identifiers is not None else {"grz": "GRZK00007"},
     }
 
@@ -497,7 +489,6 @@ def _grzctl_model(
     *,
     leistungserbringer,
     db=None,
-    keys=None,
     pruefbericht=None,
     identifiers=None,
     endpoint_url=None,
@@ -507,7 +498,6 @@ def _grzctl_model(
         **_grzctl_config_dict(
             leistungserbringer=leistungserbringer,
             db=db,
-            keys=keys,
             pruefbericht=pruefbericht,
             identifiers=identifiers,
             endpoint_url=endpoint_url,
@@ -520,7 +510,7 @@ def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
     """GrzctlConfig-format S3-only config for grzctl CLI tests."""
     config_file = temp_data_dir_path / "config.grzctl_s3.yaml"
     config = _grzctl_model(
-        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
     )
     with open(config_file, "w") as fd:
         config.to_yaml(fd)
@@ -528,13 +518,13 @@ def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
 
 
 @pytest.fixture
-def temp_grzctl_keys_config_file_path(temp_data_dir_path, keys_config_content) -> Path:
-    """GrzctlConfig-format keys config for grzctl CLI tests."""
+def temp_grzctl_keys_config_file_path(temp_data_dir_path) -> Path:
+    """GrzctlConfig-format config for grzctl CLI tests, whose inbox key decrypts the example submission."""
     config_file = temp_data_dir_path / "config.grzctl_keys.yaml"
+    grz_private_key_path = str(Path(crypt4gh_grz_private_key_file).resolve())
     config = _grzctl_model(
-        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": "/dev/null"}}}},
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": grz_private_key_path}}}},
         db=_GRZCTL_DB_DUMMY,
-        keys=keys_config_content["keys"],
     )
     with open(config_file, "w") as fd:
         config.to_yaml(fd)
@@ -553,8 +543,8 @@ def temp_grzctl_s3_db_config_file_path(temp_data_dir_path, db_config_model) -> P
 @pytest.fixture
 def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitter_private_key_file_path):
     keys = Crypt4GH.prepare_c4gh_keys(
-        recipient_key_file_path=crypt4gh_grz_public_key_file_path,
-        sender_private_key=crypt4gh_submitter_private_key_file_path,
+        recipient_public_key=Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path),
+        sender_private_key=Crypt4GH.retrieve_private_key(crypt4gh_submitter_private_key_file_path),
     )
     return keys
 
@@ -562,8 +552,10 @@ def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitt
 @pytest.fixture
 def aws_credentials(s3_config_model):
     """Mocked AWS Credentials for moto."""
+    from grz_common.models.base import get_secret_value
+
     os.environ["AWS_ACCESS_KEY_ID"] = s3_config_model.s3.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = s3_config_model.s3.secret
+    os.environ["AWS_SECRET_ACCESS_KEY"] = get_secret_value(s3_config_model.s3.secret)
     os.environ["MOTO_ALLOW_NONEXISTENT_REGION"] = "1"
     with mock_aws():
         yield
@@ -581,6 +573,33 @@ def remote_bucket(boto_s3_client, s3_config_model):
     boto_s3_client.create_bucket(Bucket=s3_config_model.s3.bucket)
 
     return boto3.resource("s3").Bucket(s3_config_model.s3.bucket)
+
+
+@pytest.fixture(params=["missing-bucket", "rejected-credentials"])
+def faulty_s3_setup(request, aws_credentials, monkeypatch):
+    """Answer S3 requests as S3 does for a faulty setup: the bucket is missing, or S3 rejects the credentials.
+
+    S3 answers a HEAD request without a body, so botocore sets the HTTP status as the error code.
+    moto sends a body with some HEAD errors, such as ``NoSuchBucket``, so the fixture drops their code.
+    """
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def call(self, operation_name, kwargs):
+        try:
+            if request.param == "rejected-credentials":
+                error = {"Code": "InvalidAccessKeyId", "Message": "The AWS Access Key Id does not exist."}
+                raise ClientError({"Error": error, "ResponseMetadata": {"HTTPStatusCode": 403}}, operation_name)
+            return original_call(self, operation_name, kwargs)
+        except ClientError as e:
+            if operation_name != "HeadObject":
+                raise
+            status = e.response["ResponseMetadata"]["HTTPStatusCode"]
+            error = {"Code": str(status), "Message": ""}
+            raise ClientError(
+                {"Error": error, "ResponseMetadata": {"HTTPStatusCode": status}}, operation_name
+            ) from None
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", call)
 
 
 @pytest.fixture

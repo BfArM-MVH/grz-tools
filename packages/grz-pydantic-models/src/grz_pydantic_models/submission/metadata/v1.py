@@ -12,7 +12,7 @@ from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Self, cast
 
 from pydantic import (
     AfterValidator,
@@ -39,6 +39,18 @@ from .versioning import Version
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
 REDACTED_TAN = "0" * 64
 REDACTED_LOCAL_CASE_ID = "REDACTED_LOCAL_CASE_ID"
+# The archive contains both an empty string and REDACTED_LOCAL_CASE_ID as redaction
+# placeholders; neither spelling identifies a patient.
+LOCAL_CASE_ID_PLACEHOLDERS = ("", REDACTED_LOCAL_CASE_ID)
+
+
+def is_redacted_local_case_id(local_case_id: str | None) -> bool:
+    """Whether *local_case_id* is a redaction placeholder rather than a submitter's value.
+
+    A placeholder identifies no patient, so it must never be stored as one, keyed on, or
+    treated as a case identifier.
+    """
+    return local_case_id is None or local_case_id in LOCAL_CASE_ID_PLACEHOLDERS
 
 
 def redact_metadata_dict(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -46,16 +58,13 @@ def redact_metadata_dict(metadata: dict[str, Any]) -> dict[str, Any]:
 
     Replaces ``tanG`` with :data:`REDACTED_TAN`, ``localCaseId`` with
     :data:`REDACTED_LOCAL_CASE_ID`, and the index donor's pseudonym with ``"index"``.
-    v1.1.1 to v1.1.7 (still supported) told submitters to put the tanG in ``donorPseudonym``;
-    v1.1.8 onward says ``"index"``. So that overwrite can be removing a real tanG.
+    v1.1.7 and earlier (still supported) told submitters to put the tanG in ``donorPseudonym``;
+    v1.2.1 onward says ``"index"``. So that overwrite can be removing a real tanG.
 
     Takes a plain dict so archival can apply it to the raw metadata.json it read from disk,
     keeping the archived record faithful to what the submitter sent, while
     :meth:`GrzSubmissionMetadata.to_redacted_dict` applies the same rule to a model dump.
     One list of sensitive fields, two carriers.
-
-    Archived documents may also carry an empty ``localCaseId`` instead of the
-    :data:`REDACTED_LOCAL_CASE_ID` placeholder, so a reader has to treat both as redacted.
 
     :param metadata: Parsed metadata JSON. Not modified.
     :returns: A deep copy of ``metadata`` with the sensitive fields redacted.
@@ -1108,8 +1117,8 @@ class LabDatum(StrictBaseModel):
 
 
 class Donor(StrictBaseModel):
-    # v1.1.1 to v1.1.7 (still supported) said "For Index patient use TanG", so a document in
-    # that range may carry the tanG here. v1.1.8 onward says "index".
+    # v1.1.7 and earlier (still supported) said "For Index patient use TanG", so a document in
+    # that range may carry the tanG here. v1.2.1 onward says "index", as the description below.
     donor_pseudonym: str
     """
     A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing;
@@ -1314,6 +1323,41 @@ class GrzSubmissionMetadata(StrictBaseModel):
         :returns: Redacted metadata dictionary
         """
         return redact_metadata_dict(self.get_raw_dict())
+
+    def restore_redacted_fields(self, *, tan_g: str | None, local_case_id: str | None) -> frozenset[str]:
+        """Put authoritative values back into the fields redaction replaced, in place.
+
+        The partial inverse of :meth:`to_redacted_dict`, for a caller that kept the
+        submitter's values elsewhere: a metadata.json read back from an archive carries
+        placeholders, not what was submitted.
+
+        Redaction replaces a third field, the index donor's pseudonym, which this
+        deliberately leaves alone. Nothing that keeps a copy of a submission stores anything
+        but ``"index"`` for the index donor, so there is no authoritative value to restore
+        it from.
+
+        A field holding something other than a placeholder is left alone and stays
+        authoritative, so an unredacted copy is never overwritten.
+
+        :param tan_g: Value to restore ``tanG`` to, or ``None`` if unknown.
+        :param local_case_id: Value to restore ``localCaseId`` to, or ``None`` if unknown.
+        :returns: The names of the fields still redacted because no value was supplied.
+        """
+        unrestored = set()
+
+        if self.submission.tan_g == REDACTED_TAN:
+            if tan_g:
+                self.submission.tan_g = tan_g
+            else:
+                unrestored.add("tan_g")
+
+        if is_redacted_local_case_id(self.submission.local_case_id):
+            if not is_redacted_local_case_id(local_case_id):
+                self.submission.local_case_id = cast(str, local_case_id)
+            else:
+                unrestored.add("local_case_id")
+
+        return frozenset(unrestored)
 
     @field_validator("donors", mode="after")
     @classmethod

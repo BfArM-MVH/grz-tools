@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import enum
 import json
 import logging
 import math
@@ -15,15 +16,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import botocore.handlers
+import grz_common.exceptions as grzexc
+from boto3.exceptions import S3UploadFailedError  # type: ignore[import-untyped]
 from boto3.s3.transfer import S3Transfer, TransferConfig  # type: ignore[import-untyped]
-from grz_common.exceptions import UploadError
+from botocore.exceptions import ClientError
 from grz_pydantic_models.submission.metadata import redact_metadata_dict
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import FileProgressLogger, UploadState
-from ..transfer import init_s3_client, init_s3_resource
+from ..transfer import head_object, init_s3_client, init_s3_resource, s3_errors
 from ..utils.redaction import redact_file
 
 MULTIPART_THRESHOLD = 8 * 1024**2  # 8MiB, boto3 default, largely irrelevant
@@ -36,6 +39,15 @@ log = logging.getLogger(__name__)
 
 # see discussion: https://github.com/boto/boto3/discussions/4251 for acception bucketnames with : in the name
 botocore.handlers.VALID_BUCKET = re.compile(r"^[:a-zA-Z0-9.\-_]{1,255}$")  # type: ignore[import-untyped]
+
+
+class _ObjectPresence(enum.StrEnum):
+    """Whether the bucket holds an object, as far as S3 says."""
+
+    EXISTS = "exists"
+    MISSING = "missing"
+    UNKNOWN = "unknown"
+    """S3 denies access. Without the ListBucket permission, it does so for a missing object as well."""
 
 
 class UploadWorker(metaclass=abc.ABCMeta):
@@ -64,6 +76,9 @@ class UploadWorker(metaclass=abc.ABCMeta):
     def archive(self, encrypted_submission: EncryptedSubmission):
         """
         Archive an encrypted submission within a GRZ
+
+        If the archive already holds the submission's metadata, an earlier run finished the archival.
+        This run then returns without uploading anything.
 
         :param encrypted_submission: The encrypted submission to archive
         :raises UploadError: when archival failed
@@ -103,6 +118,8 @@ class S3BotoUploadWorker(UploadWorker):
         Upload a single file to the specified object ID
         :param local_file_path: Path to the file to upload
         :param s3_object_id: Remote S3 object ID under which the file should be stored
+        :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+        :raises UploadError: For any other error of the S3 client.
         """
         self.__log.info(f"Uploading {local_file_path} to {s3_object_id}...")
 
@@ -127,36 +144,43 @@ class S3BotoUploadWorker(UploadWorker):
 
         transfer = S3Transfer(self._s3_client, config)  # type: ignore[arg-type]
         progress_bar = tqdm(total=filesize, desc="UPLOAD  ", **TQDM_DEFAULTS, postfix=f"{s3_object_id}")  # type: ignore[call-overload]
-        transfer.upload_file(
-            str(local_file_path),
-            self._s3_options.bucket,
-            s3_object_id,
-            callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
-        )
+        with s3_errors(f"Upload to s3://{self._s3_options.bucket}/{s3_object_id}", grzexc.UploadError):
+            try:
+                transfer.upload_file(
+                    str(local_file_path),
+                    self._s3_options.bucket,
+                    s3_object_id,
+                    callback=lambda bytes_transferred: progress_bar.update(bytes_transferred),
+                )
+            except S3UploadFailedError as e:
+                # S3Transfer replaces the ClientError that carries the error code
+                if not isinstance(e.__context__, ClientError):
+                    raise
+                raise e.__context__ from None
 
-    def _remote_id_exists(self, s3_object_id: str) -> bool:
+    def _remote_object_presence(self, s3_object_id: str) -> _ObjectPresence:
         """
-        Determine if a remote ID already exists
+        Determine whether the bucket holds an object
         :param s3_object_id: Remote S3 object ID under which the file should be stored
+        :returns: Whether the object exists or is missing, or ``UNKNOWN`` if S3 denies access.
+        :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+        :raises UploadError: For any other error of the S3 client.
         """
-        exists = True
         try:
-            self._s3_client.head_object(Bucket=self._s3_options.bucket, Key=s3_object_id)
-        except self._s3_client.exceptions.NoSuchKey:
-            exists = False
-        except botocore.exceptions.ClientError as error:
-            if error.response["Error"]["Code"] in {"403", "404"}:
-                # backend can return forbidden instead if user has no ListBucket permission
-                exists = False
-            else:
-                raise error
-
-        return exists
+            head_object(self._s3_client, self._s3_options.bucket, s3_object_id, grzexc.UploadError)
+        except grzexc.MissingObjectError:
+            return _ObjectPresence.MISSING
+        except grzexc.UploadError as e:
+            cause = e.__cause__
+            if isinstance(cause, botocore.exceptions.ClientError) and cause.response["Error"]["Code"] == "AccessDenied":
+                return _ObjectPresence.UNKNOWN
+            raise
+        return _ObjectPresence.EXISTS
 
     def _upload_logged_files(self, encrypted_submission, progress_logger, files_to_upload):
         for file_path in files_to_upload:
             if not Path(file_path).exists():
-                raise UploadError(f"File {file_path} does not exist")
+                raise grzexc.IncompleteSubmissionError(f"File {file_path} does not exist")
 
         for file_path, file_metadata in encrypted_submission.encrypted_files.items():
             logged_state = progress_logger.get_state(file_path, file_metadata)
@@ -221,8 +245,20 @@ class S3BotoUploadWorker(UploadWorker):
         progress_logger = FileProgressLogger[UploadState](self._status_file_path)
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
-        if self._remote_id_exists(metadata_s3_object_id):
-            raise UploadError("Submission already uploaded. Corrections, additions, and followups require a new tanG.")
+        match self._remote_object_presence(metadata_s3_object_id):
+            case _ObjectPresence.EXISTS:
+                raise grzexc.DuplicateUploadError(
+                    "Submission already uploaded. Corrections, additions, and followups require a new tanG."
+                )
+            case _ObjectPresence.UNKNOWN:
+                self.__log.warning(
+                    "Cannot check whether submission '%s' was uploaded before, because S3 denies access to '%s'. "
+                    "Uploading it anyway.",
+                    encrypted_submission.submission_id,
+                    metadata_s3_object_id,
+                )
+            case _ObjectPresence.MISSING:
+                pass
 
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id
@@ -246,8 +282,22 @@ class S3BotoUploadWorker(UploadWorker):
         progress_logger = FileProgressLogger[UploadState](self._status_file_path)
         metadata_file_path, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
 
-        if self._remote_id_exists(metadata_s3_object_id):
-            raise UploadError("Submission already archived.")
+        # archive uploads the metadata last, so an archived metadata object means an earlier run finished
+        match self._remote_object_presence(metadata_s3_object_id):
+            case _ObjectPresence.EXISTS:
+                self.__log.info(
+                    "Submission '%s' is already archived. Nothing to upload.", encrypted_submission.submission_id
+                )
+                return
+            case _ObjectPresence.UNKNOWN:
+                self.__log.warning(
+                    "Cannot check whether submission '%s' is already archived, because S3 denies access to '%s'. "
+                    "Archiving it anyway.",
+                    encrypted_submission.submission_id,
+                    metadata_s3_object_id,
+                )
+            case _ObjectPresence.MISSING:
+                pass
 
         files_to_upload = encrypted_submission.get_encrypted_files_and_object_id()
         files_to_upload[metadata_file_path] = metadata_s3_object_id
@@ -292,22 +342,3 @@ class S3BotoUploadWorker(UploadWorker):
 
             # upload redacted metadata
             self._upload_metadata(redacted_metadata_tmpfile.name, metadata_s3_object_id)
-
-    def _check_for_completed_submission(self, s3_object_id: str) -> bool:
-        try:
-            return s3_object_id in self._list_keys(self._s3_options.bucket, prefix=str(Path(s3_object_id).parent))
-        except Exception as e:
-            self.__log.warning(
-                "Exception occured during check for completed submission; assuming submission is incomplete.",
-                exc_info=e,
-            )
-            return False
-
-    # https://stackoverflow.com/a/54014862
-    def _list_keys(self, bucket_name, prefix="/", delimiter="/", start_after=""):
-        s3_paginator = self._s3_client.get_paginator("list_objects_v2")
-        prefix = prefix.lstrip(delimiter)
-        start_after = (start_after or prefix) if prefix.endswith(delimiter) else start_after
-        for page in s3_paginator.paginate(Bucket=bucket_name, Prefix=prefix, StartAfter=start_after):
-            for content in page.get("Contents", ()):
-                yield content["Key"]

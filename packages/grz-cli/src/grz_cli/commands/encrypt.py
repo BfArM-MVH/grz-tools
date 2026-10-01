@@ -3,11 +3,12 @@
 import logging
 import sys
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
 import click
 import grz_common.cli as grzcli
+from grz_common.models.base import get_secret_value
+from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.worker import Worker
 
 from ..models.config import EncryptConfig
@@ -78,9 +79,26 @@ def encrypt(
 
     config = EncryptConfig.model_validate(configuration)
 
-    submitter_privkey_path = config.keys.submitter_private_key_path
-    if submitter_privkey_path == "":
-        submitter_privkey_path = None
+    if config.keys.grz_public_key is not None:
+        grz_public_key = Crypt4GH.load_public_key(config.keys.grz_public_key, key_name="keys.grz_public_key")
+    elif config.keys.grz_public_key_path is not None:
+        grz_public_key = Crypt4GH.retrieve_public_key(config.keys.grz_public_key_path)
+    else:
+        # This case cannot occur here, but an explicit check is needed for type-checking.
+        sys.exit("Either keys.grz_public_key or keys.grz_public_key_path must be set for encryption.")
+
+    submitter_private_key = None
+    passphrase = get_secret_value(config.keys.submitter_private_key_passphrase)
+    if config.keys.submitter_private_key is not None:
+        submitter_private_key = Crypt4GH.load_private_key(
+            config.keys.submitter_private_key.get_secret_value(),
+            passphrase=passphrase,
+            key_name="keys.submitter_private_key",
+        )
+    elif config.keys.submitter_private_key_path is not None:
+        submitter_private_key = Crypt4GH.retrieve_private_key(
+            config.keys.submitter_private_key_path, passphrase=passphrase
+        )
 
     log.info("Starting encryption...")
 
@@ -93,25 +111,11 @@ def encrypt(
         log_dir=_logs_dir,
         encrypted_files_dir=_encrypted_files_dir,
     )
-    if pubkey := config.keys.grz_public_key:
-        with NamedTemporaryFile("w") as f:
-            f.write(pubkey)
-            f.flush()
-            worker_inst.encrypt(
-                f.name,
-                submitter_private_key_path=submitter_privkey_path,
-                force=force,
-                check_validation_logs=check_validation_logs,
-            )
-    else:
-        # This case cannot occur here, but an explicit check is needed for type-checking.
-        if config.keys.grz_public_key_path is None:
-            sys.exit("GRZ public key path is required for encryption.")
-        worker_inst.encrypt(
-            config.keys.grz_public_key_path,
-            submitter_private_key_path=submitter_privkey_path,
-            force=force,
-            check_validation_logs=check_validation_logs,
-        )
+    worker_inst.encrypt(
+        grz_public_key,
+        submitter_private_key=submitter_private_key,
+        force=force,
+        check_validation_logs=check_validation_logs,
+    )
 
     log.info("Encryption successful!")

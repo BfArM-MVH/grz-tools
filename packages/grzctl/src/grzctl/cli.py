@@ -3,12 +3,14 @@ CLI module for handling command-line interface operations for GRZ administrators
 """
 
 import logging
+import signal
+import sys
 from pathlib import Path
 
 import click
+import grz_common.exceptions as grzexc
 import platformdirs
-import rich.pretty
-from grz_cli.commands.submit import submit
+import yaml
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
 
@@ -22,10 +24,10 @@ from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
 from .commands.encrypt import encrypt
+from .commands.inbox import inbox
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
-from .commands.upload import upload
 from .commands.validate import validate
 from .models.config import GrzctlConfig
 
@@ -92,11 +94,8 @@ def build_cli():
             config = GrzctlConfig.from_path(config_path)
             ctx.obj["configuration"] = config
 
-    # For convenience, include grz-cli commands as well.
     cli.add_command(validate)
     cli.add_command(encrypt)
-    cli.add_command(upload)
-    cli.add_command(submit)
 
     cli.add_command(list_submissions, name="list")
     cli.add_command(download)
@@ -106,6 +105,7 @@ def build_cli():
     cli.add_command(consent)
     cli.add_command(pruefbericht)
     cli.add_command(db)
+    cli.add_command(inbox)
     cli.add_command(change_request_template)
     cli.add_command(change_request_validate)
     cli.add_command(report)
@@ -115,19 +115,36 @@ def build_cli():
 
 
 @click.command()
+@click.option(
+    "--reveal-secrets",
+    is_flag=True,
+    help="Print secret values in plain text instead of '**********', so the output loads back as a config file.",
+)
 @click.pass_context
-def dump_config(ctx: click.Context):
-    """Dump the loaded grzctl configuration."""
+def dump_config(ctx: click.Context, reveal_secrets: bool):
+    """Dump the loaded grzctl configuration as YAML."""
     config: GrzctlConfig = ctx.obj["configuration"]
-    rich.pretty.pprint(config.model_dump(mode="json", exclude_none=True))
+    data = config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": reveal_secrets})
+    click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
+
+
+def _stop_on_sigterm() -> None:
+    """Let SIGTERM stop a run the way Ctrl-C does, so the running step records ``interrupted``."""
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
 
 
 def main():
     """
     Main entry point for the CLI application.
     """
+    _stop_on_sigterm()
     cli = build_cli()
-    cli()
+    try:
+        cli()
+    except grzexc.GrzError as e:
+        # an expected failure, such as an invalid metadata.json: log its message, not a traceback
+        log.error(e)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

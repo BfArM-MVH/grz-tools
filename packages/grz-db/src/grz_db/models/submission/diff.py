@@ -6,7 +6,24 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Self, cast
 
 if TYPE_CHECKING:
+    from grz_pydantic_models.submission.metadata import SubmissionType
+
+    from grz_db.errors import AmbiguousCaseError
     from grz_db.models.submission import Donor as DbDonor
+
+
+DONORS_KEY = "donors"
+"""Names every donor update and delete at once in an allow-list.
+
+A donor row is keyed by the pseudonym a change may itself be replacing, so there is no finer
+unit to name.
+"""
+
+CASE_LINK_KEY = "case_id"
+"""Names a changed case link, both in an allow-list and in ``ignore_fields``.
+
+It is the column the link is stored in, so operators name it the way they name a field.
+"""
 
 
 class DiffState(StrEnum):
@@ -82,10 +99,47 @@ class FieldDiff[T]:
 
 
 @dataclass
+class CaseLinkDiff:
+    """A pending change to a submission's case link, resolved during :meth:`SubmissionDb.diff`.
+
+    Only constructed when committing would change the link, so its mere presence on a
+    :class:`SubmissionChangeSet` means there is something to write.
+
+    :param before: ``case_id`` currently stored on the submission, if any.
+    :param after: Primary key of the matching existing case, or ``None`` if committing
+        will create a new case.
+    :param submitter_id: Submitter identifier used to resolve the case.
+    :param local_case_id: Submitter-local case identifier used to resolve the case.
+    :param submission_type: Type of the submission. Checked for case-trackability (``test`` is
+        rejected), not against the case.
+    :param psn: RKI pseudonym used to resolve the case, when the caller knows one. Carried so
+        that :meth:`SubmissionDb.commit_changes` can store it on a case it creates, and so a
+        ``PsnResolver`` reaches the same value the diff resolved with. Defaults to ``None``,
+        since no psn is derivable from a submitter's metadata.
+    """
+
+    before: int | None
+    after: int | None
+    submitter_id: str | None
+    local_case_id: str | None
+    submission_type: SubmissionType
+    psn: str | None = None
+
+    @property
+    def state(self) -> DiffState:
+        """NEW when the submission is not yet linked, UPDATED when an existing link would change.
+
+        DELETED cannot occur: a diff never proposes unlinking; ``after is None`` means a new
+        case would be created instead.
+        """
+        return DiffState.NEW if self.before is None else DiffState.UPDATED
+
+
+@dataclass
 class SubmissionDiffCollection:
     """Holds the result of diffing submission-level metadata against the database.
 
-    Fields are categorised the same way as :class:`DonorDiff`:
+    Fields are categorised the same way as :class:`DonorsDiffCollection`:
 
     :param added: Fields that were ``None`` in the database and now have a value.
     :param updated: Fields whose non-null database value differs from the new value.
@@ -100,7 +154,7 @@ class SubmissionDiffCollection:
 
     @property
     def pending(self) -> Generator[FieldDiff, None, None]:
-        """All diffs that need to be written to the database (added + updated + deleted)."""
+        """All field diffs that need to be written to the database (added + updated + deleted)."""
         yield from self.added
         yield from self.updated
         yield from self.deleted
@@ -109,29 +163,6 @@ class SubmissionDiffCollection:
     def has_pending(self) -> bool:
         """True if any field needs to be written to the database (added, updated, or deleted)."""
         return len(self.added) > 0 or len(self.updated) > 0 or len(self.deleted) > 0
-
-    @property
-    def has_pending_destructive(self) -> bool:
-        """True if any field will overwrite or remove an existing database value (updated or deleted)."""
-        return len(self.updated) > 0 or len(self.deleted) > 0
-
-    def withhold_destructive(self, allowed: Container[str]) -> tuple[SubmissionDiffCollection, list[FieldDiff]]:
-        """Split off the destructive diffs whose field is not in ``allowed``.
-
-        Additive diffs are always safe to write, so they stay regardless. This lets a caller permit
-        overwriting a named field without permitting every other overwrite the same diff carries.
-
-        :param allowed: field names whose existing database value may be overwritten or removed.
-        :returns: a collection holding only what may be written, and the diffs held back.
-        """
-        committable = SubmissionDiffCollection(
-            added=list(self.added),
-            updated=[field_diff for field_diff in self.updated if field_diff.key in allowed],
-            deleted=[field_diff for field_diff in self.deleted if field_diff.key in allowed],
-            unchanged=list(self.unchanged),
-        )
-        withheld = [field_diff for field_diff in (*self.updated, *self.deleted) if field_diff.key not in allowed]
-        return committable, withheld
 
     def append(self, field_diff: FieldDiff):
         match field_diff.diff.state:
@@ -169,9 +200,11 @@ class DonorDiff(Diff["DbDonor"]):
 
         if donor.state != DiffState.UNCHANGED:
             for f in sorted(DbDonor.model_fields.keys() - {"submission_id", "pseudonym"}):
-                donor.changes.append(
-                    FieldDiff.classify_field(str(f), getattr(old_value, str(f), None), getattr(new_value, str(f), None))
+                field_diff = FieldDiff.classify_field(
+                    str(f), getattr(old_value, str(f), None), getattr(new_value, str(f), None)
                 )
+                if field_diff.diff.state != DiffState.UNCHANGED:
+                    donor.changes.append(field_diff)
 
         match (old_value, new_value):
             case (None, None):
@@ -207,7 +240,7 @@ class DonorsDiffCollection:
 
     @property
     def pending(self) -> Generator[DonorDiff, None, None]:
-        """All diffs that need to be written to the database (added + updated + deleted)."""
+        """All donor diffs that need to be written to the database (added + updated + deleted)."""
         yield from self.added
         yield from self.updated
         yield from self.deleted
@@ -216,11 +249,6 @@ class DonorsDiffCollection:
     def has_pending(self) -> bool:
         """True if any donor needs to be written to the database (added, updated, or deleted)."""
         return len(self.added) > 0 or len(self.updated) > 0 or len(self.deleted) > 0
-
-    @property
-    def has_pending_destructive(self) -> bool:
-        """True if any donor will overwrite or remove an existing database record (updated or deleted)."""
-        return len(self.updated) > 0 or len(self.deleted) > 0
 
     def append(self, donor_diff: DonorDiff):
         match donor_diff.state:
@@ -232,3 +260,72 @@ class DonorsDiffCollection:
                 self.deleted.append(donor_diff)
             case DiffState.UNCHANGED:
                 self.unchanged.append(donor_diff)
+
+
+@dataclass
+class SubmissionChangeSet:
+    """Everything committing a metadata file would change for one submission.
+
+    :param fields: Column-level diffs on the submission row.
+    :param donors: Donor rows to add, update, or delete.
+    :param case_link: Pending change to the submission's case link, or ``None`` if the
+        link is already in sync (or case resolution was skipped). Applied via
+        :meth:`SubmissionDb.assign_case`, not as a column write.
+    :param case_link_error: Why the case could not be resolved, when it could not be.
+        Whether a case can be identified says nothing about whether the rest of the
+        metadata should be recorded, so this is reported alongside the other diffs
+        rather than raised: the caller decides what an unlinkable submission is worth.
+        ``case_link`` is ``None`` whenever this is set, since there is nothing to write.
+    """
+
+    fields: SubmissionDiffCollection = field(default_factory=SubmissionDiffCollection)
+    donors: DonorsDiffCollection = field(default_factory=DonorsDiffCollection)
+    case_link: CaseLinkDiff | None = None
+    case_link_error: AmbiguousCaseError | None = None
+
+    @property
+    def has_pending(self) -> bool:
+        """True if committing would write anything to the database."""
+        return self.fields.has_pending or self.donors.has_pending or self.case_link is not None
+
+    @property
+    def pending_changes(self) -> list[str]:
+        """Names of every pending change: field diffs, donor diffs, and the case link."""
+        changes = [d.key for d in self.fields.pending]
+        changes += [f"donor '{d.pseudonym}'" for d in self.donors.pending]
+        if self.case_link is not None:
+            source = f"case {self.case_link.before}" if self.case_link.before is not None else "unlinked"
+            target = f"case {self.case_link.after}" if self.case_link.after is not None else "new case"
+            changes.append(f"case link ({source} -> {target})")
+        return sorted(changes)
+
+    @property
+    def destructive_changes(self) -> list[str]:
+        """Names of the existing database values committing would overwrite or remove.
+
+        An existing case link counts: reverting it would undo a deliberate ``case relink``.
+        """
+        return self.undeclared_destructive_changes()
+
+    def undeclared_destructive_changes(self, allowed: Container[str] = frozenset()) -> list[str]:
+        """Names of the destructive changes ``allowed`` does not cover.
+
+        Additive changes never appear: a filled field, a new donor and a first case link destroy
+        nothing. An empty list means the whole change set may be committed as it stands.
+
+        :param allowed: What may be overwritten or removed. A field matches by key, every donor
+            update and delete together as :data:`DONORS_KEY`, and a changed case link as
+            :data:`CASE_LINK_KEY`.
+        :returns: One name per change, sorted.
+        """
+        changes = [d.key for d in (*self.fields.updated, *self.fields.deleted) if d.key not in allowed]
+        if DONORS_KEY not in allowed:
+            changes += [f"donor '{d.pseudonym}'" for d in (*self.donors.updated, *self.donors.deleted)]
+        if self.case_link is not None and self.case_link.state is DiffState.UPDATED and CASE_LINK_KEY not in allowed:
+            changes.append(f"case link (case {self.case_link.before})")
+        return sorted(changes)
+
+    @property
+    def has_pending_destructive(self) -> bool:
+        """True if committing would overwrite or remove any existing database value."""
+        return bool(self.destructive_changes)

@@ -10,8 +10,7 @@ from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metada
 from grzctl.models.config import GrzctlConfig
 
 
-def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/dev/null") -> dict:
-
+def _grzctl_archives(public_key_path: str, endpoint_url: str | None = None) -> dict:
     def _s3(bucket):
         d = {"bucket": bucket, "public_key_path": public_key_path}
         if endpoint_url:
@@ -24,8 +23,49 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str = "/d
     }
 
 
-#: The revision the schema-upgrade tests start from.
 INITIAL_REVISION = "1a9bd994df1b"
+"""The revision the schema-upgrade tests start from."""
+
+PRUEFBERICHT = {
+    "authorization_url": "https://auth.example.org",
+    "client_id": "example-client",
+    "client_secret": "example-secret",
+    "api_base_url": "https://api.example.org",
+}
+"""A ``pruefbericht`` config section with fake values, for tests that never reach BfArM."""
+
+
+@pytest.fixture
+def unread_file() -> str:
+    """An existing file for the key path fields of tests that never read it.
+
+    The key path fields need an existing file, and this conftest module serves as one.
+    """
+    return str(Path(__file__).resolve())
+
+
+@pytest.fixture
+def no_prompt(monkeypatch):
+    """Fail the test if the passphrase prompt opens, and set a wrong ``C4GH_PASSPHRASE``.
+
+    The configured passphrase comes first, so the wrong one in the environment must not matter.
+    """
+    monkeypatch.setenv("C4GH_PASSPHRASE", "wrong-passphrase")
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("the passphrase prompt must not open")
+
+    monkeypatch.setattr("grz_common.utils.crypt.getpass", _fail)
+
+
+@pytest.fixture
+def crypt4gh_public_key() -> str:
+    """A crypt4gh public key as text.
+
+    ``Crypt4GHPublicKey`` only checks for the markers, but ``grzctl encrypt`` loads the key,
+    so its payload decodes to the 32 bytes of an X25519 public key.
+    """
+    return "-----BEGIN CRYPT4GH PUBLIC KEY-----\n7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n-----END CRYPT4GH PUBLIC KEY-----\n"
 
 
 @pytest.fixture
@@ -65,9 +105,7 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
                 },
             }
         },
-        archives=_grzctl_archives(
-            public_key_path=str(public_key_path.resolve()),
-        ),
+        archives=_grzctl_archives(public_key_path=str(public_key_path.resolve())),
         db={
             "database_url": database_url,
             "author": {
@@ -75,13 +113,9 @@ def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
                 "private_key_path": str(private_key_path.resolve()),
                 "private_key_passphrase": "",
             },
-            "known_public_keys": str(public_key_path.resolve()),
+            "known_public_keys_file": str(public_key_path.resolve()),
         },
-        pruefbericht={},
-        keys={
-            "grz_private_key_path": str(private_key_path.resolve()),
-            "grz_public_key_path": str(public_key_path.resolve()),
-        },
+        pruefbericht=PRUEFBERICHT,
         identifiers={"grz": "GRZK00007"},
     )
 
@@ -91,6 +125,12 @@ def _write_config(tmp_path: Path, config: GrzctlConfig) -> Path:
     with open(config_path, "w") as config_file:
         config.to_yaml(config_file)
     return config_path
+
+
+@pytest.fixture
+def offline_config(tmp_path: Path) -> GrzctlConfig:
+    """Config for tests that never open the database."""
+    return _database_config(tmp_path, f"sqlite:///{tmp_path / 'unused.sqlite'}")
 
 
 @pytest.fixture

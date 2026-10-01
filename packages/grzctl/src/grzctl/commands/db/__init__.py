@@ -29,19 +29,24 @@ class SignatureStatus(enum.StrEnum):
 
 
 def _verify_signature(
-    public_keys: dict[str, Ed25519PublicKey], expected_key_comment: str, verifiable_log: VerifiableLog
+    public_keys: dict[str, list[Ed25519PublicKey]], expected_key_comment: str, verifiable_log: VerifiableLog
 ) -> tuple[SignatureStatus, str | None]:
     signature_status = SignatureStatus.UNKNOWN
     verifying_key_comment = None
-    if public_key := public_keys.get(expected_key_comment):
-        try:
-            signature_status = SignatureStatus.VERIFIED if verifiable_log.verify(public_key) else SignatureStatus.FAILED
-        except Exception as e:
-            signature_status = SignatureStatus.ERROR
-            log.error(e)
+    if expected_keys := public_keys.get(expected_key_comment):
+        # A name can hold several keys, for example across a key rotation, and any of them may have signed.
+        signature_status = SignatureStatus.FAILED
+        for public_key in expected_keys:
+            try:
+                if verifiable_log.verify(public_key):
+                    signature_status = SignatureStatus.VERIFIED
+                    break
+            except Exception as e:
+                signature_status = SignatureStatus.ERROR
+                log.error(e)
     else:
         log.debug("Found no key with matching username in comment, trying all keys")
-        for comment, public_key in public_keys.items():
+        for comment, public_key in ((comment, key) for comment, keys in public_keys.items() for key in keys):
             try:
                 if verifiable_log.verify(public_key):
                     signature_status = SignatureStatus.VERIFIED

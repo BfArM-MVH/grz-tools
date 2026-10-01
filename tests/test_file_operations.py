@@ -3,6 +3,7 @@
 import filecmp
 from pathlib import Path
 
+import grz_common.exceptions as grzexc
 import pytest
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.utils.crypt import Crypt4GH
@@ -17,7 +18,7 @@ def test_calculate_sha256(temp_small_file_path: str, temp_small_file_sha256sum):
 
 
 def test_prepare_c4gh_keys(crypt4gh_grz_public_key_file_path: str):
-    keys = Crypt4GH.prepare_c4gh_keys(crypt4gh_grz_public_key_file_path)
+    keys = Crypt4GH.prepare_c4gh_keys(Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path))
     # single key in tuple
     assert len(keys) == 1
     # key method is set to 0
@@ -72,3 +73,22 @@ def test_crypt4gh_encrypt_file(
     Crypt4GH.decrypt_file(tmp_encrypted_file, tmp_decrypted_file, private_key=private_key)
 
     assert filecmp.cmp(temp_small_file_path, tmp_decrypted_file)
+
+
+def test_crypt4gh_decrypt_file_reports_a_changed_byte_as_a_decryption_error(
+    temp_small_file_path: str,
+    crypt4gh_grz_public_keys,
+    crypt4gh_grz_private_key_file_path,
+    tmp_path,
+):
+    """The file is at fault, so the error blames the submission and not the setup."""
+    tmp_encrypted_file = tmp_path / "temp_file.c4gh"
+    Crypt4GH.encrypt_file(temp_small_file_path, tmp_encrypted_file, crypt4gh_grz_public_keys)
+    encrypted = bytearray(tmp_encrypted_file.read_bytes())
+    # the last byte belongs to the MAC of the last segment
+    encrypted[-1] ^= 0xFF
+    tmp_encrypted_file.write_bytes(bytes(encrypted))
+    private_key = Crypt4GH.retrieve_private_key(crypt4gh_grz_private_key_file_path)
+
+    with pytest.raises(grzexc.DecryptionError):
+        Crypt4GH.decrypt_file(tmp_encrypted_file, tmp_path / "temp_file", private_key=private_key)
