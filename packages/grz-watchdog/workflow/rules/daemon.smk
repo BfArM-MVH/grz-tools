@@ -80,6 +80,8 @@ def monitor_and_queue_submissions(shutdown_event):
                                 inbox_name,
                                 "--json",
                                 "--show-cleaned",
+                                "--limit",
+                                "1000000",
                             ],
                             check=True,
                             text=True,
@@ -102,7 +104,9 @@ def monitor_and_queue_submissions(shutdown_event):
                         )
 
             # sync with db
-            initial_db_submission_list = _run_grzctl_db_command("list", "--json")
+            initial_db_submission_list = _run_grzctl_db_command(
+                "list", "--json", "--limit", "1000000"
+            )
             if initial_db_submission_list is None:
                 daemon_logger.critical(
                     "The database is unavailable. Shutting down monitoring."
@@ -156,7 +160,9 @@ def monitor_and_queue_submissions(shutdown_event):
                     )
 
             # select pending submissions
-            db_submissions_list = _run_grzctl_db_command("list", "--json")
+            db_submissions_list = _run_grzctl_db_command(
+                "list", "--json", "--limit", "1000000"
+            )
             if db_submissions_list is None:
                 daemon_logger.critical(
                     "The database became unavailable after the sync operation. Shutting down monitoring."
