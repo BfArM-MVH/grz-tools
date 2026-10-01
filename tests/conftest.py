@@ -355,6 +355,7 @@ def db_config_model(db_config_content, grzctl_identifiers_config):
         archives=_grzctl_archives(),
         pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
         identifiers=grzctl_identifiers_config,
+        detailed_qc=_GRZCTL_DETAILED_QC_DUMMY,
     )
 
 
@@ -366,6 +367,7 @@ def migrated_db_config_model(migrated_db_config_content, grzctl_identifiers_conf
         archives=_grzctl_archives(),
         pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
         identifiers=grzctl_identifiers_config,
+        detailed_qc=_GRZCTL_DETAILED_QC_DUMMY,
     )
 
 
@@ -376,7 +378,9 @@ def identifiers_config_model(identifiers_config_content):
 
 @pytest.fixture
 def pruefbericht_config_model(pruefbericht_config_content):
-    return grzctl.models.config.PruefberichtConfig(**pruefbericht_config_content)
+    from grzctl.models.pruefbericht import PruefberichtModel
+
+    return PruefberichtModel(**pruefbericht_config_content)
 
 
 @pytest.fixture
@@ -443,6 +447,7 @@ _GRZCTL_PRUEFBERICHT_DUMMY = {
     "client_secret": "example-secret",
     "api_base_url": "https://api.example.org",
 }
+_GRZCTL_DETAILED_QC_DUMMY = {"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0}
 
 
 @pytest.fixture()
@@ -468,10 +473,13 @@ def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str | Non
     return {
         "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
         "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+        "interrogation": {"s3": _s3("interrogation"), "keep_failed": False},
     }
 
 
-def _grzctl_config_dict(*, leistungserbringer, db=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
+def _grzctl_config_dict(
+    *, leistungserbringer, db=None, pruefbericht=None, identifiers=None, endpoint_url=None, detailed_qc=None
+) -> dict:
     """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
 
     *identifiers* defaults to a valid placeholder for tests that don't exercise that section.
@@ -482,6 +490,7 @@ def _grzctl_config_dict(*, leistungserbringer, db=None, pruefbericht=None, ident
         "db": db if db is not None else _GRZCTL_DB_DUMMY,
         "pruefbericht": pruefbericht if pruefbericht is not None else _GRZCTL_PRUEFBERICHT_DUMMY,
         "identifiers": identifiers if identifiers is not None else {"grz": "GRZK00007"},
+        "detailed_qc": detailed_qc if detailed_qc is not None else _GRZCTL_DETAILED_QC_DUMMY,
     }
 
 
@@ -492,6 +501,7 @@ def _grzctl_model(
     pruefbericht=None,
     identifiers=None,
     endpoint_url=None,
+    detailed_qc=None,
 ) -> grzctl.models.config.GrzctlConfig:
     """Build a GrzctlConfig model from the given sections."""
     return grzctl.models.config.GrzctlConfig(
@@ -501,6 +511,7 @@ def _grzctl_model(
             pruefbericht=pruefbericht,
             identifiers=identifiers,
             endpoint_url=endpoint_url,
+            detailed_qc=detailed_qc,
         )
     )
 
