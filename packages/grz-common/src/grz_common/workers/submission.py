@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import concurrent
+import concurrent.futures
 import json
 import logging
 import mmap
@@ -427,7 +427,14 @@ class Submission:
                     elif task_type == "raw":
                         reports = [grz_check.validate_raw(sources[0])]
             except Exception as e:
-                raise e
+                # report a read or grz_check error as a failed validation. A Rust panic arrives as a
+                # PanicException, which is no Exception, so it still stops the run
+                reports = [
+                    grz_check.ValidationReport(
+                        path=str(p), is_valid=False, errors=[f"Validation runtime error: {str(e)}"]
+                    )
+                    for p in paths
+                ]
 
             return paths, metas, reports
 
