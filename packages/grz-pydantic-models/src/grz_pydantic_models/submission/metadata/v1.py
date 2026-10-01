@@ -30,6 +30,7 @@ from ...common import StrictBaseModel, as_aware_datetime
 from ...mii.consent import (
     BroadConsentVersion,
     Consent,
+    Period,
     ProvisionType,
     Status,
 )
@@ -575,6 +576,73 @@ class ResearchConsent(StrictBaseModel):
                 all_consented = consented if all_consented is None else consented and all_consented
 
         return False if all_consented is None else all_consented
+
+    def explain_no_research_consent(self, dt: date | datetime) -> str | None:
+        """
+        Why this consent permits no research at ``dt``.
+
+        The checks follow the order in which ``consent_by_code`` reads the scope.
+        The reason is phrased to follow the name of the consent, such as ``researchConsents[0]``.
+        It leaves out ``dt``, so that a caller can state it once for several consents.
+
+        :param dt: date or datetime the consent state is evaluated at.
+        :returns: the reason, or ``None`` if this consent permits research at ``dt``.
+        """
+        if self.scope is None:
+            # ensure_scope_xor_justification guarantees a noScopeJustification here
+            return f"has no scope, noScopeJustification '{self.no_scope_justification}'"
+        if not isinstance(self.scope, Consent):
+            return "has a scope that is not a valid FHIR Consent"
+
+        research = {
+            code: permitted for code, permitted in self.consent_by_code(dt).items() if code in ResearchConsentCodes
+        }
+        if denied := [ResearchConsentCodes(code).name for code, permitted in research.items() if not permitted]:
+            return f"denies {', '.join(denied)}"
+        if research:
+            return None
+        return _why_no_research_code(self.scope, self._as_utc_datetime(dt))
+
+
+def _why_no_research_code(scope: Consent, moment: datetime) -> str:
+    """
+    Why ``ResearchConsent.consent_by_code`` states no research code for *scope* at *moment*.
+
+    The checks follow the order in which ``consent_by_code`` skips the scope or a provision.
+
+    :param scope: the consent that states no research code at *moment*.
+    :param moment: the moment the consent state is evaluated at.
+    :returns: the reason, phrased to follow the name of the consent.
+    """
+    if not scope.is_in_force:
+        return f"is not in force, status '{scope.status}'"
+    if scope.provision is None:
+        return "has no provision"
+    root_period = scope.provision.period
+    if root_period is not None and not root_period.contains(moment):
+        return f"is outside the root provision period {_period_text(root_period)}"
+    research_periods = [
+        provision.period
+        for provision in scope.provision.provision
+        if any(coding.code in ResearchConsentCodes for concept in provision.code for coding in concept.coding)
+    ]
+    if not research_periods:
+        return "has no provision for a research code"
+    return "is outside every research provision period: " + ", ".join(
+        _period_text(period) for period in research_periods
+    )
+
+
+def _period_text(period: Period) -> str:
+    """
+    A period as a report states it, such as ``2020-09-01 to 2050-08-31``.
+
+    :param period: the period to state.
+    :returns: the bounds as submitted.
+    """
+    if period.end is None:
+        return f"{period.start} without end"
+    return f"{period.start} to {period.end}"
 
 
 class TissueOntology(StrictBaseModel):
@@ -1204,6 +1272,27 @@ class Donor(StrictBaseModel):
     def consents_to_research(self, date: date) -> bool:
         return ResearchConsent.consents_to_research(self.research_consents, date)
 
+    def explain_no_research_consent(self, date: date) -> str | None:
+        """
+        Why this donor gives no research consent at ``date``.
+
+        Names every research consent that permits no research, each with its own reason.
+        A consent that permits research is never named: it cannot be the cause,
+        because a single deny in another consent refuses for the donor.
+
+        :param date: date the consent state is evaluated at.
+        :returns: the reasons as one line, or ``None`` if the donor consents to research at ``date``.
+        """
+        if self.consents_to_research(date):
+            return None
+        if not self.research_consents:
+            return "no researchConsents"
+        return ", ".join(
+            f"researchConsents[{index}] {reason}"
+            for index, consent in enumerate(self.research_consents)
+            if (reason := consent.explain_no_research_consent(date)) is not None
+        )
+
     def consents_to_mv(self) -> bool:
         if self.mv_consent.scope:
             return any(
@@ -1301,6 +1390,24 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
     def consents_to_research(self, date: date) -> bool:
         return all(donor.consents_to_research(date) for donor in self.donors)
+
+    def explain_no_research_consent(self, date: date) -> str | None:
+        """
+        Why this submission gives no research consent at ``date``.
+
+        The submission consents to research only if every donor does.
+        So every donor without research consent is named, by its position and relation, such as
+        ``donors[1] (father)``. The donorPseudonym is left out, because it can be a long hash.
+
+        :param date: date the consent state is evaluated at.
+        :returns: the reasons as one line, or ``None`` if every donor consents to research at ``date``.
+        """
+        reasons = [
+            f"donors[{index}] ({donor.relation}): {reason}"
+            for index, donor in enumerate(self.donors)
+            if (reason := donor.explain_no_research_consent(date)) is not None
+        ]
+        return "; ".join(reasons) or None
 
     def create_redaction_patterns(self) -> list[tuple[str, str]]:
         """

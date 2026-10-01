@@ -46,6 +46,12 @@ def archive(
 
     submission_date = encrypted_submission.metadata.content.submission.submission_date
     consented = encrypted_submission.metadata.content.consents_to_research(submission_date)
+    if not consented:
+        log.info(
+            f"Submission {submission_id} gives no research consent on its submission date ({submission_date}), "
+            "so it goes to the non-consented archive: "
+            f"{encrypted_submission.metadata.content.explain_no_research_consent(submission_date)}"
+        )
 
     archive_s3 = configuration.archives.consented.s3 if consented else configuration.archives.non_consented.s3
 

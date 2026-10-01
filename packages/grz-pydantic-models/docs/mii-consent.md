@@ -185,6 +185,19 @@ research consent. That is why `ResearchConsentCodes` contains both.
    end of that day); datetimes without a timezone are read as UTC.
 6. A consent that states neither research code grants nothing: silence is not consent.
 
+`explain_no_research_consent(date)` names the rule that refused, for each consent that permits no
+research. `ResearchConsent`, `Donor` and `GrzSubmissionMetadata` each have it. It returns `None`
+exactly when `consents_to_research` grants:
+
+```text
+donors[1] (mother): researchConsents[0] has no scope, noScopeJustification 'other patient-related reason'
+donors[0] (index): researchConsents[0] is outside every research provision period: 2020-09-01 to 2025-08-31
+```
+
+grzctl shows it in the `Reason` column of `grzctl consent --details`. `grzctl validate`,
+`grzctl encrypt` and `grzctl archive` log it for a submission without research consent on its
+submission date.
+
 ## How this stays correct over time
 
 Every assumption above (the OID classification, the research codes' existence and hierarchy, the
