@@ -236,46 +236,11 @@ class TestWorkflowResumption(BaseTest):
 
         final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
 
-        bad_grzctl_content = yaml.dump(
-            {
-                "leistungserbringer": {
-                    "123456789": {
-                        "alias": "test1",
-                        "inbox_buckets": {
-                            "test1": {
-                                "endpoint_url": "http://minio:9000",
-                                "access_key": "minioadmin",
-                                "secret": "minioadmin",
-                                "private_key_path": "config/keys/watchdog-test.sec",
-                            }
-                        },
-                    }
-                },
-                "archives": {
-                    "consented": {
-                        "s3": {"endpoint_url": "http://minio:9000", "bucket": "consented"},
-                        "public_key_path": "config/keys/watchdog-test.pub",
-                    },
-                    "non_consented": {
-                        "s3": {"endpoint_url": "http://minio:9000", "bucket": "nonconsented"},
-                        "public_key_path": "config/keys/watchdog-test.pub",
-                    },
-                },
-                "db": {
-                    "database_url": "sqlite:///results/submissions.sqlite",
-                    "known_public_keys": "config/configs/known_keys",
-                    "author": {"name": "Alice"},
-                },
-                "keys": {"grz_private_key_path": "config/keys/watchdog-test.sec"},
-                "identifiers": {"grz": "GRZM00123"},
-                "pruefbericht": {
-                    "api_base_url": "https://invalid-url.local",
-                    "authorization_url": "https://invalid-url.local/token",
-                    "client_id": "mock-client-id",
-                    "client_secret": "mock-client-password",
-                },
-            }
-        )
+        # the default grzctl config, but with a Prüfbericht API that cannot be reached
+        bad_grzctl_config = yaml.safe_load((Path(__file__).parent / "config" / "configs" / "grzctl.yaml").read_text())
+        bad_grzctl_config["pruefbericht"]["api_base_url"] = "https://invalid-url.local"
+        bad_grzctl_config["pruefbericht"]["authorization_url"] = "https://invalid-url.local/token"
+        bad_grzctl_content = yaml.dump(bad_grzctl_config)
 
         local_bad_config_path = tmp_path / f"{submission_id}_bad_grzctl.yaml"
         local_bad_config_path.write_text(bad_grzctl_content)

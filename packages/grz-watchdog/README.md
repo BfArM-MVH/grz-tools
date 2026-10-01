@@ -62,19 +62,7 @@ handlers:
   on-success: "echo 'Successfully finished grz-watchdog run.'"
 
 
-config_paths: # Paths to grzctl config files. Prefer absolute paths.
-  inbox:
-    "123456789": # le id
-      inbox1: "/path/to/configs/inbox.le1.inbox1.yaml"
-      inbox2: "/path/to/configs/inbox.le1.inbox2.yaml"  # if you have more than 1 inbox per le
-    "234567890": # yet another le id
-      inbox1: "/path/to/configs/inbox.le2.inbox1.yaml"
-      # … etc …
-  archive:
-    consented: "/path/to/configs/consented.yaml"
-    nonconsented: "/path/to/configs/nonconsented.yaml"
-  db: "/path/to/configs/db.yaml"
-  pruefbericht: "/path/to/configs/pruefbericht.yaml"
+grzctl_config: "/path/to/grzctl.yaml"  # The grzctl config. grz-watchdog processes every inbox listed in it. Prefer an absolute path.
 
 qc:
   revision: "v1.2.0"

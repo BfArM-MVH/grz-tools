@@ -8,6 +8,7 @@ from os import PathLike
 from typing import Literal
 
 import humanfriendly
+from grz_common.models.base import get_secret_value
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from snakemake.iocontainers import InputFiles, Wildcards
@@ -23,7 +24,7 @@ def get_inbox_s3_details(submitter_id, inbox):
     )
     bucket = bucket_cfg.bucket or inbox
     access_key = bucket_cfg.access_key or ""
-    secret = bucket_cfg.secret or ""
+    secret = get_secret_value(bucket_cfg.secret) or ""
     return endpoint_url, bucket, access_key, secret
 
 

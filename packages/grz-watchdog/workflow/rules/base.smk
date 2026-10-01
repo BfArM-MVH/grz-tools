@@ -222,10 +222,6 @@ rule decrypt:
         disk=estimate_decrypt_size,
         runtime=estimate_decrypt_runtime,
         db_handles=1,
-    params:
-        grz_private_key_passphrase=os.environ.get(
-            "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE"
-        ),
     script:
         "../scripts/decrypt.sh"
 

@@ -83,4 +83,3 @@ onsuccess:
 envvars:
     "GRZ_S3__ACCESS_KEY",
     "GRZ_S3__SECRET",
-    "GRZ_KEYS__GRZ_PRIVATE_KEY_PASSPHRASE",
