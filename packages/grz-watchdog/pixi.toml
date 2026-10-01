@@ -23,7 +23,6 @@ snakefmt = ">=2,<3"
 conda = ">=25.9.0,<26"
 git = ">=2.51.0,<3"
 jq = ">=1.8.1,<2"
-ripgrep = ">=14.1.1,<15"
 nextflow = ">=26.04.1,<27"
 s5cmd = ">=2.3.0,<3"
 minio-client = ">=2025.8.13.8.35.41,<2026"
@@ -35,6 +34,14 @@ uv = "~=0.11.22"
 
 [pypi-dependencies]
 snakemake-logger-plugin-prometheus = ">=0.1.3,<0.2"
+
+# Tools for operators, which the workflow does not use.
+[feature.ops.dependencies]
+ripgrep = ">=14.1.1,<15"
+fd-find = ">=10.5.0,<11"
+
+[environments]
+default = ["ops"]
 
 #grz-pydantic-models = { path = "../grz-pydantic-models", editable = true }
 #grz-common = { path = "../grz-common", editable = true }
