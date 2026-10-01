@@ -2,6 +2,7 @@
 
 import os
 from stat import S_IRUSR, S_IWUSR
+from unittest.mock import patch
 
 import crypt4gh.keys.c4gh
 import grz_common.exceptions as grzexc
@@ -30,6 +31,15 @@ def encrypted_dummy_key(tmp_path) -> tuple[str, bytes]:
     return str(sec_key_path), passphrase
 
 
+def test_retrieve_private_key_with_explicit_passphrase(encrypted_dummy_key, monkeypatch):
+    sec_key_path, passphrase = encrypted_dummy_key
+    monkeypatch.delenv("C4GH_PASSPHRASE", raising=False)
+
+    private_key = Crypt4GH.retrieve_private_key(sec_key_path, passphrase=passphrase.decode("utf-8"))
+
+    assert isinstance(private_key, X25519PrivateKey)
+
+
 def test_retrieve_private_key_with_envvar(encrypted_dummy_key, monkeypatch):
     sec_key_path, passphrase = encrypted_dummy_key
     monkeypatch.setenv("C4GH_PASSPHRASE", passphrase.decode("utf-8"))
@@ -37,6 +47,19 @@ def test_retrieve_private_key_with_envvar(encrypted_dummy_key, monkeypatch):
     private_key = Crypt4GH.retrieve_private_key(sec_key_path)
 
     assert isinstance(private_key, X25519PrivateKey)
+
+
+def test_retrieve_private_key_missing_passphrase(encrypted_dummy_key, monkeypatch):
+    sec_key_path, _ = encrypted_dummy_key
+    monkeypatch.delenv("C4GH_PASSPHRASE", raising=False)
+
+    with patch("grz_common.utils.crypt.getpass") as mock_getpass:
+        mock_getpass.side_effect = RuntimeError("Interactive prompt triggered in CI")
+
+        with pytest.raises(grzexc.ConfigurationError):
+            Crypt4GH.retrieve_private_key(sec_key_path, passphrase=None)
+
+        mock_getpass.assert_called_once()
 
 
 def test_a_missing_private_key_is_a_configuration_error(tmp_path):
