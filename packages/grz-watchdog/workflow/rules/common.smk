@@ -312,8 +312,7 @@ def register_s3_access_key(
     """
     Export the S3 access key in the environment as AWS_ACCESS_KEY_ID.
 
-    Try looking up environment variable `GRZ_S3__ACCESS_KEY` first,
-    then look up the access key from the unified grzctl config.
+    The access key comes from the grzctl config, where environment variables can override it.
 
     Args:
         wildcards: Wildcards with submitter_id and inbox attributes.
@@ -325,10 +324,6 @@ def register_s3_access_key(
     Raises:
         ValueError: If no S3 access key is found.
     """
-    if access_key := os.environ.get("GRZ_S3__ACCESS_KEY", ""):
-        os.environ["AWS_ACCESS_KEY_ID"] = access_key
-        return "success"
-
     _, _, access_key, _ = get_inbox_s3_details(wildcards.submitter_id, wildcards.inbox)
     if not access_key:
         raise ValueError("No S3 access_key found.")
@@ -340,8 +335,7 @@ def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["succ
     """
     Export the S3 secret in the environment as AWS_SECRET_ACCESS_KEY.
 
-    Try looking up environment variable `GRZ_S3__SECRET` first,
-    then look up the secret from the unified grzctl config.
+    The secret comes from the grzctl config, where environment variables can override it.
 
     Args:
         wildcards: Wildcards with submitter_id and inbox attributes.
@@ -353,10 +347,6 @@ def register_s3_secret(wildcards: Wildcards, input: InputFiles) -> Literal["succ
     Raises:
         ValueError: If no S3 secret is found.
     """
-    if secret := os.environ.get("GRZ_S3__SECRET", ""):
-        os.environ["AWS_SECRET_ACCESS_KEY"] = secret
-        return "success"
-
     _, _, _, secret = get_inbox_s3_details(wildcards.submitter_id, wildcards.inbox)
     if not secret:
         raise ValueError("No S3 secret found.")

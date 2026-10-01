@@ -78,8 +78,3 @@ onsuccess:
     cleanup_stale_temp_outputs()
     if on_success := config.get("handlers", {}).get("on-success"):
         shell(on_success)
-
-
-envvars:
-    "GRZ_S3__ACCESS_KEY",
-    "GRZ_S3__SECRET",

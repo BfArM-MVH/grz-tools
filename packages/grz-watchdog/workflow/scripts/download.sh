@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -n "${snakemake_params[s3_access_key]:-}" ]; then
-	export GRZ_S3__ACCESS_KEY="${snakemake_params[s3_access_key]}"
-fi
-
-if [ -n "${snakemake_params[s3_secret]:-}" ]; then
-	export GRZ_S3__SECRET="${snakemake_params[s3_secret]}"
-fi
-
 submission_id="${snakemake_wildcards[submission_id]}"
 submitter_id="${snakemake_wildcards[submitter_id]}"
 inbox="${snakemake_wildcards[inbox]}"

@@ -6,11 +6,6 @@ from contextlib import redirect_stderr, redirect_stdout
 sys.path.append(os.path.dirname(__file__))
 import shared
 
-if snakemake.params.s3_access_key:
-    os.environ["GRZ_S3__ACCESS_KEY"] = snakemake.params.s3_access_key
-if snakemake.params.s3_secret:
-    os.environ["GRZ_S3__SECRET"] = snakemake.params.s3_secret
-
 grzctl_config = snakemake.input.grzctl_config_path
 output_file = snakemake.output.submissions
 submitter_id = snakemake.wildcards.submitter_id

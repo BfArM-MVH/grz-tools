@@ -34,9 +34,6 @@ rule scan_inbox:
     benchmark:
         "<benchmarks>/scan_inbox/{submitter_id}/{inbox}/benchmark.tsv"
     priority: 2
-    params:
-        s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
-        s3_secret=os.environ.get("GRZ_S3__SECRET"),
     script:
         "../scripts/scan_inbox.py"
 
@@ -158,9 +155,6 @@ rule download:
         disk=estimate_download_size,
         runtime=estimate_download_runtime,
         db_handles=1,
-    params:
-        s3_access_key=os.environ.get("GRZ_S3__ACCESS_KEY"),
-        s3_secret=os.environ.get("GRZ_S3__SECRET"),
     script:
         "../scripts/download.sh"
 
