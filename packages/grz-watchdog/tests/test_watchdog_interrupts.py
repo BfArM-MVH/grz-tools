@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 
 import pytest
-import yaml
 
 from .conftest import (
     BUCKET_NONCONSENTED,
@@ -236,32 +235,18 @@ class TestWorkflowResumption(BaseTest):
 
         final_target = f"results/{SUBMITTER_ID}/{INBOX}/{submission_id}/processed"
 
-        # the default grzctl config, but with a Prüfbericht API that cannot be reached
-        bad_grzctl_config = yaml.safe_load((Path(__file__).parent / "config" / "configs" / "grzctl.yaml").read_text())
-        bad_grzctl_config["pruefbericht"]["api_base_url"] = "https://invalid-url.local"
-        bad_grzctl_config["pruefbericht"]["authorization_url"] = "https://invalid-url.local/token"
-        bad_grzctl_content = yaml.dump(bad_grzctl_config)
-
-        local_bad_config_path = tmp_path / f"{submission_id}_bad_grzctl.yaml"
-        local_bad_config_path.write_text(bad_grzctl_content)
-
-        container_bad_config_path = f"/tmp/{local_bad_config_path.name}"
-        subprocess.run(
-            [
-                CONTAINER_RUNTIME,
-                "cp",
-                str(local_bad_config_path),
-                f"{GRZ_WATCHDOG_CONTAINER_NAME}:{container_bad_config_path}",
-            ],
-            check=True,
-        )
-        config_overrides_fail = {
-            "qc": {"selection_strategy": {"enabled": False}},
-            "grzctl_config": container_bad_config_path,
+        # grzctl reads the Prüfbericht API from these variables instead of from the config file.
+        # The config file stays the same, so that the resumed run finds no changed inputs.
+        unreachable_pruefbericht_api = {
+            "GRZ_PRUEFBERICHT__API_BASE_URL": "https://invalid-url.local",
+            "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://invalid-url.local/token",
         }
+        config_overrides_fail = {"qc": {"selection_strategy": {"enabled": False}}}
 
         print(f"\nRunning workflow for {submission_id}, expecting failure at submit_pruefbericht")
-        self._run_watchdog_expect_fail(final_target, config_overrides=config_overrides_fail)
+        self._run_watchdog_expect_fail(
+            final_target, config_overrides=config_overrides_fail, env=unreachable_pruefbericht_api
+        )
 
         # verify state after the expected failure
         print("\nVerifying state after failure")
