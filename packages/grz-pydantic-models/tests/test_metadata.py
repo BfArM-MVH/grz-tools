@@ -609,13 +609,48 @@ def test_research_consent_open_ended_provision_period():
     )
 
 
-def test_consent_requires_root_provision_period():
-    """Every profile version pins the root provision period to 1..1; only its end became optional."""
+def test_consent_accepts_missing_root_provision_period():
+    """The model reads a missing root period, so metadata before schema v1.3 can read as it did in 2.7.1."""
     consent_raw = _consent_raw("minimal_consented")
     del consent_raw["provision"]["period"]
 
-    with pytest.raises(ValidationError, match="period"):
-        Consent.model_validate(consent_raw)
+    consent = Consent.model_validate(consent_raw)
+    assert consent.provision is not None
+    assert consent.provision.period is None
+    assert consent.datetimes_fhir_does_not_permit() == []
+
+
+def _metadata_without_root_period(dataset: str, version: str) -> dict:
+    """An example with the root provision period deleted from its first donor's consent scope."""
+    metadata = json.loads(_metadata_raw(dataset, version))
+    del metadata["donors"][0]["researchConsents"][0]["scope"]["provision"]["period"]
+    return metadata
+
+
+def test_root_provision_period_required_as_of_1_3():
+    """From metadata v1.3 on, a scope without a root provision period is rejected."""
+    metadata = _metadata_without_root_period("wgs_trio", "1.3.0")
+
+    with pytest.raises(ValidationError, match=r"scope\.provision\.period is required as of metadata v1\.3"):
+        GrzSubmissionMetadata.model_validate(metadata)
+
+
+def test_missing_root_provision_period_is_read_as_before_1_3(caplog):
+    """Before v1.3, a missing root period means no root bound: only the nested periods count."""
+    submission = GrzSubmissionMetadata.model_validate(_metadata_without_root_period("wgs_tumor_germline", "1.2.1"))
+
+    research_consent = submission.donors[0].research_consents[0]
+    assert isinstance(research_consent.scope, Consent)
+    assert research_consent.scope.provision is not None
+    assert research_consent.scope.provision.period is None
+    assert "has no period" in caplog.text
+    assert "only the nested provision periods count" in caplog.text
+
+    nested = research_consent.scope.provision.provision
+    inside = max(p.period.start.first_moment.date() for p in nested)
+    outside = min(p.period.start.first_moment.date() for p in nested) - timedelta(days=1)
+    assert ResearchConsent.consents_to_research([research_consent], date=inside)
+    assert not ResearchConsent.consents_to_research([research_consent], date=outside)
 
 
 def test_root_provision_period_caps_open_ended_sub_provisions():
@@ -1522,7 +1557,8 @@ def test_model_matches_the_profile(name: str):
     # the period itself stays required at both provision levels, framing consent evaluation
     for element_id in ("Consent.provision.period", "Consent.provision.provision.period"):
         assert elements[element_id]["min"] == 1
-    assert RootConsentProvision.model_fields["period"].is_required()
+    # the root one is optional in the model only for metadata before schema v1.3, which rejects it from v1.3 on
+    assert not RootConsentProvision.model_fields["period"].is_required()
     assert ConsentProvision.model_fields["period"].is_required()
 
     # a patient identifier, when given, must carry system and value
