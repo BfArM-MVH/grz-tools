@@ -55,7 +55,7 @@ def build_cli():
         grz-pydantic-models v{version("grz-pydantic-models")}
         """)
         + (
-            subprocess.run(["grz-check", "--version"], capture_output=True, text=True).stdout.strip()  # noqa: S607, S603
+            subprocess.run(["grz-check", "--version"], capture_output=True, text=True).stdout.strip()  # noqa: S607
             if shutil.which("grz-check") is not None
             else ""
         ),
