@@ -899,3 +899,38 @@ def test_backfill_reports_a_consent_that_ended_after_the_submission_date_as_expi
     assert "donors[0] (index): researchConsents[0] is outside the root provision period" in result.stdout
     assert "No research consent at submission date in consented archive: 0" in result.stdout
     assert "Expired consents in consented archive: 1" in result.stdout
+
+
+def _with_research_consent_starting(metadata: GrzSubmissionMetadata, start: datetime.date) -> GrzSubmissionMetadata:
+    """Give every donor the index donor's research consent, with its root provision period starting on *start*."""
+    raw = metadata.get_raw_dict()
+    consents = raw["donors"][0]["researchConsents"]
+    consents[0]["scope"]["provision"]["period"]["start"] = start.isoformat()
+    for donor in raw["donors"][1:]:
+        donor["researchConsents"] = copy.deepcopy(consents)
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+def test_backfill_reports_a_consent_that_started_after_the_submission_date_as_missing(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """A consent that starts after the submission date is missing on that date, even though it is in force today."""
+    day_after_submission = metadata.submission.submission_date + datetime.timedelta(days=1)
+    db.add_submission(submission_id)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    consenting_later = _with_research_consent_starting(metadata, day_after_submission)
+    assert consenting_later.consents_to_research(datetime.date.today())
+    _put_metadata(s3_client_mock, "consented", submission_id, consenting_later)
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id, "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert f"NO RESEARCH CONSENT: {submission_id}" in result.stdout
+    assert "donors[0] (index): researchConsents[0] is outside the root provision period" in result.stdout
+    assert "No research consent at submission date in consented archive: 1" in result.stdout
+    assert "Expired consents in consented archive: 0" in result.stdout

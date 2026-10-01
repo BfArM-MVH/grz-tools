@@ -2324,18 +2324,18 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             # Under the current rules, the submission was never consented.
             if actual_archive == "consented" and outcome.metadata is not None:
                 submission_date = outcome.metadata.submission.submission_date
-                if missing := outcome.metadata.explain_no_research_consent(submission_date):
+                if reasons := outcome.metadata.explain_no_research_consent(submission_date):
                     without_consent_at_submission += 1
                     _report(
                         f"  NO RESEARCH CONSENT: {submission.id} is in 'consented' archive, "
-                        f"but has no research consent on its submission date ({submission_date}): {missing}",
+                        f"but has no research consent on its submission date ({submission_date}): {reasons}",
                         "bold red",
                     )
-                elif missing := outcome.metadata.explain_no_research_consent(date.today()):
+                elif reasons := outcome.metadata.explain_no_research_consent(date.today()):
                     expired_consents += 1
                     _report(
                         f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
-                        f"but research consent has expired as of today ({date.today()}): {missing}",
+                        f"but research consent has expired as of today ({date.today()}): {reasons}",
                         "yellow",
                     )
 
