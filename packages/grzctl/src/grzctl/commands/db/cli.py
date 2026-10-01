@@ -1961,7 +1961,7 @@ def _report(message: str, style: str | None = None) -> None:
     """Print one line of the backfill report on stdout.
 
     Logs and the progress bar go to stderr, so the report can be redirected without them.
-    The message is printed as is, not read as rich markup.
+    The message is printed as is, without rich markup, emoji codes or highlighting.
     Markup would drop every part in square brackets, such as ``[dry-run]`` or the ``[type=...]`` of a pydantic error.
     The line is not wrapped, so that a redirected report keeps one line per message.
     Both streams share one terminal, so the progress bar is cleared for the line and redrawn below it.
@@ -1970,7 +1970,7 @@ def _report(message: str, style: str | None = None) -> None:
     :param style: A rich style for the whole line, such as ``"red"``.
     """
     with tqdm.external_write_mode(file=sys.stdout):
-        console.print(message, style=style, markup=False, soft_wrap=True)
+        console.out(message, style=style, highlight=False)
 
 
 @contextlib.contextmanager

@@ -31,6 +31,7 @@ from grzctl.commands.db.cli import (
     _BackfillResult,
     _fetch_metadata_json_from_archives,
     _logs_about,
+    _report,
 )
 from moto import mock_aws
 
@@ -821,6 +822,13 @@ def test_logs_name_the_submission_only_while_it_is_backfilled(caplog: pytest.Log
         logger.warning("outside")
 
     assert [record.getMessage() for record in caplog.records] == ["S1: inside the context", "outside"]
+
+
+def test_report_prints_the_message_as_is(capsys: pytest.CaptureFixture[str]) -> None:
+    """Markup would drop ``[dry-run]``, and emoji codes would turn ``:x:`` into an emoji."""
+    _report("  [dry-run] S1: S3 error :x: [type=missing]", "red")
+
+    assert "  [dry-run] S1: S3 error :x: [type=missing]" in capsys.readouterr().out
 
 
 def test_backfill_dry_run_counts_what_it_would_do(
