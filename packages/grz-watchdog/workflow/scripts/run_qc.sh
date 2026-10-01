@@ -11,7 +11,7 @@ _error_handler() {
 	echo "$error_message" >>"${log_stderr}"
 
 	popd # needed so relative paths specified in db_config can be resolved correctly, since nextflow is called from within $launch_dir
-	grzctl --config "${grzctl_config}" db submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
+	grzctl --config "${grzctl_config}" db submission update --ignore-error-state "${submission_id}" error --failure-reason detailed_qc_error >>"${log_stdout}" 2>>"${log_stderr}"
 }
 
 trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR

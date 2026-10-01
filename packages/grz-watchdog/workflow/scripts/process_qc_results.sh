@@ -10,7 +10,7 @@ _error_handler() {
 	echo "$error_message" >&2
 	echo "$error_message" >>"${log_stderr}"
 
-	grzctl --config "${grzctl_config}" db submission update --ignore-error-state "${submission_id}" error >>"${log_stdout}" 2>>"${log_stderr}"
+	grzctl --config "${grzctl_config}" db submission update --ignore-error-state "${submission_id}" error --failure-reason detailed_qc_error >>"${log_stdout}" 2>>"${log_stderr}"
 }
 
 trap '_error_handler $? $LINENO "$BASH_COMMAND"' ERR
