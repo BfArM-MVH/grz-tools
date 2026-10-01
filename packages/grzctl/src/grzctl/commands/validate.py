@@ -104,6 +104,14 @@ def validate(  # noqa: PLR0913, PLR0917
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
 
+    # Missing research consent is no validation error, but it decides the archive later on.
+    submission_date = submission.metadata.content.submission.submission_date
+    if missing_consent := submission.metadata.content.explain_no_research_consent(submission_date):
+        log.info(
+            f"Submission {submission_id} gives no research consent on its submission date ({submission_date}), "
+            f"so it will go to the non-consented archive: {missing_consent}"
+        )
+
     identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
 
     with DbContext(
