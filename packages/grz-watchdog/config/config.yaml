@@ -28,7 +28,7 @@ handlers:
 grzctl_config: "config/configs/grzctl.yaml"
 
 qc:
-  revision: "v1.2.0"
+  revision: "v4.0.0"
   selection_strategy:
     enabled: false
     target_percentage: 2.0

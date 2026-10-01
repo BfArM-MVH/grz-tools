@@ -65,7 +65,7 @@ handlers:
 grzctl_config: "/path/to/grzctl.yaml"  # The grzctl config. grz-watchdog processes every inbox listed in it. Prefer an absolute path.
 
 qc:
-  revision: "v1.2.0"
+  revision: "v4.0.0"
   reference_directory: "/path/to/qc/references"
   selection_strategy:
     enabled: false  # Whether automatic qc selection is enabled or not.

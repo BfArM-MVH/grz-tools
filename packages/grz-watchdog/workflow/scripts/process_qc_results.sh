@@ -30,8 +30,9 @@ qc_workflow_version="${snakemake_params[qc_workflow_version]}"
 log_stdout="${snakemake_log[stdout]}"
 log_stderr="${snakemake_log[stderr]}"
 
-index_detailed_qc_status=$(awk -F, '$2 == "index"' <"${report_csv}" | python3 -c 'import csv,sys; print("\n".join(row[6] for row in csv.reader(sys.stdin)))' | sort -u)
-qc_status=$(if [ "$index_detailed_qc_status" == 'PASS' ]; then echo 'true'; else echo 'false'; fi)
+# Since GRZ_QC_Workflow 4.0.0, a deviation from the values that the LE provided is reported as DEVIATION.
+# A deviation does not fail the QC, so the QC passes if every lab datum of the index donor has PASS or DEVIATION.
+qc_status=$(awk -F, '$2 == "index"' <"${report_csv}" | python3 -c 'import csv,sys; s={row[6] for row in csv.reader(sys.stdin)}; print(str(bool(s) and s <= {"PASS", "DEVIATION"}).lower())')
 
 grzctl --config "${grzctl_config}" db submission modify "${submission_id}" detailed_qc_passed "${qc_status}" >"$log_stdout" 2>"$log_stderr"
 grzctl --config "${grzctl_config}" db submission populate-qc --no-confirm "${submission_id}" "${report_csv}" >>"$log_stdout" 2>>"$log_stderr"
