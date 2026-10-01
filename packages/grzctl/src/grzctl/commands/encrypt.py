@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
     help="Check validation logs before encrypting.",
 )
 @grzcli.update_db
-def encrypt(  # noqa: PLR0913
+def encrypt(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_dir,
     metadata_dir,
@@ -43,7 +43,7 @@ def encrypt(  # noqa: PLR0913
     update_db,
     **kwargs,
 ):
-"""Encrypt a submission (standalone with DB updates).
+    """Encrypt a submission (standalone with DB updates).
 
     The files are encrypted for the archive that the submission's research consent selects.
     They are signed with the private key of the inbox that the submission came from.

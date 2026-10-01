@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 @grzcli.encrypted_files_dir
 @grzcli.threads
 @grzcli.update_db
-def archive(  # noqa: PLR0913
+def archive(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_dir,
     metadata_dir,
