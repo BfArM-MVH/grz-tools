@@ -81,6 +81,13 @@ qc:
       - conda  # or docker or …
 ```
 
+### Secrets
+
+grzctl reads every field of its config from an environment variable as well.
+The variable's name follows the field's path, e.g. `GRZ_LEISTUNGSERBRINGER__<LE>__INBOX_BUCKETS__<INBOX>__SECRET` or `GRZ_PRUEFBERICHT__CLIENT_SECRET`.
+If the grzctl config leaves out the S3 credentials of an inbox or archive, or the Prüfbericht client secret, `grz-watchdog` requires the corresponding environment variable and refuses to start without it.
+Key passphrases can come from the config, from such a variable, or from `C4GH_PASSPHRASE`.
+
 ### QC references
 
 If you already have reference indices for the QC workflow, copy them to the `reference_directory` specified in the

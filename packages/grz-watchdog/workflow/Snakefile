@@ -78,3 +78,8 @@ onsuccess:
     cleanup_stale_temp_outputs()
     if on_success := config.get("handlers", {}).get("on-success"):
         shell(on_success)
+
+
+envvars:
+    # The secrets that the grzctl config file leaves out must come from the environment.
+    *secret_envvars_missing_from_file(GRZCTL_CONFIG_PATH),

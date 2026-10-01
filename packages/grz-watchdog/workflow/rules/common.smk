@@ -8,6 +8,7 @@ from os import PathLike
 from typing import Literal
 
 import humanfriendly
+import yaml
 from grz_common.models.base import get_secret_value
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
@@ -26,6 +27,44 @@ def get_inbox_s3_details(submitter_id, inbox):
     access_key = bucket_cfg.access_key or ""
     secret = get_secret_value(bucket_cfg.secret) or ""
     return endpoint_url, bucket, access_key, secret
+
+
+def secret_envvars_missing_from_file(grzctl_config_path) -> list[str]:
+    """
+    Name the environment variables that must provide the secrets that the grzctl config file leaves out.
+
+    This covers the S3 credentials of every inbox and archive, and the Prüfbericht client secret.
+    grzctl reads each config field from an environment variable as well, whose name pydantic-settings
+    derives from the field's path, e.g. GRZ_LEISTUNGSERBRINGER__<LE>__INBOX_BUCKETS__<INBOX>__SECRET.
+    Passphrases are not covered, since a key without a passphrase needs none.
+    """
+    with open(grzctl_config_path) as f:
+        file_config = yaml.safe_load(f)
+
+    secret_paths = [
+        ("leistungserbringer", submitter_id, "inbox_buckets", inbox, field)
+        for submitter_id, inbox in ALL_INBOX_PAIRS
+        for field in ("access_key", "secret")
+    ]
+    secret_paths += [
+        ("archives", archive, "s3", field)
+        for archive in ("consented", "non_consented")
+        for field in ("access_key", "secret")
+    ]
+    secret_paths.append(("pruefbericht", "client_secret"))
+
+    def in_file(path):
+        value = file_config
+        for key in path:
+            if not isinstance(value, dict):
+                return False
+            # YAML reads an unquoted LE id as an int
+            value = {str(k): v for k, v in value.items()}.get(key)
+        return value not in (None, "")
+
+    return [
+        "GRZ_" + "__".join(path).upper() for path in secret_paths if not in_file(path)
+    ]
 
 
 def cleanup_stale_temp_outputs():
