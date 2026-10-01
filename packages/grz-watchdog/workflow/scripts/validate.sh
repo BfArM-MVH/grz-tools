@@ -18,6 +18,7 @@ log_stderr="${snakemake_log[stderr]}"
 
 # grzctl validate handles DB state transitions (VALIDATING → VALIDATED on success,
 # VALIDATING → ERROR on exception) via DbContext (--update-db is the default).
+# On success, it also records basic_qc_passed.
 # We expect `grzctl validate` to return a non-zero code on validation failure,
 # which is not a script error. So we handle its exit code manually instead of relying on `set -e`.
 if grzctl --config "${grzctl_config}" validate \
@@ -27,7 +28,6 @@ if grzctl --config "${grzctl_config}" validate \
 	--logs-dir "${progress_logs_dir}" \
 	>"$log_stdout" 2>"$validation_errors"; then
 	echo "true" >"$validation_flag"
-	grzctl --config "${grzctl_config}" db submission modify "${submission_id}" basic_qc_passed true
 else
 	# Failure: Validation found errors. This is an expected outcome.
 	# The errors are already captured in the validation_errors file.
