@@ -479,7 +479,7 @@ class ResearchConsent(StrictBaseModel):
             return self
 
         root = self.scope.provision
-        periods = [("provision.period", root.period)]
+        periods = [("provision.period", root.period)] if root.period is not None else []
         periods += [
             (f"provision.provision[{index}].period", nested.period) for index, nested in enumerate(root.provision)
         ]
@@ -525,8 +525,10 @@ class ResearchConsent(StrictBaseModel):
         if not self.scope.is_in_force or self.scope.provision is None:
             return code2consent
 
-        # the root provision frames every nested rule: outside its period, none of them applies
-        if not self.scope.provision.period.contains(dt):
+        # the root provision frames every nested rule: outside its period, none of them applies.
+        # Before schema v1.3 the root period may be missing. Then only the nested periods count.
+        root_period = self.scope.provision.period
+        if root_period is not None and not root_period.contains(dt):
             return code2consent
 
         for provision in self.scope.provision.provision:
@@ -1250,6 +1252,20 @@ class Donor(StrictBaseModel):
         return self
 
 
+def _lacks_root_provision_period(consent: ResearchConsent) -> bool:
+    """
+    Whether the scope is a Consent whose root provision is set but has no period.
+
+    :param consent: The research consent to check.
+    :returns: ``True`` if the root provision period is missing.
+    """
+    return (
+        isinstance(consent.scope, Consent)
+        and consent.scope.provision is not None
+        and consent.scope.provision.period is None
+    )
+
+
 class GrzSubmissionMetadata(StrictBaseModel):
     """
     General metadata schema for submissions to the GRZ
@@ -1393,7 +1409,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return schema_version
 
     @model_validator(mode="after")
-    def validate_research_consent_after_minor_version_3(self):  # noqa: C901
+    def validate_research_consent_after_minor_version_3(self):  # noqa: C901, PLR0912
         if Version(self.get_schema_version()) >= Version("1.3"):
             for donor in self.donors:
                 if len(donor.research_consents) < 1:
@@ -1405,11 +1421,19 @@ class GrzSubmissionMetadata(StrictBaseModel):
                         raise ValueError("Either a non-empty scope must be provided or a noScopeJustification")
                     if (consent.scope is not None) and (not isinstance(consent.scope, Consent)):
                         raise ValueError("scope must be a valid MII Broad Consent as of metadata v1.3")
+                    if _lacks_root_provision_period(consent):
+                        raise ValueError("scope.provision.period is required as of metadata v1.3")
         else:
             for donor in self.donors:
                 for consent in donor.research_consents:
                     if consent.schema_version is None:
                         raise ValueError("schemaVersion is required in researchConsent before metadata schema v1.3")
+                    if _lacks_root_provision_period(consent):
+                        log.warning(
+                            "researchConsents[].scope.provision has no period, which the MII consent profile "
+                            "requires. Before metadata schema v1.3 it is read as grz-pydantic-models 2.7.1 read it: "
+                            "only the nested provision periods count."
+                        )
         return self
 
     @model_validator(mode="after")

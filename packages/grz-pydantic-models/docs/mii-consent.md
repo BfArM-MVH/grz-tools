@@ -107,7 +107,7 @@ up, on `ResearchConsent` in `submission/metadata/v1.py`.
 | `category` | must contain the LOINC consent category and the MII broad consent category, one coding each; extra categories are allowed (open slicing) |
 | `patient` | † must identify the patient: reference or identifier (identifier needs `system` + `value`). The profile requires `patient` but marks both ways of filling it mustSupport only |
 | `policy` | at least one document OID, with or without the `urn:oid:` prefix |
-| `provision` (root) | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required, `code` forbidden |
+| `provision` (root) | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required from metadata v1.3 on (before, a missing one is read as grz-pydantic-models 2.7.1 read it: no root bound, only nested periods count), `code` forbidden |
 | `provision.provision[]` | the decisions: `type`, `period`, at least one `code` |
 | a third provision level | forbidden |
 

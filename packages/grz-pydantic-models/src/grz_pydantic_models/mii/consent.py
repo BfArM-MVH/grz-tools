@@ -343,9 +343,13 @@ class ConsentProvision(LosslessBaseModel):
 
 class RootConsentProvision(LosslessBaseModel):
     type: ProvisionType
-    period: Period
+    period: Period | None = None
     """
-    Required by every profile version; only its end became optional in profile 1.0.9.
+    Every profile version requires it; only its end became optional in profile 1.0.9.
+
+    The model makes it optional only so that metadata before schema v1.3 reads as grz-pydantic-models
+    2.7.1 read it: no root bound, only the nested periods count.
+    ``GrzSubmissionMetadata`` rejects a missing one from v1.3 on.
     """
 
     provision: list[ConsentProvision] = Field(default_factory=list)
@@ -500,7 +504,8 @@ class Consent(LosslessBaseModel):
         """
         periods = []
         if self.provision is not None:
-            periods.append(self.provision.period)
+            if self.provision.period is not None:
+                periods.append(self.provision.period)
             periods.extend(provision.period for provision in self.provision.provision)
 
         candidates = [self.date_time]
