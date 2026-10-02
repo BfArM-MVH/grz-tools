@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.0...grzctl-v5.1.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **grz-db,grzctl:** require grz-pydantic-models 4.1 ([#715](https://github.com/BfArM-MVH/grz-tools/issues/715)) ([67dc636](https://github.com/BfArM-MVH/grz-tools/commit/67dc63699b391d1ffe3fe045453ecab6164b22ce))
+
 ## [5.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.0.0...grzctl-v5.1.0) (2026-10-02)
 
 
