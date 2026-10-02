@@ -80,6 +80,7 @@ test = [
 
 [dependency-groups]
 dev = [
+    "snakefmt>=2.0.3",
     "textual-dev",
     "tox",
     "tox-uv",
@@ -119,6 +120,8 @@ exclude = [
     "build",
     "dist",
     "out",
+    ".snakemake",
+    "packages/grz-watchdog/tests",
 ]
 extend-exclude = ["alembic"]
 
@@ -211,6 +214,9 @@ max-complexity = 10
 "packages/grz-cli/src/grz_cli/models/**.py" = [
     "N805"
 ]
+"packages/grz-watchdog/workflow/scripts/**.py" = [
+    "F821"
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
@@ -257,6 +263,7 @@ commands = [["mypy"]]
 python_version = "3.12"
 plugins = "pydantic.mypy"
 packages = "grz_cli,grzctl,grz_pydantic_models,grz_db,grz_common"
+exclude = "(src/packages/grz-watchdog)"
 
 [[tool.mypy.overrides]]
 module = "crypt4gh.*"
