@@ -107,7 +107,7 @@ up, on `ResearchConsent` in `submission/metadata/v1.py`.
 | `category` | must contain the LOINC consent category and the MII broad consent category, one coding each; extra categories are allowed (open slicing) |
 | `patient` | † must identify the patient: reference or identifier (identifier needs `system` + `value`). The profile requires `patient` but marks both ways of filling it mustSupport only |
 | `policy` | at least one document OID, with or without the `urn:oid:` prefix |
-| `provision` (root) | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required, `code` forbidden |
+| `provision` (root) | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required from metadata v1.3 on (before, a missing one is read as grz-pydantic-models 2.7.1 read it: no root bound, only nested periods count), `code` forbidden |
 | `provision.provision[]` | the decisions: `type`, `period`, at least one `code` |
 | a third provision level | forbidden |
 
@@ -184,6 +184,19 @@ research consent. That is why `ResearchConsentCodes` contains both.
 5. Date-only period bounds cover the whole day (a start begins at midnight, an end expires at the
    end of that day); datetimes without a timezone are read as UTC.
 6. A consent that states neither research code grants nothing: silence is not consent.
+
+`explain_no_research_consent(date)` names the rule that refused, for each consent that permits no
+research. `ResearchConsent`, `Donor` and `GrzSubmissionMetadata` each have it. It returns `None`
+exactly when `consents_to_research` grants:
+
+```text
+donors[1] (mother): researchConsents[0] has no scope, noScopeJustification 'other patient-related reason'
+donors[0] (index): researchConsents[0] is outside every research provision period: 2020-09-01 to 2025-08-31
+```
+
+grzctl shows it in the `Reason` column of `grzctl consent --details`. `grzctl validate`,
+`grzctl encrypt` and `grzctl archive` log it for a submission without research consent on its
+submission date.
 
 ## How this stays correct over time
 

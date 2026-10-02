@@ -1,12 +1,14 @@
 """Command for managing a submission database"""
 
+import contextlib
 import csv
 import json
 import logging
 import sys
 import traceback
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -1954,6 +1956,44 @@ def show(ctx: click.Context, submission_id: str, output_json: bool):
     console.print(panel)
 
 
+def _report(message: str, style: str | None = None) -> None:
+    """Print one line of the backfill report on stdout.
+
+    Logs and the progress bar go to stderr, so the report can be redirected without them.
+    The message is printed as is, without rich markup, emoji codes or highlighting.
+    Markup would drop every part in square brackets, such as ``[dry-run]`` or the ``[type=...]`` of a pydantic error.
+    The line is not wrapped, so that a redirected report keeps one line per message.
+    Both streams share one terminal, so the progress bar is cleared for the line and redrawn below it.
+
+    :param message: The line to print.
+    :param style: A rich style for the whole line, such as ``"red"``.
+    """
+    with tqdm.external_write_mode(file=sys.stdout):
+        console.out(message, style=style, highlight=False)
+
+
+@contextlib.contextmanager
+def _logs_about(submission_id: str) -> Iterator[None]:
+    """Start the message of every log record created in this context with *submission_id*.
+
+    The backfill report goes to stdout and logs go to stderr.
+    A log, such as a warning from parsing metadata.json, is then no longer next to the report line of its submission.
+    So it names the submission itself.
+    """
+    factory = logging.getLogRecordFactory()
+
+    def record_about_submission(*args: Any, **kwargs: Any) -> logging.LogRecord:
+        record = factory(*args, **kwargs)
+        record.msg = f"{submission_id}: {record.msg}"
+        return record
+
+    logging.setLogRecordFactory(record_about_submission)
+    try:
+        yield
+    finally:
+        logging.setLogRecordFactory(factory)
+
+
 def _fetch_metadata_json(s3_client: Any, bucket: str, submission_id: str) -> str | None:
     """Return the raw metadata.json content for *submission_id*, or None when not found.
 
@@ -1979,7 +2019,8 @@ class _BackfillResult(StrEnum):
     CONSENT_MISMATCH = "consent_mismatch"
 
 
-class _BackfillOutcome(NamedTuple):
+@dataclass(frozen=True)
+class _BackfillOutcome:
     """What one submission's backfill did, and whether its case link is still missing.
 
     The two are independent: a submission whose case key could not be resolved is still
@@ -1990,10 +2031,14 @@ class _BackfillOutcome(NamedTuple):
     :param status: What happened to the submission's fields, donors and case link.
     :param link_unresolved: Whether the case could not be resolved. Re-running once the cause
         is cleared links it.
+    :param metadata: The parsed metadata.json, or ``None`` if it did not parse. The consent
+        checks of the run read it, so that metadata.json is parsed, and logs its warnings, once.
+        It is what the backfill read, not what it did, so comparisons leave it out.
     """
 
     status: _BackfillResult
     link_unresolved: bool = False
+    metadata: GrzSubmissionMetadata | None = field(default=None, compare=False, repr=False)
 
 
 def _fetch_metadata_json_from_archives(
@@ -2011,7 +2056,7 @@ def _fetch_metadata_json_from_archives(
         try:
             raw_json = _fetch_metadata_json(client, bucket, submission_id)
         except Exception as exc:
-            console_err.print(f"[red]  {submission_id}: S3 error in {label} archive: {exc}[/red]")
+            _report(f"  {submission_id}: S3 error in {label} archive: {exc}", "red")
             return None
         if raw_json is not None:
             found[label] = raw_json
@@ -2047,7 +2092,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     try:
         metadata = GrzSubmissionMetadata.model_validate_json(raw_json)
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: failed to parse metadata.json: {exc}[/red]")
+        _report(f"  {submission_id}: failed to parse metadata.json: {exc}", "red")
         return _BackfillOutcome(_BackfillResult.ERROR)
 
     # The archived copy is redacted; the stored row holds the submitter's values.
@@ -2069,41 +2114,40 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
             ignore_fields=ignore_fields or None,
         )
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: diff failed: {exc}[/red]")
-        return _BackfillOutcome(_BackfillResult.ERROR)
+        _report(f"  {submission_id}: diff failed: {exc}", "red")
+        return _BackfillOutcome(_BackfillResult.ERROR, metadata=metadata)
 
     # See _BackfillOutcome: a link that cannot be resolved still lets the rest be written.
     link_unresolved = changes.case_link_error is not None
     if link_unresolved:
-        console_err.print(f"[yellow]  {submission_id}: case link unresolved: {changes.case_link_error}[/yellow]")
+        _report(f"  {submission_id}: case link unresolved: {changes.case_link_error}", "yellow")
 
     if not changes.has_pending:
-        console_err.print(f"[dim]  {submission_id}: already up to date, skipping.[/dim]")
-        return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved)
+        _report(f"  {submission_id}: already up to date, skipping.", "dim")
+        return _BackfillOutcome(_BackfillResult.UP_TO_DATE, link_unresolved, metadata)
 
     # Filling a NULL destroys nothing, so it is always written. Replacing or removing a stored value
     # needs saying so, with --force or --allow-overwrite. One that nobody asked for skips the
     # submission whole: a row the run half-updated is harder to reason about than one it left alone.
     if not force and (undeclared := changes.undeclared_destructive_changes(allow_overwrite)):
-        console_err.print(
-            f"[dim]  {submission_id}: would overwrite {', '.join(undeclared)}, skipping the whole "
-            f"submission (use --force for all, or --allow-overwrite for named fields).[/dim]"
+        _report(
+            f"  {submission_id}: would overwrite {', '.join(undeclared)}, skipping the whole "
+            f"submission (use --force for all, or --allow-overwrite for named fields).",
+            "dim",
         )
-        return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE)
+        return _BackfillOutcome(_BackfillResult.WOULD_OVERWRITE, metadata=metadata)
 
     if dry_run:
-        console_err.print(
-            f"[yellow]  [dry-run] {submission_id}: would update: {', '.join(changes.pending_changes)}[/yellow]"
-        )
-        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved)
+        _report(f"  [dry-run] {submission_id}: would update: {', '.join(changes.pending_changes)}", "yellow")
+        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved, metadata)
 
     try:
         db_service.commit_changes(submission_id, changes)
-        console_err.print(f"[green]  {submission_id}: updated ({', '.join(changes.pending_changes)}).[/green]")
-        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved)
+        _report(f"  {submission_id}: updated ({', '.join(changes.pending_changes)}).", "green")
+        return _BackfillOutcome(_BackfillResult.UPDATED, link_unresolved, metadata)
     except Exception as exc:
-        console_err.print(f"[red]  {submission_id}: failed to commit: {exc}[/red]")
-        return _BackfillOutcome(_BackfillResult.ERROR)
+        _report(f"  {submission_id}: failed to commit: {exc}", "red")
+        return _BackfillOutcome(_BackfillResult.ERROR, metadata=metadata)
 
 
 @db.command("backfill")
@@ -2171,6 +2215,10 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     cannot name it, so replacing an existing link holds the whole submission back until
     --force is passed. Pass --ignore-field case_id to skip case linking altogether.
 
+    The report goes to stdout. Logs, such as the warnings from parsing metadata.json, go to
+    stderr, and each one starts with the ID of its submission. The progress bar also goes to
+    stderr, and only if stderr is a terminal.
+
     Candidate selection (mutually exclusive):
 
     \b
@@ -2204,121 +2252,132 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         candidates: list[Submission] = []
         for sid, sub in zip(submission_ids, db_service.get_submissions(list(submission_ids)), strict=True):
             if sub is None:
-                console_err.print(f"[yellow]Warning: submission '{sid}' not found in database, skipping.[/yellow]")
+                _report(f"Warning: submission '{sid}' not found in database, skipping.", "yellow")
             else:
                 candidates.append(sub)
     else:
         candidates = list(db_service.list_processed_between(start_date.date(), end_date.date()))
-        console_err.print(
-            f"[cyan]Date window: {start_date.date()} to {end_date.date()} ({len(candidates)} submission(s)).[/cyan]"
-        )
+        _report(f"Date window: {start_date.date()} to {end_date.date()} ({len(candidates)} submission(s)).", "cyan")
 
     counts: Counter[_BackfillResult] = Counter()
+    prefix = "[dry-run] " if dry_run else ""
 
-    console_err.print(
-        f"[cyan]{'[dry-run] ' if dry_run else ''}Processing {len(candidates)} submission(s) "
-        f"across consented and non-consented archives…[/cyan]"
-    )
+    _report(f"{prefix}Processing {len(candidates)} submission(s) across consented and non-consented archives…", "cyan")
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
     consent_mismatches = 0
+    without_consent_at_submission = 0
     expired_consents = 0
     links_unresolved = 0
     inboxes_recorded = 0
 
-    for submission in tqdm(candidates):
-        # Read both archives before writing anything. A metadata.json in both is an error, and
-        # committing the first copy found would already have changed the row.
-        found_in = _fetch_metadata_json_from_archives(submission.id, archive_targets)
+    for submission in tqdm(candidates, disable=None):
+        with _logs_about(submission.id):
+            # Read both archives before writing anything. A metadata.json in both is an error, and
+            # committing the first copy found would already have changed the row.
+            found_in = _fetch_metadata_json_from_archives(submission.id, archive_targets)
 
-        if found_in is None:
-            counts[_BackfillResult.ERROR] += 1
-            continue
+            if found_in is None:
+                counts[_BackfillResult.ERROR] += 1
+                continue
 
-        if len(found_in) > 1:
-            console_err.print(
-                f"[red]  {submission.id}: ERROR: metadata.json found in both consented and non_consented archives[/red]"
+            if len(found_in) > 1:
+                _report(
+                    f"  {submission.id}: ERROR: metadata.json found in both consented and non_consented archives",
+                    "red",
+                )
+                counts[_BackfillResult.ERROR] += 1
+                continue
+
+            if not found_in:
+                counts[_BackfillResult.NOT_FOUND] += 1
+                continue
+
+            actual_archive = next(iter(found_in))  # "consented" or "non_consented"
+            outcome = _backfill_submission(
+                submission,
+                found_in[actual_archive],
+                db_service,
+                dry_run,
+                force,
+                ignore_fields,
+                allow_overwrite_keys,
             )
-            counts[_BackfillResult.ERROR] += 1
-            continue
+            counts[outcome.status] += 1
+            links_unresolved += outcome.link_unresolved
 
-        if not found_in:
-            counts[_BackfillResult.NOT_FOUND] += 1
-            continue
-
-        actual_archive = next(iter(found_in))  # "consented" or "non_consented"
-        outcome = _backfill_submission(
-            submission,
-            found_in[actual_archive],
-            db_service,
-            dry_run,
-            force,
-            ignore_fields,
-            allow_overwrite_keys,
-        )
-        counts[outcome.status] += 1
-        links_unresolved += outcome.link_unresolved
-
-        # check DB `consented` vs actual archive
-        if submission.consented is not None:
-            expected_archive = "consented" if submission.consented else "non_consented"
-            if actual_archive != expected_archive:
-                consent_mismatches += 1
-                console_err.print(
-                    f"[bold red]  CONSENT MISMATCH: {submission.id} has DB consented={submission.consented} "
-                    f"(expected '{expected_archive}'), but was found in '{actual_archive}' bucket![/bold red]"
-                )
-
-        # check consent expiration (if stored in consented archive)
-        # (submission.submission_metadata is populated after commit, or check parsed metadata)
-        if actual_archive == "consented" and submission.submission_metadata:
-            try:
-                meta = GrzSubmissionMetadata.model_validate(submission.submission_metadata)
-                if not meta.consents_to_research(date=date.today()):
-                    expired_consents += 1
-                    console_err.print(
-                        f"[yellow]  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
-                        f"but research consent has expired as of today ({date.today()}).[/yellow]"
+            # check DB `consented` vs actual archive
+            if submission.consented is not None:
+                expected_archive = "consented" if submission.consented else "non_consented"
+                if actual_archive != expected_archive:
+                    consent_mismatches += 1
+                    _report(
+                        f"  CONSENT MISMATCH: {submission.id} has DB consented={submission.consented} "
+                        f"(expected '{expected_archive}'), but was found in '{actual_archive}' bucket!",
+                        "bold red",
                     )
-            except ValidationError:
-                log.warning(f"Error validating submission metadata for {submission.id}: {traceback.format_exc()}")
 
-        # A missing inbox is always filled.
-        # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
-        # inboxes can still name the one the submission came from.
-        # A scan that finds no inbox, or more than one, is ambiguous.
-        # It is left for --inbox on other commands.
-        if submission.inbox is None:
-            submitter_id = submission.id.split("_", maxsplit=1)[0]
-            derived_inbox = scan_inbox(configuration, submitter_id, submission.id)
-            if derived_inbox is None:
-                console_err.print(f"[dim]  {submission.id}: no unambiguous inbox found to record.[/dim]")
-            elif dry_run:
-                console_err.print(
-                    f"[yellow]  [dry-run] {submission.id}: would record inbox '{derived_inbox}'.[/yellow]"
-                )
-            else:
-                db_service.set_submission_inbox(submission.id, derived_inbox)
-                inboxes_recorded += 1
+            # Check the consent of the archived metadata.json, not of the stored metadata.
+            # The stored metadata is missing before the first backfill, and a dry run does not store it.
+            # Archive placement and the stored `consented` evaluate the consent at the submission date.
+            # So a consent missing on that date is no expiry.
+            # Under the current rules, the submission was never consented.
+            if actual_archive == "consented" and outcome.metadata is not None:
+                submission_date = outcome.metadata.submission.submission_date
+                if reasons := outcome.metadata.explain_no_research_consent(submission_date):
+                    without_consent_at_submission += 1
+                    _report(
+                        f"  NO RESEARCH CONSENT: {submission.id} is in 'consented' archive, "
+                        f"but has no research consent on its submission date ({submission_date}): {reasons}",
+                        "bold red",
+                    )
+                elif reasons := outcome.metadata.explain_no_research_consent(date.today()):
+                    expired_consents += 1
+                    _report(
+                        f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
+                        f"but research consent has expired as of today ({date.today()}): {reasons}",
+                        "yellow",
+                    )
+
+            # A missing inbox is always filled.
+            # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
+            # inboxes can still name the one the submission came from.
+            # A scan that finds no inbox, or more than one, is ambiguous.
+            # It is left for --inbox on other commands.
+            if submission.inbox is None:
+                submitter_id = submission.id.split("_", maxsplit=1)[0]
+                derived_inbox = scan_inbox(configuration, submitter_id, submission.id)
+                if derived_inbox is None:
+                    _report(f"  {submission.id}: no unambiguous inbox found to record.", "dim")
+                elif dry_run:
+                    _report(f"  [dry-run] {submission.id}: would record inbox '{derived_inbox}'.", "yellow")
+                    inboxes_recorded += 1
+                else:
+                    db_service.set_submission_inbox(submission.id, derived_inbox)
+                    _report(f"  {submission.id}: recorded inbox '{derived_inbox}'.", "green")
+                    inboxes_recorded += 1
 
     # ── Summary ─────────────────────────────────────────────────────────────
-    prefix = "[dry-run] " if dry_run else ""
     verb = "Would update" if dry_run else "Updated"
-    console_err.print(
-        f"\n[cyan]{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}\n"
+    inbox_verb = "Would record inbox" if dry_run else "Inbox recorded"
+    _report(
+        f"\n{prefix}Done. {verb}: {counts[_BackfillResult.UPDATED]}\n"
         f"  Up to date: {counts[_BackfillResult.UP_TO_DATE]}\n"
         f"  Not in bucket (split consent): {counts[_BackfillResult.NOT_FOUND]}\n"
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
         f"  Case link unresolved: {links_unresolved} (also counted above)\n"
-        f"  Inbox recorded: {inboxes_recorded}\n"
-        f"  Errors: {counts[_BackfillResult.ERROR]}[/cyan]"
+        f"  {inbox_verb}: {inboxes_recorded}\n"
+        f"  Errors: {counts[_BackfillResult.ERROR]}",
+        "cyan",
     )
 
-    if consent_mismatches or expired_consents:
-        console_err.print(
-            f"\n[bold yellow]Consent issues:\n"
+    if consent_mismatches or without_consent_at_submission or expired_consents:
+        _report(
+            f"\nConsent issues:\n"
             f"  Bucket ↔ DB consent mismatches: {consent_mismatches}\n"
-            f"  Expired consents in consented archive: {expired_consents}[/bold yellow]"
+            f"  No research consent at submission date in consented archive: {without_consent_at_submission}\n"
+            f"  Expired consents in consented archive: {expired_consents}",
+            "bold yellow",
         )
     if counts[_BackfillResult.ERROR]:
         sys.exit(1)

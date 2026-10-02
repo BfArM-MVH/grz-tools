@@ -609,13 +609,48 @@ def test_research_consent_open_ended_provision_period():
     )
 
 
-def test_consent_requires_root_provision_period():
-    """Every profile version pins the root provision period to 1..1; only its end became optional."""
+def test_consent_accepts_missing_root_provision_period():
+    """The model reads a missing root period, so metadata before schema v1.3 can read as it did in 2.7.1."""
     consent_raw = _consent_raw("minimal_consented")
     del consent_raw["provision"]["period"]
 
-    with pytest.raises(ValidationError, match="period"):
-        Consent.model_validate(consent_raw)
+    consent = Consent.model_validate(consent_raw)
+    assert consent.provision is not None
+    assert consent.provision.period is None
+    assert consent.datetimes_fhir_does_not_permit() == []
+
+
+def _metadata_without_root_period(dataset: str, version: str) -> dict:
+    """An example with the root provision period deleted from its first donor's consent scope."""
+    metadata = json.loads(_metadata_raw(dataset, version))
+    del metadata["donors"][0]["researchConsents"][0]["scope"]["provision"]["period"]
+    return metadata
+
+
+def test_root_provision_period_required_as_of_1_3():
+    """From metadata v1.3 on, a scope without a root provision period is rejected."""
+    metadata = _metadata_without_root_period("wgs_trio", "1.3.0")
+
+    with pytest.raises(ValidationError, match=r"scope\.provision\.period is required as of metadata v1\.3"):
+        GrzSubmissionMetadata.model_validate(metadata)
+
+
+def test_missing_root_provision_period_is_read_as_before_1_3(caplog):
+    """Before v1.3, a missing root period means no root bound: only the nested periods count."""
+    submission = GrzSubmissionMetadata.model_validate(_metadata_without_root_period("wgs_tumor_germline", "1.2.1"))
+
+    research_consent = submission.donors[0].research_consents[0]
+    assert isinstance(research_consent.scope, Consent)
+    assert research_consent.scope.provision is not None
+    assert research_consent.scope.provision.period is None
+    assert "has no period" in caplog.text
+    assert "only the nested provision periods count" in caplog.text
+
+    nested = research_consent.scope.provision.provision
+    inside = max(p.period.start.first_moment.date() for p in nested)
+    outside = min(p.period.start.first_moment.date() for p in nested) - timedelta(days=1)
+    assert ResearchConsent.consents_to_research([research_consent], date=inside)
+    assert not ResearchConsent.consents_to_research([research_consent], date=outside)
 
 
 def test_root_provision_period_caps_open_ended_sub_provisions():
@@ -740,6 +775,89 @@ def test_research_consent_no_subprovisions():
     consent_json_raw = _consent_raw("minimal_consented")
     del consent_json_raw["provision"]["provision"]
     Consent.model_validate(consent_json_raw)
+
+
+@pytest.mark.parametrize(
+    ("change", "on", "reason"),
+    (
+        (lambda consent: None, date(2024, 1, 1), None),
+        (lambda consent: None, date(2019, 1, 1), "is outside the root provision period 2020-09-01 to 2050-08-31"),
+        (
+            lambda consent: None,
+            date(2026, 1, 1),
+            "is outside every research provision period: 2020-09-01 to 2025-08-31",
+        ),
+        (lambda consent: consent.update(status="inactive"), date(2024, 1, 1), "is not in force, status 'inactive'"),
+        (
+            lambda consent: consent["provision"]["provision"][0].update(type="deny"),
+            date(2024, 1, 1),
+            "denies PATDAT_ERHEBEN_SPEICHERN_NUTZEN",
+        ),
+        (
+            lambda consent: consent["provision"].pop("provision"),
+            date(2024, 1, 1),
+            "has no provision for a research code",
+        ),
+        (lambda consent: consent.pop("provision"), date(2024, 1, 1), "has no provision"),
+    ),
+    ids=(
+        "permits",
+        "before the root period",
+        "after the research period",
+        "not in force",
+        "denies",
+        "no research provision",
+        "no provision",
+    ),
+)
+def test_research_consent_explains_why_it_permits_no_research(change, on: date, reason: str | None):
+    """The reason names the check of ``consent_by_code`` that refused, and exists exactly when consent is refused."""
+    consent_raw = _consent_raw("minimal_consented")
+    change(consent_raw)
+    research_consent = ResearchConsent(schemaVersion="2026.0.0", scope=Consent.model_validate(consent_raw))
+
+    assert research_consent.explain_no_research_consent(on) == reason
+    assert (reason is None) == ResearchConsent.consents_to_research([research_consent], date=on)
+
+
+def test_research_consent_without_parsed_scope_explains_why():
+    """A consent without a parsed scope grants nothing, and says whether it has a scope at all."""
+    unparsed = ResearchConsent(schemaVersion="2026.0.0", scope={"not": "a consent"})
+    justified = ResearchConsent(noScopeJustification=ResearchConsentNoScopeJustification.REFUSED)
+
+    assert unparsed.explain_no_research_consent(date(2024, 1, 1)) == "has a scope that is not a valid FHIR Consent"
+    assert justified.explain_no_research_consent(date(2024, 1, 1)) == (
+        "has no scope, noScopeJustification 'patient refuses to sign consent'"
+    )
+
+
+def test_donor_explanation_names_only_the_consents_that_refuse():
+    """A deny refuses for the donor even next to a permit, so only the denying consent is named."""
+    metadata_raw = json.loads(_metadata_raw("wes_tumor_germline", "1.3.0"))
+    consents = metadata_raw["donors"][0]["researchConsents"]
+    denying = copy.deepcopy(consents[0])
+    for provision in denying["scope"]["provision"]["provision"]:
+        provision["type"] = "deny"
+    consents.append(denying)
+    metadata = GrzSubmissionMetadata.model_validate(metadata_raw)
+
+    assert (
+        metadata.donors[0]
+        .explain_no_research_consent(metadata.submission.submission_date)
+        .startswith("researchConsents[1] denies ")
+    )
+
+
+def test_submission_explanation_names_every_donor_without_research_consent():
+    """Each donor without research consent is named by position and relation, with the reasons of its consents."""
+    metadata = _metadata("wgs_trio", "1.3.0")
+
+    assert metadata.explain_no_research_consent(metadata.submission.submission_date) == (
+        "donors[1] (mother): researchConsents[0] has no scope, noScopeJustification 'other patient-related reason'; "
+        "donors[2] (father): researchConsents[0] has no scope, "
+        "noScopeJustification 'patient did not return consent documents'"
+    )
+    assert _metadata("wes_tumor_germline", "1.3.0").explain_no_research_consent(date(2024, 11, 8)) is None
 
 
 @pytest.mark.parametrize(
@@ -1522,7 +1640,8 @@ def test_model_matches_the_profile(name: str):
     # the period itself stays required at both provision levels, framing consent evaluation
     for element_id in ("Consent.provision.period", "Consent.provision.provision.period"):
         assert elements[element_id]["min"] == 1
-    assert RootConsentProvision.model_fields["period"].is_required()
+    # the root one is optional in the model only for metadata before schema v1.3, which rejects it from v1.3 on
+    assert not RootConsentProvision.model_fields["period"].is_required()
     assert ConsentProvision.model_fields["period"].is_required()
 
     # a patient identifier, when given, must carry system and value

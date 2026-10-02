@@ -82,6 +82,12 @@ def encrypt(  # noqa: PLR0913, PLR0917
 
     submission_date = submission.metadata.content.submission.submission_date
     consented = submission.metadata.content.consents_to_research(submission_date)
+    if not consented:
+        log.info(
+            f"Submission {submission_id} gives no research consent on its submission date ({submission_date}), "
+            "so it is encrypted for the non-consented archive: "
+            f"{submission.metadata.content.explain_no_research_consent(submission_date)}"
+        )
 
     archive_target = configuration.archives.consented if consented else configuration.archives.non_consented
 
