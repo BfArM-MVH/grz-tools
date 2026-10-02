@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.0...grz-common-v4.0.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **grz-common,grzctl:** write CLI log records apart from tqdm progress ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** count inboxes and expired consents in db backfill dry runs ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** print the db backfill report on stdout and logs on stderr ([#705](https://github.com/BfArM-MVH/grz-tools/issues/705)) ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** show [dry-run] and full error text in db backfill ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+
 ## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v3.0.0...grz-common-v4.0.0) (2026-09-26)
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v4.0.0...grz-pydantic-models-v4.1.0) (2026-10-02)
+
+
+### Features
+
+* **grz-pydantic-models,grzctl:** explain why a submission gives no research consent ([#709](https://github.com/BfArM-MVH/grz-tools/issues/709)) ([8ea4185](https://github.com/BfArM-MVH/grz-tools/commit/8ea4185811e68e1a8ecc3dbf0e209b716bd642d9))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** read consents without root period before v1.3 ([#706](https://github.com/BfArM-MVH/grz-tools/issues/706)) ([10dfa27](https://github.com/BfArM-MVH/grz-tools/commit/10dfa27d6cc50660c03bb2a07113a5a3a8d57a4b))
+
 ## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v3.0.0...grz-pydantic-models-v4.0.0) (2026-09-26)
 
 
