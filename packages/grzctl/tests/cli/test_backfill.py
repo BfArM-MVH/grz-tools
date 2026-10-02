@@ -8,6 +8,7 @@ is not a dev/test dependency of `grz-db`, but `moto[s3]`, `pytest-postgresql`, a
 `grz-pydantic-models-testing` are all in `grzctl`'s [test] dependency group.
 """
 
+import copy
 import datetime
 import importlib.resources
 import json
@@ -841,13 +842,13 @@ def test_backfill_dry_run_counts_what_it_would_do(
     """A dry run counts the inbox it would record, and checks the consent of the archived copy.
 
     The row has no stored metadata yet, so the consent check can only read the archived copy.
+    In the example metadata the father states only a noScopeJustification, so the submission has no
+    research consent on its submission date. That is not an expiry.
     """
-    raw = metadata.get_raw_dict()
-    raw["donors"][0]["researchConsents"][0]["scope"]["status"] = "inactive"
     db.add_submission(submission_id)
     for bucket in ARCHIVE_BUCKETS:
         s3_client_mock.create_bucket(Bucket=bucket)
-    _put_metadata(s3_client_mock, "consented", submission_id, GrzSubmissionMetadata.model_validate(raw))
+    _put_metadata(s3_client_mock, "consented", submission_id, metadata)
 
     with patch("grzctl.commands.db.cli.scan_inbox", return_value="inbox"):
         result = _invoke_backfill_command(migrated_database_config_path, submission_id, "--dry-run")
@@ -855,7 +856,81 @@ def test_backfill_dry_run_counts_what_it_would_do(
     assert result.exit_code == 0, result.output
     assert f"[dry-run] {submission_id}: would record inbox 'inbox'." in result.stdout
     assert "Would record inbox: 1" in result.stdout
-    assert "Expired consents in consented archive: 1" in result.stdout
+    assert "donors[1] (father): researchConsents[0] has no scope, noScopeJustification" in result.stdout
+    assert "No research consent at submission date in consented archive: 1" in result.stdout
+    assert "Expired consents in consented archive: 0" in result.stdout
     persisted = db.get_submission(submission_id)
     assert persisted.inbox is None
     assert persisted.submission_metadata is None
+
+
+def _with_research_consent_ending(metadata: GrzSubmissionMetadata, end: datetime.date) -> GrzSubmissionMetadata:
+    """Give every donor the index donor's research consent, with every period ending on *end*."""
+    raw = metadata.get_raw_dict()
+    consents = raw["donors"][0]["researchConsents"]
+    root = consents[0]["scope"]["provision"]
+    for provision in (root, *root["provision"]):
+        provision["period"]["end"] = end.isoformat()
+    for donor in raw["donors"][1:]:
+        donor["researchConsents"] = copy.deepcopy(consents)
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+def test_backfill_reports_a_consent_that_ended_after_the_submission_date_as_expired(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """Only a consent in force on the submission date but no longer today has expired."""
+    day_after_submission = metadata.submission.submission_date + datetime.timedelta(days=1)
+    db.add_submission(submission_id)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    _put_metadata(
+        s3_client_mock, "consented", submission_id, _with_research_consent_ending(metadata, day_after_submission)
+    )
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id, "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert f"CONSENT EXPIRED: {submission_id}" in result.stdout
+    assert "donors[0] (index): researchConsents[0] is outside the root provision period" in result.stdout
+    assert "No research consent at submission date in consented archive: 0" in result.stdout
+    assert "Expired consents in consented archive: 1" in result.stdout
+
+
+def _with_research_consent_starting(metadata: GrzSubmissionMetadata, start: datetime.date) -> GrzSubmissionMetadata:
+    """Give every donor the index donor's research consent, with its root provision period starting on *start*."""
+    raw = metadata.get_raw_dict()
+    consents = raw["donors"][0]["researchConsents"]
+    consents[0]["scope"]["provision"]["period"]["start"] = start.isoformat()
+    for donor in raw["donors"][1:]:
+        donor["researchConsents"] = copy.deepcopy(consents)
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+def test_backfill_reports_a_consent_that_started_after_the_submission_date_as_missing(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """A consent that starts after the submission date is missing on that date, even though it is in force today."""
+    day_after_submission = metadata.submission.submission_date + datetime.timedelta(days=1)
+    db.add_submission(submission_id)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    consenting_later = _with_research_consent_starting(metadata, day_after_submission)
+    assert consenting_later.consents_to_research(datetime.date.today())
+    _put_metadata(s3_client_mock, "consented", submission_id, consenting_later)
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id, "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert f"NO RESEARCH CONSENT: {submission_id}" in result.stdout
+    assert "donors[0] (index): researchConsents[0] is outside the root provision period" in result.stdout
+    assert "No research consent at submission date in consented archive: 1" in result.stdout
+    assert "Expired consents in consented archive: 0" in result.stdout

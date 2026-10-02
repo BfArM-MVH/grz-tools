@@ -2266,6 +2266,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
 
     # ── Fetch metadata from S3 and update DB ────────────────────────────────
     consent_mismatches = 0
+    without_consent_at_submission = 0
     expired_consents = 0
     links_unresolved = 0
     inboxes_recorded = 0
@@ -2316,19 +2317,27 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                         "bold red",
                     )
 
-            # Check the archived copy for an expired consent, not the stored one.
-            # The stored one is missing before the first backfill, and a dry run does not store it.
-            if (
-                actual_archive == "consented"
-                and outcome.metadata is not None
-                and not outcome.metadata.consents_to_research(date=date.today())
-            ):
-                expired_consents += 1
-                _report(
-                    f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
-                    f"but research consent has expired as of today ({date.today()}).",
-                    "yellow",
-                )
+            # Check the consent of the archived metadata.json, not of the stored metadata.
+            # The stored metadata is missing before the first backfill, and a dry run does not store it.
+            # Archive placement and the stored `consented` evaluate the consent at the submission date.
+            # So a consent missing on that date is no expiry.
+            # Under the current rules, the submission was never consented.
+            if actual_archive == "consented" and outcome.metadata is not None:
+                submission_date = outcome.metadata.submission.submission_date
+                if reasons := outcome.metadata.explain_no_research_consent(submission_date):
+                    without_consent_at_submission += 1
+                    _report(
+                        f"  NO RESEARCH CONSENT: {submission.id} is in 'consented' archive, "
+                        f"but has no research consent on its submission date ({submission_date}): {reasons}",
+                        "bold red",
+                    )
+                elif reasons := outcome.metadata.explain_no_research_consent(date.today()):
+                    expired_consents += 1
+                    _report(
+                        f"  CONSENT EXPIRED: {submission.id} is in 'consented' archive, "
+                        f"but research consent has expired as of today ({date.today()}): {reasons}",
+                        "yellow",
+                    )
 
             # A missing inbox is always filled.
             # Cleaning keeps a (redacted) metadata.json marker in the inbox, so the submitter's
@@ -2362,10 +2371,11 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         "cyan",
     )
 
-    if consent_mismatches or expired_consents:
+    if consent_mismatches or without_consent_at_submission or expired_consents:
         _report(
             f"\nConsent issues:\n"
             f"  Bucket ↔ DB consent mismatches: {consent_mismatches}\n"
+            f"  No research consent at submission date in consented archive: {without_consent_at_submission}\n"
             f"  Expired consents in consented archive: {expired_consents}",
             "bold yellow",
         )
