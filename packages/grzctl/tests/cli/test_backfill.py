@@ -11,9 +11,11 @@ is not a dev/test dependency of `grz-db`, but `moto[s3]`, `pytest-postgresql`, a
 import datetime
 import importlib.resources
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import boto3
 import click.testing
@@ -28,6 +30,8 @@ from grzctl.commands.db.cli import (
     _BackfillOutcome,
     _BackfillResult,
     _fetch_metadata_json_from_archives,
+    _logs_about,
+    _report,
 )
 from moto import mock_aws
 
@@ -702,11 +706,11 @@ def test_backfill_holds_back_the_whole_submission_when_the_case_link_changed(
     assert persisted.submission_size is None
 
 
-def _invoke_backfill_command(config_path: Path, submission_id: str) -> click.testing.Result:
+def _invoke_backfill_command(config_path: Path, submission_id: str, *args: str) -> click.testing.Result:
     runner = click.testing.CliRunner()
     return runner.invoke(
         grzctl.cli.build_cli(),
-        ["--config", str(config_path), "db", "backfill", "--submission-id", submission_id],
+        ["--config", str(config_path), "db", "backfill", "--submission-id", submission_id, *args],
     )
 
 
@@ -734,7 +738,7 @@ def test_backfill_writes_the_metadata_from_the_one_archive_that_holds_it(
 
     result = _invoke_backfill_command(migrated_database_config_path, submission_id)
 
-    assert result.exit_code == 0, result.stderr
+    assert result.exit_code == 0, result.output
     assert db.get_submission(submission_id).submission_metadata == metadata.to_redacted_dict()
 
 
@@ -758,7 +762,7 @@ def test_backfill_writes_nothing_when_both_archives_hold_the_metadata(
     result = _invoke_backfill_command(migrated_database_config_path, submission_id)
 
     assert result.exit_code == 1, "any error fails the run"
-    assert "found in both" in result.stderr
+    assert "found in both" in result.stdout
     assert db.get_submission(submission_id).submission_metadata is None
 
 
@@ -777,5 +781,81 @@ def test_backfill_writes_nothing_when_an_archive_cannot_be_read(
     result = _invoke_backfill_command(migrated_database_config_path, submission_id)
 
     assert result.exit_code == 1, "any error fails the run"
-    assert "S3 error in consented archive" in result.stderr
+    assert "S3 error in consented archive" in result.stdout
     assert db.get_submission(submission_id).submission_metadata is None
+
+
+def test_backfill_prints_the_report_on_stdout_and_names_the_submission_in_each_log(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Logs go to stderr apart from the report, so each one names its submission.
+
+    The stored row holds metadata, which the consent check used to parse a second time.
+    """
+    _populate_full_row(db, submission_id, metadata)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    _put_metadata(s3_client_mock, "consented", submission_id, metadata)
+
+    with caplog.at_level(logging.WARNING, logger="grz_pydantic_models"):
+        result = _invoke_backfill_command(migrated_database_config_path, submission_id)
+
+    assert result.exit_code == 0, result.output
+    assert "Done." in result.stdout
+    assert "Done." not in result.stderr
+    warnings = [record.getMessage() for record in caplog.records if record.name.startswith("grz_pydantic_models")]
+    assert warnings, "the example metadata logs a warning for its duplicate file path"
+    assert all(warning.startswith(f"{submission_id}: ") for warning in warnings)
+    assert len(warnings) == len(set(warnings)), "metadata.json is parsed once"
+
+
+def test_logs_name_the_submission_only_while_it_is_backfilled(caplog: pytest.LogCaptureFixture) -> None:
+    logger = logging.getLogger("grz_pydantic_models")
+    with caplog.at_level(logging.WARNING, logger="grz_pydantic_models"):
+        with _logs_about("S1"):
+            logger.warning("inside %s", "the context")
+        logger.warning("outside")
+
+    assert [record.getMessage() for record in caplog.records] == ["S1: inside the context", "outside"]
+
+
+def test_report_prints_the_message_as_is(capsys: pytest.CaptureFixture[str]) -> None:
+    """Markup would drop ``[dry-run]``, and emoji codes would turn ``:x:`` into an emoji."""
+    _report("  [dry-run] S1: S3 error :x: [type=missing]", "red")
+
+    assert "  [dry-run] S1: S3 error :x: [type=missing]" in capsys.readouterr().out
+
+
+def test_backfill_dry_run_counts_what_it_would_do(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """A dry run counts the inbox it would record, and checks the consent of the archived copy.
+
+    The row has no stored metadata yet, so the consent check can only read the archived copy.
+    """
+    raw = metadata.get_raw_dict()
+    raw["donors"][0]["researchConsents"][0]["scope"]["status"] = "inactive"
+    db.add_submission(submission_id)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    _put_metadata(s3_client_mock, "consented", submission_id, GrzSubmissionMetadata.model_validate(raw))
+
+    with patch("grzctl.commands.db.cli.scan_inbox", return_value="inbox"):
+        result = _invoke_backfill_command(migrated_database_config_path, submission_id, "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert f"[dry-run] {submission_id}: would record inbox 'inbox'." in result.stdout
+    assert "Would record inbox: 1" in result.stdout
+    assert "Expired consents in consented archive: 1" in result.stdout
+    persisted = db.get_submission(submission_id)
+    assert persisted.inbox is None
+    assert persisted.submission_metadata is None
