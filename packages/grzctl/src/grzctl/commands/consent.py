@@ -47,16 +47,18 @@ def consent(submission_dir, output_json, show_details, date):
         case True, False:
             json.dump(overall_consent, sys.stdout)
         case False, True:
-            _print_rich_table(consents)
+            reasons = {donor.donor_pseudonym: donor.explain_no_research_consent(date) for donor in metadata.donors}
+            _print_rich_table(consents, reasons)
         case False, False:
             click.echo(str(overall_consent).lower())
 
 
-def _print_rich_table(consents: dict[str, bool]):
+def _print_rich_table(consents: dict[str, bool], reasons: dict[str, str | None]):
     console = rich.console.Console()
     table = rich.table.Table()
     table.add_column("Donor", no_wrap=True)
     table.add_column("Research Consent", no_wrap=True)
+    table.add_column("Reason")
     for donor_pseudonym, consent_value in consents.items():
         research_consent = rich.text.Text(
             "True" if consent_value else "False",
@@ -65,6 +67,8 @@ def _print_rich_table(consents: dict[str, bool]):
         table.add_row(
             donor_pseudonym,
             research_consent,
+            # Text keeps the brackets of researchConsents[0] from being read as markup
+            rich.text.Text(reasons[donor_pseudonym] or ""),
         )
     console.print(table)
 
