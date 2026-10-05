@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import socket
-import sys
 from os import PathLike
 from pathlib import Path
 
