@@ -1709,6 +1709,36 @@ class TestProcessArchiveCommit:
         assert metadata_key in {o.key for o in s3_buckets["consented"].objects.all()}
         assert metadata_key in {o.key for o in s3_buckets["interrogation"].objects.all()}
 
+    def test_a_denied_check_for_an_earlier_archival_archives_anyway(
+        self, s3_buckets, monkeypatch, caplog, temp_process_config_file_path, working_dir_path
+    ):
+        """Without read access to the archive, the run cannot tell whether an earlier run archived the submission."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        archive_bucket = s3_buckets["consented"].name
+        metadata_key = f"{sid}/metadata/metadata.json"
+        make_api_call = botocore.client.BaseClient._make_api_call
+
+        def deny_reading_the_archive(client, operation_name, api_params):
+            if operation_name in {"HeadObject", "GetObject"} and api_params.get("Bucket") == archive_bucket:
+                # a HEAD answer carries only the HTTP status, a GET answer the real code
+                code = "403" if operation_name == "HeadObject" else "AccessDenied"
+                error = {
+                    "Error": {"Code": code, "Message": "simulated denial"},
+                    "ResponseMetadata": {"HTTPStatusCode": 403},
+                }
+                raise botocore.exceptions.ClientError(error, operation_name)
+            return make_api_call(client, operation_name, api_params)
+
+        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", deny_reading_the_archive)
+
+        with caplog.at_level(logging.WARNING, logger="grzctl.processor"):
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert metadata_key in {o.key for o in s3_buckets["consented"].objects.all()}
+        assert f"Cannot check whether submission '{sid}' is already archived" in caplog.text
+
 
 class _Panic(BaseException):
     """Stands in for pyo3's PanicException, which grz-check raises for a Rust panic and which is no Exception."""
