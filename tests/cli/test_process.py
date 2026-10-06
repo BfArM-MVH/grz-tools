@@ -1425,6 +1425,38 @@ class TestProcessPruefbericht:
         saved = json.loads((working_dir_path / "logs" / "pruefbericht.json").read_text())
         assert saved["SubmittedCase"]["tan"] == REDACTED_TAN, "the copy in the logs must not carry the tanG"
 
+    def test_a_reported_pruefbericht_is_not_submitted_again(
+        self,
+        s3_buckets,
+        s3_requests,
+        bfarm_api,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """The first run reports the submission and fails to clean it. The rerun cleans it without reporting again."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        s3_requests.unavailable_bucket = s3_buckets["inbox"].name
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+        assert result.exit_code != 0, "the first run should fail to clean the inbox"
+        s3_requests.unavailable_bucket = None
+        saved_copy = working_dir_path / "logs" / "pruefbericht.json"
+        saved_copy.unlink()
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()]
+        assert _states(process_config_content, sid)[-4:] == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.CLEANED,
+        ]
+        assert saved_copy.is_file(), "the rerun should still save the copy of the Prüfbericht in the logs"
+
     def test_a_failed_submission_is_sent_again(
         self,
         s3_buckets,

@@ -247,8 +247,13 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     """Generate the Prüfbericht, save it, and submit it to BfArM if asked to.
 
     Submitting makes this the reporting step, so a Prüfbericht that cannot be generated fails that
-    step too.
+    step too. A Prüfbericht that the database records as reported is not submitted again.
     """
+    if submit_pruefbericht:
+        submission = get_submission_db_instance(db_url=configuration.db.database_url).get_submission(submission_id)
+        if submission is not None and submission.get_latest_state(filter_to_type=SubmissionStateEnum.REPORTED):
+            log.warning(f"Submission '{submission_id}' is already reported. Its Prüfbericht is not submitted again.")
+            submit_pruefbericht = False
     # Entering the context writes REPORTING and commits it, so the retries below hold no
     # transaction open. A Prüfbericht that never gets through is recorded as an error, and a
     # later ``grzctl pruefbericht submit`` records the reporting states again.
