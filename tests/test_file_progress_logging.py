@@ -163,6 +163,35 @@ def test_get_index_keeps_size_zero(logger, test_dir_path):
     assert logger._get_index("missing.bed", size=0, mtime=0.0) == ("missing.bed", 0.0, 0)
 
 
+def test_get_state_finds_state_keyed_by_resolved_path(test_dir_path, temp_log_file_path, temp_data_file_metadata):
+    """Progress logs written before store resolved paths, so a path below a symlink must still find its state."""
+    real_dir = test_dir_path / "real"
+    real_dir.mkdir()
+    real_file = real_dir / "data.bed"
+    real_file.write_text("asdf")
+    link_dir = test_dir_path / "link"
+    link_dir.symlink_to(real_dir, target_is_directory=True)
+
+    stat = real_file.stat()
+    with open(temp_log_file_path, "w", newline="") as fd:
+        json.dump(
+            {
+                "file_path": str(real_file.resolve()),
+                "modification_time": stat.st_mtime,
+                "size": stat.st_size,
+                "metadata": temp_data_file_metadata.model_dump(by_alias=True),
+                "state": {"progress": 25, "status": "in-progress"},
+            },
+            fd,
+        )
+        fd.write("\n")
+
+    logger = FileProgressLogger(temp_log_file_path)
+
+    state = logger.get_state(link_dir / "data.bed", temp_data_file_metadata)
+    assert state == {"progress": 25, "status": "in-progress"}
+
+
 def test_read_existing_log(temp_log_file_path, temp_data_file_path, temp_data_file_metadata):
     """Test that file states are correctly read from an existing json log."""
     # Manually write a row to the log file
