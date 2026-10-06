@@ -2,6 +2,7 @@ import base64
 import hashlib
 import logging
 import math
+import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import AbstractContextManager
 from typing import Any
@@ -53,13 +54,14 @@ class S3Downloader(ReadStream):
     ``IfMatch`` makes sure that the rest comes from the same object.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         s3_client: Any,
         bucket: str,
         key: str,
         missing_error: type[GrzError] = MissingObjectError,
         max_resumes: int = 5,
+        stop: threading.Event | None = None,
     ):
         """
         :param s3_client: boto3 S3 client.
@@ -67,6 +69,7 @@ class S3Downloader(ReadStream):
         :param key: Key of the object.
         :param missing_error: The class for a missing object.
         :param max_resumes: How often the read may break in a row without data in between.
+        :param stop: Once it is set, the next read raises ``InterruptedError``.
         :raises MissingObjectError: As ``missing_error``, if the object does not exist.
         :raises ConfigurationError: If only a faulty setup causes the error, see :func:`~grz_common.transfer.s3_errors`.
         :raises DownloadError: For any other error of the S3 client.
@@ -78,6 +81,7 @@ class S3Downloader(ReadStream):
         self._key = key
         self._missing_error = missing_error
         self._max_resumes = max_resumes
+        self._stop = stop
         self._resumes = 0
         self._offset = 0
         # get_object reads only the headers. The body stays on the connection as a StreamingBody,
@@ -97,6 +101,8 @@ class S3Downloader(ReadStream):
                 raise
 
     def read(self, size: int | None = -1) -> bytes:
+        if self._stop is not None and self._stop.is_set():
+            raise InterruptedError(f"Reading s3://{self._bucket}/{self._key} stopped at byte {self._offset}")
         while True:
             try:
                 chunk = super().read(size)
