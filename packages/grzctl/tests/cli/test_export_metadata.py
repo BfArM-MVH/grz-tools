@@ -159,7 +159,7 @@ def test_collect_exports_what_was_submitted():
     # == treats 30 and 30.0 as equal; the JSON text does not
     assert json.dumps(entry.content) == json.dumps(_original())
     assert entry.unrestored == frozenset()
-    assert entry.metadata_version == "1.3"
+    assert entry.metadata_version == "1.3.0"
     assert entry.latest_state is None
 
 
@@ -222,6 +222,7 @@ def test_schema_version_reads_any_version():
     url = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/{}/GRZ/grz-schema.json"
     assert _schema_version({"$schema": url.format("v1.2.1")}) == "1.2.1"
     assert _schema_version({"$schema": url.format("v1.1.9")}) == "1.1.9"
+    assert _schema_version({"$schema": url.format("v1.3")}) == "1.3.0", "formatted like get_schema_version"
 
 
 @pytest.mark.parametrize(
@@ -304,7 +305,7 @@ def test_manifest_describes_the_export(tmp_path: Path):
         "path": "260914050_2025-09-15_c64603c1/metadata.json",
         "archive": "non_consented",
         "sha256": hashlib.sha256(exported_bytes).hexdigest(),
-        "metadata_version": "1.3",
+        "metadata_version": "1.3.0",
         "submission_uploaded_date": None,
         "latest_state": None,
         "unrestored_fields": ["tan_g"],

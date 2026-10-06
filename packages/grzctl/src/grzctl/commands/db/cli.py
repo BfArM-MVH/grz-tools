@@ -2,7 +2,6 @@
 
 import contextlib
 import csv
-import hashlib
 import json
 import logging
 import sys
@@ -29,6 +28,7 @@ from grz_common.exceptions import ConfigurationError, MissingSubmissionFileError
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.models.base import get_secret_value
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.utils.checksums import calculate_sha256
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
@@ -77,7 +77,6 @@ from grz_pydantic_models.submission.metadata import (
 )
 from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
-from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 from tqdm.auto import tqdm
 
@@ -836,10 +835,8 @@ def export_metadata(ctx: click.Context, output: Path, public_key_path: Path, inc
 
     archive_targets = _archive_targets(ctx.obj["configuration"])
     db_service = get_submission_db_instance(ctx.obj["db_url"])
-    with db_service.transaction() as session:
-        submissions = session.exec(
-            select(Submission).options(selectinload(Submission.states)).order_by(Submission.id)  # type: ignore[arg-type]
-        ).all()
+    # sorted, so that the same database gives the same export
+    submissions = sorted(db_service.list_submissions(limit=None), key=lambda submission: submission.id)
 
     entries, skipped = collect_export_entries(
         tqdm(submissions, desc="Reading archives", disable=None),
@@ -869,8 +866,7 @@ def export_metadata(ctx: click.Context, output: Path, public_key_path: Path, inc
             )
 
     incomplete = sum(1 for entry in entries if entry.unrestored)
-    with open(output, "rb") as output_fd:
-        output_sha256 = hashlib.file_digest(output_fd, "sha256").hexdigest()
+    output_sha256 = calculate_sha256(output, progress=False)
     console.print(
         f"Exported {len(entries)} metadata.json file(s) to '{output}' "
         f"({incomplete} with redacted fields left), skipped {len(skipped)} submission(s)."

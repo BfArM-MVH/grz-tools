@@ -108,7 +108,10 @@ def restore_metadata_dict(
 
 
 def _schema_version(content: dict[str, Any]) -> str | None:
-    """Read the metadata schema version, such as ``1.3``, from the document's ``$schema`` URL.
+    """Read the metadata schema version, such as ``1.3.0``, from the document's ``$schema`` URL.
+
+    Formats it like :meth:`~grz_pydantic_models.submission.metadata.GrzSubmissionMetadata.get_schema_version`,
+    which needs a validated document; the export reads the version without validating it.
 
     :param content: Metadata document.
     :returns: The version, or ``None`` if the URL is missing, not a string, or not a known schema URL.
@@ -117,7 +120,7 @@ def _schema_version(content: dict[str, Any]) -> str | None:
     if not isinstance(schema_url, str):
         return None
     match = re.fullmatch(SCHEMA_URL_PATTERN, schema_url)
-    return ".".join(group for group in match.groups() if group) if match else None
+    return ".".join(match.groups(default="0")) if match else None
 
 
 def collect_export_entries(
