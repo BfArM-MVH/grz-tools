@@ -237,3 +237,23 @@ def test_a_corrupt_fastq_is_recorded_as_a_failed_validation(
     _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap)
 
     assert "Validation runtime error" in temp_seq_data_log.read_text()
+
+
+def test_a_failed_validation_of_a_raw_file_records_its_errors(submission, temp_checksum_log, temp_seq_data_log, mocker):
+    """For a file that is neither FASTQ nor BAM, the checksum log is the only place for the errors."""
+    mock_validate = mocker.patch("grz_common.workers.submission.grz_check")
+    report = mocker.MagicMock()
+    report.warnings = []
+    report.errors = ["could not read the file"]
+    report.is_valid = False
+    report.sha256 = None
+    mock_validate.validate_fastq_paired.return_value = [report, report]
+    mock_validate.validate_fastq.return_value = report
+    mock_validate.validate_bam.return_value = report
+    mock_validate.validate_raw.return_value = report
+
+    _validate(submission, temp_checksum_log, temp_seq_data_log, no_mmap=True)
+
+    checksum_log = temp_checksum_log.read_text()
+    assert "could not read the file" in checksum_log
+    assert "No checksum found." in checksum_log  # still the text for the FASTQ and BAM files
