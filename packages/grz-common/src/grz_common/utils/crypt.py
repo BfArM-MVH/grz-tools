@@ -1,33 +1,30 @@
-"""Utilities for handling crypt4gh keys, encryption and decryption"""
+"""Utilities for handling crypt4gh keys, encryption and decryption."""
 
 import io
 import logging
 import os
-import typing
 from base64 import b64decode
+from contextlib import nullcontext
 from functools import partial
 from getpass import getpass
 from os import PathLike
-from os.path import getsize
 from pathlib import Path
 
-import crypt4gh.header
 import crypt4gh.keys
 import crypt4gh.keys.c4gh
 import crypt4gh.keys.ssh
-import crypt4gh.lib
 import grz_common.exceptions as grzexc
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from grz_common.pipeline.components import ReadStream, Tee, TqdmObserver
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
-from .io import TqdmIOWrapper
 
 log = logging.getLogger(__name__)
 
 
 class Crypt4GH:
-    """Crypt4GH encryption/decryption utility class"""
+    """Crypt4GH encryption/decryption utility class using the streaming pipeline."""
 
     Key = tuple[int, bytes, bytes]
 
@@ -58,34 +55,43 @@ class Crypt4GH:
         input_path: str | PathLike,
         output_path: str | PathLike,
         public_keys: tuple[Key],
+        show_progress: bool = True,
     ):
         """
-        Encrypt the file, properly handling the Crypt4GH header.
+        Encrypt a file using the Crypt4GH streaming pipeline.
 
-        :param public_keys:
-        :param output_path:
-        :param input_path:
-        :return: tuple with md5 values for original file, encrypted file
+        :param input_path: Path to the input file
+        :param output_path: Path to the output encrypted file
+        :param public_keys: Prepared Crypt4GH keys for encryption
+        :param show_progress: Whether to show progress bar
         """
-        # TODO: Progress bar?
-        # TODO: store header in separate file?
+        from ..pipeline.components.crypt4gh import Crypt4GHEncryptor  # noqa: PLC0415
+
         input_path = Path(input_path)
         output_path = Path(output_path)
 
-        total_size = getsize(input_path)
+        # extract public key and signing key from prepared keys tuple
+        _, signing_key, public_key = public_keys[0]
+
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="ENCRYPT ", postfix=f"{input_path.name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
+            (
+                tqdm(  # type: ignore[call-overload]
+                    total=input_path.stat().st_size,
+                    desc="ENCRYPT ",
+                    postfix={"file": input_path.name},
+                    **TQDM_DEFAULTS,
+                )
+                if show_progress
+                else nullcontext()
+            ) as pbar,
         ):
-            crypt4gh.lib.encrypt(
-                keys=public_keys,
-                infile=pbar_in_fd,
-                outfile=out_fd,
-            )
+            pipeline = ReadStream(in_fd)
+            if show_progress and pbar:
+                pipeline = pipeline | Tee(TqdmObserver(pbar))
+            pipeline = pipeline | Crypt4GHEncryptor(recipient_pubkey=public_key, sender_privkey=signing_key)
+            pipeline >> out_fd
 
     @staticmethod
     def retrieve_public_key(pubkey_path: str | PathLike) -> X25519PublicKey:
@@ -223,37 +229,47 @@ class Crypt4GH:
         )
 
     @staticmethod
-    def decrypt_file(input_path: Path, output_path: Path, private_key: X25519PrivateKey):
+    def decrypt_file(
+        input_path: str | PathLike,
+        output_path: str | PathLike,
+        private_key: X25519PrivateKey,
+        show_progress: bool = True,
+    ):
         """
-        Decrypt a file using the provided private key
+        Decrypt a file using the Crypt4GH streaming pipeline.
+
         :param input_path: Path to the encrypted file
         :param output_path: Path to the decrypted file
         :param private_key: The private key
+        :param show_progress: Whether to show progress bar
         :raises DecryptionError: If the private key does not open the header,
             or if the header or a segment of the file cannot be decrypted.
         """
-        total_size = getsize(input_path)
-        file_name = input_path.name
+        from ..pipeline.components.crypt4gh import Crypt4GHDecryptor  # noqa: PLC0415
+
+        input_path = Path(input_path)
+        output_path = Path(output_path)
+
         with (
             open(input_path, "rb") as in_fd,
             open(output_path, "wb") as out_fd,
-            TqdmIOWrapper(
-                typing.cast(io.RawIOBase, in_fd),
-                tqdm(total=total_size, desc="DECRYPT ", postfix=f"{file_name}", **TQDM_DEFAULTS),  # type: ignore[call-overload]
-            ) as pbar_in_fd,
-        ):
-            try:
-                crypt4gh.lib.decrypt(
-                    # list of (method, privkey, recipient_pubkey=None), with the raw 32 bytes of the key
-                    keys=[(0, private_key.private_bytes_raw(), None)],
-                    infile=pbar_in_fd,
-                    outfile=out_fd,
+            (
+                tqdm(  # type: ignore[call-overload]
+                    total=input_path.stat().st_size,
+                    desc="DECRYPT ",
+                    postfix={"file": input_path.name},
+                    **TQDM_DEFAULTS,
                 )
-            except ValueError as e:
-                if str(e) == "No supported encryption method":
-                    # crypt4gh raises this if the key opens no packet of the header
-                    raise grzexc.DecryptionError(
-                        f"Cannot decrypt {input_path}: the private key does not open its Crypt4GH header"
-                    ) from e
-                # crypt4gh raises ValueError for a header or a segment that the file gets wrong
+                if show_progress
+                else nullcontext()
+            ) as pbar,
+        ):
+            pipeline = ReadStream(in_fd)
+            if show_progress and pbar:
+                pipeline = pipeline | Tee(TqdmObserver(pbar))
+            # the decryptor works with the raw 32 bytes of the key
+            pipeline = pipeline | Crypt4GHDecryptor(private_key=private_key.private_bytes_raw())
+            try:
+                pipeline >> out_fd
+            except grzexc.DecryptionError as e:
                 raise grzexc.DecryptionError(f"Cannot decrypt {input_path}: {e}") from e
