@@ -86,7 +86,8 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submi
                 _ = obj.delete()
                 num_deleted += 1
         if not num_deleted:
-            sys.exit(f"No objects with prefix '{prefix}' in inbox {inbox_desc} found for deletion.")
+            # already cleaned, or an earlier clean stopped after its deletes
+            log.warning(f"No objects with prefix '{prefix}' in inbox {inbox_desc} found for deletion.")
 
         log.info(f"Successfully deleted {num_deleted} objects.")
 
