@@ -16,6 +16,7 @@ import time
 import boto3
 import pytest
 from botocore.exceptions import ClientError
+from grz_common.constants import MULTIPART_MIN_PART_SIZE
 from grz_common.pipeline.components import Observer, ReadStream, Tee
 from grz_common.pipeline.components.s3 import S3MultipartUploader
 from moto import mock_aws
@@ -46,10 +47,10 @@ def test_failed_pipeline_aborts_upload():
     s3 = boto3.client("s3", region_name="us-east-1")
     s3.create_bucket(Bucket=BUCKET)
 
-    # Any non-empty stream starts a multipart upload, which the failure has to abort.
+    # A stream of one part or more starts a multipart upload, which the failure has to abort.
     source = ReadStream(io.BytesIO(b"x" * (9 * 1024 * 1024)))
     chain = source | Tee(_FailOnCloseObserver())
-    uploader = S3MultipartUploader(s3, BUCKET, KEY)
+    uploader = S3MultipartUploader(s3, BUCKET, KEY, part_size=MULTIPART_MIN_PART_SIZE)
 
     with pytest.raises(RuntimeError):
         chain >> uploader
@@ -76,7 +77,7 @@ def test_failed_pipeline_surfaces_original_error_when_abort_is_denied(caplog):
 
     source = ReadStream(io.BytesIO(b"x" * (9 * 1024 * 1024)))
     chain = source | Tee(_FailOnCloseObserver())
-    uploader = S3MultipartUploader(s3, BUCKET, KEY)
+    uploader = S3MultipartUploader(s3, BUCKET, KEY, part_size=MULTIPART_MIN_PART_SIZE)
 
     def _deny_abort(*args, **kwargs):
         raise ClientError(
