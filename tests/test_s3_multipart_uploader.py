@@ -1,6 +1,8 @@
 """S3MultipartUploader stores every non-empty stream as a multipart upload, and an empty one with a PUT."""
 
+import hashlib
 import io
+import tracemalloc
 
 import boto3
 import botocore.client
@@ -145,3 +147,33 @@ def test_an_empty_object_stored_differently_fails_the_upload(s3, wrong_etag_from
         ReadStream(io.BytesIO(b"")) >> S3MultipartUploader(s3, BUCKET, KEY)
 
     _assert_nothing_was_stored(s3)
+
+
+class _AcceptingClient:
+    """An S3 client that accepts every part of a multipart upload, and keeps no copy of it."""
+
+    def create_multipart_upload(self, **kwargs):
+        return {"UploadId": "upload"}
+
+    def upload_part(self, **kwargs):
+        return {"ETag": f'"{hashlib.md5(kwargs["Body"], usedforsecurity=False).hexdigest()}"'}
+
+    def abort_multipart_upload(self, **kwargs):
+        pass
+
+
+def test_a_part_is_handed_to_its_upload_without_a_copy():
+    """A part in memory takes its size once, so an upload holds about (threads + 1) parts."""
+    part_size = MULTIPART_MIN_PART_SIZE
+    data = bytes(part_size)
+    uploader = S3MultipartUploader(_AcceptingClient(), BUCKET, KEY, part_size=part_size, max_threads=1)
+
+    tracemalloc.start()
+    try:
+        uploader.observe(data)
+        uploader.abort()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 1.5 * part_size, f"observing one part allocated {peak / part_size:.1f} parts"
