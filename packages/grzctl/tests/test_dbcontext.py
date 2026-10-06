@@ -6,10 +6,12 @@ from unittest.mock import MagicMock
 import grz_common.exceptions as grzexc
 import pytest
 from grz_common.interrupt import TerminateInterrupt
+from grz_common.pipeline.components import DataValidationError, UploadIntegrityError
+from grz_common.pipeline.context import FileError
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
-from grzctl.dbcontext import DbContext
+from grzctl.dbcontext import DbContext, FilesFailedError
 from pydantic import ValidationError
 
 
@@ -53,11 +55,13 @@ class TestMapExceptionToFailureReason:
             (grzexc.DuplicateUploadError("failed"), FailureReasonEnum.DUPLICATE_TANG),
             (grzexc.NetworkError("failed"), FailureReasonEnum.TRANSFER_ERROR),
             (grzexc.UploadError("failed"), FailureReasonEnum.TRANSFER_ERROR),
+            (UploadIntegrityError("failed"), FailureReasonEnum.TRANSFER_ERROR),
             (grzexc.ConfigurationError("failed"), FailureReasonEnum.CONFIGURATION_ERROR),
             (grzexc.PruefberichtGenerationError("failed"), FailureReasonEnum.PRUEFBERICHT_GENERATION_ERROR),
             (grzexc.PruefberichtRejectedError("failed"), FailureReasonEnum.PRUEFBERICHT_REJECTED),
             (KeyboardInterrupt(), FailureReasonEnum.INTERRUPTED),
             (TerminateInterrupt(), FailureReasonEnum.INTERRUPTED),
+            (DataValidationError("failed"), FailureReasonEnum.VALIDATION_ERROR),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
             (grzexc.IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
             (grzexc.SubmissionCleanedError("failed"), FailureReasonEnum.SUBMISSION_CLEANED),
@@ -136,6 +140,8 @@ class TestMapExceptionToFailureReason:
 
         # grouping classes that no code raises directly, so they carry no failure reason of their own
         grouping_classes = {grzexc.GrzError, grzexc.SubmissionRejectedError}
+        # takes file errors, and its reason is that of its decisive file error (see ``TestFilesFailed``)
+        grouping_classes.add(FilesFailedError)
 
         reasons = {
             cls.__name__: db_context._map_exception_to_failure_reason(cls, cls("failed"))
@@ -149,6 +155,87 @@ class TestMapExceptionToFailureReason:
             if reason in {FailureReasonEnum.UNKNOWN, *RETIRED_FAILURE_REASONS}
         }
         assert not wrong, f"These errors record no current failure reason: {wrong}"
+
+
+def _files_failed(*errors: BaseException) -> FilesFailedError:
+    return FilesFailedError("Processing failed", [FileError(f"file{i}", error) for i, error in enumerate(errors)])
+
+
+class TestFilesFailed:
+    """Several files fail in one run, and the most decisive of their errors sets the failure reason."""
+
+    @pytest.mark.parametrize(
+        "errors,expected",
+        [
+            (
+                (grzexc.TransferError("slow"), grzexc.SubmissionValidationError("bad")),
+                FailureReasonEnum.VALIDATION_ERROR,
+            ),
+            (
+                (grzexc.TransferError("slow"), grzexc.ConfigurationError("refused")),
+                FailureReasonEnum.CONFIGURATION_ERROR,
+            ),
+            ((grzexc.EncryptionError("failed"), grzexc.TransferError("slow")), FailureReasonEnum.TRANSFER_ERROR),
+            (
+                (grzexc.DecryptionError("failed"), grzexc.SubmissionValidationError("bad")),
+                FailureReasonEnum.DECRYPTION_ERROR,
+            ),
+            ((RuntimeError("bug"), grzexc.EncryptionError("failed")), FailureReasonEnum.UNKNOWN),
+        ],
+        ids=[
+            "submitter-before-transfer",
+            "configuration-before-transfer",
+            "transfer-before-other",
+            "first-of-equal-rank",
+            "first-of-other",
+        ],
+    )
+    def test_the_most_decisive_error_sets_the_reason(
+        self, db_context: DbContext, errors: tuple[BaseException, ...], expected: FailureReasonEnum
+    ):
+        exc = _files_failed(*errors)
+        assert db_context._map_exception_to_failure_reason(type(exc), exc) == expected
+
+    def test_is_an_expected_failure(self):
+        """``grzctl.cli`` reports a ``GrzError`` and shows a traceback for any other exception."""
+        assert issubclass(FilesFailedError, grzexc.GrzError)
+
+    def test_every_file_error_is_recorded(self, ctx, mock_db):
+        """The decisive error is the recorded one, and every file error is listed with its own reason."""
+        exc = _files_failed(grzexc.TransferError("slow"), grzexc.SubmissionValidationError("bad"))
+
+        ctx.__exit__(type(exc), exc, None)
+
+        mock_db.update_submission_state.assert_called_once_with(
+            ctx.submission_id,
+            SubmissionStateEnum.ERROR,
+            data={
+                "error": "bad",
+                "errors": [
+                    {"file": "file0", "reason": "transfer_error", "message": "slow"},
+                    {"file": "file1", "reason": "validation_error", "message": "bad"},
+                ],
+            },
+            failure_reason=FailureReasonEnum.VALIDATION_ERROR,
+            grzctl_versions=mock.ANY,
+        )
+
+    def test_an_unmapped_decisive_error_is_the_recorded_one(self, ctx, mock_db):
+        """With no mapped reason, ``data.error`` is still the message of the decisive file error."""
+        exc = _files_failed(RuntimeError("unexpected"))
+
+        ctx.__exit__(type(exc), exc, None)
+
+        mock_db.update_submission_state.assert_called_once_with(
+            ctx.submission_id,
+            SubmissionStateEnum.ERROR,
+            data={
+                "error": "unexpected",
+                "errors": [{"file": "file0", "reason": "unknown", "message": "unexpected"}],
+            },
+            failure_reason=FailureReasonEnum.UNKNOWN,
+            grzctl_versions=mock.ANY,
+        )
 
 
 class TestDbContextFailureReason:
