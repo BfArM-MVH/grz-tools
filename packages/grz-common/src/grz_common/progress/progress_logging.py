@@ -81,11 +81,20 @@ class FileProgressLogger[T: State]:
 
     def _get_index(self, file_path: str | PathLike, size: int | None = None, mtime: float | None = None) -> Index:
         """
-        Generates a unique index.
-        If size/mtime are provided, use them. Otherwise try to stat the local file.
-        Does NOT resolve to absolute path to preserve relative paths and S3 keys.
+        Generates a unique index for a given file based on its path, modification time and size.
+
+        Without ``size`` and ``mtime``, the path is of a local file.
+        It is resolved, as in progress logs written before, and the file is stat'ed.
+        With them, the path is kept as given, e.g. for an S3 key.
+
+        :param file_path: Path of the file or S3 key.
+        :param size: The size of the file, if known.
+        :param mtime: The modification time of the file, if known.
+        :return: A tuple containing the path, modification time and size.
         """
         path_obj = Path(file_path)
+        if size is None and mtime is None:
+            file_path = path_obj = path_obj.resolve()
         if (size is None or mtime is None) and path_obj.is_file():
             stat = path_obj.stat()
             size = stat.st_size if size is None else size
