@@ -303,7 +303,7 @@ class PushToPullAdapter(io.RawIOBase):
     ``readinto()`` goes through ``read()``, and ``readall()`` comes from ``io.RawIOBase``.
     """
 
-    def __init__(self, max_queue_size: int = 128) -> None:
+    def __init__(self, max_queue_size: int = 32) -> None:
         self.queue: queue.Queue[bytes | None] = queue.Queue(maxsize=max_queue_size)
         self.buffer = b""  # the rest of a chunk that did not fit into the last read()
         self.eof = False
