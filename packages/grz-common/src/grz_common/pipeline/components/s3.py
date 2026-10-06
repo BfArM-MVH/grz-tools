@@ -201,9 +201,10 @@ class S3MultipartUploader(Observer):
             self._buffer.extend(chunk)
             while len(self._buffer) >= self.part_size:
                 self._throttle_uploads()
-                part_data = self._buffer[: self.part_size]
-                del self._buffer[: self.part_size]
-                self._submit_part(bytes(part_data), self._part_number)
+                # the upload takes the buffer itself, and only the overhang is copied into a new one
+                part, self._buffer = self._buffer, self._buffer[self.part_size :]
+                del part[self.part_size :]
+                self._submit_part(part, self._part_number)
                 self._part_number += 1
 
     def _throttle_uploads(self):
@@ -232,13 +233,13 @@ class S3MultipartUploader(Observer):
             with self._upload_errors():
                 if not self._upload_id:
                     # nothing was written: an empty object needs a PUT
-                    self._put_object(bytes(self._buffer))
-                    self._buffer.clear()
+                    self._put_object(self._buffer)
+                    self._buffer = bytearray()
                 else:
                     # upload remaining data
                     if self._buffer:
-                        self._submit_part(bytes(self._buffer), self._part_number)
-                        self._buffer.clear()
+                        self._submit_part(self._buffer, self._part_number)
+                        self._buffer = bytearray()
 
                     for f in self._futures:
                         self._parts.append(f.result())
@@ -270,7 +271,7 @@ class S3MultipartUploader(Observer):
         self._cleanup()
         self._closed = True  # prevent a later close()/finalizer from re-running on an aborted upload
 
-    def _put_object(self, data: bytes) -> None:
+    def _put_object(self, data: bytes | bytearray) -> None:
         hasher = hashlib.md5(data, usedforsecurity=False)
         local_md5_hex = hasher.hexdigest()
 
@@ -292,14 +293,14 @@ class S3MultipartUploader(Observer):
                 stage=self.__class__.__name__,
             )
 
-    def _submit_part(self, data: bytes, part_num: int):
+    def _submit_part(self, data: bytes | bytearray, part_num: int):
         if not self._executor or not self._upload_id:
             raise RuntimeError("Multipart upload not started")
 
         future = self._executor.submit(self._upload_part, self._upload_id, part_num, data)
         self._futures.append(future)
 
-    def _upload_part(self, uid: str, part_num: int, data: bytes) -> dict[str, Any]:
+    def _upload_part(self, uid: str, part_num: int, data: bytes | bytearray) -> dict[str, Any]:
         hasher = hashlib.md5(data, usedforsecurity=False)
         local_md5_bytes = hasher.digest()
         local_md5_hex = hasher.hexdigest()
