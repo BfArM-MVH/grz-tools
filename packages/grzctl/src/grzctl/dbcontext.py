@@ -72,7 +72,9 @@ def _classify(error: BaseException | None) -> tuple[FailureReasonEnum, BaseExcep
     """
     for exc in _causes(error):
         if isinstance(exc, FilesFailedError):
-            return _classify(exc.decisive.error)
+            failure_reason, deciding = _classify(exc.decisive.error)
+            # with no mapped reason, the decisive file error still decides what is recorded
+            return failure_reason, deciding if deciding is not None else exc.decisive.error
         for exc_class, failure_reason in _FAILURE_REASONS.items():
             if isinstance(exc, exc_class):
                 return failure_reason, exc
