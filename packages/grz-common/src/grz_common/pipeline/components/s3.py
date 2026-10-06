@@ -127,8 +127,8 @@ class S3Downloader(ReadStream):
 class S3MultipartUploader(Observer):
     """
     Writing to S3 is a Sink (Observer).
-    It buffers data and uploads parts. An empty stream is sent with an empty PUT on close,
-    because a multipart upload needs at least one part.
+    It buffers data and uploads parts. The multipart upload starts with the first full part,
+    so a stream smaller than one part, an empty one included, is sent with one PUT on close.
     """
 
     def __init__(  # noqa: PLR0913, PLR0917
@@ -193,13 +193,11 @@ class S3MultipartUploader(Observer):
             return
 
         with self._upload_errors():
-            if not self._upload_id:
-                self._start_multipart_upload()
-
             self._check_futures()
 
             self._buffer.extend(chunk)
             while len(self._buffer) >= self.part_size:
+                self._start_multipart_upload()
                 self._throttle_uploads()
                 # the upload takes the buffer itself, and only the overhang is copied into a new one
                 part, self._buffer = self._buffer, self._buffer[self.part_size :]
@@ -232,7 +230,7 @@ class S3MultipartUploader(Observer):
         try:
             with self._upload_errors():
                 if not self._upload_id:
-                    # nothing was written: an empty object needs a PUT
+                    # no part was full: one PUT sends the data, even an empty object
                     self._put_object(self._buffer)
                     self._buffer = bytearray()
                 else:

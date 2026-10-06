@@ -1,4 +1,4 @@
-"""S3MultipartUploader stores every non-empty stream as a multipart upload, and an empty one with a PUT."""
+"""S3MultipartUploader stores a stream of one part or more as a multipart upload, and a smaller one with a PUT."""
 
 import hashlib
 import io
@@ -46,15 +46,24 @@ def test_explicit_empty_write_creates_an_empty_object(s3):
 
 
 @pytest.mark.parametrize("size", [1, 1024, 9 * 1024 * 1024])
-def test_non_empty_stream_uses_multipart(s3, size):
-    """Any non-empty stream, however small, is stored as a multipart upload."""
+def test_a_stream_smaller_than_one_part_is_stored_with_one_put(s3, size, monkeypatch):
+    """One request instead of three, and no multipart upload that an interrupt could leave behind."""
     data = b"x" * size
+    operations = []
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def record(self, operation_name, kwargs):
+        operations.append(operation_name)
+        return original_call(self, operation_name, kwargs)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", record)
 
     ReadStream(io.BytesIO(data)) >> S3MultipartUploader(s3, BUCKET, KEY)
 
+    assert operations == ["PutObject"]
     stored = s3.get_object(Bucket=BUCKET, Key=KEY)
     assert stored["Body"].read() == data
-    assert stored["ETag"].strip('"').endswith("-1"), "a one-part multipart upload has an ETag ending in -1"
+    assert stored["ETag"].strip('"') == hashlib.md5(data, usedforsecurity=False).hexdigest()
 
 
 @pytest.fixture
@@ -104,7 +113,7 @@ def test_a_part_stored_differently_fails_the_upload(s3, wrong_etag_from):
     wrong_etag_from("UploadPart")
 
     with pytest.raises(UploadIntegrityError):
-        ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY)
+        ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY, part_size=1024)
 
     _assert_nothing_was_stored(s3)
 
@@ -114,7 +123,7 @@ def test_an_object_assembled_differently_fails_the_upload(s3, wrong_etag_from):
     wrong_etag_from("CompleteMultipartUpload")
 
     with pytest.raises(UploadIntegrityError):
-        ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY)
+        ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY, part_size=1024)
 
     _assert_nothing_was_stored(s3)
 
@@ -122,7 +131,7 @@ def test_an_object_assembled_differently_fails_the_upload(s3, wrong_etag_from):
 def test_a_part_that_cannot_be_uploaded_fails_the_upload(s3, failing_upload_part):
     """An S3 error while uploading a part fails as an upload error, not as an integrity error."""
     with pytest.raises(UploadError) as exception:
-        ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY)
+        ReadStream(io.BytesIO(b"x" * 1024)) >> S3MultipartUploader(s3, BUCKET, KEY, part_size=1024)
 
     assert not isinstance(exception.value, UploadIntegrityError)
     _assert_nothing_was_stored(s3)
@@ -139,12 +148,13 @@ def test_a_stream_of_whole_parts_uploads_no_empty_last_part(s3):
     assert stored["ETag"].strip('"').endswith("-2"), "two whole parts, and no empty third one"
 
 
-def test_an_empty_object_stored_differently_fails_the_upload(s3, wrong_etag_from):
-    """The PUT that stores an empty stream is checked the same way, and leaves nothing behind either."""
+@pytest.mark.parametrize("size", [0, 1024])
+def test_an_object_put_differently_fails_the_upload(s3, wrong_etag_from, size):
+    """The PUT that stores a stream smaller than one part is checked the same way, and leaves nothing behind either."""
     wrong_etag_from("PutObject")
 
     with pytest.raises(UploadIntegrityError):
-        ReadStream(io.BytesIO(b"")) >> S3MultipartUploader(s3, BUCKET, KEY)
+        ReadStream(io.BytesIO(b"x" * size)) >> S3MultipartUploader(s3, BUCKET, KEY)
 
     _assert_nothing_was_stored(s3)
 
