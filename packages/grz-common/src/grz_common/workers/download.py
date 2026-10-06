@@ -7,9 +7,10 @@ import enum
 import itertools
 import logging
 import re
+import threading
 from collections import OrderedDict
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from operator import attrgetter, itemgetter
 from os import PathLike
 from pathlib import Path
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 from ..constants import TQDM_DEFAULTS
+from ..interrupt import wait_for_files
 from ..models.s3 import S3Options
 from ..pipeline.components import Tee, TqdmObserver
 from ..pipeline.components.s3 import S3Downloader
@@ -147,7 +149,13 @@ class S3BotoDownloadWorker:
             self._s3_client, self._s3_options.bucket, submission_id, metadata_dir, metadata_file_name
         )
 
-    def _download_with_progress(self, local_file_path: str, s3_object_id: str, file_metadata: SubmissionFileMetadata):
+    def _download_with_progress(
+        self,
+        local_file_path: str,
+        s3_object_id: str,
+        file_metadata: SubmissionFileMetadata,
+        stop: threading.Event | None = None,
+    ):
         """
         Download a single file from S3 to local storage using streaming pipeline.
 
@@ -155,6 +163,7 @@ class S3BotoDownloadWorker:
 
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
+        :param stop: Once it is set, the download stops at its next chunk.
         :raises MissingSubmissionFileError: If the bucket holds no such object.
         :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
         :raises DownloadError: For any other error of the S3 client.
@@ -175,6 +184,7 @@ class S3BotoDownloadWorker:
                     self._s3_options.bucket,
                     s3_object_id,
                     missing_error=grzexc.MissingSubmissionFileError,
+                    stop=stop,
                 )
                 pbar.reset(total=source.length)
                 pipeline = source | Tee(TqdmObserver(pbar))
@@ -185,13 +195,14 @@ class S3BotoDownloadWorker:
             Path(local_file_path).unlink(missing_ok=True)
             raise
 
-    def download_file(
+    def download_file(  # noqa: PLR0913, PLR0917
         self,
         local_file_path: Path,
         s3_object_id: str,
         progress_logger: FileProgressLogger[DownloadState],
         file_metadata: SubmissionFileMetadata,
         submission_id: str,
+        stop: threading.Event | None = None,
     ):
         """
         Download a single file from S3 to the specified local_file_path.
@@ -200,12 +211,13 @@ class S3BotoDownloadWorker:
         :param s3_object_id: S3 key of the file to download.
         :param progress_logger: The progress logger instance.
         :param file_metadata: The metadata for the file.
+        :param stop: Once it is set, the download stops at its next chunk.
         """
         try:
             local_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
 
             self.__log.info("Downloading file: '%s' -> '%s'", s3_object_id, str(local_file_path))
-            self._download_with_progress(str(local_file_path), s3_object_id, file_metadata)
+            self._download_with_progress(str(local_file_path), s3_object_id, file_metadata, stop)
 
             self.__log.info(f"Download complete for {str(local_file_path)}.")
             progress_logger.set_state(
@@ -255,21 +267,19 @@ class S3BotoDownloadWorker:
 
             pending.append((local_file_path, file_key, file_metadata))
 
+        stop = threading.Event()
         # a single stream cannot be split, so the files are what runs in parallel
-        with ThreadPoolExecutor(max_workers=self._threads) as pool:
-            futures = [
-                pool.submit(
-                    self.download_file, local_file_path, file_key, progress_logger, file_metadata, submission_id
-                )
-                for local_file_path, file_key, file_metadata in pending
-            ]
-            try:
-                for future in as_completed(futures):
-                    future.result()
-            except BaseException:
-                # also Ctrl-C and SIGTERM: the progress log records what finished, so a rerun picks the rest up
-                pool.shutdown(cancel_futures=True)
-                raise
+        pool = ThreadPoolExecutor(max_workers=self._threads)
+        futures = [
+            pool.submit(
+                self.download_file, local_file_path, file_key, progress_logger, file_metadata, submission_id, stop
+            )
+            for local_file_path, file_key, file_metadata in pending
+        ]
+        # no with block: its exit would wait for the running files again after the third Ctrl-C.
+        # The progress log records what finished, so a rerun picks the rest up.
+        wait_for_files(pool, futures, stop)
+        pool.shutdown()
 
 
 class InboxSubmissionState(enum.StrEnum):
