@@ -454,13 +454,14 @@ class Submission:
                     pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
 
                     for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
-                        checksum_issues = []
+                        checksum_issues: list[str] = []
 
                         for w in report.warnings:
                             self.__log.warning(f"{file_path.name}: {w}")
 
                         if not report.sha256:
-                            checksum_issues.append("No checksum found.")
+                            raw_errors = report.errors if file_metadata.file_type not in ("fastq", "bam") else []
+                            checksum_issues.extend(raw_errors or ["No checksum found."])
 
                         if (
                             report.sha256
