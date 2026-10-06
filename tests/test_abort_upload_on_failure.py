@@ -1,15 +1,12 @@
 """
-Regression test for failure-path upload handling in `Pipeable.__rshift__`.
+Regression tests for failure-path upload handling in ``Pipeable.__rshift__`` and ``S3MultipartUploader``.
 
 When the pipeline fails (here: a validator that only fails at ``close()``, mirroring the
-deferred FASTQ/BAM/checksum validators), the S3 multipart upload must be **aborted**:
+deferred FASTQ/BAM/checksum validators), or an interrupt stops the upload, the S3 multipart
+upload must be **aborted**:
 
 - no partial object may be committed to the archive, and
 - no incomplete multipart upload may be left dangling on the server.
-
-This is expected to FAIL until `__rshift__` aborts the sink on the failure path
-(currently `self.close()` raises in the `finally` and `other.close()` is skipped, so the
-upload is neither completed nor aborted).
 """
 
 import io
@@ -130,3 +127,27 @@ def test_abort_waits_for_the_parts_in_flight():
     uploader.abort()
 
     assert events == ["part", "part", "abort"]
+
+
+@mock_aws
+def test_an_interrupt_while_closing_aborts_the_upload():
+    """Ctrl-C, and SIGTERM in grzctl, raise no ``Exception``, but must abort the upload as well."""
+    s3 = boto3.client("s3", region_name="us-east-1")  # moto placeholder, see note above
+    s3.create_bucket(Bucket=BUCKET)
+    upload_part = s3.upload_part
+
+    def interrupted_last_part(**kwargs):
+        if kwargs["PartNumber"] == 2:
+            raise KeyboardInterrupt
+        return upload_part(**kwargs)
+
+    s3.upload_part = interrupted_last_part
+    uploader = S3MultipartUploader(s3, BUCKET, KEY, part_size=1024)
+    # one whole part, and the rest, which close() sends as the last part
+    uploader.observe(b"x" * 1500)
+
+    with pytest.raises(KeyboardInterrupt):
+        uploader.close()
+
+    uploads = s3.list_multipart_uploads(Bucket=BUCKET)
+    assert "Uploads" not in uploads, f"an interrupt must abort the upload, dangling: {uploads.get('Uploads')}"

@@ -238,7 +238,7 @@ class S3MultipartUploader(Observer):
                     self._parts.sort(key=lambda x: x["PartNumber"])
                     self._complete_upload()
 
-        except Exception as e:
+        except BaseException as e:
             log.error(f"Upload failed: {e}")
             self.abort()
             raise e
