@@ -31,12 +31,9 @@ import grzctl.processor
 import pytest
 import responses
 import yaml
-from grz_common.exceptions import MissingSubmissionFileError
-from grz_common.models.s3 import S3Options
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from grzctl.commands import inbox_resolution
-from grzctl.commands.clean import _clean_submission_from_bucket
 
 # Path to test fixtures
 MOCK_FILES_DIR = Path(__file__).parent.parent / "mock_files"
@@ -1223,19 +1220,36 @@ class TestProcessInboxCleanup:
             SubmissionStateEnum.CLEANED,
         ]
 
-    def test_nothing_to_clean_is_a_missing_submission_file(self, s3_buckets):
-        """An inbox that holds only the metadata lacks every file that the metadata lists."""
+    def test_a_clean_interrupted_after_its_deletes_finishes_on_a_rerun(
+        self,
+        s3_buckets,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """The inbox then holds only the metadata and the ``cleaning`` marker, so the rerun has nothing to delete."""
         sid = self.SUBMISSION_ID
-        s3_buckets["inbox"].put_object(Key=f"{sid}/metadata/metadata.json", Body=b"{}")
-        options = S3Options(
-            endpoint_url="https://s3.amazonaws.com",
-            bucket=s3_buckets["inbox"].name,
-            access_key="testing",
-            secret="testing",
-        )
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/").delete()
+        s3_buckets["inbox"].put_object(Key=f"{sid}/cleaning", Body=b"")
 
-        with pytest.raises(MissingSubmissionFileError):
-            _clean_submission_from_bucket(options.bucket, options, sid, "inbox 'inbox'")
+        args = [
+            "--config",
+            str(temp_process_config_file_path),
+            "clean",
+            "--submission-id",
+            sid,
+            "--yes-i-really-mean-it",
+        ]
+        result = click.testing.CliRunner().invoke(grzctl.cli.build_cli(), args)
+
+        assert result.exit_code == 0, f"Clean failed: {result.output}"
+        keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
+        assert keys == {f"{sid}/metadata/metadata.json", f"{sid}/cleaned"}
+        assert s3_buckets["inbox"].Object(f"{sid}/metadata/metadata.json").get()["Body"].read() == b""
+        assert _states(process_config_content, sid)[-2:] == [SubmissionStateEnum.CLEANING, SubmissionStateEnum.CLEANED]
 
     def test_a_failed_cleanup_is_recorded_once_as_its_own_step(
         self,
