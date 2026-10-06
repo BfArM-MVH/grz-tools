@@ -11,8 +11,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from boto3.s3.transfer import TransferConfig
+from botocore.exceptions import ClientError
 from grz_common.constants import TQDM_DEFAULTS
-from grz_common.exceptions import DetailedQCError, MissingObjectError, MissingSubmissionFileError, UploadError
+from grz_common.exceptions import (
+    DetailedQCError,
+    DownloadError,
+    MissingObjectError,
+    MissingSubmissionFileError,
+    UploadError,
+)
 from grz_common.pipeline.components import (
     DevNullSink,
     ObserverWithMetrics,
@@ -655,10 +662,21 @@ class SubmissionProcessor:
         """Whether the target archive holds the submission's metadata, and log a warning if it does.
 
         The archive copy ends with the metadata, so an archived metadata object means an earlier run finished.
+        If S3 denies access to it, the submission counts as not archived, as it does for ``grzctl archive``.
         """
+        key = _archive_metadata_key(run_state.submission_id)
         try:
-            head_object(run_state.final_s3, run_state.final_bucket, _archive_metadata_key(run_state.submission_id))
+            head_object(run_state.final_s3, run_state.final_bucket, key)
         except MissingObjectError:
+            return False
+        except DownloadError as e:
+            cause = e.__cause__
+            if not (isinstance(cause, ClientError) and cause.response["Error"]["Code"] == "AccessDenied"):
+                raise
+            log.warning(
+                f"Cannot check whether submission '{run_state.submission_id}' is already archived, "
+                f"because S3 denies access to '{key}'. Archiving it anyway."
+            )
             return False
         log.warning(
             f"Submission '{run_state.submission_id}' is already archived in '{run_state.final_bucket}'. "
