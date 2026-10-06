@@ -650,6 +650,22 @@ class SubmissionProcessor:
         log_keys = list(self._log_files(run_state.submission_id))
         return [*sorted(file_keys), *log_keys, _archive_metadata_key(run_state.submission_id)]
 
+    @staticmethod
+    def _is_archived(run_state: SubmissionRunState) -> bool:
+        """Whether the target archive holds the submission's metadata, and log a warning if it does.
+
+        The archive copy ends with the metadata, so an archived metadata object means an earlier run finished.
+        """
+        try:
+            head_object(run_state.final_s3, run_state.final_bucket, _archive_metadata_key(run_state.submission_id))
+        except MissingObjectError:
+            return False
+        log.warning(
+            f"Submission '{run_state.submission_id}' is already archived in '{run_state.final_bucket}'. "
+            "Nothing is streamed or copied again."
+        )
+        return True
+
     def _commit_to_archive(self, run_state: SubmissionRunState) -> None:
         """Copy all staged files from the interrogation bucket to the final archive.
 
@@ -721,6 +737,7 @@ class SubmissionProcessor:
 
         High-level view:
         1. Determine the target archive from the consent status at the submission date.
+           If it already holds the submission's metadata, stop.
         2. Guess whether the submission will be selected for detailed QC.
         3. Spawn threads to process files (Download -> Decrypt -> Validate -> Encrypt -> Archive).
            If the guess is yes, also write the decrypted data to local QC storage.
@@ -745,6 +762,8 @@ class SubmissionProcessor:
             Its ``__cause__`` is the decisive file error.
         """
         submission_run = self._new_run_state(submission_metadata)
+        if self._is_archived(submission_run):
+            return
         db = SubmissionDb(self.config.db.database_url, self.config.db.signing_author)
         prefetch = self._predict_qc(db, submission_run.submission_id)
         if prefetch:

@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import itertools
 import json
+import logging
 import os
 import signal
 import stat
@@ -1113,6 +1114,37 @@ class TestProcessRerun:
         assert downloads[self.READ1] == 0, "read1 passed in the first run, so the rerun must not stream it again"
         assert downloads[self.READ2] == 1
         _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
+
+    def test_a_rerun_of_an_archived_submission_streams_and_copies_nothing(
+        self,
+        s3_buckets,
+        s3_requests,
+        bfarm_api,
+        caplog,
+        temp_process_config_file_path,
+        working_dir_path,
+    ):
+        """The first run archives the submission and fails on the Prüfbericht, so the rerun finds it archived."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "invalid"}, status=400)
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+        assert result.exit_code != 0, "the first run should fail on the Prüfbericht"
+        s3_requests.requests.clear()
+
+        with caplog.at_level(logging.WARNING, logger="grzctl.processor"):
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid) == Counter()
+        archive_buckets = {s3_buckets[name].name for name in ("consented", "non_consented", "interrogation")}
+        archive_writes = [
+            key
+            for operation, bucket, key in s3_requests.requests
+            if operation in S3_WRITE_OPERATIONS and bucket in archive_buckets
+        ]
+        assert archive_writes == []
+        assert f"Submission '{sid}' is already archived" in caplog.text
 
 
 class TestProcessStagingCheckFailure:
