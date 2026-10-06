@@ -404,20 +404,20 @@ class Submission:
 
         def _execute_task(task_type, paths, metas, kwargs, pbar):
             reports = []
-            try:
-                with ExitStack() as stack:
-                    sources = []
-                    for p in paths:
-                        if not p.exists() or p.stat().st_size == 0:
-                            sources.append(str(p))
+            with ExitStack() as stack:
+                sources = []
+                for p in paths:
+                    if not p.exists() or p.stat().st_size == 0:
+                        sources.append(str(p))
+                    else:
+                        f = stack.enter_context(open(p, "rb"))
+                        if no_mmap:
+                            sources.append(TqdmFileReader(f, pbar))
                         else:
-                            f = stack.enter_context(open(p, "rb"))
-                            if no_mmap:
-                                sources.append(TqdmFileReader(f, pbar))
-                            else:
-                                mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
-                                sources.append(mm)
+                            mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
+                            sources.append(mm)
 
+                try:
                     if task_type == "fastq_paired":
                         reports = grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs)
                     elif task_type == "fastq_single":
@@ -426,15 +426,18 @@ class Submission:
                         reports = [grz_check.validate_bam(sources[0])]
                     elif task_type == "raw":
                         reports = [grz_check.validate_raw(sources[0])]
-            except Exception as e:
-                # report a read or grz_check error as a failed validation. A Rust panic arrives as a
-                # PanicException, which is no Exception, so it still stops the run
-                reports = [
-                    grz_check.ValidationReport(
-                        path=str(p), is_valid=False, errors=[f"Validation runtime error: {str(e)}"]
-                    )
-                    for p in paths
-                ]
+                except OSError as e:
+                    # grz_check raises an OSError for a stream it cannot decode, which is a failed validation.
+                    # A failed read of the source is not the data's fault and passes. A Rust panic arrives
+                    # as a PanicException, which is no Exception, so it still stops the run
+                    if "Failed to read from Python file-like object" in str(e):
+                        raise
+                    reports = [
+                        grz_check.ValidationReport(
+                            path=str(p), is_valid=False, errors=[f"Validation runtime error: {str(e)}"]
+                        )
+                        for p in paths
+                    ]
 
             return paths, metas, reports
 
