@@ -299,7 +299,7 @@ def test_upload_file_reports_rejected_credentials_as_a_configuration_error(
     s3_config_model, remote_bucket, temp_small_file_path, tmp_path, monkeypatch
 ):
     """The uploader keeps the ClientError, which carries the error code, as the cause."""
-    _fail_s3_operation(monkeypatch, "CreateMultipartUpload", "InvalidAccessKeyId")
+    _fail_s3_operation(monkeypatch, "PutObject", "InvalidAccessKeyId")
     upload_worker = S3BotoUploadWorker(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
     )
@@ -314,7 +314,7 @@ def test_upload_file_reports_any_other_s3_error_as_a_failed_upload(
     s3_config_model, remote_bucket, temp_small_file_path, tmp_path, monkeypatch
 ):
     """``AccessDenied`` is no configuration error, since S3 also answers it for a missing object."""
-    _fail_s3_operation(monkeypatch, "CreateMultipartUpload", "AccessDenied")
+    _fail_s3_operation(monkeypatch, "PutObject", "AccessDenied")
     upload_worker = S3BotoUploadWorker(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
     )
