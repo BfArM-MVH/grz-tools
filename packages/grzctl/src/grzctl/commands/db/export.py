@@ -1,5 +1,9 @@
 """
-Logic for exporting stored metadata.json files with their redacted fields restored.
+Logic for exporting archived metadata.json files with their redacted fields restored.
+
+The archive buckets hold each metadata.json as the submitter sent it, with tanG and localCaseId
+redacted. The database holds those two values, so the export reads the document from the archive
+and the values from the database.
 """
 
 import copy
@@ -10,7 +14,7 @@ import json
 import re
 import tempfile
 import zipfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,10 +36,25 @@ MANIFEST_NAME = "manifest.json"
 
 
 @dataclass(frozen=True)
+class ArchivedMetadata:
+    """A submission's metadata.json as read from an archive bucket."""
+
+    archive: str
+    """Name of the archive that holds it, such as ``consented``."""
+    raw_json: str
+    """The redacted document, as archiving wrote it."""
+
+
+ArchiveLookup = Callable[[str], ArchivedMetadata | str]
+"""Looks up a submission's archived metadata.json by submission ID; returns why not, if it cannot."""
+
+
+@dataclass(frozen=True)
 class ExportEntry:
     """One metadata.json to export, with what the manifest says about it."""
 
     submission_id: str
+    archive: str
     content: dict[str, Any]
     unrestored: frozenset[str]
     metadata_version: str | None
@@ -64,7 +83,7 @@ def restore_metadata_dict(
     The index donor's pseudonym, which redaction also replaces, cannot be restored:
     nothing stores the original value.
 
-    :param redacted: Redacted metadata, as stored in ``Submission.submission_metadata``. Not modified.
+    :param redacted: Redacted metadata, as read from an archive bucket. Not modified.
     :param tan_g: The submitter's tanG from the database, or ``None`` if unknown.
     :param local_case_id: The submitter's localCaseId from the database, or ``None`` if unknown.
     :returns: The restored copy, and the names of the fields still redacted because no value was known.
@@ -102,13 +121,15 @@ def _schema_version(content: dict[str, Any]) -> str | None:
 
 
 def collect_export_entries(
-    submissions: Iterable[Submission], *, include_test_submissions: bool
+    submissions: Iterable[Submission], fetch_archived: ArchiveLookup, *, include_test_submissions: bool
 ) -> tuple[list[ExportEntry], list[SkippedSubmission]]:
-    """Sort submissions into those to export, with their metadata restored, and those left out.
+    """Sort submissions into those to export, with their archived metadata restored, and those left out.
 
     Every submission lands in exactly one of the two lists, so none is dropped silently.
+    Test submissions are left out before their archive is read.
 
     :param submissions: Submissions with their ``states`` loaded, for :meth:`Submission.get_latest_state`.
+    :param fetch_archived: Reads a submission's metadata.json from the archives, or says why it cannot.
     :param include_test_submissions: Whether to export submissions of type ``test``.
     :returns: The entries to export, and the submissions left out with the reason.
     """
@@ -119,19 +140,29 @@ def collect_export_entries(
         if submission.submission_type == SubmissionType.test and not include_test_submissions:
             skipped.append(SkippedSubmission(submission.id, "test submission"))
             continue
-        if not submission.submission_metadata:
-            skipped.append(SkippedSubmission(submission.id, "no metadata stored in the database"))
+
+        archived = fetch_archived(submission.id)
+        if isinstance(archived, str):
+            skipped.append(SkippedSubmission(submission.id, archived))
+            continue
+        try:
+            content, unrestored = restore_metadata_dict(
+                json.loads(archived.raw_json),
+                tan_g=submission.tan_g,
+                local_case_id=submission.local_case_id,
+            )
+        except (ValueError, KeyError, TypeError):
+            # not JSON, or no submission object with tanG and localCaseId in it
+            skipped.append(
+                SkippedSubmission(submission.id, f"metadata.json in the {archived.archive} archive cannot be read")
+            )
             continue
 
-        content, unrestored = restore_metadata_dict(
-            submission.submission_metadata,
-            tan_g=submission.tan_g,
-            local_case_id=submission.local_case_id,
-        )
         latest_state = submission.get_latest_state()
         entries.append(
             ExportEntry(
                 submission_id=submission.id,
+                archive=archived.archive,
                 content=content,
                 unrestored=unrestored,
                 metadata_version=_schema_version(content),
@@ -189,6 +220,7 @@ def build_manifest(
             {
                 "submission_id": entry.submission_id,
                 "path": _member_path(entry.submission_id),
+                "archive": entry.archive,
                 "sha256": checksums[entry.submission_id],
                 "metadata_version": entry.metadata_version,
                 "submission_uploaded_date": (

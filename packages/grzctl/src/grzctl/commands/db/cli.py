@@ -8,7 +8,7 @@ import logging
 import sys
 import traceback
 from collections import Counter
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
@@ -88,7 +88,7 @@ from .. import limit
 from ..change_request import resolve_and_validate_change_request
 from ..inbox_resolution import require_inbox, scan_inbox
 from . import SignatureStatus, _verify_signature
-from .export import collect_export_entries, write_metadata_zip
+from .export import ArchivedMetadata, collect_export_entries, write_metadata_zip
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
 
@@ -769,6 +769,28 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
         raise SystemExit(1) from e
 
 
+def _warn(message: str, style: str | None = None) -> None:
+    """Print one warning line on stderr, as is: without rich markup, and not wrapped, so a redirected log keeps one line per warning."""
+    console_err.print(message, style=style, markup=False, highlight=False, soft_wrap=True)
+
+
+def _archived_metadata(submission_id: str, archive_targets: list[tuple[str, str, Any]]) -> ArchivedMetadata | str:
+    """Read a submission's metadata.json from the one archive that holds it, as backfill does.
+
+    :returns: The archived document, or why it cannot be exported: in neither archive, in both,
+        or an archive could not be read. An unread archive might hold a second copy.
+    """
+    found = _fetch_metadata_json_from_archives(submission_id, archive_targets, report=_warn)
+    if found is None:
+        return "an archive could not be read"
+    if len(found) > 1:
+        return "metadata.json found in both consented and non_consented archives"
+    if not found:
+        return "metadata.json found in neither archive"
+    [(archive, raw_json)] = found.items()
+    return ArchivedMetadata(archive=archive, raw_json=raw_json)
+
+
 @db.command("export-metadata")
 @click.option(
     "--output",
@@ -793,28 +815,37 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
 )
 @click.pass_context
 def export_metadata(ctx: click.Context, output: Path, public_key_path: Path, include_test_submissions: bool):
-    """Export every stored metadata.json, with tanG and localCaseId restored, as an encrypted zip file.
+    """Export every archived metadata.json, with tanG and localCaseId restored, as an encrypted zip file.
 
-    The database stores each metadata.json redacted, and the submitter's tanG and localCaseId
-    in their own columns. This command puts them back, writes one metadata.json per submission
-    into a zip, and adds a manifest.json that lists each file with its SHA-256 checksum, the
-    fields that could not be restored, and the submissions left out with the reason.
+    Reads each submission's metadata.json from the consented or non-consented archive, as backfill
+    does, so each document is what the submitter sent. Archiving redacted tanG and localCaseId;
+    this command puts back the values the database holds. It writes one metadata.json per
+    submission into a zip, and adds a manifest.json that lists each file with its archive and
+    SHA-256 checksum, the fields that could not be restored, and the submissions left out with the reason.
 
     The zip is encrypted with Crypt4GH for the recipient's public key before it is written,
     so its content never reaches the disk unencrypted.
     """
+    # checked here as well, so that a taken name stops the command before it reads every archive
+    if output.exists():
+        _abort(FileExistsError(f"Refusing to overwrite existing export '{output}'."))
     try:
         recipient_public_key = Crypt4GH.retrieve_public_key(public_key_path)
     except ConfigurationError as e:
         _abort(e)
 
+    archive_targets = _archive_targets(ctx.obj["configuration"])
     db_service = get_submission_db_instance(ctx.obj["db_url"])
-
     with db_service.transaction() as session:
         submissions = session.exec(
             select(Submission).options(selectinload(Submission.states)).order_by(Submission.id)  # type: ignore[arg-type]
         ).all()
-        entries, skipped = collect_export_entries(submissions, include_test_submissions=include_test_submissions)
+
+    entries, skipped = collect_export_entries(
+        tqdm(submissions, desc="Reading archives", disable=None),
+        lambda submission_id: _archived_metadata(submission_id, archive_targets),
+        include_test_submissions=include_test_submissions,
+    )
 
     try:
         write_metadata_zip(
@@ -828,12 +859,13 @@ def export_metadata(ctx: click.Context, output: Path, public_key_path: Path, inc
         _abort(e)
 
     for skip in skipped:
-        console_err.print(f"[yellow]Skipped {skip.submission_id}: {skip.reason}.[/yellow]")
+        _warn(f"Skipped {skip.submission_id}: {skip.reason}.", "yellow")
     for entry in entries:
         if entry.unrestored:
-            console_err.print(
-                f"[yellow]Exported {entry.submission_id} with {', '.join(sorted(entry.unrestored))} "
-                "still redacted: the database holds no value for it.[/yellow]"
+            _warn(
+                f"Exported {entry.submission_id} with {', '.join(sorted(entry.unrestored))} "
+                "still redacted: the database holds no value for it.",
+                "yellow",
             )
 
     incomplete = sum(1 for entry in entries if entry.unrestored)
@@ -2122,13 +2154,28 @@ class _BackfillOutcome:
     metadata: GrzSubmissionMetadata | None = field(default=None, compare=False, repr=False)
 
 
+def _archive_targets(configuration: GrzctlConfig) -> list[tuple[str, str, Any]]:
+    """Return ``(label, bucket, s3_client)`` for the consented and the non-consented archive."""
+    return [
+        ("consented", configuration.archives.consented.s3.bucket, init_s3_client(configuration.archives.consented.s3)),
+        (
+            "non_consented",
+            configuration.archives.non_consented.s3.bucket,
+            init_s3_client(configuration.archives.non_consented.s3),
+        ),
+    ]
+
+
 def _fetch_metadata_json_from_archives(
-    submission_id: str, archive_targets: list[tuple[str, str, Any]]
+    submission_id: str,
+    archive_targets: list[tuple[str, str, Any]],
+    report: Callable[[str, str | None], None] = _report,
 ) -> dict[str, str] | None:
     """Fetch the metadata.json for *submission_id* from every archive.
 
     :param submission_id: Submission to fetch.
     :param archive_targets: ``(label, bucket, s3_client)`` per archive.
+    :param report: Prints the error when an archive cannot be read; the backfill report by default.
     :returns: The raw content per label of each archive that holds the file, or None when an
         archive could not be read. An unread archive might hold a second copy.
     """
@@ -2137,7 +2184,7 @@ def _fetch_metadata_json_from_archives(
         try:
             raw_json = _fetch_metadata_json(client, bucket, submission_id)
         except Exception as exc:
-            _report(f"  {submission_id}: S3 error in {label} archive: {exc}", "red")
+            report(f"  {submission_id}: S3 error in {label} archive: {exc}", "red")
             return None
         if raw_json is not None:
             found[label] = raw_json
@@ -2317,14 +2364,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ignore_fields = set(ignore_field)
 
     # ── Build S3 clients for both archive targets ────────────────────────────
-    archive_targets = [
-        ("consented", configuration.archives.consented.s3.bucket, init_s3_client(configuration.archives.consented.s3)),
-        (
-            "non_consented",
-            configuration.archives.non_consented.s3.bucket,
-            init_s3_client(configuration.archives.non_consented.s3),
-        ),
-    ]
+    archive_targets = _archive_targets(configuration)
 
     db_service = get_submission_db_instance(ctx.obj["db_url"], author=ctx.obj["author"])
 

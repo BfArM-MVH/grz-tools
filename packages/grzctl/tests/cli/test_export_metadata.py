@@ -1,4 +1,8 @@
-"""Tests for `grzctl db export-metadata`."""
+"""Tests for `grzctl db export-metadata`.
+
+The unit tests feed the export an archive lookup directly. The command tests at the end run it
+against a moto-mocked S3 with both archives, as the backfill tests do.
+"""
 
 import copy
 import datetime
@@ -7,8 +11,11 @@ import importlib.resources
 import io
 import json
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+import boto3
 import crypt4gh.keys
 import crypt4gh.keys.c4gh
 import crypt4gh.lib
@@ -25,12 +32,16 @@ from grz_pydantic_models.submission.metadata import (
 )
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.db.export import (
+    ArchivedMetadata,
+    ArchiveLookup,
     ExportEntry,
+    SkippedSubmission,
     _schema_version,
     collect_export_entries,
     restore_metadata_dict,
     write_metadata_zip,
 )
+from moto import mock_aws
 
 TEST_METADATA_PATH = importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
 
@@ -39,17 +50,34 @@ def _original() -> dict:
     return json.loads(TEST_METADATA_PATH.read_text())
 
 
+def _archived_json(submitted: dict) -> str:
+    """The copy archiving uploads: the submitted document, redacted, written as JSON again."""
+    return json.dumps(redact_metadata_dict(submitted), indent=2)
+
+
 def _submission(suffix: str, **fields) -> Submission:
-    """A Submission row, not stored anywhere, holding the redacted example metadata."""
+    """A Submission row, not stored anywhere, holding the example's tanG and localCaseId."""
     original = _original()
     defaults = {
         "id": f"260914050_2025-09-15_c64603{suffix}",
         "tan_g": original["submission"]["tanG"],
         "local_case_id": original["submission"]["localCaseId"],
         "submission_type": SubmissionType.initial,
-        "submission_metadata": redact_metadata_dict(original),
     }
     return Submission(**(defaults | fields))
+
+
+def _always(found: ArchivedMetadata | str) -> ArchiveLookup:
+    """An archive lookup that gives *found* for every submission."""
+    return lambda submission_id: found
+
+
+ARCHIVED = ArchivedMetadata(archive="consented", raw_json=_archived_json(_original()))
+"""The example metadata as the consented archive holds it."""
+
+
+def _collect(*submissions: Submission, found: ArchivedMetadata | str = ARCHIVED, include_test_submissions=False):
+    return collect_export_entries(list(submissions), _always(found), include_test_submissions=include_test_submissions)
 
 
 def test_restore_round_trip():
@@ -119,35 +147,52 @@ def test_restore_leaves_input_untouched():
     assert redacted == before
 
 
-def test_collect_exports_restored_metadata():
-    """A submission with stored metadata is exported, restored, with what the manifest needs."""
-    entries, skipped = collect_export_entries([_submission("a1")], include_test_submissions=False)
+def test_collect_exports_what_was_submitted():
+    """The archived document, restored, is what the submitter sent, numbers written as they were."""
+    entries, skipped = _collect(_submission("a1"))
 
     assert skipped == []
     [entry] = entries
     assert entry.submission_id == "260914050_2025-09-15_c64603a1"
+    assert entry.archive == "consented"
     assert entry.content == _original()
+    # == treats 30 and 30.0 as equal; the JSON text does not
+    assert json.dumps(entry.content) == json.dumps(_original())
     assert entry.unrestored == frozenset()
     assert entry.metadata_version == "1.3"
     assert entry.latest_state is None
 
 
-def test_collect_skips_missing_metadata():
-    """A submission without stored metadata is skipped, with the reason."""
-    entries, skipped = collect_export_entries(
-        [_submission("a2", submission_metadata=None)], include_test_submissions=False
-    )
+def test_collect_skips_what_the_archive_lookup_reports():
+    """A submission the archives cannot provide is skipped, with the lookup's reason."""
+    entries, skipped = _collect(_submission("a2"), found="metadata.json found in neither archive")
+
+    assert entries == []
+    assert skipped == [SkippedSubmission("260914050_2025-09-15_c64603a2", "metadata.json found in neither archive")]
+
+
+@pytest.mark.parametrize(
+    "raw_json",
+    ["{not json", "[]", '{"donors": []}'],
+    ids=["not-json", "not-an-object", "no-submission"],
+)
+def test_collect_skips_an_unreadable_archived_copy(raw_json: str):
+    """An archived copy that is not a metadata document is skipped, naming its archive."""
+    entries, skipped = _collect(_submission("a3"), found=ArchivedMetadata("non_consented", raw_json))
 
     assert entries == []
     [skip] = skipped
-    assert skip.submission_id == "260914050_2025-09-15_c64603a2"
-    assert skip.reason == "no metadata stored in the database"
+    assert skip.reason == "metadata.json in the non_consented archive cannot be read"
 
 
-def test_collect_skips_test_submissions_by_default():
-    """Test submissions are left out unless asked for, and listed as skipped."""
+def test_collect_skips_test_submissions_without_reading_the_archive():
+    """Test submissions are left out unless asked for, before their archive is read."""
+
+    def no_archive_read(submission_id: str):
+        raise AssertionError("the archive of a skipped test submission must not be read")
+
     entries, skipped = collect_export_entries(
-        [_submission("a3", submission_type=SubmissionType.test)], include_test_submissions=False
+        [_submission("a4", submission_type=SubmissionType.test)], no_archive_read, include_test_submissions=False
     )
 
     assert entries == []
@@ -157,9 +202,7 @@ def test_collect_skips_test_submissions_by_default():
 
 def test_collect_includes_test_submissions_on_request():
     """Test submissions are exported when asked for."""
-    entries, skipped = collect_export_entries(
-        [_submission("a3", submission_type=SubmissionType.test)], include_test_submissions=True
-    )
+    entries, skipped = _collect(_submission("a5", submission_type=SubmissionType.test), include_test_submissions=True)
 
     assert len(entries) == 1
     assert skipped == []
@@ -167,7 +210,7 @@ def test_collect_includes_test_submissions_on_request():
 
 def test_collect_reports_unrestored_fields():
     """A submission whose tanG the database does not hold is exported with the field reported."""
-    entries, _ = collect_export_entries([_submission("a4", tan_g=None)], include_test_submissions=False)
+    entries, _ = _collect(_submission("a6", tan_g=None))
 
     [entry] = entries
     assert entry.content["submission"]["tanG"] == REDACTED_TAN
@@ -199,12 +242,10 @@ def test_schema_version_without_known_url(content: dict):
 
 def test_collect_exports_metadata_without_schema_url():
     """A document without a $schema URL is still exported, only without a version."""
-    metadata = redact_metadata_dict(_original())
-    del metadata["$schema"]
+    document = redact_metadata_dict(_original())
+    del document["$schema"]
 
-    entries, skipped = collect_export_entries(
-        [_submission("a5", submission_metadata=metadata)], include_test_submissions=False
-    )
+    entries, skipped = _collect(_submission("a7"), found=ArchivedMetadata("consented", json.dumps(document)))
 
     assert skipped == []
     [entry] = entries
@@ -223,7 +264,7 @@ def _export(tmp_path: Path, entries: list[ExportEntry], skipped=()) -> tuple[Pat
 
 def test_zip_holds_each_metadata_and_the_manifest(tmp_path: Path):
     """The zip holds one metadata.json per exported submission, restored, plus the manifest."""
-    entries, _ = collect_export_entries([_submission("b1"), _submission("b2")], include_test_submissions=False)
+    entries, _ = _collect(_submission("b1"), _submission("b2"))
 
     output, _ = _export(tmp_path, entries)
 
@@ -238,9 +279,12 @@ def test_zip_holds_each_metadata_and_the_manifest(tmp_path: Path):
 
 def test_manifest_describes_the_export(tmp_path: Path):
     """The manifest in the zip lists every exported and skipped submission, with checksums that match."""
+    found = {
+        "260914050_2025-09-15_c64603c1": ArchivedMetadata("non_consented", ARCHIVED.raw_json),
+        "260914050_2025-09-15_c64603c2": "metadata.json found in neither archive",
+    }
     entries, skipped = collect_export_entries(
-        [_submission("c1", tan_g=None), _submission("c2", submission_metadata=None)],
-        include_test_submissions=False,
+        [_submission("c1", tan_g=None), _submission("c2")], found.__getitem__, include_test_submissions=False
     )
 
     output, manifest = _export(tmp_path, entries, skipped)
@@ -258,6 +302,7 @@ def test_manifest_describes_the_export(tmp_path: Path):
     assert described == {
         "submission_id": "260914050_2025-09-15_c64603c1",
         "path": "260914050_2025-09-15_c64603c1/metadata.json",
+        "archive": "non_consented",
         "sha256": hashlib.sha256(exported_bytes).hexdigest(),
         "metadata_version": "1.3",
         "submission_uploaded_date": None,
@@ -265,13 +310,13 @@ def test_manifest_describes_the_export(tmp_path: Path):
         "unrestored_fields": ["tan_g"],
     }
     assert manifest["skipped"] == [
-        {"submission_id": "260914050_2025-09-15_c64603c2", "reason": "no metadata stored in the database"}
+        {"submission_id": "260914050_2025-09-15_c64603c2", "reason": "metadata.json found in neither archive"}
     ]
 
 
 def test_manifest_holds_no_tan_g_or_local_case_id(tmp_path: Path):
     """The manifest can be inspected without exposing what the export protects."""
-    entries, _ = collect_export_entries([_submission("d1")], include_test_submissions=False)
+    entries, _ = _collect(_submission("d1"))
 
     output, _ = _export(tmp_path, entries)
 
@@ -283,7 +328,7 @@ def test_manifest_holds_no_tan_g_or_local_case_id(tmp_path: Path):
 
 def test_refuses_to_overwrite_an_existing_export(tmp_path: Path):
     """An existing file at the output path is left as it is."""
-    entries, _ = collect_export_entries([_submission("e1")], include_test_submissions=False)
+    entries, _ = _collect(_submission("e1"))
     output = tmp_path / "export.zip"
     output.write_text("an earlier export")
 
@@ -295,7 +340,7 @@ def test_refuses_to_overwrite_an_existing_export(tmp_path: Path):
 
 def test_failed_export_leaves_nothing_behind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A failure halfway through writing leaves neither the zip nor its temporary file."""
-    entries, _ = collect_export_entries([_submission("f1")], include_test_submissions=False)
+    entries, _ = _collect(_submission("f1"))
 
     def disk_full(*args, **kwargs):
         raise OSError("No space left on device")
@@ -309,6 +354,23 @@ def test_failed_export_leaves_nothing_behind(tmp_path: Path, monkeypatch: pytest
 
 
 UPLOAD_DATE = "2025-09-16"
+
+
+@pytest.fixture
+def archives() -> Iterator[Any]:
+    """A moto-mocked S3 with the consented and non_consented archive buckets the test config names."""
+    with mock_aws():
+        s3_client = boto3.client("s3", region_name="us-east-1")
+        for bucket in ("consented", "non_consented"):
+            s3_client.create_bucket(Bucket=bucket)
+        yield s3_client
+
+
+def _put_archived(s3_client: Any, bucket: str, submission_id: str, submitted: dict) -> None:
+    """Put a submission's metadata.json into an archive bucket, redacted, as archiving does."""
+    s3_client.put_object(
+        Bucket=bucket, Key=f"{submission_id}/metadata/metadata.json", Body=_archived_json(submitted).encode()
+    )
 
 
 @pytest.fixture
@@ -357,14 +419,19 @@ def _populate(config_path: Path, tmp_path: Path, **submission_fields) -> tuple[s
     return submission_id, submitted
 
 
+def _unwrapped(text: str) -> str:
+    """*text* on one line: errors are wrapped at the terminal width, which a long temporary path can cross."""
+    return " ".join(text.split())
+
+
 def _export_args(output: Path, public_key_path: Path, *extra: str) -> list[str]:
     return ["db", "export-metadata", "--output", str(output), "--public-key", str(public_key_path), *extra]
 
 
 def test_command_exports_what_was_submitted(
-    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path]
+    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path], archives: Any
 ):
-    """The decrypted metadata.json equals what the submitter sent, tanG and localCaseId included."""
+    """The decrypted metadata.json is what the submitter sent, tanG and localCaseId included, from either archive."""
     public_key_path, private_key_path = recipient_key_paths
     first_id, first_submitted = _populate(
         migrated_database_config_path, tmp_path, submissionType="initial", tanG="b" * 64
@@ -372,6 +439,8 @@ def test_command_exports_what_was_submitted(
     second_id, second_submitted = _populate(
         migrated_database_config_path, tmp_path, submissionType="initial", tanG="c" * 64, localCaseId="case-2"
     )
+    _put_archived(archives, "consented", first_id, first_submitted)
+    _put_archived(archives, "non_consented", second_id, second_submitted)
     _invoke(migrated_database_config_path, "db", "submission", "update", first_id, "Finished")
     output = tmp_path / "export.zip.c4gh"
 
@@ -380,10 +449,15 @@ def test_command_exports_what_was_submitted(
     assert "Exported 2 metadata.json file(s)" in result.stdout
     assert hashlib.sha256(output.read_bytes()).hexdigest() in result.stdout
     with _decrypt(output, private_key_path) as archive:
-        assert json.loads(archive.read(f"{first_id}/metadata.json")) == first_submitted
-        assert json.loads(archive.read(f"{second_id}/metadata.json")) == second_submitted
+        first_exported = json.loads(archive.read(f"{first_id}/metadata.json"))
+        second_exported = json.loads(archive.read(f"{second_id}/metadata.json"))
         manifest = json.loads(archive.read("manifest.json"))
+    # == treats 30 and 30.0 as equal; the JSON text does not
+    assert json.dumps(first_exported) == json.dumps(first_submitted)
+    assert json.dumps(second_exported) == json.dumps(second_submitted)
     described = {submission["submission_id"]: submission for submission in manifest["submissions"]}
+    assert described[first_id]["archive"] == "consented"
+    assert described[second_id]["archive"] == "non_consented"
     assert described[first_id]["latest_state"] == "Finished"
     assert described[second_id]["latest_state"] is None
     assert described[first_id]["submission_uploaded_date"] == UPLOAD_DATE
@@ -392,11 +466,14 @@ def test_command_exports_what_was_submitted(
 
 
 def test_command_writes_nothing_readable_without_the_private_key(
-    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path]
+    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path], archives: Any
 ):
     """The export is no readable zip, and holds no tanG in plain text."""
     public_key_path, _ = recipient_key_paths
-    _, submitted = _populate(migrated_database_config_path, tmp_path, submissionType="initial", tanG="d" * 64)
+    submission_id, submitted = _populate(
+        migrated_database_config_path, tmp_path, submissionType="initial", tanG="d" * 64
+    )
+    _put_archived(archives, "consented", submission_id, submitted)
     output = tmp_path / "export.zip.c4gh"
 
     _invoke(migrated_database_config_path, *_export_args(output, public_key_path))
@@ -406,35 +483,63 @@ def test_command_writes_nothing_readable_without_the_private_key(
     assert list(tmp_path.glob(".export.zip.c4gh.*")) == []
 
 
-def test_command_skips_test_and_unpopulated_submissions(
-    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path]
+def test_command_skips_what_it_cannot_export(
+    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path], archives: Any
 ):
-    """Test submissions and submissions without metadata are listed as skipped, on stderr and in the manifest."""
+    """Test submissions, and submissions in neither or both archives, are skipped on stderr and in the manifest."""
     public_key_path, private_key_path = recipient_key_paths
-    test_id, _ = _populate(migrated_database_config_path, tmp_path)  # the example metadata is a test submission
-    unpopulated_id = "260914050_2025-09-15_0000abcd"
-    _invoke(migrated_database_config_path, "db", "submission", "add", unpopulated_id)
+    test_id, test_submitted = _populate(migrated_database_config_path, tmp_path)  # the example is a test submission
+    _put_archived(archives, "consented", test_id, test_submitted)
+    unarchived_id = "260914050_2025-09-15_0000abcd"
+    _invoke(migrated_database_config_path, "db", "submission", "add", unarchived_id)
+    doubled_id, doubled_submitted = _populate(
+        migrated_database_config_path, tmp_path, submissionType="initial", tanG="e" * 64
+    )
+    _put_archived(archives, "consented", doubled_id, doubled_submitted)
+    _put_archived(archives, "non_consented", doubled_id, doubled_submitted)
     output = tmp_path / "export.zip.c4gh"
 
     result = _invoke(migrated_database_config_path, *_export_args(output, public_key_path))
 
-    assert f"Skipped {test_id}: test submission." in result.stderr
-    assert f"Skipped {unpopulated_id}: no metadata stored in the database." in result.stderr
+    reasons = {
+        test_id: "test submission",
+        unarchived_id: "metadata.json found in neither archive",
+        doubled_id: "metadata.json found in both consented and non_consented archives",
+    }
+    for submission_id, reason in reasons.items():
+        assert f"Skipped {submission_id}: {reason}." in result.stderr
     with _decrypt(output, private_key_path) as archive:
         assert archive.namelist() == ["manifest.json"]
         manifest = json.loads(archive.read("manifest.json"))
-    assert {skip["submission_id"]: skip["reason"] for skip in manifest["skipped"]} == {
-        test_id: "test submission",
-        unpopulated_id: "no metadata stored in the database",
-    }
+    assert {skip["submission_id"]: skip["reason"] for skip in manifest["skipped"]} == reasons
+
+
+def test_command_skips_when_an_archive_cannot_be_read(
+    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path], archives: Any
+):
+    """An archive that cannot be read might hold a second copy, so the copy in the other one is not exported."""
+    public_key_path, _ = recipient_key_paths
+    submission_id, submitted = _populate(
+        migrated_database_config_path, tmp_path, submissionType="initial", tanG="f" * 64
+    )
+    _put_archived(archives, "non_consented", submission_id, submitted)
+    archives.delete_bucket(Bucket="consented")
+    output = tmp_path / "export.zip.c4gh"
+
+    result = _invoke(migrated_database_config_path, *_export_args(output, public_key_path))
+
+    assert f"{submission_id}: S3 error in consented archive" in result.stderr
+    assert f"Skipped {submission_id}: an archive could not be read." in result.stderr
+    assert "Exported 0 metadata.json file(s)" in result.stdout
 
 
 def test_command_includes_test_submissions_on_request(
-    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path]
+    migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path], archives: Any
 ):
     """--include-test-submissions exports test submissions too."""
     public_key_path, private_key_path = recipient_key_paths
     test_id, submitted = _populate(migrated_database_config_path, tmp_path)
+    _put_archived(archives, "consented", test_id, submitted)
     output = tmp_path / "export.zip.c4gh"
 
     _invoke(migrated_database_config_path, *_export_args(output, public_key_path, "--include-test-submissions"))
@@ -444,21 +549,22 @@ def test_command_includes_test_submissions_on_request(
         assert json.loads(archive.read("manifest.json"))["export"]["test_submissions_included"] is True
 
 
-def test_command_refuses_to_overwrite(
+def test_command_refuses_to_overwrite_before_reading_the_archives(
     migrated_database_config_path: Path, tmp_path: Path, recipient_key_paths: tuple[Path, Path]
 ):
-    """An existing output file aborts the command and is left as it is."""
+    """An existing output file aborts the command before any archive is read, and is left as it is."""
     public_key_path, _ = recipient_key_paths
     output = tmp_path / "export.zip.c4gh"
     output.write_text("an earlier export")
 
+    # no mocked S3: reading an archive would fail
     result = CliRunner().invoke(
         grzctl.cli.build_cli(),
         ["--config", str(migrated_database_config_path), *_export_args(output, public_key_path)],
     )
 
     assert result.exit_code != 0
-    assert "Refusing to overwrite" in result.stderr
+    assert "Refusing to overwrite" in _unwrapped(result.stderr)
     assert output.read_text() == "an earlier export"
 
 
@@ -474,5 +580,5 @@ def test_command_rejects_an_unreadable_public_key(migrated_database_config_path:
     )
 
     assert result.exit_code != 0
-    assert "cannot be read" in result.stderr
+    assert "cannot be read" in _unwrapped(result.stderr)
     assert not output.exists()
