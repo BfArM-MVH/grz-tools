@@ -258,21 +258,21 @@ A rerun of `process` then fails with `submission_cleaned`.
 
 ### Memory use
 
-For one file, `process` holds up to this much memory:
+The part buffers of the upload to the interrogation bucket take most of the memory. For one file, they hold up to
 
 ```
-(C + 1) × P + V × (Q + 2) × 8 MiB
+(C + 1) × P
 ```
 
 - C is `--concurrent-uploads`.
 - P is the part size: `archives.interrogation.s3.multipart_chunksize`, raised to the file size / 1000 for a file
   above 1000 parts.
-- V is the number of grz-check validators: 2 for FASTQ and BAM (checksum and format), 1 for other files.
-- Q is the queue of each validator: 32 chunks of 8 MiB. Each validator also holds 2 grz-check buffers of 8 MiB.
 
-A run holds this for `--threads` files at once. With the defaults (C = 4, P = 256 MiB, Q = 32, `--threads 4`),
-the worst case is about 1.8 GiB per FASTQ or BAM file and 7.1 GiB per run. The validator queues fill only when
-grz-check is slower than the rest of the pipeline, which is likely for gzipped FASTQ on a fast link.
+Decryption, validation and re-encryption add about 60 MiB per file, measured for a gzipped FASTQ. The validators
+queue Crypt4GH segments of 64 KiB, and grz-check reads through buffers of 8 MiB.
+
+A run holds this for `--threads` files at once. With the defaults (C = 4, P = 256 MiB, `--threads 4`), that is
+about 1.3 GiB per file and 5 GiB per run. A larger file raises P: a 500 GiB file holds 5 parts of 512 MiB.
 
 A future `--max-memory` option should derive `--threads` and the part size from a memory limit.
 
