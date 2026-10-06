@@ -83,7 +83,7 @@ def _rank(failure_reason: FailureReasonEnum) -> int:
     return next((rank for rank, reasons in enumerate(_RANKS) if failure_reason in reasons), len(_RANKS))
 
 
-class FilesFailedError(Exception):
+class FilesFailedError(grzexc.GrzError):
     """Files of a submission failed, each for its own reason.
 
     The most decisive of their errors sets the failure reason. Among errors of the same rank, the
