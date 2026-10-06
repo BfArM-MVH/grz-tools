@@ -1745,7 +1745,7 @@ class _Panic(BaseException):
 
 
 class TestProcessAbort:
-    """A panic fails its file like any error; an interrupt starts no queued file."""
+    """A panic fails its file like any error; an interrupt starts no queued file, and a second one stops the running files."""
 
     SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
     VCF = "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf"
@@ -1774,7 +1774,7 @@ class TestProcessAbort:
     def test_an_interrupt_starts_no_queued_file(
         self, s3_buckets, s3_requests, temp_process_config_file_path, working_dir_path, monkeypatch
     ):
-        """With one thread, SIGTERM during the second file lets it finish and starts no other file."""
+        """With one thread, a first interrupt during the second file lets it finish and starts no other file."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
         process_file = grzctl.processor.FilePipelineExecutor._process_file
@@ -1790,7 +1790,7 @@ class TestProcessAbort:
 
         monkeypatch.setattr(grzctl.processor.FilePipelineExecutor, "_process_file", interrupt_then_process_file)
 
-        # grzctl.cli.main() installs this handler, but the test runner calls the CLI without main()
+        # SIGTERM raises the KeyboardInterrupt of a first Ctrl-C here, not the one that grzctl.cli.main() installs
         previous_handler = signal.signal(signal.SIGTERM, signal.default_int_handler)
         try:
             result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--threads", "1")
@@ -1800,6 +1800,55 @@ class TestProcessAbort:
         assert result.exit_code != 0, f"Process should have been interrupted: {result.output}"
         downloads = s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid)
         assert sum(downloads.values()) == 2
+
+    def test_sigterm_stops_the_running_file(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        monkeypatch,
+    ):
+        """SIGTERM starts at the second level, so the running file stops at its next chunk and its upload is aborted."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        interrogation = s3_buckets["interrogation"].name
+        # parts smaller than a FASTQ file, so that the upload of the first FASTQ file is a multipart upload
+        monkeypatch.setattr(grzctl.processor, "calculate_s3_part_size", lambda size, preferred: 64 * 1024)
+        main_thread_id = threading.main_thread().ident
+        assert main_thread_id is not None
+        read = grzctl.processor.S3Downloader.read
+        stopped: list[bool] = []
+
+        def terminate_once_a_multipart_upload_runs(downloader, size=-1):
+            started = ("CreateMultipartUpload", interrogation) in {request[:2] for request in s3_requests.requests}
+            if started and not stopped:
+                signal.pthread_kill(main_thread_id, signal.SIGTERM)
+                # the main thread sets the stop event of the running files
+                stopped.append(downloader._stop is not None and downloader._stop.wait(timeout=30))
+            return read(downloader, size)
+
+        monkeypatch.setattr(grzctl.processor.S3Downloader, "read", terminate_once_a_multipart_upload_runs)
+
+        previous_handler = signal.getsignal(signal.SIGTERM)
+        grzctl.cli._stop_on_sigterm()
+        try:
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--threads", "1")
+        finally:
+            signal.signal(signal.SIGTERM, previous_handler)
+
+        assert result.exit_code != 0, f"Process should have been interrupted: {result.output}"
+        assert stopped == [True], "the run should stop the running file"
+        assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.INTERRUPTED
+        started_keys = [
+            key
+            for operation, bucket, key in s3_requests.requests
+            if operation == "CreateMultipartUpload" and bucket == interrogation
+        ]
+        assert len(started_keys) == 1
+        assert started_keys[0] not in {o.key for o in s3_buckets["interrogation"].objects.all()}
+        assert boto3.client("s3").list_multipart_uploads(Bucket=interrogation).get("Uploads", []) == []
 
 
 class TestProcessAuthorKey:

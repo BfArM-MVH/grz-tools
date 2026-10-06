@@ -223,8 +223,16 @@ after a failed run with `keep_failed: false`, is validated and staged again. A f
 whose local copy is gone is written again, by the main pass if the prediction is
 "yes", otherwise by the QC pass.
 
-An interrupted run (Ctrl-C or SIGTERM) finishes the files it is streaming and starts no other.
-It leaves the staged and local copies in place, so the rerun reuses them.
+Each interrupt stops a run one level further:
+
+1. The first Ctrl-C starts no queued file and lets the streaming files finish.
+2. A second Ctrl-C stops the streaming files at their next chunk.
+   Their uploads to the interrogation bucket are aborted, and the progress logs record them as failed.
+3. A third Ctrl-C stops waiting for them. The process still exits only once they have stopped.
+
+SIGTERM starts at the second level, because a supervisor follows it with SIGKILL after a grace period.
+Either way, the run records `interrupted`.
+It leaves the staged and local copies of the finished files in place, so the rerun reuses them.
 
 If the target archive already holds the submission, a rerun streams and copies nothing.
 This is the case after a failed Prüfbericht, for example.
