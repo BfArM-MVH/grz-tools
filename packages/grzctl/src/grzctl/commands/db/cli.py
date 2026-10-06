@@ -2,6 +2,7 @@
 
 import contextlib
 import csv
+import hashlib
 import json
 import logging
 import sys
@@ -24,10 +25,11 @@ import rich.table
 import rich.text
 import textual.logging
 from grz_common.cli import output_json
-from grz_common.exceptions import MissingSubmissionFileError, SubmissionCleanedError
+from grz_common.exceptions import ConfigurationError, MissingSubmissionFileError, SubmissionCleanedError
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.models.base import get_secret_value
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     CaseHasLinkedSubmissionsError,
@@ -75,6 +77,7 @@ from grz_pydantic_models.submission.metadata import (
 )
 from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 from tqdm.auto import tqdm
 
@@ -85,6 +88,7 @@ from .. import limit
 from ..change_request import resolve_and_validate_change_request
 from ..inbox_resolution import require_inbox, scan_inbox
 from . import SignatureStatus, _verify_signature
+from .export import collect_export_entries, write_metadata_zip
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
 
@@ -763,6 +767,83 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
     except SubmissionError as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from e
+
+
+@db.command("export-metadata")
+@click.option(
+    "--output",
+    "output",
+    type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    required=True,
+    help="Path of the encrypted file to create, such as grz-metadata.zip.c4gh. It must not exist yet.",
+)
+@click.option(
+    "--public-key",
+    "public_key_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Crypt4GH public key of the recipient. Only the holder of the matching private key can decrypt the export.",
+)
+@click.option(
+    "--include-test-submissions",
+    "include_test_submissions",
+    is_flag=True,
+    default=False,
+    help="Also export submissions of type 'test'. Without this flag, they are listed as skipped.",
+)
+@click.pass_context
+def export_metadata(ctx: click.Context, output: Path, public_key_path: Path, include_test_submissions: bool):
+    """Export every stored metadata.json, with tanG and localCaseId restored, as an encrypted zip file.
+
+    The database stores each metadata.json redacted, and the submitter's tanG and localCaseId
+    in their own columns. This command puts them back, writes one metadata.json per submission
+    into a zip, and adds a manifest.json that lists each file with its SHA-256 checksum, the
+    fields that could not be restored, and the submissions left out with the reason.
+
+    The zip is encrypted with Crypt4GH for the recipient's public key before it is written,
+    so its content never reaches the disk unencrypted.
+    """
+    try:
+        recipient_public_key = Crypt4GH.retrieve_public_key(public_key_path)
+    except ConfigurationError as e:
+        _abort(e)
+
+    db_service = get_submission_db_instance(ctx.obj["db_url"])
+
+    with db_service.transaction() as session:
+        submissions = session.exec(
+            select(Submission).options(selectinload(Submission.states)).order_by(Submission.id)  # type: ignore[arg-type]
+        ).all()
+        entries, skipped = collect_export_entries(submissions, include_test_submissions=include_test_submissions)
+
+    try:
+        write_metadata_zip(
+            entries,
+            skipped,
+            output,
+            include_test_submissions=include_test_submissions,
+            recipient_public_key=recipient_public_key,
+        )
+    except FileExistsError as e:
+        _abort(e)
+
+    for skip in skipped:
+        console_err.print(f"[yellow]Skipped {skip.submission_id}: {skip.reason}.[/yellow]")
+    for entry in entries:
+        if entry.unrestored:
+            console_err.print(
+                f"[yellow]Exported {entry.submission_id} with {', '.join(sorted(entry.unrestored))} "
+                "still redacted: the database holds no value for it.[/yellow]"
+            )
+
+    incomplete = sum(1 for entry in entries if entry.unrestored)
+    with open(output, "rb") as output_fd:
+        output_sha256 = hashlib.file_digest(output_fd, "sha256").hexdigest()
+    console.print(
+        f"Exported {len(entries)} metadata.json file(s) to '{output}' "
+        f"({incomplete} with redacted fields left), skipped {len(skipped)} submission(s)."
+    )
+    console.print(f"SHA-256 of '{output.name}': {output_sha256}")
 
 
 def _build_submission_dict_from(
