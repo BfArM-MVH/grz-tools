@@ -105,7 +105,15 @@ class S3Downloader(ReadStream):
                     raise NetworkError(f"S3 read error: {e}") from e
                 self._resumes += 1
                 log.warning(f"Reading s3://{self._bucket}/{self._key} broke at byte {self._offset}, resuming: {e}")
-                self._source = self._get_object(Range=f"bytes={self._offset}-", IfMatch=self.response["ETag"])["Body"]
+                response = self._get_object(Range=f"bytes={self._offset}-", IfMatch=self.response["ETag"])
+                self._source = response["Body"]
+                status, content_range = response["ResponseMetadata"]["HTTPStatusCode"], response.get("ContentRange", "")
+                if status != 206 or not content_range.startswith(f"bytes {self._offset}-"):
+                    # a server that ignores Range sends the whole object, which would be appended to the bytes read
+                    raise DownloadError(
+                        f"Resuming s3://{self._bucket}/{self._key} at byte {self._offset} got status {status} "
+                        f"and range {content_range!r} instead of the rest of the object"
+                    ) from e
                 continue
             except Exception as e:
                 raise NetworkError(f"S3 read error: {e}") from e

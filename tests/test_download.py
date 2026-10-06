@@ -461,6 +461,48 @@ def test_download_file_resumes_when_the_stream_breaks(
     assert local_file_path.read_bytes() == b"encrypted payload"
 
 
+def test_download_file_fails_when_the_resumed_read_ignores_the_range(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """A server that ignores Range sends the whole object again, which must not be appended to the bytes read."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def ignore_the_range(self, operation_name, kwargs):
+        if operation_name == "GetObject" and "Range" in kwargs:
+            # status 200 and the whole object
+            return original_call(self, operation_name, {k: v for k, v in kwargs.items() if k != "Range"})
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            response["Body"] = _BreakingBody(response["Body"].read(len(b"encrypted ")))
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", ignore_the_range)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.DownloadError):
+        download_worker.download_file(
+            local_file_path,
+            f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+            progress_logger,
+            file_metadata,
+            submission.submission_id,
+        )
+
+    assert not local_file_path.exists(), "a failed download should leave no partial file behind"
+
+
 def test_download_file_resumes_more_often_than_max_resumes_while_it_progresses(
     s3_config_model,
     remote_bucket,
