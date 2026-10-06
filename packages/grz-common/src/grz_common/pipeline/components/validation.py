@@ -42,9 +42,11 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
     def _validate(self) -> Any:
         """Run grz_check, raising a DataValidationError for the failures the data causes.
 
-        Anything that is not an ``Exception`` keeps its own type. grz_check is a pyo3
-        extension, so a Rust panic arrives as a ``PanicException``, and that is the tool
-        breaking rather than the data being wrong.
+        grz_check raises an ``OSError`` for a stream it cannot decode, and that is the data
+        being wrong. The same ``OSError`` also wraps a failed ``read()`` of the source, which
+        arrives unchanged because the data is not at fault. Anything that is not an ``OSError``
+        keeps its own type, too. grz_check is a pyo3 extension, so a Rust panic arrives as a
+        ``PanicException``, and that is the tool breaking.
 
         :returns: The report grz_check produced.
         :raises DataValidationError: If grz_check rejected the data.
@@ -53,7 +55,9 @@ class GrzCheckValidator(ObserverWithMetrics, metaclass=abc.ABCMeta):
             return self._invoke_grz_check()
         except PipelineError:
             raise
-        except Exception as e:
+        except OSError as e:
+            if "Failed to read from Python file-like object" in str(e):
+                raise
             raise DataValidationError(str(e), stage=self.__class__.__name__, cause=e) from e
 
     def _check_worker(self) -> None:
