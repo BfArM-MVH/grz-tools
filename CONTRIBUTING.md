@@ -148,9 +148,10 @@ When you raise an error:
 S3 answers a HEAD request without a body, so botocore reports only the HTTP status as the error code.
 A `403` can then mean rejected credentials, and a `404` a missing bucket.
 For these two codes, `grz_common.transfer.head_object()` sends a GET request for the first byte of the object and sorts the error code of that answer.
-Downloads and uploads start with `head_object()`, so their first request already tells a faulty setup from a missing object.
+Uploads and the download of `metadata.json` start with `head_object()`, so their first request already tells a faulty setup from a missing object.
+File downloads start with the GET request of `S3Downloader`, whose answer carries the real error code.
 
-The upload worker takes the error code from the `ClientError` that `S3Transfer` wraps in `S3UploadFailedError`.
+`S3MultipartUploader` calls the S3 client itself, so every error it gets is a `ClientError` with the error code.
 
 ## Static type checking
 
