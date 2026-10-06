@@ -4,6 +4,7 @@ import logging
 import stat
 import subprocess
 import tempfile
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from grz_common.exceptions import (
     MissingSubmissionFileError,
     UploadError,
 )
+from grz_common.interrupt import wait_for_files
 from grz_common.pipeline.components import (
     DevNullSink,
     ObserverWithMetrics,
@@ -214,29 +216,28 @@ class FilePipelineExecutor:
         thresholds = self.get_thresholds(run_state.submission_metadata)
 
         log.info(f"Processing {len(files_map)} files ({total_bytes / (1024**3):.2f} GB)...")
+        stop = threading.Event()
         with (
             tqdm(total=total_bytes, desc="Total     ", position=0, **TQDM_DEFAULTS) as pbar_global,  # type: ignore[call-overload]
-            ThreadPoolExecutor(max_workers=self._threads) as pool,
         ):
-            try:
-                futures: list[Future] = [
-                    pool.submit(
-                        self._process_file,
-                        run_state=run_state,
-                        file_meta=file_meta,
-                        threshold=thresholds.get(file_meta.file_path),
-                        pbar_global=pbar_global,
-                        stage=stage,
-                        write_local=write_local,
-                    )
-                    for file_meta in files_map.values()
-                ]
-                for future in futures:
-                    future.result()
-            except BaseException:
-                # Ctrl-C and SIGTERM reach only this thread: the running files finish, the queued ones never start
-                pool.shutdown(wait=True, cancel_futures=True)
-                raise
+            # no with block for the pool: its exit would wait for the running files again after the third Ctrl-C
+            pool = ThreadPoolExecutor(max_workers=self._threads)
+            futures: list[Future] = [
+                pool.submit(
+                    self._process_file,
+                    run_state=run_state,
+                    file_meta=file_meta,
+                    threshold=thresholds.get(file_meta.file_path),
+                    pbar_global=pbar_global,
+                    stage=stage,
+                    write_local=write_local,
+                    stop=stop,
+                )
+                for file_meta in files_map.values()
+            ]
+            # Ctrl-C and SIGTERM reach only this thread, and each one stops the files one level further
+            wait_for_files(pool, futures, stop)
+            pool.shutdown()
 
     def _process_file(  # noqa: PLR0913, PLR0917
         self,
@@ -246,6 +247,7 @@ class FilePipelineExecutor:
         pbar_global: Any,
         stage: bool,
         write_local: bool,
+        stop: threading.Event,
     ) -> None:
         """Stream one file of the submission into the outputs it is still missing.
 
@@ -260,6 +262,7 @@ class FilePipelineExecutor:
         :param pbar_global: The progress bar over all files of the submission.
         :param stage: Validate the file and stage its re-encrypted copy in the interrogation bucket.
         :param write_local: Write the file's decrypted copy to local storage.
+        :param stop: Once it is set, the file stops at its next chunk.
         """
         inbox_key = _inbox_file_key(run_state.submission_id, file_meta)
         file_path_str = str(file_meta.file_path)
@@ -321,6 +324,7 @@ class FilePipelineExecutor:
                 pbar_global,
                 stage=needs_staging,
                 write_local=needs_local_copy,
+                stop=stop,
             )
 
             if needs_staging:
@@ -413,11 +417,13 @@ class FilePipelineExecutor:
         pbar_global: Any,
         stage: bool,
         write_local: bool,
+        stop: threading.Event,
     ) -> None:
         """Download and decrypt one file, check its checksum, and write it into the requested outputs.
 
         :param stage: Also validate the file's format and stage its re-encrypted copy in the interrogation bucket.
         :param write_local: Also write the decrypted copy to local storage.
+        :param stop: Once it is set, the download raises ``InterruptedError`` at its next chunk.
         """
         metrics = StreamMetricsRegistry()
 
@@ -433,7 +439,7 @@ class FilePipelineExecutor:
         ):
             # download and decrypt
             source = S3Downloader(
-                self._source_s3, self._source_bucket, inbox_key, missing_error=MissingSubmissionFileError
+                self._source_s3, self._source_bucket, inbox_key, missing_error=MissingSubmissionFileError, stop=stop
             )
 
             # A validator runs a thread from the moment it is built, so it is built once the
