@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import os
+import threading
 from io import BytesIO
 
 import grz_check
@@ -281,6 +282,24 @@ class TestFailedConstruction:
             S3Downloader(_MissingObject(), "bucket", "key")
 
         gc.collect()
+
+
+class TestS3Downloader:
+    def test_read_raises_once_stop_is_set(self):
+        """A set ``stop`` ends the download at its next chunk."""
+
+        class _Object:
+            def get_object(self, **_kwargs):
+                return {"Body": BytesIO(b"abcd"), "ContentLength": 4}
+
+        stop = threading.Event()
+        downloader = S3Downloader(_Object(), "bucket", "key", stop=stop)
+        assert downloader.read(2) == b"ab"
+
+        stop.set()
+
+        with pytest.raises(InterruptedError):
+            downloader.read(2)
 
 
 class TestPushToPullAdapter:

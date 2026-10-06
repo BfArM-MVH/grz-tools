@@ -12,6 +12,7 @@ import grz_common.exceptions as grzexc
 import platformdirs
 import yaml
 from grz_common.cli import FILE_R_E
+from grz_common.interrupt import TerminateInterrupt
 from grz_common.logging import setup_cli_logging
 
 from . import get_versions
@@ -129,8 +130,16 @@ def dump_config(ctx: click.Context, reveal_secrets: bool):
 
 
 def _stop_on_sigterm() -> None:
-    """Let SIGTERM stop a run the way Ctrl-C does, so the running step records ``interrupted``."""
-    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    """Let SIGTERM stop a run like a second Ctrl-C, so the running step records ``interrupted``.
+
+    A supervisor follows SIGTERM with SIGKILL after a grace period, so the running files stop at their
+    next chunk instead of finishing, see :func:`grz_common.interrupt.wait_for_files`.
+    """
+
+    def terminate(signum: int, frame: object) -> None:
+        raise TerminateInterrupt
+
+    signal.signal(signal.SIGTERM, terminate)
 
 
 def main():

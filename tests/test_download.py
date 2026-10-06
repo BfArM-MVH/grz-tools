@@ -3,6 +3,7 @@
 import io
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -547,6 +548,26 @@ def test_download_file_resumes_more_often_than_max_resumes_while_it_progresses(
     assert local_file_path.read_bytes() == b"encrypted payload"
 
 
+class _SlowBody(io.RawIOBase):
+    """An S3 response body that hands out one byte every 10 ms, and sets ``reading`` on the first read."""
+
+    def __init__(self, reading: threading.Event, size: int):
+        super().__init__()
+        self._reading = reading
+        self._left = size
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int | None = -1) -> bytes:
+        self._reading.set()
+        if not self._left:
+            return b""
+        time.sleep(0.01)
+        self._left -= 1
+        return b"x"
+
+
 def _submission_in_the_bucket(remote_bucket, submission_metadata_dir: Path, tmp_path: Path) -> EncryptedSubmission:
     """Put every encrypted file of the example submission into the bucket, to be downloaded to *tmp_path*."""
     submission = EncryptedSubmission(submission_metadata_dir, tmp_path / "encrypted_files")
@@ -596,7 +617,7 @@ def test_download_starts_no_queued_file_after_an_interrupt(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(S3BotoDownloadWorker, "download_file", slow_download_file)
-    monkeypatch.setattr("grz_common.workers.download.as_completed", interrupted)
+    monkeypatch.setattr("grz_common.interrupt.as_completed", interrupted)
     download_worker = S3BotoDownloadWorker(
         s3_options=s3_config_model.s3, status_file_path=temp_download_log_file_path, threads=1
     )
@@ -605,6 +626,51 @@ def test_download_starts_no_queued_file_after_an_interrupt(
         download_worker.download(submission.submission_id, submission)
 
     assert len(started) == 1
+
+
+def test_download_stops_the_running_file_after_a_second_interrupt(
+    s3_config_model, remote_bucket, submission_metadata_dir, temp_download_log_file_path, monkeypatch, tmp_path
+):
+    """A second Ctrl-C, while the first one waits, stops the running download at its next chunk."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    reading = threading.Event()
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def slow_body(self, operation_name, kwargs):
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            # a download that does not stop takes 10 s
+            response["Body"] = _SlowBody(reading, size=1000)
+        return response
+
+    def interrupted(futures):
+        reading.wait(timeout=10)
+        raise KeyboardInterrupt
+
+    class _CtrlCWhileWaiting(ThreadPoolExecutor):
+        """A pool that gets the second Ctrl-C while the first one waits for the running files."""
+
+        waited = False
+
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            if wait and not self.waited:
+                self.waited = True
+                super().shutdown(wait=False, cancel_futures=cancel_futures)
+                raise KeyboardInterrupt
+            super().shutdown(wait=wait, cancel_futures=cancel_futures)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", slow_body)
+    monkeypatch.setattr("grz_common.interrupt.as_completed", interrupted)
+    monkeypatch.setattr("grz_common.workers.download.ThreadPoolExecutor", _CtrlCWhileWaiting)
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3, status_file_path=temp_download_log_file_path, threads=1
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        download_worker.download(submission.submission_id, submission)
+
+    assert reading.is_set()
+    assert not any(path.exists() for path in submission.encrypted_files), "a stopped download leaves no file"
 
 
 def test_download_downloads_one_file_at_a_time_with_one_thread(
