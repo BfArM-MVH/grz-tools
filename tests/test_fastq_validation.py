@@ -2,7 +2,7 @@
 
 import grz_check
 import pytest
-from grz_common.pipeline.components import DataValidationError, ReadStream
+from grz_common.pipeline.components import DataValidationError, PushToPullAdapter, ReadStream
 from grz_common.pipeline.components.validation import FastqValidator
 from grz_common.pipeline.context import ReadPairConsistencyValidator, SubmissionContext
 
@@ -117,3 +117,33 @@ def test_paired_end_all_checks_passed_stream():
     assert consistency.partner_map.get(path2) == path1
     consistency.check(path1)
     consistency.check(path2)
+
+
+@pytest.mark.parametrize("error", [MemoryError("out of memory"), OSError("disk gone")])
+def test_a_failing_source_read_is_not_a_data_validation_error(monkeypatch, error):
+    """A failure of the source's ``read()`` is the system failing, not the data being wrong."""
+    real_read = PushToPullAdapter.read
+    calls = []
+
+    def failing_read(self, size=-1):
+        # the first read passes, as grz_check hides the cause of a failure while it detects the format
+        calls.append(None)
+        if len(calls) > 1:
+            raise error
+        return real_read(self, size)
+
+    monkeypatch.setattr(PushToPullAdapter, "read", failing_read)
+    path = "tests/mock_files/fastq_files_1000/paired_end_passing_read1.fastq.gz"
+
+    with pytest.raises(Exception) as excinfo:
+        run_validator(path)
+
+    assert not isinstance(excinfo.value, DataValidationError)
+
+
+def test_a_corrupt_gzip_stream_is_a_data_validation_error(tmp_path):
+    path = tmp_path / "corrupt.fastq.gz"
+    path.write_bytes(b"\x1f\x8b\x08\x00" + b"this is not a deflate stream" * 100)
+
+    with pytest.raises(DataValidationError):
+        run_validator(str(path))
