@@ -220,6 +220,23 @@ class TestFilesFailed:
             grzctl_versions=mock.ANY,
         )
 
+    def test_an_unmapped_decisive_error_is_the_recorded_one(self, ctx, mock_db):
+        """With no mapped reason, ``data.error`` is still the message of the decisive file error."""
+        exc = _files_failed(RuntimeError("unexpected"))
+
+        ctx.__exit__(type(exc), exc, None)
+
+        mock_db.update_submission_state.assert_called_once_with(
+            ctx.submission_id,
+            SubmissionStateEnum.ERROR,
+            data={
+                "error": "unexpected",
+                "errors": [{"file": "file0", "reason": "unknown", "message": "unexpected"}],
+            },
+            failure_reason=FailureReasonEnum.UNKNOWN,
+            grzctl_versions=mock.ANY,
+        )
+
 
 class TestDbContextFailureReason:
     def test_file_not_found_maps_correctly(self, ctx, mock_db):
