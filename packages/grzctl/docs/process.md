@@ -103,7 +103,7 @@ $ grzctl --config $CONFIG_PATH process \
         state = PROCESSED
                      ▼
 9. generate Prüfbericht, optionally save (--save-pruefbericht) and
-   submit (unless --no-submit-pruefbericht, with retries)
+   submit (unless --no-submit-pruefbericht or already REPORTED, with retries)
    (DB states REPORTING → REPORTED; ERROR if BfArM never accepts it, STOP)
                      ▼
 10. --clean-inbox (default on): remove submission from inbox
@@ -226,17 +226,47 @@ whose local copy is gone is written again, by the main pass if the prediction is
 An interrupted run (Ctrl-C or SIGTERM) finishes the files it is streaming and starts no other.
 It leaves the staged and local copies in place, so the rerun reuses them.
 
+If the target archive already holds the submission, a rerun streams and copies nothing.
+This is the case after a failed Prüfbericht, for example.
+The run checks the target archive for the submission's `metadata.json`, which step 8 copies last.
+If it is there, the run logs a warning and records `PROCESSED`.
+If the database already records `REPORTED`, step 9 does not submit the Prüfbericht again, but still generates and saves it.
+
+Once a cleaning has started, the inbox holds a `cleaning` or `cleaned` marker.
+A rerun of `process` then fails with `submission_cleaned`.
+`grzctl clean` finishes the cleaning instead, also one that stopped after its deletes.
+
 ## CLI options
 
 | Option                                               | Default                 | Effect on this flow                                                                                                                                                                                                                                                  |
 | ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--threads`                                          | `min(cpu_count, 4)`     | Number of files processed concurrently in the thread pool (step 3 and the QC pass).                                                                                                                                                                                  |
-| `--concurrent-uploads`                               | `4`                     | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. Each file holds up to `--concurrent-uploads` + 1 parts of `multipart_chunksize` in memory, so the defaults need about 1.3 GiB per file, and about 5 GiB with `--threads 4`. |
+| `--concurrent-uploads`                               | `4`                     | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. See [Memory use](#memory-use).                                                                                                                                              |
 | `--inbox`                                            | `None`                  | Selects which inbox to read from. Defaults to the inbox recorded in the database, the submitter's only inbox, or the only inbox that holds the submission.                                                                                                           |
 | `--clean-inbox` / `--no-clean-inbox`                 | `--clean-inbox`         | Whether step 10 removes the submission from the inbox after success.                                                                                                                                                                                                 |
 | `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing. A server error, a timeout or no connection is retried with backoff.                                                                                                                                     |
 | `--save-pruefbericht PATH`                           | `None`                  | Also writes the generated Prüfbericht to `PATH`. A copy with redacted TAN always goes to `logs/pruefbericht.json`.                                                                                                                                                   |
 | `--redact-pruefbericht` / `--no-redact-pruefbericht` | `--redact-pruefbericht` | Whether the TAN is redacted in the file written by `--save-pruefbericht`.                                                                                                                                                                                            |
+
+### Memory use
+
+For one file, `process` holds up to this much memory:
+
+```
+(C + 1) × P + V × (Q + 2) × 8 MiB
+```
+
+- C is `--concurrent-uploads`.
+- P is the part size: `archives.interrogation.s3.multipart_chunksize`, raised to the file size / 1000 for a file
+  above 1000 parts.
+- V is the number of grz-check validators: 2 for FASTQ and BAM (checksum and format), 1 for other files.
+- Q is the queue of each validator: 32 chunks of 8 MiB. Each validator also holds 2 grz-check buffers of 8 MiB.
+
+A run holds this for `--threads` files at once. With the defaults (C = 4, P = 256 MiB, Q = 32, `--threads 4`),
+the worst case is about 1.8 GiB per FASTQ or BAM file and 7.1 GiB per run. The validator queues fill only when
+grz-check is slower than the rest of the pipeline, which is likely for gzipped FASTQ on a fast link.
+
+A future `--max-memory` option should derive `--threads` and the part size from a memory limit.
 
 ## Config keys
 
