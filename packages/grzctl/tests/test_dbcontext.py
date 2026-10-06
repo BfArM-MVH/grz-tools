@@ -140,6 +140,8 @@ class TestMapExceptionToFailureReason:
 
         # grouping classes that no code raises directly, so they carry no failure reason of their own
         grouping_classes = {grzexc.GrzError, grzexc.SubmissionRejectedError}
+        # takes file errors, and its reason is that of its decisive file error (see ``TestFilesFailed``)
+        grouping_classes.add(FilesFailedError)
 
         reasons = {
             cls.__name__: db_context._map_exception_to_failure_reason(cls, cls("failed"))
@@ -193,6 +195,10 @@ class TestFilesFailed:
     ):
         exc = _files_failed(*errors)
         assert db_context._map_exception_to_failure_reason(type(exc), exc) == expected
+
+    def test_is_an_expected_failure(self):
+        """``grzctl.cli`` reports a ``GrzError`` and shows a traceback for any other exception."""
+        assert issubclass(FilesFailedError, grzexc.GrzError)
 
     def test_every_file_error_is_recorded(self, ctx, mock_db):
         """The decisive error is the recorded one, and every file error is listed with its own reason."""
