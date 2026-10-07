@@ -14,7 +14,7 @@ import json
 import re
 import tempfile
 import zipfile
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,6 @@ from grz_db.models.submission import Submission
 from grz_pydantic_models.submission.metadata import (
     REDACTED_TAN,
     SCHEMA_URL_PATTERN,
-    SubmissionType,
     is_redacted_local_case_id,
 )
 
@@ -35,18 +34,12 @@ from ... import get_versions
 MANIFEST_NAME = "manifest.json"
 
 
-@dataclass(frozen=True)
-class ArchivedMetadata:
-    """A submission's metadata.json as read from an archive bucket."""
+class ArchivedMetadataError(Exception):
+    """A submission's archived metadata.json cannot be exported, although both archives could be read.
 
-    archive: str
-    """Name of the archive that holds it, such as ``consented``."""
-    raw_json: str
-    """The redacted document, as archiving wrote it."""
-
-
-ArchiveLookup = Callable[[str], ArchivedMetadata | str]
-"""Looks up a submission's archived metadata.json by submission ID; returns why not, if it cannot."""
+    Not a :class:`~grz_common.exceptions.GrzError`: those record a failure reason in a submission's
+    state, and the export records nothing.
+    """
 
 
 @dataclass(frozen=True)
@@ -123,72 +116,32 @@ def _schema_version(content: dict[str, Any]) -> str | None:
     return ".".join(match.groups(default="0")) if match else None
 
 
-def collect_export_entries(
-    submissions: Iterable[Submission], fetch_archived: ArchiveLookup, *, include_test_submissions: bool
-) -> tuple[list[ExportEntry], list[SkippedSubmission]]:
-    """Sort submissions into those to export, with their archived metadata restored, and those left out.
+def build_export_entry(submission: Submission, archive: str, raw_json: str) -> ExportEntry:
+    """Restore a submission's archived metadata.json and describe it for the manifest.
 
-    Every submission lands in exactly one of the two lists, so none is dropped silently.
-    Test submissions are left out before their archive is read.
-
-    :param submissions: Submissions with their ``states`` loaded, for :meth:`Submission.get_latest_state`.
-    :param fetch_archived: Reads a submission's metadata.json from the archives, or says why it cannot.
-    :param include_test_submissions: Whether to export submissions of type ``test``.
-    :returns: The entries to export, and the submissions left out with the reason.
+    :param submission: The submission, with its ``states`` loaded, for :meth:`Submission.get_latest_state`.
+    :param archive: Name of the archive the document was read from, such as ``consented``.
+    :param raw_json: The redacted document, as archiving wrote it.
+    :returns: The entry to export.
+    :raises ArchivedMetadataError: If the document is not JSON, or holds no submission with tanG and localCaseId.
     """
-    entries: list[ExportEntry] = []
-    skipped: list[SkippedSubmission] = []
-
-    for submission in submissions:
-        if submission.submission_type == SubmissionType.test and not include_test_submissions:
-            skipped.append(SkippedSubmission(submission.id, "test submission"))
-            continue
-
-        archived = fetch_archived(submission.id)
-        if isinstance(archived, str):
-            skipped.append(SkippedSubmission(submission.id, archived))
-            continue
-        try:
-            content, unrestored = restore_metadata_dict(
-                json.loads(archived.raw_json),
-                tan_g=submission.tan_g,
-                local_case_id=submission.local_case_id,
-            )
-        except (ValueError, KeyError, TypeError):
-            # not JSON, or no submission object with tanG and localCaseId in it
-            skipped.append(
-                SkippedSubmission(submission.id, f"metadata.json in the {archived.archive} archive cannot be read")
-            )
-            continue
-
-        latest_state = submission.get_latest_state()
-        entries.append(
-            ExportEntry(
-                submission_id=submission.id,
-                archive=archived.archive,
-                content=content,
-                unrestored=unrestored,
-                metadata_version=_schema_version(content),
-                submission_uploaded_date=submission.submission_uploaded_date,
-                latest_state=latest_state.state.value if latest_state else None,
-            )
+    try:
+        content, unrestored = restore_metadata_dict(
+            json.loads(raw_json), tan_g=submission.tan_g, local_case_id=submission.local_case_id
         )
+    except (ValueError, KeyError, TypeError) as e:
+        raise ArchivedMetadataError(f"metadata.json in the {archive} archive cannot be read") from e
 
-    return entries, skipped
-
-
-def _serialize(content: dict[str, Any]) -> bytes:
-    """Serialize a metadata document the way archiving writes it, as UTF-8.
-
-    :param content: Metadata document.
-    :returns: The JSON text as bytes, which are both written to the zip and checksummed.
-    """
-    return json.dumps(content, indent=2, ensure_ascii=False).encode("utf-8")
-
-
-def _member_path(submission_id: str) -> str:
-    """Path of a submission's metadata.json inside the zip."""
-    return f"{submission_id}/metadata.json"
+    latest_state = submission.get_latest_state()
+    return ExportEntry(
+        submission_id=submission.id,
+        archive=archive,
+        content=content,
+        unrestored=unrestored,
+        metadata_version=_schema_version(content),
+        submission_uploaded_date=submission.submission_uploaded_date,
+        latest_state=latest_state.state.value if latest_state else None,
+    )
 
 
 def build_manifest(
@@ -222,7 +175,7 @@ def build_manifest(
         "submissions": [
             {
                 "submission_id": entry.submission_id,
-                "path": _member_path(entry.submission_id),
+                "path": f"{entry.submission_id}/metadata.json",
                 "archive": entry.archive,
                 "sha256": checksums[entry.submission_id],
                 "metadata_version": entry.metadata_version,
@@ -265,7 +218,10 @@ def write_metadata_zip(  # noqa: PLR0913
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite existing export '{output}'.")
 
-    files = {entry.submission_id: _serialize(entry.content) for entry in entries}
+    files = {
+        entry.submission_id: json.dumps(entry.content, indent=2, ensure_ascii=False).encode("utf-8")
+        for entry in entries
+    }
     checksums = {submission_id: hashlib.sha256(data).hexdigest() for submission_id, data in files.items()}
     manifest = build_manifest(
         entries,
@@ -281,7 +237,7 @@ def write_metadata_zip(  # noqa: PLR0913
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             for submission_id, data in files.items():
-                archive.writestr(_member_path(submission_id), data)
+                archive.writestr(f"{submission_id}/metadata.json", data)
             archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2, ensure_ascii=False))
         zip_buffer.seek(0)
 
