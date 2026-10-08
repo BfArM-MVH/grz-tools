@@ -37,7 +37,6 @@ from grzctl.commands.db.export import (
     ArchivedMetadataError,
     ExportEntry,
     SkippedSubmission,
-    _schema_version,
     build_export_entry,
     restore_metadata_dict,
     write_metadata_zip,
@@ -176,38 +175,36 @@ def test_build_entry_reports_unrestored_fields():
     assert entry.unrestored == frozenset({"tan_g"})
 
 
-def test_schema_version_reads_any_version():
-    """The version comes from each document's own URL, in both two- and three-part form."""
-    url = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/{}/GRZ/grz-schema.json"
-    assert _schema_version({"$schema": url.format("v1.2.1")}) == "1.2.1"
-    assert _schema_version({"$schema": url.format("v1.1.9")}) == "1.1.9"
-    assert _schema_version({"$schema": url.format("v1.3")}) == "1.3.0", "formatted like get_schema_version"
+SCHEMA_URL = "https://raw.githubusercontent.com/BfArM-MVH/MVGenomseq/refs/tags/{}/GRZ/grz-schema.json"
+NO_SCHEMA = object()
+"""Stands for a document without a $schema key."""
 
 
 @pytest.mark.parametrize(
-    "content",
+    ("schema", "version"),
     [
-        {},
-        {"$schema": ""},
-        {"$schema": "https://example.org/schema.json"},
-        {"$schema": None},
-        {"$schema": 13},
+        (SCHEMA_URL.format("v1.2.1"), "1.2.1"),
+        (SCHEMA_URL.format("v1.1.9"), "1.1.9"),
+        (SCHEMA_URL.format("v1.3"), "1.3.0"),
+        (NO_SCHEMA, None),
+        ("", None),
+        ("https://example.org/schema.json", None),
+        (None, None),
+        (13, None),
     ],
-    ids=["missing", "empty", "unknown-url", "null", "not-a-string"],
+    ids=["three-part", "older", "two-part", "missing", "empty", "unknown-url", "null", "not-a-string"],
 )
-def test_schema_version_without_known_url(content: dict):
-    """A missing, empty, unknown or non-string $schema gives no version instead of an error."""
-    assert _schema_version(content) is None
-
-
-def test_build_entry_exports_metadata_without_schema_url():
-    """A document without a $schema URL is still exported, only without a version."""
+def test_build_entry_reads_the_schema_version(schema: object, version: str | None):
+    """The version comes from the document's own $schema; without a known URL it is exported without one."""
     document = redact_metadata_dict(_original())
-    del document["$schema"]
+    if schema is NO_SCHEMA:
+        del document["$schema"]
+    else:
+        document["$schema"] = schema
 
     entry = _entry(_submission("a7"), json.dumps(document))
 
-    assert entry.metadata_version is None
+    assert entry.metadata_version == version
 
 
 CREATED_AT = datetime.datetime(2026, 10, 6, 9, 30, tzinfo=datetime.UTC)

@@ -99,24 +99,6 @@ def restore_metadata_dict(
     return restored, frozenset(unrestored)
 
 
-def _schema_version(content: dict[str, Any]) -> str | None:
-    """Read the metadata schema version, such as ``1.3.0``, from the document's ``$schema`` URL.
-
-    Uses :meth:`~grz_pydantic_models.submission.metadata.GrzSubmissionMetadata.get_schema_version`.
-    It reads only ``$schema``, so a model built without validation is enough, and the export
-    does not depend on the document passing today's validation.
-
-    :param content: Metadata document.
-    :returns: The version, or ``None`` if the URL is missing, not a string, or not a known schema URL.
-    """
-    unvalidated: dict[str, Any] = {"$schema": content.get("$schema")}
-    try:
-        return GrzSubmissionMetadata.model_construct(**unvalidated).get_schema_version()
-    except (TypeError, ValueError):
-        # TypeError: $schema is missing or not a string; ValueError: not a known schema URL
-        return None
-
-
 def build_export_entry(submission: Submission, archive: str, raw_json: str) -> ExportEntry:
     """Restore a submission's archived metadata.json and describe it for the manifest.
 
@@ -133,13 +115,21 @@ def build_export_entry(submission: Submission, archive: str, raw_json: str) -> E
     except (ValueError, KeyError, TypeError) as e:
         raise ArchivedMetadataError(f"metadata.json in the {archive} archive cannot be read") from e
 
+    unvalidated: dict[str, Any] = {"$schema": content.get("$schema")}
+    try:
+        # get_schema_version only reads $schema, so a model built without validation is enough
+        metadata_version = GrzSubmissionMetadata.model_construct(**unvalidated).get_schema_version()
+    except (TypeError, ValueError):
+        # $schema is missing, not a string, or not a known schema URL
+        metadata_version = None
+
     latest_state = submission.get_latest_state()
     return ExportEntry(
         submission_id=submission.id,
         archive=archive,
         content=content,
         unrestored=unrestored,
-        metadata_version=_schema_version(content),
+        metadata_version=metadata_version,
         submission_uploaded_date=submission.submission_uploaded_date,
         latest_state=latest_state.state.value if latest_state else None,
     )
