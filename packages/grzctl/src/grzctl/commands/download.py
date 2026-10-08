@@ -14,6 +14,7 @@ from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
+from .duplicate_checks import reject_duplicates
 from .inbox_resolution import require_inbox
 
 log = logging.getLogger(__name__)
@@ -44,14 +45,18 @@ def download(  # noqa: PLR0913, PLR0917
     **kwargs,
 ):
     """
-    Download a submission from a GRZ.
+        Download a submission from a GRZ.
 
-    Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
-    Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
+        Downloaded metadata is stored within the `metadata` sub-folder of the submission output directory.
+        Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
 
-    With --update-db (the default), download records the inbox of the submission in the database.
-    With --populate (also the default), it also fills the submission metadata in the database.
-    With --no-update-db, download touches no database, and --populate only logs a warning.
+        With --update-db (the default), download records the inbox of the submission in the database.
+        With --populate (also the default), it also fills the submission metadata in the database.
+        With --no-update-db, download touches no database, and --populate only logs a warning.
+
+    With --update-db, the metadata is checked against the database before any file is downloaded:
+    a submission whose tanG is already used, or whose case already has a QC-passed initial submission,
+    fails right away, as it would later in populate and validate.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
     resolved_inbox = require_inbox(
@@ -88,6 +93,10 @@ def download(  # noqa: PLR0913, PLR0917
         end_state=SubmissionStateEnum.DOWNLOADED,
         enabled=update_db,
     ) as db_context:
+        db = db_context.db if update_db else None
+        if update_db and db is None:
+            raise RuntimeError("A DbContext that update_db enables holds the database.")
+
         worker_inst.download(
             s3_options,
             submission_id,
@@ -96,11 +105,12 @@ def download(  # noqa: PLR0913, PLR0917
                 s3_options,
                 metadata_schema_version,
             ),
+            # a duplicate tanG or case is found from the metadata alone, before any file is transferred
+            metadata_check=(lambda metadata: reject_duplicates(db, submission_id, metadata))
+            if db is not None
+            else None,
         )
         if update_db:
-            db = db_context.db
-            if db is None:
-                raise RuntimeError("A DbContext that update_db enables holds the database.")
             if populate:
                 s3_client = init_s3_client(s3_options)
                 submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
