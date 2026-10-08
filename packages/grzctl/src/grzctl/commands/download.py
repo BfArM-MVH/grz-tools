@@ -1,6 +1,7 @@
 """Command for downloading a submission."""
 
 import logging
+from functools import partial
 from pathlib import Path
 
 import click
@@ -93,7 +94,7 @@ def download(  # noqa: PLR0913, PLR0917
         end_state=SubmissionStateEnum.DOWNLOADED,
         enabled=update_db,
     ) as db_context:
-        db = db_context.db if update_db else None
+        db = db_context.db
         if update_db and db is None:
             raise RuntimeError("A DbContext that update_db enables holds the database.")
 
@@ -106,11 +107,9 @@ def download(  # noqa: PLR0913, PLR0917
                 metadata_schema_version,
             ),
             # a duplicate tanG or case is found from the metadata alone, before any file is transferred
-            metadata_check=(lambda metadata: reject_duplicates(db, submission_id, metadata))
-            if db is not None
-            else None,
+            metadata_check=partial(reject_duplicates, db, submission_id) if db is not None else None,
         )
-        if update_db:
+        if db is not None:
             if populate:
                 s3_client = init_s3_client(s3_options)
                 submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
