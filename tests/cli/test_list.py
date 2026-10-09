@@ -111,7 +111,7 @@ def test_list_with_partial_env(remote_bucket_with_version, working_dir_path, tmp
         "260914050",
     ]
 
-    result_list = runner.invoke(cli, list_args, env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "secret"})
+    result_list = runner.invoke(cli, list_args, env={"grz_db__author__private_key_passphrase": "secret"})
 
     assert result_list.exit_code != 0
 
@@ -173,6 +173,6 @@ def test_list_with_broken_env(
         "260914050",
     ]
 
-    result_list = runner.invoke(cli, list_args, env={"GRZ_DB__AUTHOR__NAME": ""})
+    result_list = runner.invoke(cli, list_args, env={"grz_db__author__name": ""})
 
     assert result_list.exit_code != 0
