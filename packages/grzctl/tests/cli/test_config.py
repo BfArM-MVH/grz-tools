@@ -58,6 +58,20 @@ def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration:
     assert config.archives.consented.public_key_path is None
 
 
+@pytest.mark.parametrize("env_var_name", ["GRZ_PRIVATE_KEY", "GRZ_PRIVATE_KEY_PASSPHRASE"])
+def test_db_author_ignores_env_vars_without_the_db_author_path(monkeypatch, configuration: dict, env_var_name: str):
+    """An environment variable sets a field of ``db.author`` only by its full path,
+    such as ``GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE``.
+    """
+    configuration["db"]["author"].pop("private_key_passphrase", None)
+    monkeypatch.setenv(env_var_name, "stray-value")
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    assert config.db.author.private_key is None
+    assert config.db.author.private_key_passphrase is None
+
+
 def test_inbox_target_defaults_the_bucket_to_the_inbox_name(configuration: dict):
     """Without an explicit ``bucket:``, the S3 bucket of an inbox is its name."""
     config = GrzctlConfig.from_configuration(configuration)
