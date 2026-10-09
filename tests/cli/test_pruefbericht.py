@@ -112,10 +112,10 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         runner = click.testing.CliRunner(
             env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+                "grz_pruefbericht__authorization_url": "https://bfarm.localhost/token",
+                "grz_pruefbericht__client_id": "pytest",
+                "grz_pruefbericht__client_secret": "pysecret",
+                "grz_pruefbericht__api_base_url": "https://bfarm.localhost/api",
             }
         )
         cli = grzctl.cli.build_cli()
@@ -157,10 +157,10 @@ def test_valid_submission_with_token(
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         runner = click.testing.CliRunner(
             env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+                "grz_pruefbericht__authorization_url": "https://bfarm.localhost/token",
+                "grz_pruefbericht__client_id": "pytest",
+                "grz_pruefbericht__client_secret": "pysecret",
+                "grz_pruefbericht__api_base_url": "https://bfarm.localhost/api",
                 **token_env,
             }
         )
@@ -198,10 +198,10 @@ def test_valid_submission_with_expired_token(
     with importlib.resources.as_file(submission_dir_ptr) as submission_dir:
         runner = click.testing.CliRunner(
             env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+                "grz_pruefbericht__authorization_url": "https://bfarm.localhost/token",
+                "grz_pruefbericht__client_id": "pytest",
+                "grz_pruefbericht__client_secret": "pysecret",
+                "grz_pruefbericht__api_base_url": "https://bfarm.localhost/api",
             }
         )
         cli = grzctl.cli.build_cli()
@@ -317,10 +317,10 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
 
         runner = click.testing.CliRunner(
             env={
-                "GRZ_PRUEFBERICHT__AUTHORIZATION_URL": "https://bfarm.localhost/token",
-                "GRZ_PRUEFBERICHT__CLIENT_ID": "pytest",
-                "GRZ_PRUEFBERICHT__CLIENT_SECRET": "pysecret",
-                "GRZ_PRUEFBERICHT__API_BASE_URL": "https://bfarm.localhost/api",
+                "grz_pruefbericht__authorization_url": "https://bfarm.localhost/token",
+                "grz_pruefbericht__client_id": "pytest",
+                "grz_pruefbericht__client_secret": "pysecret",
+                "grz_pruefbericht__api_base_url": "https://bfarm.localhost/api",
             }
         )
         cli = grzctl.cli.build_cli()
