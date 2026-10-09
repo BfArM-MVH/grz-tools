@@ -26,8 +26,8 @@ def configuration(offline_config: GrzctlConfig) -> dict:
 
 
 def test_pydantic_nested_env_var_merging(monkeypatch, configuration: dict):
-    env_var_name = f"GRZ_LEISTUNGSERBRINGER__{LE_ID}__INBOX_BUCKETS__{BUCKET_NAME}__PRIVATE_KEY_PASSPHRASE"
-    monkeypatch.setenv(env_var_name.upper(), "dotenv-secret-passphrase")
+    env_var_name = f"grz_leistungserbringer__{LE_ID}__inbox_buckets__{BUCKET_NAME}__private_key_passphrase"
+    monkeypatch.setenv(env_var_name, "dotenv-secret-passphrase")
 
     config = GrzctlConfig.from_configuration(configuration)
 
@@ -36,12 +36,10 @@ def test_pydantic_nested_env_var_merging(monkeypatch, configuration: dict):
 
 
 def test_an_env_var_reaches_an_inbox_whose_name_has_upper_case_letters(monkeypatch, configuration: dict):
-    """pydantic-settings reads the names of environment variables in lowercase.
-    The inbox in a variable's name still matches the inbox of the file whose name differs only in case.
-    """
+    """The names of environment variables spell the config keys as the file does, inbox names included."""
     inboxes = configuration["leistungserbringer"][LE_ID]["inbox_buckets"]
     inboxes["Main"] = inboxes.pop(BUCKET_NAME)
-    monkeypatch.setenv(f"GRZ_LEISTUNGSERBRINGER__{LE_ID}__INBOX_BUCKETS__MAIN__SECRET", "env-secret")
+    monkeypatch.setenv(f"grz_leistungserbringer__{LE_ID}__inbox_buckets__Main__secret", "env-secret")
 
     config = GrzctlConfig.from_configuration(configuration)
 
@@ -50,31 +48,22 @@ def test_an_env_var_reaches_an_inbox_whose_name_has_upper_case_letters(monkeypat
     assert get_secret_value(inbox_buckets["Main"].secret) == "env-secret"
 
 
-def test_inbox_names_must_differ_in_more_than_case(configuration: dict):
-    """An environment variable names an inbox in lowercase, so it could not tell these inboxes apart."""
-    inboxes = configuration["leistungserbringer"][LE_ID]["inbox_buckets"]
-    inboxes["Main"] = inboxes["main"] = inboxes.pop(BUCKET_NAME)
+def test_an_env_var_in_another_case_is_ignored_with_a_warning(monkeypatch, configuration: dict, caplog):
+    """Up to 5.1.1, grzctl matched the names in any case, and the upgrade guide of 5.0.0 wrote them in uppercase."""
+    monkeypatch.setenv("GRZ_DB__DATABASE_URL", "sqlite:///elsewhere.sqlite")
+    monkeypatch.setenv("GRZ_PRUEFBERICHT_ACCESS_TOKEN", "names no config key")
 
-    with pytest.raises(ValidationError, match=r"Inbox names must differ in more than case: 'Main', 'main'"):
-        GrzctlConfig.from_configuration(configuration)
+    config = GrzctlConfig.from_configuration(configuration)
 
-
-def test_two_env_vars_that_spell_one_inbox_differently_fail(monkeypatch, configuration: dict):
-    """A JSON variable keeps the case of the inbox name, while a nested variable gives it in lowercase.
-    The two must not override each other silently.
-    """
-    inboxes = configuration["leistungserbringer"][LE_ID]["inbox_buckets"]
-    inboxes["Main"] = inboxes.pop(BUCKET_NAME)
-    monkeypatch.setenv(f"GRZ_LEISTUNGSERBRINGER__{LE_ID}__INBOX_BUCKETS", json.dumps({"Main": {"secret": "json"}}))
-    monkeypatch.setenv(f"GRZ_LEISTUNGSERBRINGER__{LE_ID}__INBOX_BUCKETS__MAIN__ACCESS_KEY", "nested")
-
-    with pytest.raises(ValidationError, match=r"Inbox names must differ in more than case: 'Main', 'main'"):
-        GrzctlConfig.from_configuration(configuration)
+    assert config.db.database_url == configuration["db"]["database_url"]
+    assert "Ignoring the environment variable GRZ_DB__DATABASE_URL" in caplog.text
+    assert "grz_db__database_url" in caplog.text
+    assert "GRZ_PRUEFBERICHT_ACCESS_TOKEN" not in caplog.text
 
 
 def test_pydantic_json_env_var_merging(monkeypatch, configuration: dict):
     inbox_override = {**INBOX, "private_key_passphrase": "json-secret-passphrase"}
-    monkeypatch.setenv("GRZ_LEISTUNGSERBRINGER", json.dumps({LE_ID: {"inbox_buckets": {BUCKET_NAME: inbox_override}}}))
+    monkeypatch.setenv("grz_leistungserbringer", json.dumps({LE_ID: {"inbox_buckets": {BUCKET_NAME: inbox_override}}}))
 
     config = GrzctlConfig.from_configuration(configuration)
 
@@ -87,7 +76,7 @@ def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration:
     instead of writing it to a file that ``public_key_path`` then points at.
     """
     del configuration["archives"]["consented"]["public_key_path"]
-    monkeypatch.setenv("GRZ_ARCHIVES__CONSENTED__PUBLIC_KEY", crypt4gh_public_key)
+    monkeypatch.setenv("grz_archives__consented__public_key", crypt4gh_public_key)
 
     config = GrzctlConfig.from_configuration(configuration)
 
@@ -95,10 +84,10 @@ def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration:
     assert config.archives.consented.public_key_path is None
 
 
-@pytest.mark.parametrize("env_var_name", ["GRZ_PRIVATE_KEY", "GRZ_PRIVATE_KEY_PASSPHRASE"])
+@pytest.mark.parametrize("env_var_name", ["grz_private_key", "grz_private_key_passphrase"])
 def test_db_author_ignores_env_vars_without_the_db_author_path(monkeypatch, configuration: dict, env_var_name: str):
     """An environment variable sets a field of ``db.author`` only by its full path,
-    such as ``GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE``.
+    such as ``grz_db__author__private_key_passphrase``.
     """
     configuration["db"]["author"].pop("private_key_passphrase", None)
     monkeypatch.setenv(env_var_name, "stray-value")

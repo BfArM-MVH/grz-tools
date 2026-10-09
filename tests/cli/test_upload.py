@@ -47,7 +47,7 @@ def test_upload_download_submission(
     temp_grzctl_s3_db_config_file_path,
     initiated_db_test_connection,  # necessary to initiate DB
 ):
-    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
+    env = {"grz_db__author__private_key_passphrase": "test"}
 
     copy_submission(working_dir_path, "files", "encrypted_files", "metadata")
 

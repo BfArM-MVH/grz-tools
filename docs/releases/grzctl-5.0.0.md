@@ -118,8 +118,6 @@ pruefbericht:
   api_base_url: https://...
 ```
 
-The inbox names of one LE must differ in more than case, so not `Main` and `main`.
-
 `access_key` and `secret` may be left out.
 boto3 then looks for credentials itself, for example in `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
 These credentials then apply to every inbox and archive without its own.
@@ -159,51 +157,54 @@ Every field of the config file can also come from an environment variable.
 In grzctl 4.0.0, the file won, and an environment variable only filled a field that the file lacked.
 Now the environment variable wins.
 
-The name is `GRZ_` and the field's path in the file, with `__` between the levels.
-Upper or lower case does not matter.
+The name is `grz_` and the field's path in the file, with `__` between the levels.
+It spells every key as the file does, so it is lowercase apart from LE IDs and inbox names.
+grzctl ignores a name in another case, and warns about one whose `grz_` or first key is not lowercase.
 A required field may be left out of the file if an environment variable sets it, for example to keep the secrets out of the file.
 
 | Field in the file                                                          | Environment variable                                                             |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `leistungserbringer."123456789".inbox_buckets.main.access_key`             | `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__ACCESS_KEY`             |
-| `leistungserbringer."123456789".inbox_buckets.main.secret`                 | `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__SECRET`                 |
-| `leistungserbringer."123456789".inbox_buckets.main.private_key_path`       | `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__PRIVATE_KEY_PATH`       |
-| `leistungserbringer."123456789".inbox_buckets.main.private_key_passphrase` | `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__PRIVATE_KEY_PASSPHRASE` |
-| `archives.consented.s3.access_key`                                         | `GRZ_ARCHIVES__CONSENTED__S3__ACCESS_KEY`                                        |
-| `archives.non_consented.s3.secret`                                         | `GRZ_ARCHIVES__NON_CONSENTED__S3__SECRET`                                        |
-| `archives.consented.public_key`                                            | `GRZ_ARCHIVES__CONSENTED__PUBLIC_KEY`                                            |
-| `db.database_url`                                                          | `GRZ_DB__DATABASE_URL`                                                           |
-| `db.author.private_key_passphrase`                                         | `GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE`                                         |
-| `db.known_public_keys`                                                     | `GRZ_DB__KNOWN_PUBLIC_KEYS`, as a JSON list: `'["ssh-ed25519 AAAA... alice"]'`   |
-| `pruefbericht.client_secret`                                               | `GRZ_PRUEFBERICHT__CLIENT_SECRET`                                                |
-| `identifiers.grz`                                                          | `GRZ_IDENTIFIERS__GRZ`                                                           |
+| `leistungserbringer."123456789".inbox_buckets.main.access_key`             | `grz_leistungserbringer__123456789__inbox_buckets__main__access_key`             |
+| `leistungserbringer."123456789".inbox_buckets.main.secret`                 | `grz_leistungserbringer__123456789__inbox_buckets__main__secret`                 |
+| `leistungserbringer."123456789".inbox_buckets.main.private_key_path`       | `grz_leistungserbringer__123456789__inbox_buckets__main__private_key_path`       |
+| `leistungserbringer."123456789".inbox_buckets.main.private_key_passphrase` | `grz_leistungserbringer__123456789__inbox_buckets__main__private_key_passphrase` |
+| `leistungserbringer."123456789".inbox_buckets.Main.secret`                 | `grz_leistungserbringer__123456789__inbox_buckets__Main__secret`                 |
+| `archives.consented.s3.access_key`                                         | `grz_archives__consented__s3__access_key`                                        |
+| `archives.non_consented.s3.secret`                                         | `grz_archives__non_consented__s3__secret`                                        |
+| `archives.consented.public_key`                                            | `grz_archives__consented__public_key`                                            |
+| `db.database_url`                                                          | `grz_db__database_url`                                                           |
+| `db.author.private_key_passphrase`                                         | `grz_db__author__private_key_passphrase`                                         |
+| `db.known_public_keys`                                                     | `grz_db__known_public_keys`, as a JSON list: `'["ssh-ed25519 AAAA... alice"]'`   |
+| `pruefbericht.client_secret`                                               | `grz_pruefbericht__client_secret`                                                |
+| `identifiers.grz`                                                          | `grz_identifiers__grz`                                                           |
 
 Rename the variables of grzctl 4.0.0.
-grzctl ignores a name that matches no field, without a warning, so the old names do nothing now.
+grzctl 4.0.0 and grzctl up to 5.1.1 matched the names in any case, so the old names are often written in uppercase.
+grzctl ignores a name that matches no field without a warning, so the old names do nothing now.
 
 | grzctl 4.0.0                                                   | grzctl 5.0.0                                                                       |
 | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `GRZ_S3__*` of an inbox, for example `GRZ_S3__SECRET`          | `GRZ_LEISTUNGSERBRINGER__<LE_ID>__INBOX_BUCKETS__<INBOX>__*`                       |
-| `GRZ_S3__*` of an archive                                      | `GRZ_ARCHIVES__CONSENTED__S3__*` / `GRZ_ARCHIVES__NON_CONSENTED__S3__*`            |
-| `GRZ_KEYS__GRZ_PRIVATE_KEY_PATH`                               | `GRZ_LEISTUNGSERBRINGER__<LE_ID>__INBOX_BUCKETS__<INBOX>__PRIVATE_KEY_PATH`        |
-| `GRZ_KEYS__GRZ_PUBLIC_KEY` / `GRZ_KEYS__GRZ_PUBLIC_KEY_PATH`   | `GRZ_ARCHIVES__<ARCHIVE>__PUBLIC_KEY` / `GRZ_ARCHIVES__<ARCHIVE>__PUBLIC_KEY_PATH` |
-| `GRZ_DB__KNOWN_PUBLIC_KEYS`, a path                            | `GRZ_DB__KNOWN_PUBLIC_KEYS_FILE`                                                   |
-| other `GRZ_DB__*`, `GRZ_PRUEFBERICHT__*`, `GRZ_IDENTIFIERS__*` | unchanged                                                                          |
+| `GRZ_S3__*` of an inbox, for example `GRZ_S3__SECRET`          | `grz_leistungserbringer__<LE_ID>__inbox_buckets__<inbox>__*`                       |
+| `GRZ_S3__*` of an archive                                      | `grz_archives__consented__s3__*` / `grz_archives__non_consented__s3__*`            |
+| `GRZ_KEYS__GRZ_PRIVATE_KEY_PATH`                               | `grz_leistungserbringer__<LE_ID>__inbox_buckets__<inbox>__private_key_path`        |
+| `GRZ_KEYS__GRZ_PUBLIC_KEY` / `GRZ_KEYS__GRZ_PUBLIC_KEY_PATH`   | `grz_archives__<archive>__public_key` / `grz_archives__<archive>__public_key_path` |
+| `GRZ_DB__KNOWN_PUBLIC_KEYS`, a path                            | `grz_db__known_public_keys_file`                                                   |
+| other `GRZ_DB__*`, `GRZ_PRUEFBERICHT__*`, `GRZ_IDENTIFIERS__*` | the same name in lowercase, for example `grz_db__database_url`                     |
 
-Check the environment of your workers for `GRZ_*` variables.
+Check the environment of your workers for variables that start with `GRZ_` in any case.
 A variable that the file shadowed in grzctl 4.0.0 now overrides the file.
 
 Pitfalls:
 
 - An environment variable cannot remove a field of the file.
-  So to pass a key inline, for example with `..._PRIVATE_KEY`, remove `private_key_path` from the file.
+  So to pass a key inline, for example with `..._private_key`, remove `private_key_path` from the file.
   Otherwise grzctl stops with `Only one of private_key or private_key_path must be set`.
 - Use the LE ID, not the alias.
 - A variable whose path matches no LE or inbox of the file adds a new, incomplete entry, and every command stops.
 - A shell accepts only letters, digits and `_` in a variable name, so `export` fails for an inbox named like `le-123456789`.
   Name the inbox `main` and set `bucket: le-123456789`.
   Or set the inbox as JSON one level up, which grzctl merges into the inbox of the file:
-  `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS='{"le-123456789": {"secret": "..."}}'`.
+  `grz_leistungserbringer__123456789__inbox_buckets='{"le-123456789": {"secret": "..."}}'`.
 - An empty variable sets an empty value.
   Unset a variable instead.
 - Environment variables only apply together with a config file.
@@ -306,7 +307,7 @@ The command replaces the `version.json` in each inbox. The policy recommends grz
 
 - `decrypt` decrypts with the key of the submission's inbox, which the next section describes. So the inboxes of one LE may use different keys.
 - Every key path must name a regular file. Otherwise every grzctl command stops.
-- An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`. Prefer the grzctl setting to `C4GH_PASSPHRASE`, for example the environment variable `GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__PRIVATE_KEY_PASSPHRASE`. `C4GH_PASSPHRASE` applies to every key that has no passphrase of its own.
+- An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`. Prefer the grzctl setting to `C4GH_PASSPHRASE`, for example the environment variable `grz_leistungserbringer__123456789__inbox_buckets__main__private_key_passphrase`. `C4GH_PASSPHRASE` applies to every key that has no passphrase of its own.
 - `archives.*.public_key` takes the public key inline, as `keys.grz_public_key` did in v4.0.0.
 
 ### grzctl: the inbox of a submission (#696)
