@@ -184,8 +184,7 @@ A rerun is safe, so run it again for the current quarter just before you generat
 ### 7. Publish the grz-cli version policy (#667)
 
 grz-cli reads `version.json` from the inbox before `upload` and `submit`.
-It stops if its version is too old, or if the inbox has no `version.json`.
-grzctl 5.0.0 ships a policy file, and this command publishes it to every configured inbox:
+It stops if its version is too old, or if the inbox has no `version.json`. grzctl 5.0.0 ships a policy file, and this command publishes it to every configured inbox:
 
 ```sh
 grzctl inbox push-version

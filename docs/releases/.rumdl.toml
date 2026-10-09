@@ -1,0 +1,6 @@
+# Release notes end a bullet with its PRs after the full stop, as in "- foo bar. (#123)".
+# With require-sentence-capital = false, rumdl would move "(#123)" to a line of its own.
+extends = "../../pyproject.toml"
+
+[MD013]
+require-sentence-capital = true
