@@ -1,30 +1,29 @@
 # MII research consent, explained
 
-A donor signs a consent form on paper: the **MII broad consent** ("breite Einwilligung" of the
-Medizininformatik-Initiative). The hospital records that decision in its consent management
-system, which exports it as a **FHIR `Consent` resource**. A GRZ submission carries that resource
-inside `researchConsents[].scope`, and this package answers two questions about it:
+A donor signs a consent form on paper: the **MII broad consent** ("breite Einwilligung" of the Medizininformatik-Initiative).
+The hospital records that decision in its consent management system, which exports it as a **FHIR `Consent` resource**.
+A GRZ submission carries that resource inside `researchConsents[].scope`, and this package answers two questions about it:
 
-1. **Is it well-formed?** Does it follow the MII's FHIR specification (validation)?
-2. **What does it say?** May the donor's data be used for research at a given date (evaluation)?
+1. **Is it well-formed?**
+   Does it follow the MII's FHIR specification (validation)?
+2. **What does it say?**
+   May the donor's data be used for research at a given date (evaluation)?
 
-`scope` may also be absent, paired with a `noScopeJustification` saying why. And a `scope` that
-fails Consent validation is not rejected: it is kept as a plain object, the validation errors are
-logged as warnings, and both questions below then answer "nothing known" rather than "no".
+`scope` may also be absent, paired with a `noScopeJustification` saying why.
+And a `scope` that fails Consent validation is not rejected: it is kept as a plain object, the validation errors are logged as warnings, and both questions below then answer "nothing known" rather than "no".
 
-Current version numbers live in the code constants and in `example_terminology/packages.json` of
-`grz-pydantic-models-testing`.
+Current version numbers live in the code constants and in `example_terminology/packages.json` of `grz-pydantic-models-testing`.
 
 ## Glossary
 
-| Term | In one sentence |
-| --- | --- |
-| MII broad consent | The standardized consent form a donor signs, allowing broad research use of their data. Exists in several document versions. |
-| KDS consent package | The MII's FHIR package (`de.medizininformatikinitiative.kerndatensatz.consent`) that defines how to represent such a consent digitally ([registry](https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent)). |
-| Profile | The rulebook inside the package (`MII_PR_Consent_Einwilligung`): which fields a Consent resource must/may have. |
-| Policy CodeSystem | The catalogue of **permissions** ("use data scientifically", "contact again", …), one OID each, organized as modules with sub-items. |
+| Term                           | In one sentence |
+| ------------------------------ | --------------- |
+| MII broad consent              | The standardized consent form a donor signs, allowing broad research use of their data. Exists in several document versions. |
+| KDS consent package            | The MII's FHIR package (`de.medizininformatikinitiative.kerndatensatz.consent`) that defines how to represent such a consent digitally ([registry](https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent)). |
+| Profile                        | The rulebook inside the package (`MII_PR_Consent_Einwilligung`): which fields a Consent resource must/may have. |
+| Policy CodeSystem              | The catalogue of **permissions** ("use data scientifically", "contact again", …), one OID each, organized as modules with sub-items. |
 | Version and modules CodeSystem | The catalogue of **signable documents** (each broad consent version, withdrawal forms, additional modules), one OID each. |
-| GRZ metadata schema | BfArM's format for the whole submission; `researchConsents[]` is one small part of it. |
+| GRZ metadata schema            | BfArM's format for the whole submission; `researchConsents[]` is one small part of it. |
 
 ## A consent, annotated
 
@@ -67,98 +66,84 @@ Two different OID catalogues meet here, and telling them apart is the key to eve
 - `policy[].uri` says **which document** the donor signed → version and modules CodeSystem.
 - `provision.provision[].code` says **what the donor allowed or refused** → policy CodeSystem.
 
-Some systems state the signed document as a `category` coding from the version and modules
-CodeSystem instead of in `policy[]`. `Consent.document_oids` reads both places, so either spelling
-works.
+Some systems state the signed document as a `category` coding from the version and modules CodeSystem instead of in `policy[]`.
+`Consent.document_oids` reads both places, so either spelling works.
 
 ## Four version numbers that mean different things
 
-| Version of… | Where you see it | Source of truth in this repo |
-| --- | --- | --- |
-| the GRZ metadata schema | `$schema` URL of the submission | `is_supported_version`, `get_accepted_versions` |
-| the KDS consent package | `researchConsents[].schemaVersion` | `RESEARCH_CONSENT_PACKAGES` |
-| each artefact inside the package (profile, CodeSystems) | inside the package files | `example_terminology/` file names + `example_terminology/packages.json` |
-| the signed broad consent document | OIDs in `Consent.policy[].uri`, or in a `category` coding from the version and modules CodeSystem | `BroadConsentVersion`, `BROAD_CONSENT_DOCUMENT_OIDS` |
+| Version of…                                             | Where you see it                                                                                  | Source of truth in this repo |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------- |
+| the GRZ metadata schema                                 | `$schema` URL of the submission                                                                   | `is_supported_version`, `get_accepted_versions` |
+| the KDS consent package                                 | `researchConsents[].schemaVersion`                                                                | `RESEARCH_CONSENT_PACKAGES`  |
+| each artefact inside the package (profile, CodeSystems) | inside the package files                                                                          | `example_terminology/` file names + `example_terminology/packages.json` |
+| the signed broad consent document                       | OIDs in `Consent.policy[].uri`, or in a `category` coding from the version and modules CodeSystem | `BroadConsentVersion`, `BROAD_CONSENT_DOCUMENT_OIDS` |
 
-None of these implies another. The classic trap: **`schemaVersion` names the KDS package (the
-digital format), not the document the donor signed.** Which broad consent version the donor
-actually signed is derived from those document OIDs (`Consent.broad_consent_versions`), wherever
-they appear.
+None of these implies another.
+The classic trap: **`schemaVersion` names the KDS package (the digital format), not the document the donor signed.**
+Which broad consent version the donor actually signed is derived from those document OIDs (`Consent.broad_consent_versions`), wherever they appear.
 
 Two facts that follow from the axes moving independently:
 
-- Most package releases only grow the terminology and leave the profile untouched, so a Consent
-  that parses under one `schemaVersion` usually parses under all of them
-  (`test_every_published_package_version_parses_the_same_consent` pins this for a fully bounded
-  consent). Where the profile or the IG text changed, portability ends: see the next section.
+- Most package releases only grow the terminology and leave the profile untouched, so a Consent that parses under one `schemaVersion` usually parses under all of them (`test_every_published_package_version_parses_the_same_consent` pins this for a fully bounded consent).
+  Where the profile or the IG text changed, portability ends: see the next section.
 - The GRZ metadata schema sometimes lists a package version before the MII has released it; such
   versions stay rejected until the release exists and its artefacts are vendored.
 
 ## How the consent packages differ
 
-`RESEARCH_CONSENT_PACKAGES` in `submission/metadata/v1.py` holds, per package, every rule in which
-the packages differ and that the model enforces. The GRZ metadata schema lists only 2025.0.1 up to
-1.3.0, and its `scope` description still names the 2025 IG in 1.3.1. LEs adopted newer packages
-before the schema listed them, so every accepted package is accepted at every metadata version.
+`RESEARCH_CONSENT_PACKAGES` in `submission/metadata/v1.py` holds, per package, every rule in which the packages differ and that the model enforces.
+The GRZ metadata schema lists only 2025.0.1 up to 1.3.0, and its `scope` description still names the 2025 IG in 1.3.1.
+LEs adopted newer packages before the schema listed them, so every accepted package is accepted at every metadata version.
 
-| | 2025.0.1 | 2025.0.2 | 2025.0.3, 2025.0.4 | 2026.0.0 |
-| --- | --- | --- | --- | --- |
-| Released | 2025-01-21 | 2025-06-11 | 2025-06-12, 2025-06-16 | 2025-12-18 |
-| In the `schemaVersion` enum of the GRZ metadata schema | from 1.1.1 on | from 1.3.1 on | from 1.3.1 on | from 1.3.1 on |
-| Profile `MII_PR_Consent_Einwilligung` | 1.0.8 | 1.0.8 | 1.0.8 | 1.0.9 |
-| Policy CodeSystem | 1.0.5, 66 codes | 1.0.6, 101 codes | 1.0.7, 124 codes | 1.1.0, 124 codes |
-| Deprecated policy codes | `.41`, `.42` | `.41`, `.42` | `.41`, `.42` | also `.16`, `.17`, `.46`, `.47` |
-| Version and modules CodeSystem | not shipped | not shipped | not shipped | 0.2.0 |
-| End of both provision periods (profile) | 1..1 | 1..1 | 1..1 | 0..1 |
-| `patient.reference` and `.identifier` (IG text) | both optional | both optional | both optional | the reference if a Patient resource exists, else the identifier ("muss") |
-| System of the `category:mii` slice (profile) | `mii-cs-consent-consent_category` | the same | the same | `mii-cs-consent-version-modules` |
-| `category` (IG text) | two codings | the same | the same | at least two categories, with new rows for ResultType and TemplateType |
+|                                                        | 2025.0.1                          | 2025.0.2         | 2025.0.3, 2025.0.4     | 2026.0.0 |
+| ------------------------------------------------------ | --------------------------------- | ---------------- | ---------------------- | -------- |
+| Released                                               | 2025-01-21                        | 2025-06-11       | 2025-06-12, 2025-06-16 | 2025-12-18 |
+| In the `schemaVersion` enum of the GRZ metadata schema | from 1.1.1 on                     | from 1.3.1 on    | from 1.3.1 on          | from 1.3.1 on |
+| Profile `MII_PR_Consent_Einwilligung`                  | 1.0.8                             | 1.0.8            | 1.0.8                  | 1.0.9    |
+| Policy CodeSystem                                      | 1.0.5, 66 codes                   | 1.0.6, 101 codes | 1.0.7, 124 codes       | 1.1.0, 124 codes |
+| Deprecated policy codes                                | `.41`, `.42`                      | `.41`, `.42`     | `.41`, `.42`           | also `.16`, `.17`, `.46`, `.47` |
+| Version and modules CodeSystem                         | not shipped                       | not shipped      | not shipped            | 0.2.0    |
+| End of both provision periods (profile)                | 1..1                              | 1..1             | 1..1                   | 0..1     |
+| `patient.reference` and `.identifier` (IG text)        | both optional                     | both optional    | both optional          | the reference if a Patient resource exists, else the identifier ("muss") |
+| System of the `category:mii` slice (profile)           | `mii-cs-consent-consent_category` | the same         | the same               | `mii-cs-consent-version-modules` |
+| `category` (IG text)                                   | two codings                       | the same         | the same               | at least two categories, with new rows for ResultType and TemplateType |
 
 What the model does with each difference:
 
-| Difference | Enforced | Why |
-| --- | --- | --- |
-| End of both provision periods | an open-ended period is rejected under the 2025 packages | the profile pins it |
-| Patient reference or identifier | under 2026.0.0, a consent without either is rejected from metadata v1.3 on, and logged as a warning before | only the IG text requires it, and before v1.3 a consent is read as grz-pydantic-models 2.7.1 read it |
-| System of the `category:mii` slice | no, both systems are accepted under every package | the MII kept shipping examples in the old spelling, see Question 1 |
-| ResultType and TemplateType categories | no | the profile of package 2026.0.0 defines no such slices, only its IG page and the 2026.0.1 release candidates do |
-| Deprecated policy codes | no | research consent reads only `.1` and `.8`, and neither is deprecated |
-| `schemaVersion` enum per metadata version | no | see above |
+| Difference                                | Enforced                                                                                                   | Why |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --- |
+| End of both provision periods             | an open-ended period is rejected under the 2025 packages                                                   | the profile pins it |
+| Patient reference or identifier           | under 2026.0.0, a consent without either is rejected from metadata v1.3 on, and logged as a warning before | only the IG text requires it, and before v1.3 a consent is read as grz-pydantic-models 2.7.1 read it |
+| System of the `category:mii` slice        | no, both systems are accepted under every package                                                          | the MII kept shipping examples in the old spelling, see Question 1 |
+| ResultType and TemplateType categories    | no                                                                                                         | the profile of package 2026.0.0 defines no such slices, only its IG page and the 2026.0.1 release candidates do |
+| Deprecated policy codes                   | no                                                                                                         | research consent reads only `.1` and `.8`, and neither is deprecated |
+| `schemaVersion` enum per metadata version | no                                                                                                         | see above |
 
 The sources contradict each other in places:
 
-- The 2026.0.0 IG page still calls both period ends "verpflichtend", while its profile and its
-  release notes make them 0..1. The model follows the profile.
+- The 2026.0.0 IG page still calls both period ends "verpflichtend", while its profile and its release notes make them 0..1.
+  The model follows the profile.
 - GRZ metadata schema 1.3.1 lists 2026.0.1, which the MII has released only as release candidates
   (rc-1 to rc-4), so it stays rejected.
-- The MII published some artefact versions twice with different contents: profile 1.0.9 in 2026.0.0
-  and in the 2026.0.1 release candidates, policy CodeSystem 1.0.7 in 2025.0.3 and 2025.0.4, and
-  policy CodeSystem 1.1.0 in 2026.0.0 and in 2026.0.1-rc-4. The two CodeSystem variants differ only
-  in display strings. `example_terminology/` holds the variant of the first package listed here.
+- The MII published some artefact versions twice with different contents: profile 1.0.9 in 2026.0.0 and in the 2026.0.1 release candidates, policy CodeSystem 1.0.7 in 2025.0.3 and 2025.0.4, and policy CodeSystem 1.1.0 in 2026.0.0 and in 2026.0.1-rc-4.
+  The two CodeSystem variants differ only in display strings.
+  `example_terminology/` holds the variant of the first package listed here.
 
-Sources: the IG text of
-[2025.0.4](https://simplifier.net/guide/mii-ig-modul-consent-2025/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent?version=2025.0.4)
-(2025.0.1 to 2025.0.3 state the same rules; 2025.0.1 lists fewer document OIDs) and
-[2026.0.0](https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent?version=2026.0.0),
-the [2026.0.0 release notes](https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/Release-Notes?version=2026.0.0),
-the [packages](https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent)
-and the [GRZ metadata schema](https://github.com/BfArM-MVH/MVGenomseq_GRZ/blob/main/GRZ/grz-schema.json).
+Sources: the IG text of [2025.0.4](https://simplifier.net/guide/mii-ig-modul-consent-2025/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent?version=2025.0.4) (2025.0.1 to 2025.0.3 state the same rules; 2025.0.1 lists fewer document OIDs) and [2026.0.0](https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent?version=2026.0.0), the [2026.0.0 release notes](https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/Release-Notes?version=2026.0.0), the [packages](https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent) and the [GRZ metadata schema](https://github.com/BfArM-MVH/MVGenomseq_GRZ/blob/main/GRZ/grz-schema.json).
 
 ## Question 1: is it well-formed?
 
-The model (`grz_pydantic_models/mii/consent.py`) enforces what the profile pins, plus one rule the
-profile leaves open but the GRZ requires, marked †, and one rule of the IG text, marked ‡. The
-root-provision rule is enforced one level up, on `ResearchConsent`, and the patient rule on
-`GrzSubmissionMetadata`, both in `submission/metadata/v1.py`.
+The model (`grz_pydantic_models/mii/consent.py`) enforces what the profile pins, plus one rule the profile leaves open but the GRZ requires, marked †, and one rule of the IG text, marked ‡.
+The root-provision rule is enforced one level up, on `ResearchConsent`, and the patient rule on `GrzSubmissionMetadata`, both in `submission/metadata/v1.py`.
 
-| Element | Rule |
-| --- | --- |
-| `status` | required; only `active` marks the consent as in force |
-| `scope` | exactly one coding, and it must be `research` |
-| `category` | must contain the LOINC consent category and the MII broad consent category, one coding each; extra categories are allowed (open slicing) |
-| `patient` | reference, identifier (identifier needs `system` + `value`), or a display only. The profile requires `patient` but marks both ways of filling it mustSupport only. ‡ The IG text calls both optional up to package 2025.0.4 and requires one of them from 2026.0.0 on, so a consent of package 2026.0.0 or newer without either is rejected from metadata v1.3 on, and logged as a warning before |
-| `policy` | at least one document OID, with or without the `urn:oid:` prefix |
-| `provision` (root) | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required from metadata v1.3 on (before, a missing one is read as grz-pydantic-models 2.7.1 read it: no root bound, only nested periods count), `code` forbidden |
+| Element                 | Rule |
+| ----------------------- | ---- |
+| `status`                | required; only `active` marks the consent as in force |
+| `scope`                 | exactly one coding, and it must be `research` |
+| `category`              | must contain the LOINC consent category and the MII broad consent category, one coding each; extra categories are allowed (open slicing) |
+| `patient`               | reference, identifier (identifier needs `system` + `value`), or a display only. The profile requires `patient` but marks both ways of filling it mustSupport only. ‡ The IG text calls both optional up to package 2025.0.4 and requires one of them from 2026.0.0 on, so a consent of package 2026.0.0 or newer without either is rejected from metadata v1.3 on, and logged as a warning before |
+| `policy`                | at least one document OID, with or without the `urn:oid:` prefix |
+| `provision` (root)      | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required from metadata v1.3 on (before, a missing one is read as grz-pydantic-models 2.7.1 read it: no root bound, only nested periods count), `code` forbidden |
 | `provision.provision[]` | the decisions: `type`, `period`, at least one `code` |
 | a third provision level | forbidden |
 
@@ -167,26 +152,18 @@ Two quirks worth knowing:
 - The MII renamed the category CodeSystem at one point but kept shipping examples in the old
   spelling, so **both spellings are in the wild and both are accepted**
   (`MII_CONSENT_CATEGORY_SYSTEMS`).
-- Profile 1.0.9, shipped by package 2026.0.0, relaxed both provision `period.end` elements from
-  1..1 to 0..1. FHIR reads a period with no `end` as still running, so such a permission never
-  expires. Profile 1.0.8, shipped by every 2025 package, still requires an `end`, so an open-ended
-  period is **rejected under those `schemaVersion`s** (`requires_period_end`). It is
-  accepted under 2026.0.0, and also when the submission declares no `schemaVersion` at all, which
-  metadata 1.3 permits: with no package named there is no profile to enforce. The field stays
-  optional on `Period` itself, because one model serves every profile version; the version that
-  decides is the one the submission declares.
+- Profile 1.0.9, shipped by package 2026.0.0, relaxed both provision `period.end` elements from 1..1 to 0..1.
+  FHIR reads a period with no `end` as still running, so such a permission never expires.
+  Profile 1.0.8, shipped by every 2025 package, still requires an `end`, so an open-ended period is **rejected under those `schemaVersion`s** (`requires_period_end`).
+  It is accepted under 2026.0.0, and also when the submission declares no `schemaVersion` at all, which metadata 1.3 permits: with no package named there is no profile to enforce.
+  The field stays optional on `Period` itself, because one model serves every profile version; the version that decides is the one the submission declares.
 
-Unknown fields are ignored on the resource and its provisions (FHIR carries much more than we
-read), but **forbidden** on the small leaf elements the evaluation reads field by field: `Period`,
-`Coding` and `CodeableConcept`. Three things are rejected outright rather than ignored: a `code` on
-the root provision and a third provision level, because they carry permissions the evaluation never
-looks at and accepting them would silently lose them; and a wrong `resourceType`, because it cannot
-be what the submitter meant.
+Unknown fields are ignored on the resource and its provisions (FHIR carries much more than we read), but **forbidden** on the small leaf elements the evaluation reads field by field: `Period`, `Coding` and `CodeableConcept`.
+Three things are rejected outright rather than ignored: a `code` on the root provision and a third provision level, because they carry permissions the evaluation never looks at and accepting them would silently lose them; and a wrong `resourceType`, because it cannot be what the submitter meant.
 
 ## Question 1b: what was signed?
 
-Every OID the MII ships in the version and modules CodeSystem is classified in
-`BROAD_CONSENT_DOCUMENT_OIDS` as one of:
+Every OID the MII ships in the version and modules CodeSystem is classified in `BROAD_CONSENT_DOCUMENT_OIDS` as one of:
 
 - **consent**: the broad consent itself, per document version (incl. minor / legal-guardian variants)
 - **rejection**: the donor refused (Ablehnung)
@@ -194,21 +171,17 @@ Every OID the MII ships in the version and modules CodeSystem is classified in
 - **partial withdrawal**: parts revoked (Teilwiderruf)
 - **additional module**: an add-on to the broad consent (Zusatzmodul)
 
-An OID we do not recognize (e.g. a future broad consent version) is **reported, never rejected**
-(`unknown_document_oids`): new document versions must not break submissions.
+An OID we do not recognize (e.g. a future broad consent version) is **reported, never rejected** (`unknown_document_oids`): new document versions must not break submissions.
 
-**None of this feeds the research decision.** Question 2 reads only `status` and the provisions; the
-document kind is reported, not enforced. A real withdrawal or rejection says so twice, through its
-document OID *and* by denying the permissions or stating none, and it is the second half that
-Question 2 acts on. The shipped `withdrawal_complete` example shows the shape: its status is
-`active`, and what refuses is its nested `deny` of the PATDAT module. So treat a withdrawal or
-rejection OID on a consent that still permits research as a contradiction worth investigating, not
-as a refusal the model has already applied.
+**None of this feeds the research decision.**
+Question 2 reads only `status` and the provisions; the document kind is reported, not enforced.
+A real withdrawal or rejection says so twice, through its document OID *and* by denying the permissions or stating none, and it is the second half that Question 2 acts on.
+The shipped `withdrawal_complete` example shows the shape: its status is `active`, and what refuses is its nested `deny` of the PATDAT module.
+So treat a withdrawal or rejection OID on a consent that still permits research as a contradiction worth investigating, not as a refusal the model has already applied.
 
 ## Question 2: does the donor consent to research?
 
-Research use requires one specific permission from the policy CodeSystem, and that catalogue is
-hierarchical: permissions live inside modules:
+Research use requires one specific permission from the policy CodeSystem, and that catalogue is hierarchical: permissions live inside modules:
 
 ```text
 …24.5.3.1  "Patientendaten erheben, speichern, nutzen"   ← the module (PATDAT_ERHEBEN_SPEICHERN_NUTZEN)
@@ -217,41 +190,37 @@ hierarchical: permissions live inside modules:
                                                              policy 1.0.5-1.0.7 display it as "… EU DSGVO NIVEAU")
 ```
 
-Permitting the module includes everything inside it, so **either** OID being permitted grants
-research consent. That is why `ResearchConsentCodes` contains both.
+Permitting the module includes everything inside it, so **either** OID being permitted grants research consent.
+That is why `ResearchConsentCodes` contains both.
 
 `consents_to_research(consents, date)` then applies these rules:
 
-1. A consent whose `status` is not `active` contributes nothing. `status` is a FHIR modifier
-   element, so a rejected, withdrawn (`inactive`), draft, proposed or erroneous consent grants
-   nothing regardless of its provisions.
-2. A consent whose root provision period does not contain `date` contributes nothing, since the root
-   deny frame bounds every nested rule. Same for each nested provision's own period.
+1. A consent whose `status` is not `active` contributes nothing.
+   `status` is a FHIR modifier element, so a rejected, withdrawn (`inactive`), draft, proposed or erroneous consent grants nothing regardless of its provisions.
+2. A consent whose root provision period does not contain `date` contributes nothing, since the root deny frame bounds every nested rule.
+   Same for each nested provision's own period.
 3. Codes are matched on the OID alone, because the surrounding `system` is written
    inconsistently in the wild (with and without `urn:oid:`).
-4. **Deny wins.** A permit of either research code grants, but a deny on either revokes, also
-   across multiple consents of the same donor. So a partial withdrawal that denies `…5.3.8`
-   revokes research use even while the module permit still stands.
+4. **Deny wins.**
+   A permit of either research code grants, but a deny on either revokes, also across multiple consents of the same donor.
+   So a partial withdrawal that denies `…5.3.8` revokes research use even while the module permit still stands.
 5. Date-only period bounds cover the whole day (a start begins at midnight, an end expires at the
    end of that day); datetimes without a timezone are read as UTC.
 6. A consent that states neither research code grants nothing: silence is not consent.
 
-`explain_no_research_consent(date)` names the rule that refused, for each consent that permits no
-research. `ResearchConsent`, `Donor` and `GrzSubmissionMetadata` each have it. It returns `None`
-exactly when `consents_to_research` grants:
+`explain_no_research_consent(date)` names the rule that refused, for each consent that permits no research.
+`ResearchConsent`, `Donor` and `GrzSubmissionMetadata` each have it.
+It returns `None` exactly when `consents_to_research` grants:
 
 ```text
 donors[1] (mother): researchConsents[0] has no scope, noScopeJustification 'other patient-related reason'
 donors[0] (index): researchConsents[0] is outside every research provision period: 2020-09-01 to 2025-08-31
 ```
 
-grzctl shows it in the `Reason` column of `grzctl consent --details`. `grzctl validate`,
-`grzctl encrypt` and `grzctl archive` log it for a submission without research consent on its
-submission date.
+grzctl shows it in the `Reason` column of `grzctl consent --details`.
+`grzctl validate`, `grzctl encrypt` and `grzctl archive` log it for a submission without research consent on its submission date.
 
 ## How this stays correct over time
 
-Every assumption above (the OID classification, the research codes' existence and hierarchy, the
-profile's cardinalities and prohibitions) is re-checked against the MII's own artefacts, vendored
-in `example_terminology/` of `grz-pydantic-models-testing`. Its `packages.json` records which
-package ships which artefact version, and its README describes the update workflow.
+Every assumption above (the OID classification, the research codes' existence and hierarchy, the profile's cardinalities and prohibitions) is re-checked against the MII's own artefacts, vendored in `example_terminology/` of `grz-pydantic-models-testing`.
+Its `packages.json` records which package ships which artefact version, and its README describes the update workflow.

@@ -7,17 +7,18 @@ This page lists the Crypt4GH keys that each tool needs, and where they go in its
 
 ## Which key goes where
 
-| Key | Tool and config field | Used for |
-| --- | --------------------- | -------- |
-| GRZ public key | grz-cli: `keys.grz_public_key[_path]` | The LE encrypts a submission for the GRZ. |
-| LE private key | grz-cli: `keys.submitter_private_key[_path]`, optional | grz-cli signs the files that it encrypts. |
-| GRZ private key | grzctl: `leistungserbringer.<LE ID>.inbox_buckets.<inbox>.private_key[_path]` | grzctl decrypts a submission from that inbox. `grzctl encrypt` signs the files that it re-encrypts for an archive with this key, or with a random key if no inbox resolves. |
-| Archive public keys | grzctl: `archives.consented.public_key[_path]`, `archives.non_consented.public_key[_path]` | grzctl re-encrypts a submission for the matching archive. |
+| Key                  | Tool and config field                                                                                  | Used for |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | -------- |
+| GRZ public key       | grz-cli: `keys.grz_public_key[_path]`                                                                  | The LE encrypts a submission for the GRZ. |
+| LE private key       | grz-cli: `keys.submitter_private_key[_path]`, optional                                                 | grz-cli signs the files that it encrypts. |
+| GRZ private key      | grzctl: `leistungserbringer.<LE ID>.inbox_buckets.<inbox>.private_key[_path]`                          | grzctl decrypts a submission from that inbox. `grzctl encrypt` signs the files that it re-encrypts for an archive with this key, or with a random key if no inbox resolves. |
+| Archive public keys  | grzctl: `archives.consented.public_key[_path]`, `archives.non_consented.public_key[_path]`             | grzctl re-encrypts a submission for the matching archive. |
 | Archive private keys | grzctl: `archives.consented.private_key[_path]`, `archives.non_consented.private_key[_path]`, optional | `grzctl decrypt --archive` decrypts an archived submission. |
 
 `<name>[_path]` stands for the two fields `<name>` and `<name>_path`.
 The GRZ gives its public key to its LEs.
-The archive private keys are optional. Only `grzctl decrypt --archive` uses them.
+The archive private keys are optional.
+Only `grzctl decrypt --archive` uses them.
 They decrypt the whole archive, so set them only on a host that needs to decrypt archived submissions.
 
 `db.author.private_key[_path]` in the grzctl config is no Crypt4GH key.
@@ -34,8 +35,7 @@ A `_path` field must name an existing regular file.
 An inline public key must be in the Crypt4GH format.
 A public key file and a private key can also be in the OpenSSH format, as an ed25519 key.
 
-A private key can have a passphrase.
-grzctl and grz-cli take the passphrase from the first of:
+A private key can have a passphrase. grzctl and grz-cli take the passphrase from the first of:
 
 1. the key's `<name>_passphrase` field, for example `private_key_passphrase` of an inbox, or `keys.submitter_private_key_passphrase` in grz-cli,
 2. the `C4GH_PASSPHRASE` environment variable,
@@ -112,8 +112,7 @@ If the GRZ private key has a passphrase, put `private_key_passphrase` into `inbo
 
 Each inbox can name its own private key.
 This includes the inboxes of one LE.
-Without `--archive` and `--private-key-path`, `grzctl decrypt` decrypts a submission with the key of the inbox that the submission came from.
-grzctl looks up the inbox under the LE that the submission's metadata names.
+Without `--archive` and `--private-key-path`, `grzctl decrypt` decrypts a submission with the key of the inbox that the submission came from. grzctl looks up the inbox under the LE that the submission's metadata names.
 It takes the inbox from `--inbox`.
 Without `--inbox`, it takes the inbox recorded in the database, else the LE's only inbox.
 `grzctl download` records the inbox, and `grzctl db backfill` records it for older submissions.

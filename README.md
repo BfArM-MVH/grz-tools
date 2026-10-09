@@ -12,6 +12,7 @@ This monorepo hosts the following packages:
 
 The [`grz-cli`](packages/grz-cli/README.md) package is the primary CLI for submissions to the GRZs.
 It provides functionality for:
+
 - Validating submissions
 - Encrypting files using crypt4gh
 - Uploading files to a GRZ
@@ -19,6 +20,7 @@ It provides functionality for:
 For detailed installation and usage instructions, please refer to the [grz-cli README](packages/grz-cli/README.md).
 
 ## Development setup
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on setting up a development environment.
 
 ## Legacy Information
