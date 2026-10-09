@@ -35,6 +35,43 @@ def test_pydantic_nested_env_var_merging(monkeypatch, configuration: dict):
     assert get_secret_value(entry.inbox_buckets[BUCKET_NAME].private_key_passphrase) == "dotenv-secret-passphrase"
 
 
+def test_an_env_var_reaches_an_inbox_whose_name_has_upper_case_letters(monkeypatch, configuration: dict):
+    """pydantic-settings reads the names of environment variables in lowercase.
+    The inbox in a variable's name still matches the inbox of the file whose name differs only in case.
+    """
+    inboxes = configuration["leistungserbringer"][LE_ID]["inbox_buckets"]
+    inboxes["Main"] = inboxes.pop(BUCKET_NAME)
+    monkeypatch.setenv(f"GRZ_LEISTUNGSERBRINGER__{LE_ID}__INBOX_BUCKETS__MAIN__SECRET", "env-secret")
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    inbox_buckets = config.leistungserbringer[LE_ID].inbox_buckets
+    assert list(inbox_buckets) == ["Main"]
+    assert get_secret_value(inbox_buckets["Main"].secret) == "env-secret"
+
+
+def test_inbox_names_must_differ_in_more_than_case(configuration: dict):
+    """An environment variable names an inbox in lowercase, so it could not tell these inboxes apart."""
+    inboxes = configuration["leistungserbringer"][LE_ID]["inbox_buckets"]
+    inboxes["Main"] = inboxes["main"] = inboxes.pop(BUCKET_NAME)
+
+    with pytest.raises(ValidationError, match=r"Inbox names must differ in more than case: 'Main', 'main'"):
+        GrzctlConfig.from_configuration(configuration)
+
+
+def test_two_env_vars_that_spell_one_inbox_differently_fail(monkeypatch, configuration: dict):
+    """A JSON variable keeps the case of the inbox name, while a nested variable gives it in lowercase.
+    The two must not override each other silently.
+    """
+    inboxes = configuration["leistungserbringer"][LE_ID]["inbox_buckets"]
+    inboxes["Main"] = inboxes.pop(BUCKET_NAME)
+    monkeypatch.setenv(f"GRZ_LEISTUNGSERBRINGER__{LE_ID}__INBOX_BUCKETS", json.dumps({"Main": {"secret": "json"}}))
+    monkeypatch.setenv(f"GRZ_LEISTUNGSERBRINGER__{LE_ID}__INBOX_BUCKETS__MAIN__ACCESS_KEY", "nested")
+
+    with pytest.raises(ValidationError, match=r"Inbox names must differ in more than case: 'Main', 'main'"):
+        GrzctlConfig.from_configuration(configuration)
+
+
 def test_pydantic_json_env_var_merging(monkeypatch, configuration: dict):
     inbox_override = {**INBOX, "private_key_passphrase": "json-secret-passphrase"}
     monkeypatch.setenv("GRZ_LEISTUNGSERBRINGER", json.dumps({LE_ID: {"inbox_buckets": {BUCKET_NAME: inbox_override}}}))
