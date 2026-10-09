@@ -209,7 +209,9 @@ def test_wgs_trio_1_3_fail_scope_must_be_a_consent(version: str):
     metadata = json.loads(_metadata_raw("wgs_trio", version))
     del metadata["donors"][0]["researchConsents"][0]["scope"]["scope"]
 
-    with pytest.raises(ValidationError, match=r"scope must be a valid MII Broad Consent as of metadata v1.3"):
+    with pytest.raises(
+        ValidationError, match=r"scope must be a valid MII Broad Consent as of metadata v1\.3: scope: Field required"
+    ):
         GrzSubmissionMetadata.model_validate_json(json.dumps(metadata))
 
 
@@ -823,11 +825,15 @@ def test_research_consent_explains_why_it_permits_no_research(change, on: date, 
 
 
 def test_research_consent_without_parsed_scope_explains_why():
-    """A consent without a parsed scope grants nothing, and says whether it has a scope at all."""
-    unparsed = ResearchConsent(schemaVersion="2026.0.0", scope={"not": "a consent"})
+    """A consent without a parsed scope grants nothing, and says why its scope does not parse or that it has none."""
+    scope = _consent_raw("minimal_consented")
+    del scope["status"]
+    unparsed = ResearchConsent(schemaVersion="2026.0.0", scope=scope)
     justified = ResearchConsent(noScopeJustification=ResearchConsentNoScopeJustification.REFUSED)
 
-    assert unparsed.explain_no_research_consent(date(2024, 1, 1)) == "has a scope that is not a valid FHIR Consent"
+    assert unparsed.explain_no_research_consent(date(2024, 1, 1)) == (
+        "has a scope that is not a valid FHIR Consent: status: Field required"
+    )
     assert justified.explain_no_research_consent(date(2024, 1, 1)) == (
         "has no scope, noScopeJustification 'patient refuses to sign consent'"
     )
