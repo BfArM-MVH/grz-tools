@@ -76,7 +76,7 @@ works.
 | Version of… | Where you see it | Source of truth in this repo |
 | --- | --- | --- |
 | the GRZ metadata schema | `$schema` URL of the submission | `is_supported_version`, `get_accepted_versions` |
-| the KDS consent package | `researchConsents[].schemaVersion` | `RESEARCH_CONSENT_SCHEMA_VERSIONS` |
+| the KDS consent package | `researchConsents[].schemaVersion` | `RESEARCH_CONSENT_PACKAGES` |
 | each artefact inside the package (profile, CodeSystems) | inside the package files | `example_terminology/` file names + `example_terminology/packages.json` |
 | the signed broad consent document | OIDs in `Consent.policy[].uri`, or in a `category` coding from the version and modules CodeSystem | `BroadConsentVersion`, `BROAD_CONSENT_DOCUMENT_OIDS` |
 
@@ -90,9 +90,59 @@ Two facts that follow from the axes moving independently:
 - Most package releases only grow the terminology and leave the profile untouched, so a Consent
   that parses under one `schemaVersion` usually parses under all of them
   (`test_every_published_package_version_parses_the_same_consent` pins this for a fully bounded
-  consent). Where the profile did change, portability ends: see the period rule below.
+  consent). Where the profile or the IG text changed, portability ends: see the next section.
 - The GRZ metadata schema sometimes lists a package version before the MII has released it; such
   versions stay rejected until the release exists and its artefacts are vendored.
+
+## How the consent packages differ
+
+`RESEARCH_CONSENT_PACKAGES` in `submission/metadata/v1.py` holds, per package, every rule in which
+the packages differ and that the model enforces. The GRZ metadata schema lists only 2025.0.1 up to
+1.3.0, and its `scope` description still names the 2025 IG in 1.3.1. LEs adopted newer packages
+before the schema listed them, so every accepted package is accepted at every metadata version.
+
+| | 2025.0.1 | 2025.0.2 | 2025.0.3, 2025.0.4 | 2026.0.0 |
+| --- | --- | --- | --- | --- |
+| Released | 2025-01-21 | 2025-06-11 | 2025-06-12, 2025-06-16 | 2025-12-18 |
+| In the `schemaVersion` enum of the GRZ metadata schema | from 1.1.1 on | from 1.3.1 on | from 1.3.1 on | from 1.3.1 on |
+| Profile `MII_PR_Consent_Einwilligung` | 1.0.8 | 1.0.8 | 1.0.8 | 1.0.9 |
+| Policy CodeSystem | 1.0.5, 66 codes | 1.0.6, 101 codes | 1.0.7, 124 codes | 1.1.0, 124 codes |
+| Deprecated policy codes | `.41`, `.42` | `.41`, `.42` | `.41`, `.42` | also `.16`, `.17`, `.46`, `.47` |
+| Version and modules CodeSystem | not shipped | not shipped | not shipped | 0.2.0 |
+| End of both provision periods (profile) | 1..1 | 1..1 | 1..1 | 0..1 |
+| `patient.reference` and `.identifier` (IG text) | both optional | both optional | both optional | the reference if a Patient resource exists, else the identifier ("muss") |
+| System of the `category:mii` slice (profile) | `mii-cs-consent-consent_category` | the same | the same | `mii-cs-consent-version-modules` |
+| `category` (IG text) | two codings | the same | the same | at least two categories, with new rows for ResultType and TemplateType |
+
+What the model does with each difference:
+
+| Difference | Enforced | Why |
+| --- | --- | --- |
+| End of both provision periods | an open-ended period is rejected under the 2025 packages | the profile pins it |
+| Patient reference or identifier | under 2026.0.0, a consent without either is rejected from metadata v1.3 on, and logged as a warning before | only the IG text requires it, and before v1.3 a consent is read as grz-pydantic-models 2.7.1 read it |
+| System of the `category:mii` slice | no, both systems are accepted under every package | the MII kept shipping examples in the old spelling, see Question 1 |
+| ResultType and TemplateType categories | no | the profile of package 2026.0.0 defines no such slices, only its IG page and the 2026.0.1 release candidates do |
+| Deprecated policy codes | no | research consent reads only `.1` and `.8`, and neither is deprecated |
+| `schemaVersion` enum per metadata version | no | see above |
+
+The sources contradict each other in places:
+
+- The 2026.0.0 IG page still calls both period ends "verpflichtend", while its profile and its
+  release notes make them 0..1. The model follows the profile.
+- GRZ metadata schema 1.3.1 lists 2026.0.1, which the MII has released only as release candidates
+  (rc-1 to rc-4), so it stays rejected.
+- The MII published some artefact versions twice with different contents: profile 1.0.9 in 2026.0.0
+  and in the 2026.0.1 release candidates, policy CodeSystem 1.0.7 in 2025.0.3 and 2025.0.4, and
+  policy CodeSystem 1.1.0 in 2026.0.0 and in 2026.0.1-rc-4. The two CodeSystem variants differ only
+  in display strings. `example_terminology/` holds the variant of the first package listed here.
+
+Sources: the IG text of
+[2025.0.4](https://simplifier.net/guide/mii-ig-modul-consent-2025/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent?version=2025.0.4)
+(2025.0.1 to 2025.0.3 state the same rules; 2025.0.1 lists fewer document OIDs) and
+[2026.0.0](https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent?version=2026.0.0),
+the [2026.0.0 release notes](https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/Release-Notes?version=2026.0.0),
+the [packages](https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent)
+and the [GRZ metadata schema](https://github.com/BfArM-MVH/MVGenomseq_GRZ/blob/main/GRZ/grz-schema.json).
 
 ## Question 1: is it well-formed?
 
@@ -120,7 +170,7 @@ Two quirks worth knowing:
 - Profile 1.0.9, shipped by package 2026.0.0, relaxed both provision `period.end` elements from
   1..1 to 0..1. FHIR reads a period with no `end` as still running, so such a permission never
   expires. Profile 1.0.8, shipped by every 2025 package, still requires an `end`, so an open-ended
-  period is **rejected under those `schemaVersion`s** (`PROFILES_REQUIRING_PERIOD_END`). It is
+  period is **rejected under those `schemaVersion`s** (`requires_period_end`). It is
   accepted under 2026.0.0, and also when the submission declares no `schemaVersion` at all, which
   metadata 1.3 permits: with no package named there is no profile to enforce. The field stays
   optional on `Period` itself, because one model serves every profile version; the version that

@@ -57,7 +57,7 @@ version it concerns:
 - either policy code research consent is derived from going missing, deprecated or inactive
 - a profile that pins a different category CodeSystem, relaxes or tightens a period bound, changes
   the minimum number of categories, or stops forbidding what the model rejects
-- any disagreement between `packages.json` and `RESEARCH_CONSENT_PACKAGE_PROFILES`: a package one
+- any disagreement between `packages.json` and `RESEARCH_CONSENT_PACKAGES`: a package one
   names and the other does not, or a package the two map to different profiles
 
 A failure is a prompt to update the model, not a reason to edit these files.
@@ -66,7 +66,7 @@ A failure is a prompt to update the model, not a reason to edit these files.
 
 `packages.json` holds it: one entry per package version, naming the version each artefact states,
 with an artefact the package does not ship simply absent. The consent tests check
-`RESEARCH_CONSENT_PACKAGE_PROFILES` against it, so a released package the model does not yet
+`RESEARCH_CONSENT_PACKAGES` against it, so a released package the model does not yet
 classify fails the suite instead of being quietly unsupported.
 
 The profile version is the one that matters most, because it decides which cardinalities apply:
