@@ -6,7 +6,7 @@ from typing import Annotated, Any, Self
 import platformdirs
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes, load_ssh_public_key
-from grz_common.models.base import FilePath, IgnoringBaseSettings, get_secret_value
+from grz_common.models.base import FilePath, IgnoringBaseModel, get_secret_value
 from grz_db.errors import DatabaseConfigurationError
 from grz_db.models.author import Author as SigningAuthor
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -27,7 +27,7 @@ AuthorNameStr = Annotated[
 ]
 
 
-class Author(IgnoringBaseSettings):
+class Author(IgnoringBaseModel):
     name: AuthorNameStr
     """Name of the author"""
 
@@ -93,7 +93,7 @@ def _read_known_public_keys_file(path: Path) -> dict[str, list[SSHPublicKeyTypes
     return _parse_known_public_keys((location, line) for location, line in lines if line and not line.startswith("#"))
 
 
-class DbModel(IgnoringBaseSettings):
+class DbModel(IgnoringBaseModel):
     """Submission database related configuration."""
 
     database_url: Annotated[str, Field(examples=["sqlite:///submission.sqlite"])]
