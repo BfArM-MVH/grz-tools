@@ -103,6 +103,7 @@ test = [
 ]
 lint = [
     "ruff",
+    "rumdl",
     "types-pyyaml",
     "types-tqdm",
     "types-boto3[s3] >=1.36,<2",
@@ -215,10 +216,31 @@ max-complexity = 10
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
 
+[tool.rumdl]
+# release-please writes the changelogs
+exclude = ["**/CHANGELOG.md"]
+# MD014 would remove the "$ " prompt from commands shown without their output
+disable = ["MD014"]
+
+[tool.rumdl.MD013]
+# one sentence per line, so that a diff shows the changed sentence
+line-length = 0
+reflow = true
+reflow-mode = "sentence-per-line"
+# also split before a sentence that starts in lowercase or with code, such as a command name
+require-sentence-capital = false
+abbreviations = ["incl", "e.g", "i.e", "etc", "vs", "cf", "z.B", "bzw", "ca"]
+
+[tool.rumdl.MD060]
+# align the table columns, so that a table reads as one in plain text too
+enabled = true
+style = "aligned"
+loose-last-column = true
+
 [tool.tox]
 requires = ["tox>=4.23"]
 env_list = ["format-check", "lints", "typecheck", "3.12", "3.13"]
-allowlist_externals = ["pytest", "ruff"]
+allowlist_externals = ["pytest", "ruff", "rumdl"]
 isolated_build = true
 
 [tool.tox.env_run_base]
@@ -239,7 +261,7 @@ setenv = { UV_REINSTALL_PACKAGE = "grz-check", CARGO_TARGET_DIR = "{work_dir}/ca
 runner = "uv-venv-lock-runner"
 skip_install = true
 dependency_groups = ["lint"]
-commands = [["ruff", "format", "--check"]]
+commands = [["ruff", "format", "--check"], ["rumdl", "fmt", "--check"]]
 
 [tool.tox.env."lints"]
 runner = "uv-venv-lock-runner"
