@@ -20,6 +20,7 @@ from grz_pydantic_models.mii.consent import (
     ConsentProvision,
     FhirDateTime,
     Identifier,
+    Patient,
     Period,
     RootConsentProvision,
 )
@@ -396,6 +397,7 @@ VALID_CONSENT_CASES = (
     "minimal_consented_version_modules_category",
     "minimal_consented_extra_multi_coding_category",
     "minimal_consented_patient_by_identifier",
+    "minimal_consented_patient_by_display",
     "minimal_consented_bc_v1_7_2",
     "minimal_consented_bc_v1_6d_bare_oid",
     "minimal_consented_unknown_policy_oid",
@@ -994,16 +996,51 @@ def test_consent_keeps_patient_identifier():
     assert consent.patient.identifier.value == "42"
 
 
-def test_consent_rejects_unidentified_patient():
-    """
-    The profile requires neither reference nor identifier (both are mustSupport, 0..1), but a
-    patient stating neither, e.g. by display name only, carries nothing this model keeps.
-    """
-    consent_raw = _consent_raw("minimal_consented")
-    consent_raw["patient"] = {}
+def test_consent_keeps_patient_display():
+    """The profile requires neither reference nor identifier (both are mustSupport, 0..1), so a display alone is valid."""
+    consent = _consent("minimal_consented_patient_by_display")
 
-    with pytest.raises(ValidationError, match="reference or an identifier"):
-        Consent.model_validate(consent_raw)
+    assert consent.patient.reference is None
+    assert consent.patient.identifier is None
+    patient = consent.model_dump(mode="json", by_alias=True, exclude_none=True)["patient"]
+    assert patient == {"display": "Erika Mustermann"}
+
+
+def _metadata_with_patient_by_display(version: str, consent_schema_version: str) -> dict:
+    """An example whose first consent gives its patient by display only."""
+    metadata = json.loads(_metadata_raw("wgs_tumor_germline", version))
+    consent = metadata["donors"][0]["researchConsents"][0]
+    consent["schemaVersion"] = consent_schema_version
+    consent["scope"]["patient"] = {"display": "Erika Mustermann"}
+    return metadata
+
+
+@pytest.mark.parametrize("version", TESTED_VERSIONS)
+def test_a_patient_given_by_display_only_consents_to_research_before_package_2026(version: str):
+    """The IG text before consent package 2026.0.0 calls both the patient reference and identifier optional.
+
+    Rejecting such a consent made a consented submission count as non-consented before metadata v1.3,
+    and fail validation from v1.3 on.
+    """
+    parsed = GrzSubmissionMetadata.model_validate(_metadata_with_patient_by_display(version, "2025.0.1"))
+
+    assert parsed.index_donor.consents_to_research(parsed.submission.submission_date)
+
+
+def test_patient_reference_or_identifier_required_from_package_2026_as_of_1_3():
+    """The IG text of consent package 2026.0.0 requires a patient reference or identifier."""
+    metadata = _metadata_with_patient_by_display("1.3.0", "2026.0.0")
+
+    with pytest.raises(ValidationError, match=r"scope\.patient needs a reference or an identifier"):
+        GrzSubmissionMetadata.model_validate(metadata)
+
+
+def test_patient_by_display_only_from_package_2026_is_accepted_before_1_3(caplog):
+    """Before metadata v1.3, such a consent is accepted, as grz-pydantic-models 2.7.1 accepted it."""
+    parsed = GrzSubmissionMetadata.model_validate(_metadata_with_patient_by_display("1.2.1", "2026.0.0"))
+
+    assert parsed.index_donor.consents_to_research(parsed.submission.submission_date)
+    assert "has neither a reference nor an identifier" in caplog.text
 
 
 def test_date_only_provision_end_covers_the_whole_day():
@@ -1643,6 +1680,12 @@ def test_model_matches_the_profile(name: str):
     # the root one is optional in the model only for metadata before schema v1.3, which rejects it from v1.3 on
     assert not RootConsentProvision.model_fields["period"].is_required()
     assert ConsentProvision.model_fields["period"].is_required()
+
+    # the patient may be given by reference, by identifier or by display only
+    for element_id in ("Consent.patient.reference", "Consent.patient.identifier"):
+        assert elements[element_id].get("min", 0) == 0
+    assert not Patient.model_fields["reference"].is_required()
+    assert not Patient.model_fields["identifier"].is_required()
 
     # a patient identifier, when given, must carry system and value
     for element_id in ("Consent.patient.identifier.system", "Consent.patient.identifier.value"):
