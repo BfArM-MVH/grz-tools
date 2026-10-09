@@ -7,17 +7,18 @@ This page lists the Crypt4GH keys that each tool needs, and where they go in its
 
 ## Which key goes where
 
-| Key | Tool and config field | Used for |
-| --- | --------------------- | -------- |
-| GRZ public key | grz-cli: `keys.grz_public_key[_path]` | The LE encrypts a submission for the GRZ. |
-| LE private key | grz-cli: `keys.submitter_private_key[_path]`, optional | grz-cli signs the files that it encrypts. |
-| GRZ private key | grzctl: `leistungserbringer.<LE ID>.inbox_buckets.<inbox>.private_key[_path]` | grzctl decrypts a submission from that inbox. `grzctl encrypt` signs the files that it re-encrypts for an archive with this key, or with a random key if no inbox resolves. |
-| Archive public keys | grzctl: `archives.consented.public_key[_path]`, `archives.non_consented.public_key[_path]` | grzctl re-encrypts a submission for the matching archive. |
+| Key                  | Tool and config field                                                                                  | Used for |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | -------- |
+| GRZ public key       | grz-cli: `keys.grz_public_key[_path]`                                                                  | The LE encrypts a submission for the GRZ. |
+| LE private key       | grz-cli: `keys.submitter_private_key[_path]`, optional                                                 | grz-cli signs the files that it encrypts. |
+| GRZ private key      | grzctl: `leistungserbringer.<LE ID>.inbox_buckets.<inbox>.private_key[_path]`                          | grzctl decrypts a submission from that inbox. `grzctl encrypt` signs the files that it re-encrypts for an archive with this key, or with a random key if no inbox resolves. |
+| Archive public keys  | grzctl: `archives.consented.public_key[_path]`, `archives.non_consented.public_key[_path]`             | grzctl re-encrypts a submission for the matching archive. |
 | Archive private keys | grzctl: `archives.consented.private_key[_path]`, `archives.non_consented.private_key[_path]`, optional | `grzctl decrypt --archive` decrypts an archived submission. |
 
 `<name>[_path]` stands for the two fields `<name>` and `<name>_path`.
 The GRZ gives its public key to its LEs.
-The archive private keys are optional. Only `grzctl decrypt --archive` uses them.
+The archive private keys are optional.
+Only `grzctl decrypt --archive` uses them.
 They decrypt the whole archive, so set them only on a host that needs to decrypt archived submissions.
 
 `db.author.private_key[_path]` in the grzctl config is no Crypt4GH key.
