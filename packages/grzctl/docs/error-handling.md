@@ -53,8 +53,7 @@ No grzctl step raises the error behind `detailed_qc_error` yet.
 `grzctl db submission update --failure-reason` can record it.
 
 Older states can carry `network_error` or `upload_error`.
-Both mean what `transfer_error` means.
-grzctl no longer writes them, and `grzctl db submission update` does not offer them.
+Both mean what `transfer_error` means. grzctl no longer writes them, and `grzctl db submission update` does not offer them.
 
 ## S3 errors
 

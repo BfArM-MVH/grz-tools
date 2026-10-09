@@ -203,8 +203,7 @@ $ grzctl change-request-validate Delete --data-file delete-request.yaml
 ```
 
 This is a **top-level** command: it needs no `--config-file`, opens no database connection, and **cannot write anything**.
-Use it as the routine "is my file correct?"
-check — because there is no DB in the picture, there is no way to accidentally register a live change request.
+Use it as the routine "is my file correct?" check — because there is no DB in the picture, there is no way to accidentally register a live change request.
 On success it echoes back the validated fields (binary content elided as a byte count).
 
 Since change requests are rare and consequential, prefer this offline check while iterating on your data file, and only reach for the DB command once it passes.
@@ -218,8 +217,7 @@ $ grzctl db --config-file $CONFIG_PATH submission change-request \
 ```
 
 `--dry-run` runs the identical input checks **and additionally** connects to the database to confirm the submission exists — but still writes nothing.
-Use it when you want that extra "would this actually apply to a real submission?"
-confirmation.
+Use it when you want that extra "would this actually apply to a real submission?" confirmation.
 It requires a valid `--config-file` (including author keys), because it is a subcommand of the `db` group.
 
 ## Extra / type-specific data

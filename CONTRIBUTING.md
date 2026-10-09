@@ -76,7 +76,7 @@ Markdown files are formatted with [rumdl](https://rumdl.dev), configured in `pyp
 It puts one sentence per line, so that a diff shows the changed sentence.
 It also aligns the table columns, so that a table reads as one in plain text too.
 The changelogs are excluded, since release-please writes them.
-In `docs/releases/`, a sentence is split only before a capital letter, so that a PR reference such as `(#123)` stays on the line of its bullet.
+A sentence is split only before a capital letter or code, so that a PR reference such as `(#123)` stays on the line of its bullet.
 
 ```bash
 uv run rumdl fmt          # format

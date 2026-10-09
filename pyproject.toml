@@ -227,8 +227,6 @@ disable = ["MD014"]
 line-length = 0
 reflow = true
 reflow-mode = "sentence-per-line"
-# also split before a sentence that starts in lowercase or with code, such as a command name
-require-sentence-capital = false
 abbreviations = ["incl", "e.g", "i.e", "etc", "vs", "cf", "z.B", "bzw", "ca"]
 
 [tool.rumdl.MD060]
