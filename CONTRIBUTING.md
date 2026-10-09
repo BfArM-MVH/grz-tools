@@ -70,6 +70,18 @@ To auto-format the code, run:
 uv run ruff format
 ```
 
+### Markdown
+
+Markdown files are formatted with [rumdl](https://rumdl.dev), configured in `pyproject.toml`.
+It puts one sentence per line, so that a diff shows the changed sentence.
+It also aligns the table columns, so that a table reads as one in plain text too.
+The changelogs are excluded, since release-please writes them.
+
+```bash
+uv run rumdl fmt          # format
+uv run rumdl fmt --check  # check, as CI does
+```
+
 ## Docstrings
 
 Docstrings use ReST field lists.
