@@ -96,16 +96,17 @@ Two facts that follow from the axes moving independently:
 
 ## Question 1: is it well-formed?
 
-The model (`grz_pydantic_models/mii/consent.py`) enforces what the profile pins, plus two rules the
-profile leaves open but the GRZ requires, marked †. The root-provision rule is enforced one level
-up, on `ResearchConsent` in `submission/metadata/v1.py`.
+The model (`grz_pydantic_models/mii/consent.py`) enforces what the profile pins, plus one rule the
+profile leaves open but the GRZ requires, marked †, and one rule of the IG text, marked ‡. The
+root-provision rule is enforced one level up, on `ResearchConsent`, and the patient rule on
+`GrzSubmissionMetadata`, both in `submission/metadata/v1.py`.
 
 | Element | Rule |
 | --- | --- |
 | `status` | required; only `active` marks the consent as in force |
 | `scope` | exactly one coding, and it must be `research` |
 | `category` | must contain the LOINC consent category and the MII broad consent category, one coding each; extra categories are allowed (open slicing) |
-| `patient` | † must identify the patient: reference or identifier (identifier needs `system` + `value`). The profile requires `patient` but marks both ways of filling it mustSupport only |
+| `patient` | reference, identifier (identifier needs `system` + `value`), or a display only. The profile requires `patient` but marks both ways of filling it mustSupport only. ‡ The IG text calls both optional up to package 2025.0.4 and requires one of them from 2026.0.0 on, so a consent of package 2026.0.0 or newer without either is rejected from metadata v1.3 on, and logged as a warning before |
 | `policy` | at least one document OID, with or without the `urn:oid:` prefix |
 | `provision` (root) | † `type` must be `deny` (opt-in); the profile requires `type` but fixes no value. `period` required from metadata v1.3 on (before, a missing one is read as grz-pydantic-models 2.7.1 read it: no root bound, only nested periods count), `code` forbidden |
 | `provision.provision[]` | the decisions: `type`, `period`, at least one `code` |
@@ -127,10 +128,10 @@ Two quirks worth knowing:
 
 Unknown fields are ignored on the resource and its provisions (FHIR carries much more than we
 read), but **forbidden** on the small leaf elements the evaluation reads field by field: `Period`,
-`Coding` and `CodeableConcept`. Four things are rejected outright rather than ignored: a `code` on
+`Coding` and `CodeableConcept`. Three things are rejected outright rather than ignored: a `code` on
 the root provision and a third provision level, because they carry permissions the evaluation never
-looks at and accepting them would silently lose them; a wrong `resourceType` and a patient
-identified by neither reference nor identifier, because neither can be what the submitter meant.
+looks at and accepting them would silently lose them; and a wrong `resourceType`, because it cannot
+be what the submitter meant.
 
 ## Question 1b: what was signed?
 
