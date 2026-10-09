@@ -15,7 +15,7 @@ from grz_common.models.base import (
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from grz_common.utils.crypt import Crypt4GH
-from pydantic import Field, PrivateAttr, SecretStr, model_validator
+from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
 
@@ -149,6 +149,19 @@ class LeistungserbringerEntry(IgnoringBaseModel):
     inbox_buckets: Annotated[dict[str, InboxConfig], Field(min_length=1)]
     """Mapping: InboxName -> InboxConfig."""
 
+    @field_validator("inbox_buckets", mode="before")
+    @classmethod
+    def check_inbox_names_differ_in_more_than_case(cls, inbox_buckets: Any) -> Any:
+        """Environment variables name inboxes in lowercase. Runs before the inboxes, which a clash may leave incomplete."""
+        if isinstance(inbox_buckets, dict):
+            names_by_lowercase: dict[str, list[str]] = {}
+            for name in inbox_buckets:
+                names_by_lowercase.setdefault(str(name).lower(), []).append(name)
+            for names in names_by_lowercase.values():
+                if len(names) > 1:
+                    raise ValueError(f"Inbox names must differ in more than case: {', '.join(map(repr, names))}")
+        return inbox_buckets
+
 
 class ArchiveTarget(IgnoringBaseModel):
     """Encapsulates everything needed to write to a specific archive."""
@@ -257,6 +270,47 @@ class DictConfigSettingsSource(PydanticBaseSettingsSource):
         return d
 
 
+class InboxNameCaseSettingsSource(PydanticBaseSettingsSource):
+    """Wraps the environment variables source, and spells each inbox name as in the config file.
+
+    pydantic-settings reads the names of environment variables in lowercase, so
+    ``GRZ_LEISTUNGSERBRINGER__123456789__INBOX_BUCKETS__MAIN__SECRET`` names the inbox ``main``.
+    This source renames it to the inbox of the config file whose name differs only in case, such as ``Main``.
+    """
+
+    def __init__(self, settings_cls: type, env_settings: PydanticBaseSettingsSource, config_dict: dict[str, Any]):
+        super().__init__(settings_cls)
+        self.env_settings = env_settings
+        self.config_dict = config_dict
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return self.env_settings.get_field_value(field, field_name)
+
+    def _inbox_names_in_file(self, submitter_id: str) -> list[str]:
+        try:
+            return list(self.config_dict["leistungserbringer"][submitter_id]["inbox_buckets"])
+        except (KeyError, TypeError):
+            return []
+
+    def __call__(self) -> dict[str, Any]:
+        d = self.env_settings()
+        leistungserbringer = d.get("leistungserbringer")
+        if not isinstance(leistungserbringer, dict):
+            return d
+        for submitter_id, entry in leistungserbringer.items():
+            if not isinstance(entry, dict) or not isinstance(entry.get("inbox_buckets"), dict):
+                continue
+            inboxes = entry["inbox_buckets"]
+            spelling_in_file = {str(name).lower(): name for name in self._inbox_names_in_file(submitter_id)}
+            renamed = {}
+            for name, inbox in inboxes.items():
+                name_in_file = spelling_in_file.get(name.lower(), name)
+                # keep both spellings of one inbox, so that validation rejects them instead of one overriding the other
+                renamed[name if name_in_file in inboxes else name_in_file] = inbox
+            entry["inbox_buckets"] = renamed
+        return d
+
+
 class GrzctlConfig(IgnoringBaseSettings):
     """Unified configuration for all grzctl commands."""
 
@@ -311,7 +365,7 @@ class GrzctlConfig(IgnoringBaseSettings):
         if config_dict is not None:
             return (
                 init_settings,
-                env_settings,
+                InboxNameCaseSettingsSource(settings_cls, env_settings, config_dict),
                 DictConfigSettingsSource(settings_cls, config_dict),
                 dotenv_settings,
                 file_secret_settings,
