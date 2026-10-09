@@ -76,6 +76,16 @@ def test_dump_config_reveal_secrets_roundtrips(tmp_path: Path, config_with_secre
     assert GrzctlConfig.from_path(reloaded_path) == GrzctlConfig.from_path(config_with_secrets_path)
 
 
+def test_dump_config_without_a_config_file_asks_for_one(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(grzctl.cli, "DEFAULT_CONFIG_PATH", tmp_path / "missing.yaml")
+    runner = click.testing.CliRunner()
+
+    result = runner.invoke(grzctl.cli.build_cli(), ["dump-config"])
+
+    assert result.exit_code == 2
+    assert "Missing required option '--config'" in result.stderr
+
+
 def test_json_dump_with_reveal_secrets_roundtrips(config_with_secrets_path: Path):
     """With reveal_secrets, a JSON dump loads back into an equal config, secrets included."""
     config = GrzctlConfig.from_path(config_with_secrets_path)

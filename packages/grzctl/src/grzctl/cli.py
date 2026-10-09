@@ -15,6 +15,7 @@ from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
 
 from . import get_versions
+from .commands import grzctl_configuration
 from .commands.archive import archive
 from .commands.change_request import change_request_validate
 from .commands.change_request_template import change_request_template
@@ -120,11 +121,10 @@ def build_cli():
     is_flag=True,
     help="Print secret values in plain text instead of '**********', so the output loads back as a config file.",
 )
-@click.pass_context
-def dump_config(ctx: click.Context, reveal_secrets: bool):
+@grzctl_configuration
+def dump_config(configuration: GrzctlConfig, reveal_secrets: bool):
     """Dump the loaded grzctl configuration as YAML."""
-    config: GrzctlConfig = ctx.obj["configuration"]
-    data = config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": reveal_secrets})
+    data = configuration.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": reveal_secrets})
     click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
 
 
