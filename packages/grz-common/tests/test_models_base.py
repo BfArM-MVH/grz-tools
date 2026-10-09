@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from grz_common.models.base import IgnoringBaseModel, IgnoringBaseSettings
-from pydantic import SecretStr
+from pydantic import AnyHttpUrl, SecretStr
 
 SECRET = "s3-secret"
 
@@ -24,3 +24,16 @@ def test_to_yaml_roundtrips_secrets(tmp_path: Path, model_class: type[_Model | _
         model_class(secret=SecretStr(SECRET)).to_yaml(fd)
 
     assert model_class.from_path(config_path).secret.get_secret_value() == SECRET
+
+
+class _ModelWithUrl(IgnoringBaseModel):
+    url: AnyHttpUrl
+
+
+@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("reveal_secrets", [False, True])
+def test_json_dump_of_a_required_url_does_not_warn(reveal_secrets: bool):
+    """Revealing the secrets must leave the serialization of the other fields to pydantic."""
+    model = _ModelWithUrl(url="https://example.org")
+
+    assert model.model_dump(mode="json", context={"reveal_secrets": reveal_secrets}) == {"url": "https://example.org/"}
