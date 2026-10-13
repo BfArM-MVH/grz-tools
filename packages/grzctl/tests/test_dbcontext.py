@@ -237,6 +237,15 @@ class TestFilesFailed:
             grzctl_versions=mock.ANY,
         )
 
+    def test_a_file_error_without_a_message_is_listed_by_its_type(self, ctx, mock_db):
+        """A bare ``MemoryError()`` has an empty ``str()``, so its entry names the type like ``data.error`` does."""
+        exc = _files_failed(MemoryError())
+
+        ctx.__exit__(type(exc), exc, None)
+
+        data = mock_db.update_submission_state.call_args.kwargs["data"]
+        assert data["errors"] == [{"file": "file0", "reason": "unknown", "message": "MemoryError"}]
+
 
 class TestDbContextFailureReason:
     def test_file_not_found_maps_correctly(self, ctx, mock_db):
