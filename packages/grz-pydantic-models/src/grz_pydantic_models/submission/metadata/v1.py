@@ -592,7 +592,7 @@ class ResearchConsent(StrictBaseModel):
             # ensure_scope_xor_justification guarantees a noScopeJustification here
             return f"has no scope, noScopeJustification '{self.no_scope_justification}'"
         if not isinstance(self.scope, Consent):
-            return "has a scope that is not a valid FHIR Consent"
+            return f"has a scope that is not a valid FHIR Consent: {_why_not_a_consent(self.scope)}"
 
         research = {
             code: permitted for code, permitted in self.consent_by_code(dt).items() if code in ResearchConsentCodes
@@ -602,6 +602,23 @@ class ResearchConsent(StrictBaseModel):
         if research:
             return None
         return _why_no_research_code(self.scope, self._as_utc_datetime(dt))
+
+
+def _why_not_a_consent(scope: dict) -> str:
+    """
+    Why *scope* does not parse as a :class:`Consent`.
+
+    :param scope: a research consent scope that the model kept as a dict.
+    :returns: the location and message of each validation error, separated by ``; ``.
+    """
+    try:
+        Consent.model_validate(scope)
+    except ValidationError as e:
+        return "; ".join(
+            f"{'.'.join(map(str, error['loc']))}: {error['msg']}" if error["loc"] else error["msg"]
+            for error in e.errors()
+        )
+    raise RuntimeError("The scope parses as a Consent, but the model kept it as a dict.")
 
 
 def _why_no_research_code(scope: Consent, moment: datetime) -> str:
@@ -1355,6 +1372,26 @@ def _lacks_root_provision_period(consent: ResearchConsent) -> bool:
     )
 
 
+def _lacks_patient_reference_and_identifier(consent: ResearchConsent) -> bool:
+    """
+    Whether the scope is a Consent of MII consent package 2026.0.0 or newer whose patient has neither a reference nor
+    an identifier.
+
+    The IG text requires one of them from package 2026.0.0 on, and calls both optional before. The profile requires
+    neither. A consent declaring no schemaVersion, which metadata 1.3 permits, names no package, so nothing is required.
+
+    :param consent: The research consent to check.
+    :returns: ``True`` if the patient has neither.
+    """
+    return (
+        isinstance(consent.scope, Consent)
+        and consent.schema_version is not None
+        and Version(consent.schema_version) >= Version("2026.0.0")
+        and consent.scope.patient.reference is None
+        and consent.scope.patient.identifier is None
+    )
+
+
 class GrzSubmissionMetadata(StrictBaseModel):
     """
     General metadata schema for submissions to the GRZ
@@ -1527,9 +1564,17 @@ class GrzSubmissionMetadata(StrictBaseModel):
                     if consent.no_scope_justification is None and not consent.scope:
                         raise ValueError("Either a non-empty scope must be provided or a noScopeJustification")
                     if (consent.scope is not None) and (not isinstance(consent.scope, Consent)):
-                        raise ValueError("scope must be a valid MII Broad Consent as of metadata v1.3")
+                        raise ValueError(
+                            "scope must be a valid MII Broad Consent as of metadata v1.3: "
+                            f"{_why_not_a_consent(consent.scope)}"
+                        )
                     if _lacks_root_provision_period(consent):
                         raise ValueError("scope.provision.period is required as of metadata v1.3")
+                    if _lacks_patient_reference_and_identifier(consent):
+                        raise ValueError(
+                            "scope.patient needs a reference or an identifier under researchConsent schemaVersion "
+                            f"{consent.schema_version} as of metadata v1.3"
+                        )
         else:
             for donor in self.donors:
                 for consent in donor.research_consents:
@@ -1540,6 +1585,12 @@ class GrzSubmissionMetadata(StrictBaseModel):
                             "researchConsents[].scope.provision has no period, which the MII consent profile "
                             "requires. Before metadata schema v1.3 it is read as grz-pydantic-models 2.7.1 read it: "
                             "only the nested provision periods count."
+                        )
+                    if _lacks_patient_reference_and_identifier(consent):
+                        log.warning(
+                            "researchConsents[].scope.patient has neither a reference nor an identifier, which the MII "
+                            "consent IG requires from schemaVersion 2026.0.0 on. Before metadata schema v1.3 it is "
+                            "accepted, as grz-pydantic-models 2.7.1 accepted it."
                         )
         return self
 
