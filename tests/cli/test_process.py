@@ -1699,6 +1699,24 @@ class TestProcessConsentRouting:
         assert not {o.key for o in s3_buckets["non_consented"].objects.all()}
 
 
+def _deny_reading(monkeypatch, bucket: str) -> None:
+    """Deny reading ``bucket``, as S3 does for write-only credentials."""
+    make_api_call = botocore.client.BaseClient._make_api_call
+
+    def deny(client, operation_name, api_params):
+        if operation_name in {"HeadObject", "GetObject"} and api_params.get("Bucket") == bucket:
+            # a HEAD answer carries only the HTTP status, a GET answer the real code
+            code = "403" if operation_name == "HeadObject" else "AccessDenied"
+            error = {
+                "Error": {"Code": code, "Message": "simulated denial"},
+                "ResponseMetadata": {"HTTPStatusCode": 403},
+            }
+            raise botocore.exceptions.ClientError(error, operation_name)
+        return make_api_call(client, operation_name, api_params)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", deny)
+
+
 class TestProcessArchiveCommit:
     """The commit copies a submission into its archive with the metadata last."""
 
@@ -1741,22 +1759,8 @@ class TestProcessArchiveCommit:
         """Without read access to the archive, the run cannot tell whether an earlier run archived the submission."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        archive_bucket = s3_buckets["consented"].name
         metadata_key = f"{sid}/metadata/metadata.json"
-        make_api_call = botocore.client.BaseClient._make_api_call
-
-        def deny_reading_the_archive(client, operation_name, api_params):
-            if operation_name in {"HeadObject", "GetObject"} and api_params.get("Bucket") == archive_bucket:
-                # a HEAD answer carries only the HTTP status, a GET answer the real code
-                code = "403" if operation_name == "HeadObject" else "AccessDenied"
-                error = {
-                    "Error": {"Code": code, "Message": "simulated denial"},
-                    "ResponseMetadata": {"HTTPStatusCode": 403},
-                }
-                raise botocore.exceptions.ClientError(error, operation_name)
-            return make_api_call(client, operation_name, api_params)
-
-        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", deny_reading_the_archive)
+        _deny_reading(monkeypatch, s3_buckets["consented"].name)
 
         with caplog.at_level(logging.WARNING, logger="grzctl.processor"):
             result = _run_process(temp_process_config_file_path, sid, working_dir_path)
@@ -1764,6 +1768,24 @@ class TestProcessArchiveCommit:
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert metadata_key in {o.key for o in s3_buckets["consented"].objects.all()}
         assert f"Cannot check whether submission '{sid}' is already archived" in caplog.text
+
+    def test_a_denied_check_after_a_processed_run_streams_nothing(
+        self, s3_buckets, s3_requests, monkeypatch, caplog, temp_process_config_file_path, working_dir_path
+    ):
+        """Write-only archive credentials cannot see the archived metadata, but the database records PROCESSED."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        s3_requests.requests.clear()
+        _deny_reading(monkeypatch, s3_buckets["consented"].name)
+
+        with caplog.at_level(logging.WARNING, logger="grzctl.processor"):
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid) == Counter()
+        assert f"the database records submission '{sid}' as Processed" in caplog.text
 
 
 class _Panic(BaseException):

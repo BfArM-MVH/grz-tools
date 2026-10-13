@@ -218,6 +218,8 @@ If the target archive already holds the submission, a rerun streams and copies n
 This is the case after a failed Prüfbericht, for example.
 The run checks the target archive for the submission's `metadata.json`, which step 8 copies last.
 If it is there, the run logs a warning and records `PROCESSED`.
+Write-only archive credentials cannot read the `metadata.json`.
+The run then counts the submission as archived if the database records `PROCESSED` or `ARCHIVED` for it.
 If the database already records `REPORTED`, step 9 does not submit the Prüfbericht again, but still generates and saves it.
 
 Once a cleaning has started, the inbox holds a `cleaning` or `cleaned` marker.
