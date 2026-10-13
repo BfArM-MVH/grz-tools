@@ -228,8 +228,11 @@ class ArchivesConfig(IgnoringBaseModel):
     interrogation: InterrogationConfig
     """Target definition for the intermediate interrogation bucket."""
 
-    @model_validator(mode="after")
-    def check_endpoints_match(self) -> "ArchivesConfig":
+    def warn_if_endpoints_differ(self) -> None:
+        """Log a warning for each archive on another endpoint than the interrogation bucket.
+
+        ``grzctl process`` copies from the interrogation bucket to an archive on the server side.
+        """
         consented_endpoint = str(self.consented.s3.endpoint_url) if self.consented.s3.endpoint_url else None
         non_consented_endpoint = str(self.non_consented.s3.endpoint_url) if self.non_consented.s3.endpoint_url else None
         interrogation_endpoint = str(self.interrogation.s3.endpoint_url) if self.interrogation.s3.endpoint_url else None
@@ -249,8 +252,6 @@ class ArchivesConfig(IgnoringBaseModel):
                 interrogation_endpoint,
                 non_consented_endpoint,
             )
-
-        return self
 
     @model_validator(mode="after")
     def check_buckets_are_unique(self) -> "ArchivesConfig":
