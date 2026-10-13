@@ -1,6 +1,7 @@
 """GrzctlConfig checks the configuration it loads, and merges environment variables into it."""
 
 import json
+import logging
 
 import pytest
 from grz_common.models.base import get_secret_value
@@ -56,6 +57,20 @@ def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration:
 
     assert config.archives.consented.public_key == crypt4gh_public_key
     assert config.archives.consented.public_key_path is None
+
+
+def test_differing_archive_endpoints_warn_only_when_asked(configuration: dict, caplog):
+    """Only ``grzctl process`` copies from the interrogation bucket to an archive, so loading the config stays quiet."""
+    configuration["archives"]["interrogation"]["s3"]["endpoint_url"] = "https://other.example.org"
+
+    with caplog.at_level(logging.WARNING):
+        config = GrzctlConfig.from_configuration(configuration)
+    assert "endpoint" not in caplog.text
+
+    with caplog.at_level(logging.WARNING):
+        config.archives.warn_if_endpoints_differ()
+    assert "differs from consented archive endpoint" in caplog.text
+    assert "differs from non-consented archive endpoint" in caplog.text
 
 
 def test_inbox_target_defaults_the_bucket_to_the_inbox_name(configuration: dict):

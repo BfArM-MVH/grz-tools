@@ -544,6 +544,7 @@ class SubmissionProcessor:
         self.inbox = inbox
         self._source_s3_options = inbox.s3
         self._log_dir = log_dir
+        configuration.archives.warn_if_endpoints_differ()
 
         log.debug("Loading crypt4gh keys...")
         # the pipeline stages work with the raw 32 bytes of each key
