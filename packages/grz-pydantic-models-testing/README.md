@@ -2,9 +2,7 @@
 
 Installable test fixtures and example metadata for [`grz-pydantic-models`](../grz-pydantic-models).
 
-This package ships the example and failing metadata JSON files as proper package data so
-that any downstream package can access them via `importlib.resources` without relying on
-filesystem layout or editable-install assumptions.
+This package ships the example and failing metadata JSON files as proper package data so that any downstream package can access them via `importlib.resources` without relying on filesystem layout or editable-install assumptions.
 
 ## Installation
 
@@ -30,9 +28,9 @@ metadata = GrzSubmissionMetadata.model_validate_json(json_text)
 
 ## Contents
 
-| Sub-package | Description |
-|---|---|
-| `example_metadata` | Valid example submissions for all supported study types and schema versions |
-| `example_pruefberichte` | Example Prüfbericht payloads |
+| Sub-package                | Description |
+| -------------------------- | ----------- |
+| `example_metadata`         | Valid example submissions for all supported study types and schema versions |
+| `example_pruefberichte`    | Example Prüfbericht payloads |
 | `example_research_consent` | Example research consent FHIR resources |
-| `failing_metadata` | Invalid metadata fixtures for negative testing |
+| `failing_metadata`         | Invalid metadata fixtures for negative testing |
