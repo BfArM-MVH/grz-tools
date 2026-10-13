@@ -93,6 +93,9 @@ If it finds one, it raises a `SubmissionCleanedError`.
 An empty metadata.json without a marker was uploaded like that.
 So its `LastModified` is the upload date, and its download fails as an invalid metadata.json.
 
+A clean that finds nothing under the submission ID records `configuration_error` and writes no marker.
+Every clean keeps the metadata.json, so the submission ID or the inbox is wrong.
+
 `AccessDenied` is not a configuration error.
 S3 also answers 403 for a missing object if the credentials lack the permission to list the bucket.
 For the same reason, `AccessDenied` for the submission's metadata does not tell whether the bucket holds the submission.

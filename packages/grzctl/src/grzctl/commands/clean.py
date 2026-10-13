@@ -5,6 +5,7 @@ import sys
 
 import click
 import grz_common.cli as grzcli
+import grz_common.exceptions as grzexc
 from grz_common.models.s3 import S3Options
 from grz_common.transfer import init_s3_resource, s3_errors
 from grz_db.models.submission import SubmissionStateEnum
@@ -73,6 +74,11 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submi
     bucket = resource.Bucket(bucket_name)
     log.info(f"Cleaning '{prefix}' from inbox {inbox_desc} …")
     with s3_errors(f"Cleaning {submission_id} from inbox {inbox_desc}"):
+        # every clean keeps metadata.json, so a prefix with nothing in it is a wrong submission ID or inbox
+        if next(iter(bucket.objects.filter(Prefix=prefix).limit(1)), None) is None:
+            raise grzexc.ConfigurationError(
+                f"Inbox {inbox_desc} holds nothing under '{prefix}'. Check the submission ID and the inbox."
+            )
         # add a marker at start of cleaning to
         #  1.) ensure user can upload the "cleaned" marker at the end _before_ we start deleting things
         #  2.) detect incomplete cleans if needed
