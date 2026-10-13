@@ -733,7 +733,7 @@ class TestProcessDetailedQc:
     ):
         """When the guess is right, each file is downloaded once, and the QC pass finds it already in QC storage.
 
-        The QC copies are closed to other users, even in a directory that an earlier run left open.
+        The QC copies and their directories are closed to other users, even in a directory that an earlier run left open.
         """
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], self.SUBMISSION_ID)
         qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / self.SUBMISSION_ID
@@ -752,6 +752,8 @@ class TestProcessDetailedQc:
         assert json.loads((qc_dir / "metadata" / "metadata.json").read_text()) == uploaded_metadata
         for directory in [qc_dir, *(path for path in qc_dir.rglob("*") if path.is_dir())]:
             assert stat.S_IMODE(directory.stat().st_mode) == 0o770, f"{directory} has the wrong mode"
+        for file in (path for path in qc_dir.rglob("*") if path.is_file()):
+            assert stat.S_IMODE(file.stat().st_mode) == 0o660, f"{file} has the wrong mode"
 
     def test_failed_qc_download_fails_the_run(
         self,
