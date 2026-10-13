@@ -801,6 +801,8 @@ class SubmissionProcessor:
         submission_run = self._new_run_state(submission_metadata)
         db = SubmissionDb(self.config.db.database_url, self.config.db.signing_author)
         if self._is_archived(db, submission_run):
+            # a run interrupted while it deleted the staged copies leaves the rest of them behind
+            self._delete_staged_copies(submission_run, self._get_expected_keys(submission_run))
             return
         prefetch = self._predict_qc(db, submission_run.submission_id)
         if prefetch:
