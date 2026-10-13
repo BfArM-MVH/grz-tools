@@ -100,6 +100,7 @@ Every clean keeps the metadata.json, so the submission ID or the inbox is wrong.
 S3 also answers 403 for a missing object if the credentials lack the permission to list the bucket.
 For the same reason, `AccessDenied` for the submission's metadata does not tell whether the bucket holds the submission.
 An upload or an archival then logs a warning that it cannot check for an earlier run, and it continues.
+`grzctl process` asks the database instead: a recorded `PROCESSED` or `ARCHIVED` state means an earlier run archived the submission.
 
 ## BfArM errors
 
