@@ -11,6 +11,7 @@ import click
 import grz_common.exceptions as grzexc
 import platformdirs
 import yaml
+from click.shell_completion import BashComplete, FishComplete, ZshComplete
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
 
@@ -34,6 +35,8 @@ from .models.config import GrzctlConfig
 log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
+
+_COMPLETION_CLASSES = {"bash": BashComplete, "zsh": ZshComplete, "fish": FishComplete}
 
 
 class OrderedGroup(click.Group):
@@ -110,6 +113,7 @@ def build_cli():
     cli.add_command(change_request_validate)
     cli.add_command(report)
     cli.add_command(dump_config)
+    cli.add_command(completion)
 
     return cli
 
@@ -126,6 +130,19 @@ def dump_config(ctx: click.Context, reveal_secrets: bool):
     config: GrzctlConfig = ctx.obj["configuration"]
     data = config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": reveal_secrets})
     click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
+
+
+@click.command()
+@click.argument("shell", type=click.Choice(list(_COMPLETION_CLASSES)))
+@click.pass_context
+def completion(ctx: click.Context, shell: str):
+    """Print the completion script for a shell.
+
+    Load it at shell start, e.g. with eval "$(grzctl completion zsh)" in ~/.zshrc.
+    Set GRZCTL_COMPLETE_SUBMISSION_IDS=1 to also complete submission IDs from the database.
+    """
+    complete = _COMPLETION_CLASSES[shell](ctx.find_root().command, {}, "grzctl", "_GRZCTL_COMPLETE")
+    click.echo(complete.source())
 
 
 def _stop_on_sigterm() -> None:
