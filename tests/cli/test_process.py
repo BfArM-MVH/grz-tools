@@ -1169,6 +1169,26 @@ class TestProcessRerun:
         assert archive_writes == []
         assert f"Submission '{sid}' is already archived" in caplog.text
 
+    def test_a_rerun_of_an_archived_submission_deletes_staged_copies_left_behind(
+        self, s3_buckets, temp_process_config_file_path, working_dir_path
+    ):
+        """A run interrupted while it deleted the staged copies leaves some behind, though the archive is complete."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        left_behind = next(
+            o.key
+            for name in ("consented", "non_consented")
+            for o in s3_buckets[name].objects.filter(Prefix=f"{sid}/files/")
+        )
+        s3_buckets["interrogation"].put_object(Key=left_behind, Body=b"staged copy")
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert not list(s3_buckets["interrogation"].objects.all())
+
 
 class TestProcessStagingCheckFailure:
     """A rerun asks the interrogation bucket whether a file is still staged, and that question can fail."""
