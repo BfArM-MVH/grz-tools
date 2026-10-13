@@ -131,6 +131,28 @@ def test_abort_waits_for_the_parts_in_flight():
 
 
 @mock_aws
+def test_an_interrupt_while_the_abort_waits_for_the_parts_still_aborts_the_upload(monkeypatch):
+    """A second Ctrl-C during that wait must not leave the multipart upload behind."""
+    s3 = boto3.client("s3", region_name="us-east-1")  # moto placeholder, see note above
+    s3.create_bucket(Bucket=BUCKET)
+    uploader = S3MultipartUploader(s3, BUCKET, KEY, part_size=1024, max_threads=2)
+    uploader.observe(b"x" * 2048)
+    shutdown = uploader._executor.shutdown
+
+    def interrupted_shutdown(*args, **kwargs):
+        shutdown(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(uploader._executor, "shutdown", interrupted_shutdown)
+
+    with pytest.raises(KeyboardInterrupt):
+        uploader.abort()
+
+    uploads = s3.list_multipart_uploads(Bucket=BUCKET)
+    assert "Uploads" not in uploads, f"an interrupt must not skip the abort, dangling: {uploads.get('Uploads')}"
+
+
+@mock_aws
 def test_an_interrupt_while_closing_aborts_the_upload():
     """Ctrl-C, and SIGTERM in grzctl, raise no ``Exception``, but must abort the upload as well."""
     s3 = boto3.client("s3", region_name="us-east-1")  # moto placeholder, see note above
