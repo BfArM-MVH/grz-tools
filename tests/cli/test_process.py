@@ -1915,6 +1915,8 @@ class TestProcessAbort:
             if operation == "CreateMultipartUpload" and bucket == interrogation
         ]
         assert len(started_keys) == 1
+        # a stream that ran to its end would complete the upload, which moto then rejects for its small parts
+        assert ("CompleteMultipartUpload", interrogation, started_keys[0]) not in s3_requests.requests
         assert started_keys[0] not in {o.key for o in s3_buckets["interrogation"].objects.all()}
         assert boto3.client("s3").list_multipart_uploads(Bucket=interrogation).get("Uploads", []) == []
 
