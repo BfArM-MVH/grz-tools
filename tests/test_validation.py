@@ -239,6 +239,26 @@ def test_a_corrupt_fastq_is_recorded_as_a_failed_validation(
     assert "Validation runtime error" in temp_seq_data_log.read_text()
 
 
+@pytest.mark.parametrize("no_mmap", [True, False])
+@pytest.mark.parametrize("broken", ["missing", "empty"])
+def test_a_missing_or_empty_fastq_mate_is_recorded_as_a_failed_validation(
+    submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap, broken
+):
+    """Read 1 is opened as usual, so the pair mixes a path with an open file."""
+    path = next(p for p in submission_copy.files if p.name.endswith(".read2.fastq.gz"))
+    if broken == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(b"")
+
+    _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap)
+
+    seq_data_logger = FileProgressLogger[ValidationState](log_file_path=temp_seq_data_log)
+    state = seq_data_logger.get_state(path, submission_copy.files[path])
+    assert state is not None
+    assert not state["validation_passed"]
+
+
 def test_a_failed_validation_of_a_raw_file_records_its_errors(submission, temp_checksum_log, temp_seq_data_log, mocker):
     """For a file that is neither FASTQ nor BAM, the checksum log is the only place for the errors."""
     mock_validate = mocker.patch("grz_common.workers.submission.grz_check")
