@@ -203,6 +203,10 @@ def process(  # noqa: PLR0913, PLR0917
             log.warning(f"{e} Failing basic QC for submission '{submission_id}' without processing.")
             dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", False)
             raise
+        # the checks of ``grzctl validate`` that the metadata alone decides
+        identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
+        if errors := list(submission_metadata.validate(identifiers)):
+            raise grzexc.SubmissionValidationError("\n".join(["Metadata validation failed! Errors:", *errors]))
         processor.run(submission_metadata)
 
     _handle_pruefbericht(

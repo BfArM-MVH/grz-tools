@@ -42,6 +42,8 @@ $ grzctl --config $CONFIG_PATH process \
    state = ERROR (duplicate_tang); STOP
    case already has a QC-passed initial submission?
    basic_qc_passed = false, state = ERROR (duplicate_initial); STOP
+   metadata fails the metadata checks of `grzctl validate`?
+   state = ERROR (validation_error); STOP
                      │
                      ▼
 2. predict detailed QC (detailed_qc.target_percentage > 0 only)

@@ -108,7 +108,7 @@ def process_config_content(
             "auto_run": False,
         },
         "identifiers": {
-            "grz": "GRZT00000",
+            "grz": "GRZK00007",
         },
     }
 
@@ -408,6 +408,32 @@ class TestProcessValidationFailure:
         for bucket in ("consented", "non_consented", "interrogation"):
             keys = {o.key for o in s3_buckets[bucket].objects.all()}
             assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
+
+    def test_metadata_for_another_grz_fails_before_any_file_is_streamed(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """``grzctl process`` checks the metadata as ``grzctl validate`` does."""
+        submission_id = "260914050_2024-07-15_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+        metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+        metadata["submission"]["genomicDataCenterId"] = "GRZK00008"
+        s3_buckets["inbox"].put_object(
+            Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode()
+        )
+
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        state = _latest_state(process_config_content, submission_id)
+        assert state.state == SubmissionStateEnum.ERROR
+        assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
+        assert "does not match genomic data center identifier in config" in (state.data or {}).get("error", "")
+        assert not s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], submission_id)
 
     def test_checksum_mismatch_fails_processing(
         self,
