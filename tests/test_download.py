@@ -504,6 +504,47 @@ def test_download_file_fails_when_the_resumed_read_ignores_the_range(
     assert not local_file_path.exists(), "a failed download should leave no partial file behind"
 
 
+def test_download_file_accepts_the_whole_object_when_it_resumes_at_the_start(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """Before the first byte, the whole object is the rest, so an answer that ignores Range is right."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def break_at_once_and_ignore_the_range(self, operation_name, kwargs):
+        if operation_name == "GetObject" and "Range" in kwargs:
+            # status 200 and the whole object
+            return original_call(self, operation_name, {k: v for k, v in kwargs.items() if k != "Range"})
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            response["Body"] = _BreakingBody(b"")
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", break_at_once_and_ignore_the_range)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    download_worker.download_file(
+        local_file_path,
+        f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+        progress_logger,
+        file_metadata,
+        submission.submission_id,
+    )
+
+    assert local_file_path.read_bytes() == b"encrypted payload"
+
+
 def test_download_file_resumes_more_often_than_max_resumes_while_it_progresses(
     s3_config_model,
     remote_bucket,
