@@ -45,7 +45,7 @@ from grz_common.transfer import head_object, init_s3_client, s3_errors
 from grz_common.utils.redaction import redact_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError
-from grz_db.models.submission import SubmissionDb
+from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
 from tqdm.auto import tqdm
@@ -664,11 +664,12 @@ class SubmissionProcessor:
         return [*sorted(file_keys), *log_keys, _archive_metadata_key(run_state.submission_id)]
 
     @staticmethod
-    def _is_archived(run_state: SubmissionRunState) -> bool:
+    def _is_archived(db: SubmissionDb, run_state: SubmissionRunState) -> bool:
         """Whether the target archive holds the submission's metadata, and log a warning if it does.
 
         The archive copy ends with the metadata, so an archived metadata object means an earlier run finished.
-        If S3 denies access to it, the submission counts as not archived, as it does for ``grzctl archive``.
+        Write-only archive credentials cannot read it.
+        S3 then denies access, and a ``PROCESSED`` or ``ARCHIVED`` state in the database means an earlier run finished.
         """
         key = _archive_metadata_key(run_state.submission_id)
         try:
@@ -679,11 +680,23 @@ class SubmissionProcessor:
             cause = e.__cause__
             if not (isinstance(cause, ClientError) and cause.response["Error"]["Code"] == "AccessDenied"):
                 raise
+            submission = db.get_submission(run_state.submission_id)
+            finished = [
+                state
+                for state in (SubmissionStateEnum.PROCESSED, SubmissionStateEnum.ARCHIVED)
+                if submission is not None and submission.get_latest_state(filter_to_type=state)
+            ]
+            if not finished:
+                log.warning(
+                    f"Cannot check whether submission '{run_state.submission_id}' is already archived, "
+                    f"because S3 denies access to '{key}', and the database records no archival. Archiving it anyway."
+                )
+                return False
             log.warning(
-                f"Cannot check whether submission '{run_state.submission_id}' is already archived, "
-                f"because S3 denies access to '{key}'. Archiving it anyway."
+                f"S3 denies access to '{key}', but the database records submission '{run_state.submission_id}' "
+                f"as {finished[0].value}. Nothing is streamed or copied again."
             )
-            return False
+            return True
         log.warning(
             f"Submission '{run_state.submission_id}' is already archived in '{run_state.final_bucket}'. "
             "Nothing is streamed or copied again."
@@ -786,9 +799,9 @@ class SubmissionProcessor:
             Its ``__cause__`` is the decisive file error.
         """
         submission_run = self._new_run_state(submission_metadata)
-        if self._is_archived(submission_run):
-            return
         db = SubmissionDb(self.config.db.database_url, self.config.db.signing_author)
+        if self._is_archived(db, submission_run):
+            return
         prefetch = self._predict_qc(db, submission_run.submission_id)
         if prefetch:
             log.info(
