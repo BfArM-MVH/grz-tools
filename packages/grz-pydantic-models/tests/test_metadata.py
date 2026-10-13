@@ -35,6 +35,7 @@ from grz_pydantic_models.submission.metadata.v1 import (
     REDACTED_LOCAL_CASE_ID,
     REDACTED_TAN,
     RESEARCH_CONSENT_PACKAGE_PROFILES,
+    RESEARCH_CONSENT_PACKAGES,
     RESEARCH_CONSENT_SCHEMA_VERSIONS,
     File,
     FileType,
@@ -1698,6 +1699,15 @@ def test_model_matches_the_profile(name: str):
         assert elements[element_id]["min"] == 1
     assert Identifier.model_fields["system"].is_required()
     assert Identifier.model_fields["value"].is_required()
+
+
+def test_packages_of_one_profile_agree_on_the_period_end():
+    """PROFILES_REQUIRING_PERIOD_END, which test_model_matches_the_profile checks, would hide a package that disagrees."""
+    period_end_rules: dict[str, set[bool]] = {}
+    for package in RESEARCH_CONSENT_PACKAGES.values():
+        period_end_rules.setdefault(package.profile, set()).add(package.requires_period_end)
+
+    assert all(len(rules) == 1 for rules in period_end_rules.values()), period_end_rules
 
 
 def test_recorded_and_vendored_artefacts_agree():

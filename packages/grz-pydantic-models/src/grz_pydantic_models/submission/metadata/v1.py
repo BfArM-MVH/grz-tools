@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, tzinfo
 from enum import StrEnum
 from functools import cache
@@ -333,26 +334,60 @@ class MvConsent(StrictBaseModel):
     """
 
 
-# MII "Modul Consent" package versions the Consent model is checked against, in publication order,
-# each mapped to the version of MII_PR_Consent_Einwilligung it ships. The profile version
-# decides which cardinalities apply, so a package cannot be accepted without naming its profile.
-# GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has not released; add it here once it
-# is, together with its artefacts in example_terminology.
-RESEARCH_CONSENT_PACKAGE_PROFILES = {
-    "2025.0.1": "1.0.8",
-    "2025.0.2": "1.0.8",
-    "2025.0.3": "1.0.8",
-    "2025.0.4": "1.0.8",
-    "2026.0.0": "1.0.9",
+@dataclass(frozen=True)
+class ResearchConsentPackage:
+    """
+    The rules in which one MII "Modul Consent" package, named by ``researchConsents[].schemaVersion``, differs.
+
+    ``docs/mii-consent.md`` lists every difference between the packages, with its source.
+    """
+
+    profile: str
+    """Version of MII_PR_Consent_Einwilligung that the package ships."""
+
+    requires_period_end: bool
+    """
+    Whether the profile pins the end of both provision periods to 1..1. ``test_model_matches_the_profile`` checks it
+    against the vendored profiles.
+    """
+
+    requires_patient_reference_or_identifier: bool
+    """
+    Whether the IG text requires ``Consent.patient.reference`` or ``.identifier``. The profile requires neither, so no
+    test can check this against an artefact. From 2026.0.0 on, the IG text of
+    https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent
+    requires it, and the IG text of the 2025 packages calls both optional.
+    """
+
+
+# MII "Modul Consent" package versions the Consent model is checked against, in publication order. A package
+# cannot be accepted without deciding every rule. GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has
+# not released; add it here once it is, together with its artefacts in example_terminology.
+RESEARCH_CONSENT_PACKAGES = {
+    "2025.0.1": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2025.0.2": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2025.0.3": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2025.0.4": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2026.0.0": ResearchConsentPackage(
+        profile="1.0.9", requires_period_end=False, requires_patient_reference_or_identifier=True
+    ),
 }
 
-RESEARCH_CONSENT_SCHEMA_VERSIONS = tuple(RESEARCH_CONSENT_PACKAGE_PROFILES)
+RESEARCH_CONSENT_PACKAGE_PROFILES = {version: package.profile for version, package in RESEARCH_CONSENT_PACKAGES.items()}
 
-# Profile versions pinning both provision periods' end to 1..1. Profile 1.0.9 relaxed it to 0..1,
-# so only there may a period stay open-ended. A profile absent from this set is taken not to
-# require an end, so a future profile that re-tightens the bound has to be added here;
-# test_model_matches_the_profile fails against the vendored artefacts until it is.
-PROFILES_REQUIRING_PERIOD_END = frozenset({"1.0.8"})
+RESEARCH_CONSENT_SCHEMA_VERSIONS = tuple(RESEARCH_CONSENT_PACKAGES)
+
+PROFILES_REQUIRING_PERIOD_END = frozenset(
+    package.profile for package in RESEARCH_CONSENT_PACKAGES.values() if package.requires_period_end
+)
 
 
 def _validate_research_consent_schema_version(value: str) -> str:
@@ -475,8 +510,8 @@ class ResearchConsent(StrictBaseModel):
         if self.schema_version is None or not isinstance(self.scope, Consent):
             return self
 
-        profile = RESEARCH_CONSENT_PACKAGE_PROFILES[self.schema_version]
-        if profile not in PROFILES_REQUIRING_PERIOD_END or self.scope.provision is None:
+        package = RESEARCH_CONSENT_PACKAGES[self.schema_version]
+        if not package.requires_period_end or self.scope.provision is None:
             return self
 
         root = self.scope.provision
@@ -486,7 +521,7 @@ class ResearchConsent(StrictBaseModel):
         ]
         if open_ended := [name for name, period in periods if period.end is None]:
             raise ValueError(
-                f"researchConsent schemaVersion {self.schema_version} ships MII consent profile {profile}, "
+                f"researchConsent schemaVersion {self.schema_version} ships MII consent profile {package.profile}, "
                 f"which requires an end on every provision period; missing on {', '.join(open_ended)}"
             )
         return self
@@ -1374,11 +1409,10 @@ def _lacks_root_provision_period(consent: ResearchConsent) -> bool:
 
 def _lacks_patient_reference_and_identifier(consent: ResearchConsent) -> bool:
     """
-    Whether the scope is a Consent of MII consent package 2026.0.0 or newer whose patient has neither a reference nor
-    an identifier.
+    Whether the scope is a Consent whose package requires a patient reference or identifier, and whose patient has
+    neither.
 
-    The IG text requires one of them from package 2026.0.0 on, and calls both optional before. The profile requires
-    neither. A consent declaring no schemaVersion, which metadata 1.3 permits, names no package, so nothing is required.
+    A consent declaring no schemaVersion, which metadata 1.3 permits, names no package, so nothing is required.
 
     :param consent: The research consent to check.
     :returns: ``True`` if the patient has neither.
@@ -1386,7 +1420,7 @@ def _lacks_patient_reference_and_identifier(consent: ResearchConsent) -> bool:
     return (
         isinstance(consent.scope, Consent)
         and consent.schema_version is not None
-        and Version(consent.schema_version) >= Version("2026.0.0")
+        and RESEARCH_CONSENT_PACKAGES[consent.schema_version].requires_patient_reference_or_identifier
         and consent.scope.patient.reference is None
         and consent.scope.patient.identifier is None
     )
@@ -1589,8 +1623,8 @@ class GrzSubmissionMetadata(StrictBaseModel):
                     if _lacks_patient_reference_and_identifier(consent):
                         log.warning(
                             "researchConsents[].scope.patient has neither a reference nor an identifier, which the MII "
-                            "consent IG requires from schemaVersion 2026.0.0 on. Before metadata schema v1.3 it is "
-                            "accepted, as grz-pydantic-models 2.7.1 accepted it."
+                            f"consent IG of schemaVersion {consent.schema_version} requires. Before metadata schema v1.3 "
+                            "it is accepted, as grz-pydantic-models 2.7.1 accepted it."
                         )
         return self
 
