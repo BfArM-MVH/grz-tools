@@ -405,11 +405,13 @@ class Submission:
         def _execute_task(task_type, paths, metas, kwargs, pbar):
             reports = []
             with ExitStack() as stack:
-                sources = []
-                for p in paths:
-                    if not p.exists() or p.stat().st_size == 0:
-                        sources.append(str(p))
-                    else:
+                # grz_check reports a missing or empty file only when it gets its path. It takes the
+                # files of a pair either all as paths or all as open files, so the mate goes as a path too.
+                if any(not p.exists() or p.stat().st_size == 0 for p in paths):
+                    sources = [str(p) for p in paths]
+                else:
+                    sources = []
+                    for p in paths:
                         f = stack.enter_context(open(p, "rb"))
                         if no_mmap:
                             sources.append(TqdmFileReader(f, pbar))
