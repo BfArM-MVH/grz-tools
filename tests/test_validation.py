@@ -1,5 +1,6 @@
 """Tests for submission_id-aware validation skip logic"""
 
+import errno
 import os
 import shutil
 import time
@@ -223,6 +224,51 @@ def test_an_unreadable_file_raises_instead_of_failing_the_validation(
 
     with pytest.raises(PermissionError):
         _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap)
+
+    assert not temp_seq_data_log.exists() or "Validation runtime error" not in temp_seq_data_log.read_text()
+
+
+def test_a_failed_source_read_raises_instead_of_failing_the_validation(
+    submission_copy, temp_checksum_log, temp_seq_data_log, monkeypatch
+):
+    """An I/O error while grz-check reads the source is re-raised, not recorded as a validation runtime error.
+
+    The mmap path never calls ``read()``, so only ``no_mmap=True`` applies.
+    """
+    target = next(p for p in submission_copy.files if p.name.endswith(".read1.fastq.gz"))
+
+    class FailingOnSecondRead:
+        # The 2nd call, because grz-check loses the cause of a failure on the 1st read (format detection).
+        def __init__(self, file):
+            self._file = file
+            self._reads = 0
+
+        def read(self, size=-1):
+            self._reads += 1
+            if self._reads == 2:
+                raise OSError(errno.EIO, "Input/output error")
+            return self._file.read(size)
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+        def __enter__(self):
+            self._file.__enter__()
+            return self
+
+        def __exit__(self, *exc_info):
+            return self._file.__exit__(*exc_info)
+
+    real_open = open
+
+    def fake_open(file, *args, **kwargs):
+        f = real_open(file, *args, **kwargs)
+        return FailingOnSecondRead(f) if Path(file) == Path(target) else f
+
+    monkeypatch.setattr("grz_common.workers.submission.open", fake_open, raising=False)
+
+    with pytest.raises(OSError):
+        _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap=True)
 
     assert not temp_seq_data_log.exists() or "Validation runtime error" not in temp_seq_data_log.read_text()
 
