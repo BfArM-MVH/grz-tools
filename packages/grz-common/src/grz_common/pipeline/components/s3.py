@@ -114,8 +114,10 @@ class S3Downloader(ReadStream):
                 response = self._get_object(Range=f"bytes={self._offset}-", IfMatch=self.response["ETag"])
                 self._source = response["Body"]
                 status, content_range = response["ResponseMetadata"]["HTTPStatusCode"], response.get("ContentRange", "")
-                if status != 206 or not content_range.startswith(f"bytes {self._offset}-"):
-                    # a server that ignores Range sends the whole object, which would be appended to the bytes read
+                # A server that ignores Range sends the whole object. Before the first byte, that is the rest.
+                # Later, it would be appended to the bytes read.
+                resumed = status == 206 and content_range.startswith(f"bytes {self._offset}-")
+                if not resumed and not (status == 200 and self._offset == 0):
                     raise DownloadError(
                         f"Resuming s3://{self._bucket}/{self._key} at byte {self._offset} got status {status} "
                         f"and range {content_range!r} instead of the rest of the object"
