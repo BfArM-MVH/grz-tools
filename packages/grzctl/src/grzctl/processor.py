@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import os
 import stat
 import subprocess
 import tempfile
@@ -95,6 +96,9 @@ def _qc_file_path(local_storage: str, submission_id: str, file_meta: File) -> Pa
 
 QC_DIRECTORY_MODE = 0o770
 """Mode of the directories below ``detailed_qc.local_storage``, which hold decrypted files and the unredacted metadata."""
+
+QC_FILE_MODE = 0o660
+"""Mode of the decrypted files and the metadata in ``detailed_qc.local_storage``, matching their directories."""
 
 
 def _ensure_directory_mode(local_storage: Path, directory: Path, mode: int) -> None:
@@ -464,6 +468,8 @@ class FilePipelineExecutor:
                 path = _qc_file_path(self._qc_local_storage, run_state.submission_id, file_meta)
                 _ensure_directory_mode(Path(self._qc_local_storage), path.parent, QC_DIRECTORY_MODE)
                 writer = stack.enter_context(open(path, "wb"))
+                # the umask applies only to a new file, and an earlier run may have left the file open to others
+                os.fchmod(writer.fileno(), QC_FILE_MODE)
                 pipeline |= Tee(metrics.measure("2b_Write")(writer))
 
             pipeline |= Tee(validation_chain)
@@ -768,7 +774,7 @@ class SubmissionProcessor:
         error = FilesFailedError(message, file_errors)
         raise error from error.decisive.error
 
-    def run(self, submission_metadata: SubmissionMetadata) -> None:
+    def run(self, submission_metadata: SubmissionMetadata) -> None:  # noqa: PLR0915
         """
         Execute the processing pipeline for a single submission.
 
@@ -848,6 +854,7 @@ class SubmissionProcessor:
                 _ensure_directory_mode(Path(detailed_qc.local_storage), metadata_dir, QC_DIRECTORY_MODE)
                 metadata_file = metadata_dir / "metadata.json"
                 metadata_file.write_text(json.dumps(submission_metadata.content.get_raw_dict(), indent=2))
+                metadata_file.chmod(QC_FILE_MODE)
                 log.info(f"Wrote submission metadata to {metadata_file}")
 
                 if detailed_qc.auto_run:
