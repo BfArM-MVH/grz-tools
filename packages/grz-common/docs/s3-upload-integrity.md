@@ -7,10 +7,10 @@ A file smaller than one part goes as one `PutObject` instead of a multipart uplo
 
 ## Mechanisms
 
-| Mechanism                             | Computed by                                                                   | The server                                                                             | Backends        |
-| ------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | --------------- |
-| ETag                                  | the server: the MD5 of the part bytes                                         | stores it with the object, but compares it with nothing. The client has to compare it. | all             |
-| Content-MD5 header                    | the client: the MD5 of the part bytes                                         | rejects a part whose MD5 differs, and does not store the value.                        | all             |
+| Mechanism                             | Computed by                                                                   | The server                                                                             | Backends |
+| ------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------- |
+| ETag                                  | the server: the MD5 of the part bytes                                         | stores it with the object, but compares it with nothing. The client has to compare it. | all      |
+| Content-MD5 header                    | the client: the MD5 of the part bytes                                         | rejects a part whose MD5 differs, and does not store the value.                        | all      |
 | Checksum API (`x-amz-checksum-<alg>`) | the client: a CRC or SHA checksum of the part bytes                           | rejects a part whose checksum differs, and stores the value with the object.           | some, see below |
 | COMPOSITE or FULL_OBJECT checksum     | the client: a checksum of the whole object, sent with CompleteMultipartUpload | checks the assembled object against it.                                                | some, see below |
 
@@ -20,14 +20,17 @@ A FULL_OBJECT checksum covers the bytes of the whole object, and exists only for
 
 ## Backend support for the Checksum API
 
-- Ceph: support differs between deployments. Some ignore the checksum headers and accept wrong checksums. Others check each part, but ignore the checksums at CompleteMultipartUpload.
+- Ceph: support differs between deployments.
+  Some ignore the checksum headers and accept wrong checksums.
+  Others check each part, but ignore the checksums at CompleteMultipartUpload.
 - Dell ECS: checks each part, but rejects every top-level checksum at CompleteMultipartUpload, whatever its value.
 - IBM Cloud Object Storage: only in releases after 2025.
 - SeaweedFS: unknown.
 
 ## What the uploader checks
 
-1. Each part carries a Content-MD5 header, and so does the PUT of a file smaller than one part. The server rejects bytes that changed on the way.
+1. Each part carries a Content-MD5 header, and so does the PUT of a file smaller than one part.
+   The server rejects bytes that changed on the way.
 2. The uploader compares the ETag that the server returns for each part or PUT with the local MD5.
 3. After CompleteMultipartUpload, the uploader compares the object ETag with the hash of hashes of the local part MD5s.
 
