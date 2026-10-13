@@ -253,7 +253,7 @@ class DbContext:
                     {
                         "file": file_error.file,
                         "reason": _classify(file_error.error)[0].value,
-                        "message": str(file_error.error),
+                        "message": str(file_error.error) or type(file_error.error).__name__,
                     }
                     for file_error in files_failed.file_errors
                 ]
