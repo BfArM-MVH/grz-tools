@@ -73,3 +73,34 @@ def test_encrypted_submission():
         assert enc_path == Path(input_path + ".c4gh")
         enc_path = EncryptedSubmission.get_encryption_header_path(input_path)
         assert enc_path == Path(input_path + ".c4gh_header")
+
+
+@pytest.mark.parametrize(
+    ("metadata_path", "expected_valid"),
+    [
+        ("tests/mock_files/submissions/valid_submission/metadata/metadata.json", True),
+        ("tests/mock_files/no_localCaseId_metadata.json", True),
+        ("tests/mock_files/invalid_localCaseId_in_other_field_metadata.json", False),
+        ("tests/mock_files/invalid_localCaseId_in_filePath_metadata.json", False),
+    ],
+    ids=["valid", "no_local_case_id", "local_case_id_in_other", "local_case_id_in_filePath"],
+)
+def test_local_case_id_in_metadata(metadata_path, expected_valid, identifiers_config_model):
+    # Collect errors
+    errors = list(SubmissionMetadata(metadata_path).validate(identifiers_config_model.identifiers))
+
+    # Parse errors
+    if expected_valid:
+        assert [e for e in errors if "localCaseId" in e] == [], errors
+    elif metadata_path == "tests/mock_files/invalid_localCaseId_in_other_field_metadata.json":
+        assert [
+            e
+            for e in errors
+            if "is the same as localCaseId, which must not appear outside of submission.localCaseId" in e
+        ], errors
+    else:
+        assert [
+            e
+            for e in errors
+            if "contains the localCaseId, which must not appear outside of submission.localCaseId" in e
+        ], errors

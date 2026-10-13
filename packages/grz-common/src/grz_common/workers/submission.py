@@ -185,6 +185,29 @@ class SubmissionMetadata:
                     if f.file_type == FileType.bam:
                         yield donor, lab_datum, f
 
+    # Iterate over metadata leafs and return all strings (for localCaseId check)
+    def _iter_metadata_values(self, node, path_to_node: str = "") -> Generator[tuple[str, str]]:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from self._iter_metadata_values(v, f"{path_to_node}.{k}" if path_to_node else k)
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                yield from self._iter_metadata_values(value, f"{path_to_node}.[{i}]")
+        elif isinstance(node, str):
+            yield path_to_node, node
+
+    # Check to see if localCaseId appears anywhere it should not
+    def _check_for_misplaced_local_case_id(self, raw_local_case_id: str) -> Generator[str]:
+        # If localCaseID is "", juts skip
+        if raw_local_case_id == "":
+            return
+        for location_of_value, value in self._iter_metadata_values(self.content.get_raw_dict()):
+            if location_of_value != "submission.localCaseId" and raw_local_case_id == value:
+                yield f"{location_of_value}: is the same as localCaseId, which must not appear outside of submission.localCaseId"
+            # Check if localCaseId is within any filePath, and error if so
+            if "filePath" in location_of_value and raw_local_case_id in value:
+                yield f"{location_of_value}: contains the localCaseId, which must not appear outside of submission.localCaseId"
+
     def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """
         Validates this submission's metadata (content).
@@ -208,6 +231,9 @@ class SubmissionMetadata:
                 f"Submitter (LE) identifier specified in the metadata.json ({submitted_le_id}) "
                 f"does not match submitter (LE) identifier in config ({expected_le_id})"
             )
+
+        # Check to see if localCaseId appears in any unexpected fields in the metadata, and fail if so
+        yield from self._check_for_misplaced_local_case_id(self.content.submission.local_case_id)
 
         # The models keep a consent dateTime as submitted, so a document written before FHIR's
         # timezone requirement was enforced still parses and stays readable. Holding submitters to
