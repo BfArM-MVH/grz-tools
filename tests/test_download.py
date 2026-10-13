@@ -3,7 +3,7 @@
 import io
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import wait
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -647,21 +647,18 @@ def test_download_stops_the_running_file_after_a_second_interrupt(
         reading.wait(timeout=10)
         raise KeyboardInterrupt
 
-    class _CtrlCWhileWaiting(ThreadPoolExecutor):
-        """A pool that gets the second Ctrl-C while the first one waits for the running files."""
+    waits = []
 
-        waited = False
-
-        def shutdown(self, wait=True, *, cancel_futures=False):
-            if wait and not self.waited:
-                self.waited = True
-                super().shutdown(wait=False, cancel_futures=cancel_futures)
-                raise KeyboardInterrupt
-            super().shutdown(wait=wait, cancel_futures=cancel_futures)
+    def ctrl_c_while_waiting(futures):
+        """The second Ctrl-C arrives while the first one waits for the running files."""
+        waits.append(futures)
+        if len(waits) == 1:
+            raise KeyboardInterrupt
+        return wait(futures)
 
     monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", slow_body)
     monkeypatch.setattr("grz_common.interrupt.as_completed", interrupted)
-    monkeypatch.setattr("grz_common.workers.download.ThreadPoolExecutor", _CtrlCWhileWaiting)
+    monkeypatch.setattr("grz_common.interrupt.wait", ctrl_c_while_waiting)
     download_worker = S3BotoDownloadWorker(
         s3_options=s3_config_model.s3, status_file_path=temp_download_log_file_path, threads=1
     )
