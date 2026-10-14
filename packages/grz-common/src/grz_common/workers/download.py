@@ -26,6 +26,7 @@ from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import DownloadState, FileProgressLogger
 from ..transfer import head_object, init_s3_client, raise_if_cleaned, s3_errors
+from ..utils.paths import ensure_directory_mode
 
 MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
 MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
@@ -50,6 +51,8 @@ class S3BotoDownloadWorker:
         s3_options: S3Options,
         status_file_path: str | PathLike,
         threads: int = 1,
+        *,
+        directory_mode: int | None = None,
     ):
         """
         A download manager for S3 storage
@@ -57,12 +60,17 @@ class S3BotoDownloadWorker:
         :param s3_options: The S3 configuration options
         :param status_file_path: The path to the status file
         :param threads: The number of concurrent download threads
+        :param directory_mode: Permission bits, such as ``0o770``, for the directories that the download creates
+            or writes into. They are set with ``chmod``, so the umask does not change them.
+            The parents of the metadata, encrypted files and logs directories keep their mode.
+            With ``None``, the umask filters the mode of each new directory, and existing directories keep their mode.
         """
         super().__init__()
 
         self._status_file_path = Path(status_file_path)
         self._s3_options = s3_options
         self._threads = threads
+        self._directory_mode = directory_mode
 
         self._s3_client = init_s3_client(s3_options)
 
@@ -80,11 +88,8 @@ class S3BotoDownloadWorker:
         :param log_dir: Path to the logs directory
         """
         for dir_path in [metadata_dir, encrypted_files_dir, log_dir]:
-            if not dir_path.exists():
-                self.__log.debug("Creating directory: %s", dir_path)
-                dir_path.mkdir(parents=False, exist_ok=False)
-            else:
-                self.__log.debug("Directory exists: %s", dir_path)
+            self.__log.debug("Setting up directory: %s", dir_path)
+            ensure_directory_mode(dir_path.parent, dir_path, self._directory_mode)
 
     def download_metadata(
         self,
@@ -110,7 +115,7 @@ class S3BotoDownloadWorker:
         self.__log.info("Downloading metadata file: '%s'", metadata_key)
         try:
             # Ensure the local target directory exists
-            metadata_file_path.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+            ensure_directory_mode(metadata_dir.parent, metadata_dir, self._directory_mode)
 
             # The HEAD request of download_file reports only the HTTP status.
             # head_object also tells a missing file from a faulty setup.
@@ -220,6 +225,10 @@ class S3BotoDownloadWorker:
         for local_file_path, file_metadata in encrypted_submission.encrypted_files.items():
             relative_encrypted_path = file_metadata.encrypted_file_path()
             file_key = f"{submission_id}/files/{relative_encrypted_path}"
+
+            ensure_directory_mode(
+                encrypted_submission.encrypted_files_dir.parent, local_file_path.parent, self._directory_mode
+            )
 
             logged_state = progress_logger.get_state(local_file_path, file_metadata)
             if (
