@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-testing-v1.1.0...grz-pydantic-models-testing-v1.1.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** accept a consent patient given by display only before consent package 2026.0.0 ([#722](https://github.com/BfArM-MVH/grz-tools/issues/722)) ([fe2b075](https://github.com/BfArM-MVH/grz-tools/commit/fe2b075f581eab09cfe825d04d0d7a74616c1e10))
+* **grz-pydantic-models:** name the fields that keep a research consent ([fe2b075](https://github.com/BfArM-MVH/grz-tools/commit/fe2b075f581eab09cfe825d04d0d7a74616c1e10))
+
 ## [1.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-testing-v1.0.0...grz-pydantic-models-testing-v1.1.0) (2026-09-26)
 
 
