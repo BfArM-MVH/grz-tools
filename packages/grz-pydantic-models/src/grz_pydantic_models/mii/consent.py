@@ -376,17 +376,10 @@ class Identifier(LosslessBaseModel):
 
 
 class Patient(LosslessBaseModel):
-    # The profile marks both as mustSupport yet requires neither, so the patient may be identified
-    # either way. A patient stating neither (e.g. display only) carries nothing this model keeps
-    # and is rejected rather than silently reduced to an empty object.
+    # The profile marks both as mustSupport yet requires neither. The IG text requires one of them from
+    # consent package 2026.0.0 on, which GrzSubmissionMetadata checks, since only it knows the package.
     reference: str | None = None
     identifier: Identifier | None = None
-
-    @model_validator(mode="after")
-    def require_reference_or_identifier(self):
-        if self.reference is None and self.identifier is None:
-            raise ValueError("consent.patient must identify the patient by a reference or an identifier")
-        return self
 
 
 class Verification(LosslessBaseModel):

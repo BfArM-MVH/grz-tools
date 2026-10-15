@@ -4,7 +4,7 @@
 
 From `packages/grz-db`:
 
-```
+```text
 uv run alembic revision -m "description of migration"
 ```
 
@@ -28,7 +28,7 @@ sqlmodel.main.get_column_from_field(SubmissionBase.model_fields["new_column_name
 
 One can also look at the generated schema for a newly initialized database:
 
-```
+```text
 sqlite3 submission.db.sqlite .schema
 ```
 
