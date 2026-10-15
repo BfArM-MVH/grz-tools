@@ -195,18 +195,17 @@ class SubmissionMetadata:
                 yield from self._iter_metadata_values(value, f"{path_to_node}.[{i}]")
         elif isinstance(node, str):
             yield path_to_node, node
+        else:
+            return
 
     # Check to see if localCaseId appears anywhere it should not
     def _check_for_misplaced_local_case_id(self, raw_local_case_id: str) -> Generator[str]:
-        # If localCaseID is "", juts skip
+        # If localCaseID is "", just skip
         if raw_local_case_id == "":
             return
         for location_of_value, value in self._iter_metadata_values(self.content.get_raw_dict()):
-            if location_of_value != "submission.localCaseId" and raw_local_case_id == value:
-                yield f"{location_of_value}: is the same as localCaseId, which must not appear outside of submission.localCaseId"
-            # Check if localCaseId is within any filePath, and error if so
-            if "filePath" in location_of_value and raw_local_case_id in value:
-                yield f"{location_of_value}: contains the localCaseId, which must not appear outside of submission.localCaseId"
+            if location_of_value != "submission.localCaseId" and raw_local_case_id in value:
+                yield f"[PrivacyViolation]: {location_of_value} contains localCaseId, which must not appear outside of submission.localCaseId"
 
     def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """

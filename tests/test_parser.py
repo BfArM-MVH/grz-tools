@@ -92,15 +92,5 @@ def test_local_case_id_in_metadata(metadata_path, expected_valid, identifiers_co
     # Parse errors
     if expected_valid:
         assert [e for e in errors if "localCaseId" in e] == [], errors
-    elif metadata_path == "tests/mock_files/invalid_localCaseId_in_other_field_metadata.json":
-        assert [
-            e
-            for e in errors
-            if "is the same as localCaseId, which must not appear outside of submission.localCaseId" in e
-        ], errors
     else:
-        assert [
-            e
-            for e in errors
-            if "contains the localCaseId, which must not appear outside of submission.localCaseId" in e
-        ], errors
+        assert [e for e in errors if "[PrivacyViolation]" in e], errors
