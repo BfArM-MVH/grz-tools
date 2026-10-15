@@ -1,0 +1,74 @@
+# grzctl does not expand ${...} in this file. Replace the example values, or override any value with an
+# environment variable: GRZ_ followed by the keys of its path, joined by "__",
+# such as GRZ_PRUEFBERICHT__CLIENT_SECRET or GRZ_ARCHIVES__CONSENTED__S3__SECRET.
+
+definitions:
+  - &default_inbox_connection
+    endpoint_url: https://inbox.s3.example.com
+    access_key: inbox-access-key
+    secret: inbox-secret
+    private_key_path: /path/to/grz-default-inbox.sec
+    # If the inbox key is passphrase-protected, either set:
+    #   private_key_passphrase: inbox-key-passphrase
+    # or export the standard crypt4gh environment variable C4GH_PASSPHRASE
+    # (used as a fallback when private_key_passphrase is not set).
+
+  - &default_archive_s3_connection
+    endpoint_url: https://archive.s3.example.com
+    access_key: archive-access-key
+    secret: archive-secret
+
+leistungserbringer:
+  "123456789":
+    inbox_buckets:
+      grz-inbox: *default_inbox_connection
+
+  "987654321":
+    inbox_buckets:
+      some-other-bucket: *default_inbox_connection
+
+      bucket-with-different-key:
+        <<: *default_inbox_connection
+        private_key_path: /path/to/grz-key-for-bucket-with-different-key.sec
+
+archives:
+  consented:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-consented
+    public_key_path: /path/to/archive-consented.pub
+
+  non_consented:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-nonconsented
+    public_key_path: /path/to/archive-nonconsented.pub
+
+  interrogation:
+    s3:
+      <<: *default_archive_s3_connection
+      bucket: grz-archive-interrogation
+    keep_failed: false
+
+pruefbericht:
+  authorization_url: https://auth.example.com/token
+  client_id: pruefbericht-client-id
+  client_secret: pruefbericht-client-secret
+  api_base_url: https://pruefbericht.example.com/api
+
+detailed_qc:
+  local_storage: /path/to/local_storage
+  salt: detailed-qc-salt
+  target_percentage: 2.0
+  # shell_command: "nextflow run main.nf -profile docker --submission_basepath '{submission_basepath}' --outdir '{output_basepath}/grzqc_output' -work-dir '{output_basepath}/work'"
+  # auto_run: true
+
+db:
+  database_url: sqlite:///path/to/submission.db.sqlite
+  author:
+    name: steward-name
+    private_key_path: /path/to/steward-name.ssh
+    private_key_passphrase: steward-key-passphrase
+
+identifiers:
+  grz: "GRZXYZ123"

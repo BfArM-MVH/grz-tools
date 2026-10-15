@@ -125,7 +125,7 @@ def test_valid_submission(bfarm_auth_api, bfarm_submit_api, temp_pruefbericht_co
         generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
         generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
         assert generate_result.exit_code == 0, generate_result.output
-        pruefbericht_json_path.write_text(generate_result.output)
+        pruefbericht_json_path.write_text(generate_result.stdout)
 
         # submit generated Prüfbericht
         submit_args = [
@@ -171,7 +171,7 @@ def test_valid_submission_with_token(
         generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
         generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
         assert generate_result.exit_code == 0, generate_result.output
-        pruefbericht_json_path.write_text(generate_result.output)
+        pruefbericht_json_path.write_text(generate_result.stdout)
 
         # submit generated Prüfbericht with a pre-provided token
         submit_args = [
@@ -211,7 +211,7 @@ def test_valid_submission_with_expired_token(
         generate_args = ["pruefbericht", "generate", "from-submission-dir", str(submission_dir)]
         generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
         assert generate_result.exit_code == 0, generate_result.output
-        pruefbericht_json_path.write_text(generate_result.output)
+        pruefbericht_json_path.write_text(generate_result.stdout)
 
         # (try to) submit generated Prüfbericht with an expired token
         submit_args = [
@@ -264,7 +264,7 @@ def test_generate_pruefbericht_multiple_library_types(temp_pruefbericht_config_f
 
     assert result.exit_code == 0, result.output
     # Check that the generated Pruefbericht correctly selected the most expensive library type
-    pruefbericht_data = json.loads(result.output)
+    pruefbericht_data = json.loads(result.stdout)
     assert pruefbericht_data["SubmittedCase"]["libraryType"] == "wgs"
 
 
@@ -330,7 +330,7 @@ def test_refuse_redacted_tang(temp_pruefbericht_config_file_path, tmp_path):
         generate_args = ["pruefbericht", "generate", "from-submission-dir", str(tmp_path)]
         generate_result = runner.invoke(cli, generate_args, catch_exceptions=False)
         assert generate_result.exit_code == 0, generate_result.output
-        pruefbericht_json_path.write_text(generate_result.output)
+        pruefbericht_json_path.write_text(generate_result.stdout)
 
         # attempt to submit
         submit_args = [
@@ -435,6 +435,7 @@ def pruefbericht_db_config(tmp_path, migrated_db_connection):
         "db": {"database_url": migrated_db_connection, "author": {"name": "test_author"}},
         "pruefbericht": _GRZCTL_PRUEFBERICHT_DUMMY,
         "identifiers": {"grz": "GRZK00007"},
+        "detailed_qc": {"local_storage": "/tmp/qc", "salt": "test", "target_percentage": 0.0},
     }
 
     config_path = tmp_path / "config.json"
@@ -511,7 +512,7 @@ def test_generate_from_database(temp_pruefbericht_config_file_path, pruefbericht
     assert result.exit_code == 0, result.output
 
     # Verify the generated Prüfbericht matches expected values
-    pruefbericht_data = json.loads(result.output)
+    pruefbericht_data = json.loads(result.stdout)
     assert pruefbericht_data["SubmittedCase"] == {
         "submissionDate": "2024-07-15",
         "submissionType": "test",
