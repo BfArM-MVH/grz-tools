@@ -14,19 +14,16 @@ Command-line tool for internal GRZ operations.
 ## Shell completion
 
 `grzctl completion <shell>` prints the completion script for bash (4.4 or newer), zsh or fish.
-Load it in your shell's startup file:
+Save it once to where your shell loads completions from:
 
 ```bash
-# ~/.bashrc
-eval "$(grzctl completion bash)"
-# ~/.zshrc
-eval "$(grzctl completion zsh)"
-# ~/.config/fish/config.fish
-grzctl completion fish | source
+grzctl completion bash > ~/.local/share/bash-completion/completions/grzctl
+grzctl completion zsh > <dir on $fpath>/_grzctl
+grzctl completion fish > ~/.config/fish/completions/grzctl.fish
 ```
 
-This runs `grzctl` at every shell start.
-To avoid that, save the output to a file once and source that file instead.
+Completion needs `grzctl` on your `PATH`, so it does not work for `uv run grzctl`.
+For a development version, start a shell with `uv run --project path/to/repo $SHELL`, or run `source .venv/bin/activate`.
 
 Set `GRZCTL_COMPLETE_SUBMISSION_IDS=1` to also complete submission IDs in `grzctl db` from the database.
 Each completion then loads the config and queries the database.

@@ -138,7 +138,7 @@ def dump_config(ctx: click.Context, reveal_secrets: bool):
 def completion(ctx: click.Context, shell: str):
     """Print the completion script for a shell.
 
-    Load it at shell start, e.g. with eval "$(grzctl completion zsh)" in ~/.zshrc.
+    Save it where your shell loads completions from, e.g. ~/.config/fish/completions/grzctl.fish for fish.
     Set GRZCTL_COMPLETE_SUBMISSION_IDS=1 to also complete submission IDs from the database.
     """
     complete = _COMPLETION_CLASSES[shell](ctx.find_root().command, {}, "grzctl", "_GRZCTL_COMPLETE")
