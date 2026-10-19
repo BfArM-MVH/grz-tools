@@ -5,6 +5,7 @@ import click.testing
 import grz_common.exceptions as grzexc
 import grzctl.cli
 import pytest
+from grz_common.interrupt import TerminateInterrupt
 
 
 def test_help():
@@ -32,11 +33,11 @@ def test_main_reports_a_grz_error_without_traceback(monkeypatch, caplog):
 
 
 def test_sigterm_stops_a_run_like_ctrl_c():
-    """A KeyboardInterrupt is what makes the running step record ``interrupted``."""
+    """A TerminateInterrupt is a KeyboardInterrupt, which makes the running step record ``interrupted``."""
     previous = signal.getsignal(signal.SIGTERM)
     try:
         grzctl.cli._stop_on_sigterm()
-        with pytest.raises(KeyboardInterrupt):
+        with pytest.raises(TerminateInterrupt):
             signal.raise_signal(signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, previous)
