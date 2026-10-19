@@ -4,6 +4,7 @@ import contextlib
 import csv
 import json
 import logging
+import os
 import sys
 import traceback
 from collections import Counter
@@ -75,7 +76,8 @@ from grz_pydantic_models.submission.metadata import (
 )
 from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
-from sqlmodel import Session, select
+from sqlalchemy import make_url
+from sqlmodel import Session, col, create_engine, select
 from tqdm.auto import tqdm
 
 from ... import get_versions
@@ -138,7 +140,45 @@ def _abort_missing_submission(e: SubmissionNotFoundError, submission_id: str) ->
     raise click.Abort() from e
 
 
-_submission_id_argument = click.argument("submission_id", type=str)
+_COMPLETE_SUBMISSION_IDS_ENVVAR = "GRZCTL_COMPLETE_SUBMISSION_IDS"
+
+_COMPLETION_CONNECT_TIMEOUT_SECONDS = 2
+"""Seconds a submission ID completion waits to connect to PostgreSQL, so Tab does not hang on an unreachable server.
+
+libpq and psycopg raise any shorter timeout to 2 s.
+"""
+
+
+def _complete_submission_ids(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
+    """Complete submission IDs from the database, if ``GRZCTL_COMPLETE_SUBMISSION_IDS`` is set.
+
+    Off by default, because each completion then loads the config and queries the database.
+    Completion runs no command callbacks, so this loads the config itself.
+    Any error yields no completions, so the shell shows no traceback.
+    """
+    if not os.environ.get(_COMPLETE_SUBMISSION_IDS_ENVVAR):
+        return []
+    # lazy import to avoid import cycle
+    from ...cli import DEFAULT_CONFIG_PATH  # noqa: PLC0415
+
+    config_path = ctx.find_root().params.get("config_path") or DEFAULT_CONFIG_PATH
+    try:
+        db_url = make_url(GrzctlConfig.from_path(config_path).db.database_url)
+        is_postgresql = db_url.get_backend_name() == "postgresql"
+        connect_args = {"connect_timeout": _COMPLETION_CONNECT_TIMEOUT_SECONDS} if is_postgresql else {}
+        # not SubmissionDb: it takes no connect_args, and its schema check opens another connection
+        with Session(create_engine(db_url, connect_args=connect_args)) as session:
+            statement = (
+                select(Submission.id)
+                .where(col(Submission.id).startswith(incomplete, autoescape=True))
+                .order_by(Submission.id)
+            )
+            return list(session.exec(statement))
+    except Exception:
+        return []
+
+
+_submission_id_argument = click.argument("submission_id", type=str, shell_complete=_complete_submission_ids)
 
 
 def get_submission_db_instance(db_url: str, author: Author | None = None) -> SubmissionDb:
@@ -2164,6 +2204,7 @@ def _backfill_submission(  # noqa: PLR0911, PLR0913, PLR0917
     "submission_ids",
     multiple=True,
     metavar="SUBMISSION_ID",
+    shell_complete=_complete_submission_ids,
     help="Restrict backfill to these submission IDs (may be repeated). Mutually exclusive with --start-date/--end-date.",
 )
 @click.option(
