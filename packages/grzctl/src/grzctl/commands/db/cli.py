@@ -76,7 +76,8 @@ from grz_pydantic_models.submission.metadata import (
 )
 from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
-from sqlmodel import Session, col, select
+from sqlalchemy import make_url
+from sqlmodel import Session, col, create_engine, select
 from tqdm.auto import tqdm
 
 from ... import get_versions
@@ -141,6 +142,12 @@ def _abort_missing_submission(e: SubmissionNotFoundError, submission_id: str) ->
 
 _COMPLETE_SUBMISSION_IDS_ENVVAR = "GRZCTL_COMPLETE_SUBMISSION_IDS"
 
+_COMPLETION_CONNECT_TIMEOUT_SECONDS = 2
+"""Seconds a submission ID completion waits to connect to PostgreSQL, so Tab does not hang on an unreachable server.
+
+libpq and psycopg raise any shorter timeout to 2 s.
+"""
+
 
 def _complete_submission_ids(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
     """Complete submission IDs from the database, if ``GRZCTL_COMPLETE_SUBMISSION_IDS`` is set.
@@ -156,9 +163,11 @@ def _complete_submission_ids(ctx: click.Context, param: click.Parameter, incompl
 
     config_path = ctx.find_root().params.get("config_path") or DEFAULT_CONFIG_PATH
     try:
-        db_url = GrzctlConfig.from_path(config_path).db.database_url
-        # not SubmissionDb.transaction(): its schema check scans the migrations and opens another connection
-        with Session(get_submission_db_instance(db_url).engine) as session:
+        db_url = make_url(GrzctlConfig.from_path(config_path).db.database_url)
+        is_postgresql = db_url.get_backend_name() == "postgresql"
+        connect_args = {"connect_timeout": _COMPLETION_CONNECT_TIMEOUT_SECONDS} if is_postgresql else {}
+        # not SubmissionDb: it takes no connect_args, and its schema check opens another connection
+        with Session(create_engine(db_url, connect_args=connect_args)) as session:
             statement = (
                 select(Submission.id)
                 .where(col(Submission.id).startswith(incomplete, autoescape=True))
