@@ -9,7 +9,7 @@ from click.testing import CliRunner
 def test_db(
     temp_db_config_file_path,
 ):
-    env = {"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test"}
+    env = {"grz_db__author__private_key_passphrase": "test"}
 
     runner = CliRunner(env=env)
     cli = grzctl.cli.build_cli()

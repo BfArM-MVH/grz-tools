@@ -44,7 +44,7 @@ def test_quarter_determination():
 def test_quarterly_empty(migrated_database_config_path: Path, tmp_path: Path):
     """Quarterly reports should work on an empty database."""
     env = {
-        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "grz_identifiers__grz": "GRZX00000",
     }
 
     runner = CliRunner(env=env)
@@ -76,7 +76,7 @@ def quarterly_report_dir(migrated_database_config_path: Path, tmp_path: Path) ->
     Returns the directory containing the three generated TSV files.
     """
     env = {
-        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "grz_identifiers__grz": "GRZX00000",
     }
 
     runner = CliRunner(env=env)
@@ -462,7 +462,7 @@ def test_quarterly_migrated_database(migrated_database_config_path: Path, tmp_pa
         connection.commit()
 
     env = {
-        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "grz_identifiers__grz": "GRZX00000",
     }
 
     runner = CliRunner(env=env)
@@ -503,7 +503,7 @@ def test_quarterly_qc_includes_passing_submission_with_deviation(migrated_databa
     without being counted as a failed QC (BfArM section B).
     """
     env = {
-        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
+        "grz_identifiers__grz": "GRZX00000",
     }
 
     runner = CliRunner(env=env)
