@@ -1,8 +1,7 @@
 # grz-watchdog
 
 A prototype of a snakemake workflow for the grz-ingest process.
-Can be run to process a single (known) target (see `process-single`), a batch of (unknown) targets (see `process-batch`)
-or continuously scan inboxes for new targets (see `daemon`).
+Can be run to process a single (known) target (see `process-single`), a batch of (unknown) targets (see `process-batch`) or continuously scan inboxes for new targets (see `daemon`).
 
 ## Setup
 
@@ -16,8 +15,8 @@ pixi install
 
 For faster validation, also install `grz-check` into the same environment (not installed by default).
 
-Alternatively, build a docker image from the provided `Dockerfile` and run that – this does include grz-check by
-default. Its default entrypoint is `daemon`.
+Alternatively, build a docker image from the provided `Dockerfile` and run that – this does include grz-check by default.
+Its default entrypoint is `daemon`.
 
 ### Configuration
 
@@ -28,8 +27,7 @@ GRZ_WATCHDOG_WORKDIR=/path/to/workdir  # where watchdog will store its results a
 GRZ_WATCHDOG_SNAKEMAKE_PROFILE=/path/to/your/custom/snakemake/profile
 ```
 
-Setting `GRZ_WATCHDOG_WORKDIR` is strongly recommended, otherwise the default workdir is relative to the project
-directory of grz-watchdog, i.e., `grz-watchdog/workdir`.
+Setting `GRZ_WATCHDOG_WORKDIR` is strongly recommended, otherwise the default workdir is relative to the project directory of grz-watchdog, i.e., `grz-watchdog/workdir`.
 Note that `GRZ_WATCHDOG_SNAKEMAKE_PROFILE` isn't respected properly at the moment, please supply `--configfile ${GRZ_WATCHDOG_SNAKEMAKE_PROFILE}` to your invocations for the time being.
 
 Example grz-watchdog configuration (refer to schema at `workflow/schemas/config.schema.yaml` for details):
@@ -90,16 +88,14 @@ Key passphrases can come from the config, from such a variable, or from `C4GH_PA
 
 ### QC references
 
-If you already have reference indices for the QC workflow, copy them to the `reference_directory` specified in the
-config and `mkdir -p "<resources>/shared_qc_launchdir"` (a marker so snakemake doesn't unnecessarily re-run building
-reference indices).
+If you already have reference indices for the QC workflow, copy them to the `reference_directory` specified in the config and `mkdir -p "<resources>/shared_qc_launchdir"` (a marker so snakemake doesn't unnecessarily re-run building reference indices).
 Otherwise, `grz-watchdog` will build the references the first time they are needed.
 
 ### Resources
 
-To help snakemake schedule jobs, define available resources either in your snakemake profile or 
-via the corresponding cli options.
+To help snakemake schedule jobs, define available resources either in your snakemake profile or via the corresponding cli options.
 For example
+
 ```yaml
 cores: 64
 resources:
@@ -130,8 +126,7 @@ That means you can easily:
 ### Processing a specific submission ID
 
 Process a specific submission by supplying the submitter ID, inbox name and submission ID.
-By default, whether QC will be performed is determined automatically using the selection strategy defined in the
-grz-watchdog config:
+By default, whether QC will be performed is determined automatically using the selection strategy defined in the grz-watchdog config:
 
 ```sh
 SUBMITTER_ID="123456789"
@@ -148,15 +143,13 @@ pixi run process-single ${SUBMITTER_ID} ${INBOX} ${SUBMISSION_ID} --force-withou
 
 ### Batch Processing
 
-Depending on the `batch: limit` in `config/config.yaml`, determine and take up to `limit` submissions ready for
-processing (by means of an automatic inbox scan) and submit these:
+Depending on the `batch: limit` in `config/config.yaml`, determine and take up to `limit` submissions ready for processing (by means of an automatic inbox scan) and submit these:
 
 ```sh
 pixi run process-batch --configfile /path/to/watchdog/config.yaml
 ```
 
-(will be executed within `$GRZ_WATCHDOG_WORKDIR` by default; can be overwritten by appending
-`--directory /some/other/path` or re-defining `$GRZ_WATCHDOG_WORKDIR`).
+(will be executed within `$GRZ_WATCHDOG_WORKDIR` by default; can be overwritten by appending `--directory /some/other/path` or re-defining `$GRZ_WATCHDOG_WORKDIR`).
 
 ### Daemon Mode
 
@@ -167,9 +160,9 @@ pixi run daemon --configfile /path/to/watchdog/config.yaml
 ```
 
 This will constantly monitor the configured inboxes and check for new submissions and sync them to the database.
-Then, submissions available for processing (determined by their state in the database) are pushed to the job queue
-automatically.
+Then, submissions available for processing (determined by their state in the database) are pushed to the job queue automatically.
 
 ## Running with different executors
-Because `grz-watchdog` is a snakemake workflow, you can choose from any of the [available executor plugins](https://snakemake.github.io/snakemake-plugin-catalog/index.html), e.g., `slurm` or `kubernetes`. ([Or write your own](https://github.com/snakemake/snakemake-interface-executor-plugins))
-For example, to use slurm, additionally install `snakemake-executor-plugin-slurm`, then enable `--executor slurm` on the commandline ad-hoc or in your snakemake profile. You will likely also want to specify `--jobs N` to specify the number of jobs to be run in parallel.
+
+Because `grz-watchdog` is a snakemake workflow, you can choose from any of the [available executor plugins](https://snakemake.github.io/snakemake-plugin-catalog/index.html), e.g., `slurm` or `kubernetes`. ([Or write your own](https://github.com/snakemake/snakemake-interface-executor-plugins)) For example, to use slurm, additionally install `snakemake-executor-plugin-slurm`, then enable `--executor slurm` on the commandline ad-hoc or in your snakemake profile.
+You will likely also want to specify `--jobs N` to specify the number of jobs to be run in parallel.

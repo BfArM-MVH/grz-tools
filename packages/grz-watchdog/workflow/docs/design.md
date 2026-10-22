@@ -50,7 +50,6 @@ flowchart TD
     n18@{ shape: proc}
 ```
 
-
 ## Submission Lifecycle
 
 In case of any errors or explicit termination requests, `grz-watchdog` should be able to gracefully resume from any combination of submission states.
@@ -98,7 +97,6 @@ flowchart TD
     n22@{ shape: rect}
 ```
 
-
 ## Submission Database
 
 Submissions are tracked within an SQL database at each GRZ.
@@ -118,14 +116,14 @@ Columns:
     - during phase 0 this will be the local case ID
     - if tanG is null then we know that this is a real RKI psuedonym instead of a local case ID
 
-
 ### `submission_states`
 
 Columns:
 
 1. `submission_id` (primary key, str, maps to `id` in `submissions`)
 2. `timestamp` (str, ISO 8601 format)
-3. `author` (str? key signature?)
+3. `author` (str?
+   key signature?)
 4. `state` (enum of lifecycle states)
 5. `data` (additional data on state in JSON)
   - e.g. public key fingerprint of key used to encrypt
