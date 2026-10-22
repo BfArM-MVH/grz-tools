@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.1...grz-common-v4.0.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **grz-common:** require certifi &gt;=2026.10.19 and urllib3 &gt;=2.8.0 ([#734](https://github.com/BfArM-MVH/grz-tools/issues/734)) ([337183e](https://github.com/BfArM-MVH/grz-tools/commit/337183eb1337bfc5fe409210d3fcfde9ccdc46b2))
+
 ## [4.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.0...grz-common-v4.0.1) (2026-10-02)
 
 

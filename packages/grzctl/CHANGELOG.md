@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.1...grzctl-v5.1.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** require grz-common 4.0.2 ([#737](https://github.com/BfArM-MVH/grz-tools/issues/737)) ([6bc5d89](https://github.com/BfArM-MVH/grz-tools/commit/6bc5d8942bf3568ba1037a52f8fa0a97ace71b50))
+
 ## [5.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.0...grzctl-v5.1.1) (2026-10-02)
 
 
