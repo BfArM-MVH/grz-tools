@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v4.1.0...grz-pydantic-models-v4.1.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** accept a consent patient given by display only before consent package 2026.0.0 ([#722](https://github.com/BfArM-MVH/grz-tools/issues/722)) ([fe2b075](https://github.com/BfArM-MVH/grz-tools/commit/fe2b075f581eab09cfe825d04d0d7a74616c1e10))
+* **grz-pydantic-models:** name the fields that keep a research consent ([fe2b075](https://github.com/BfArM-MVH/grz-tools/commit/fe2b075f581eab09cfe825d04d0d7a74616c1e10))
+
+## [4.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v4.0.0...grz-pydantic-models-v4.1.0) (2026-10-02)
+
+
+### Features
+
+* **grz-pydantic-models,grzctl:** explain why a submission gives no research consent ([#709](https://github.com/BfArM-MVH/grz-tools/issues/709)) ([8ea4185](https://github.com/BfArM-MVH/grz-tools/commit/8ea4185811e68e1a8ecc3dbf0e209b716bd642d9))
+
+
+### Bug Fixes
+
+* **grz-pydantic-models:** read consents without root period before v1.3 ([#706](https://github.com/BfArM-MVH/grz-tools/issues/706)) ([10dfa27](https://github.com/BfArM-MVH/grz-tools/commit/10dfa27d6cc50660c03bb2a07113a5a3a8d57a4b))
+
 ## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-pydantic-models-v3.0.0...grz-pydantic-models-v4.0.0) (2026-09-26)
 
 

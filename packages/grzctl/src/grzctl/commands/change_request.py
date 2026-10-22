@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import click
 import rich.console
@@ -121,7 +122,7 @@ def _build_change_request_kwargs(
     unknown_keys = {k: v for k, v in raw_input.items() if k not in _COLUMNAR_KEYS}
     extras = nested_extras if nested_extras else (unknown_keys or None)
 
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "requester_name": raw_input.get("requester_name"),
         "requester_email": raw_input.get("requester_email"),
         "requested_at": raw_input.get("requested_at"),

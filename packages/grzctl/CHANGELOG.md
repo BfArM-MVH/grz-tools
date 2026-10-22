@@ -1,5 +1,35 @@
 # Changelog
 
+## [5.1.2](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.1...grzctl-v5.1.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** require grz-common 4.0.2 ([#737](https://github.com/BfArM-MVH/grz-tools/issues/737)) ([6bc5d89](https://github.com/BfArM-MVH/grz-tools/commit/6bc5d8942bf3568ba1037a52f8fa0a97ace71b50))
+
+## [5.1.1](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.0...grzctl-v5.1.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **grz-db,grzctl:** require grz-pydantic-models 4.1 ([#715](https://github.com/BfArM-MVH/grz-tools/issues/715)) ([67dc636](https://github.com/BfArM-MVH/grz-tools/commit/67dc63699b391d1ffe3fe045453ecab6164b22ce))
+
+## [5.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.0.0...grzctl-v5.1.0) (2026-10-02)
+
+
+### Features
+
+* **grz-pydantic-models,grzctl:** explain why a submission gives no research consent ([#709](https://github.com/BfArM-MVH/grz-tools/issues/709)) ([8ea4185](https://github.com/BfArM-MVH/grz-tools/commit/8ea4185811e68e1a8ecc3dbf0e209b716bd642d9))
+
+
+### Bug Fixes
+
+* **grz-common,grzctl:** write CLI log records apart from tqdm progress ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** count inboxes and expired consents in db backfill dry runs ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** print the db backfill report on stdout and logs on stderr ([#705](https://github.com/BfArM-MVH/grz-tools/issues/705)) ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** show [dry-run] and full error text in db backfill ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** tell missing from expired research consent in db backfill ([#707](https://github.com/BfArM-MVH/grz-tools/issues/707)) ([ab47894](https://github.com/BfArM-MVH/grz-tools/commit/ab4789451860f37662b52514e51370c3540f6035))
+
 ## [5.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v4.0.0...grzctl-v5.0.0) (2026-09-26)
 
 
