@@ -1,5 +1,8 @@
 """Tests for submission_id-aware validation skip logic"""
 
+import errno
+import os
+import shutil
 import time
 from pathlib import Path
 
@@ -190,3 +193,133 @@ def test_an_interruption_cancels_the_queued_validation_tasks(
 
     # the one worker thread may have started the second task before the interruption reached the main thread
     assert len(started_tasks) <= 2, f"{len(started_tasks)} tasks ran"
+
+
+@pytest.fixture
+def submission_copy(submission_metadata_dir, tmp_path) -> Submission:
+    """A submission with a copy of the files, which a test may damage."""
+    files_dir = tmp_path / "files"
+    shutil.copytree("tests/mock_files/submissions/valid_submission/files", files_dir)
+    return Submission(metadata_dir=submission_metadata_dir, files_dir=files_dir)
+
+
+def _validate(submission, checksum_log, seq_data_log, no_mmap):
+    return list(
+        submission.validate_files(
+            checksum_progress_file=checksum_log,
+            seq_data_progress_file=seq_data_log,
+            threads=1,
+            no_mmap=no_mmap,
+        )
+    )
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads files regardless of their mode")
+@pytest.mark.parametrize("no_mmap", [True, False])
+def test_an_unreadable_file_raises_instead_of_failing_the_validation(
+    submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap
+):
+    """The file is there, so the system fails to read it. The data is not shown to be wrong."""
+    next(p for p in submission_copy.files if p.name.endswith(".read1.fastq.gz")).chmod(0o000)
+
+    with pytest.raises(PermissionError):
+        _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap)
+
+    assert not temp_seq_data_log.exists() or "Validation runtime error" not in temp_seq_data_log.read_text()
+
+
+def test_a_failed_source_read_raises_instead_of_failing_the_validation(
+    submission_copy, temp_checksum_log, temp_seq_data_log, monkeypatch
+):
+    """An I/O error while grz-check reads the source is re-raised, not recorded as a validation runtime error.
+
+    The mmap path never calls ``read()``, so only ``no_mmap=True`` applies.
+    """
+    target = next(p for p in submission_copy.files if p.name.endswith(".read1.fastq.gz"))
+
+    class FailingOnSecondRead:
+        # The 2nd call, because grz-check loses the cause of a failure on the 1st read (format detection).
+        def __init__(self, file):
+            self._file = file
+            self._reads = 0
+
+        def read(self, size=-1):
+            self._reads += 1
+            if self._reads == 2:
+                raise OSError(errno.EIO, "Input/output error")
+            return self._file.read(size)
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+        def __enter__(self):
+            self._file.__enter__()
+            return self
+
+        def __exit__(self, *exc_info):
+            return self._file.__exit__(*exc_info)
+
+    real_open = open
+
+    def fake_open(file, *args, **kwargs):
+        f = real_open(file, *args, **kwargs)
+        return FailingOnSecondRead(f) if Path(file) == Path(target) else f
+
+    monkeypatch.setattr("grz_common.workers.submission.open", fake_open, raising=False)
+
+    with pytest.raises(OSError):
+        _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap=True)
+
+    assert not temp_seq_data_log.exists() or "Validation runtime error" not in temp_seq_data_log.read_text()
+
+
+@pytest.mark.parametrize("no_mmap", [True, False])
+def test_a_corrupt_fastq_is_recorded_as_a_failed_validation(
+    submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap
+):
+    path = next(p for p in submission_copy.files if p.name.endswith(".read1.fastq.gz"))
+    path.write_bytes(b"\x1f\x8b\x08\x00" + b"this is not a deflate stream" * 100)
+
+    _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap)
+
+    assert "Validation runtime error" in temp_seq_data_log.read_text()
+
+
+@pytest.mark.parametrize("no_mmap", [True, False])
+@pytest.mark.parametrize("broken", ["missing", "empty"])
+def test_a_missing_or_empty_fastq_mate_is_recorded_as_a_failed_validation(
+    submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap, broken
+):
+    """Read 1 is opened as usual, so the pair mixes a path with an open file."""
+    path = next(p for p in submission_copy.files if p.name.endswith(".read2.fastq.gz"))
+    if broken == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(b"")
+
+    _validate(submission_copy, temp_checksum_log, temp_seq_data_log, no_mmap)
+
+    seq_data_logger = FileProgressLogger[ValidationState](log_file_path=temp_seq_data_log)
+    state = seq_data_logger.get_state(path, submission_copy.files[path])
+    assert state is not None
+    assert not state["validation_passed"]
+
+
+def test_a_failed_validation_of_a_raw_file_records_its_errors(submission, temp_checksum_log, temp_seq_data_log, mocker):
+    """For a file that is neither FASTQ nor BAM, the checksum log is the only place for the errors."""
+    mock_validate = mocker.patch("grz_common.workers.submission.grz_check")
+    report = mocker.MagicMock()
+    report.warnings = []
+    report.errors = ["could not read the file"]
+    report.is_valid = False
+    report.sha256 = None
+    mock_validate.validate_fastq_paired.return_value = [report, report]
+    mock_validate.validate_fastq.return_value = report
+    mock_validate.validate_bam.return_value = report
+    mock_validate.validate_raw.return_value = report
+
+    _validate(submission, temp_checksum_log, temp_seq_data_log, no_mmap=True)
+
+    checksum_log = temp_checksum_log.read_text()
+    assert "could not read the file" in checksum_log
+    assert "No checksum found." in checksum_log  # still the text for the FASTQ and BAM files
