@@ -7,6 +7,7 @@ import botocore.client
 import grz_common.exceptions as grzexc
 import pytest
 from botocore.exceptions import ClientError
+from grz_common.constants import MULTIPART_MIN_PART_SIZE
 from grz_common.progress.progress_logging import FileProgressLogger
 from grz_common.progress.states import UploadState
 from grz_common.utils.checksums import calculate_sha256
@@ -63,6 +64,19 @@ def test_boto_upload(
 
     assert calculate_sha256(local_tmpdir_path / "small_test_file.bed") == temp_small_file_sha256sum
     assert calculate_sha256(local_tmpdir_path / "large_test_file.fastq") == temp_fastq_file_sha256sum
+
+
+def test_boto_upload_uses_configured_part_size(s3_config_model, remote_bucket, temp_upload_log_file_path, tmp_path):
+    """upload_file splits a file into parts of the configured multipart_chunksize."""
+    s3_options = s3_config_model.s3.model_copy(update={"multipart_chunksize": MULTIPART_MIN_PART_SIZE})
+    upload_worker = S3BotoUploadWorker(s3_options=s3_options, status_file_path=temp_upload_log_file_path)
+    file_path = tmp_path / "three_parts.bin"
+    file_path.write_bytes(b"x" * (2 * MULTIPART_MIN_PART_SIZE + 1))
+
+    upload_worker.upload_file(file_path, "three_parts.bin")
+
+    etag = remote_bucket.Object("three_parts.bin").e_tag.strip('"')
+    assert etag.endswith("-3"), f"expected a 3-part multipart upload, got ETag {etag}"
 
 
 def test__gather_files_to_upload(encrypted_submission):
@@ -284,7 +298,7 @@ def _fail_s3_operation(monkeypatch, operation: str, code: str, status: HTTPStatu
 def test_upload_file_reports_rejected_credentials_as_a_configuration_error(
     s3_config_model, remote_bucket, temp_small_file_path, tmp_path, monkeypatch
 ):
-    """S3Transfer wraps the ClientError in S3UploadFailedError, and the upload worker takes it out again."""
+    """The uploader keeps the ClientError, which carries the error code, as the cause."""
     _fail_s3_operation(monkeypatch, "PutObject", "InvalidAccessKeyId")
     upload_worker = S3BotoUploadWorker(
         s3_options=s3_config_model.s3, status_file_path=tmp_path / "progress_upload.cjson"
@@ -337,3 +351,33 @@ def test_upload_goes_ahead_with_a_warning_if_access_is_denied(
     _, metadata_s3_object_id = encrypted_submission.get_metadata_file_path_and_object_id()
     assert metadata_s3_object_id in {o.key for o in remote_bucket.objects.all()}
     assert "because S3 denies access" in caplog.text
+
+
+def test_upload_file_uploads_parts_in_parallel(
+    s3_config_model, remote_bucket, temp_upload_log_file_path, overlapping_s3_calls, tmp_path
+):
+    """With two threads, two parts of one file are uploaded at the same time."""
+    s3_options = s3_config_model.s3.model_copy(update={"multipart_chunksize": MULTIPART_MIN_PART_SIZE})
+    file_path = tmp_path / "three_parts.bin"
+    file_path.write_bytes(b"x" * (2 * MULTIPART_MIN_PART_SIZE + 1))
+    overlapped = overlapping_s3_calls("UploadPart", timeout=10)
+    upload_worker = S3BotoUploadWorker(s3_options=s3_options, status_file_path=temp_upload_log_file_path, threads=2)
+
+    upload_worker.upload_file(file_path, "three_parts.bin")
+
+    assert overlapped(), "two parts should have been uploaded at the same time"
+
+
+def test_upload_file_uploads_one_part_at_a_time_with_one_thread(
+    s3_config_model, remote_bucket, temp_upload_log_file_path, overlapping_s3_calls, tmp_path
+):
+    """With one thread, no two parts of a file are uploaded at the same time."""
+    s3_options = s3_config_model.s3.model_copy(update={"multipart_chunksize": MULTIPART_MIN_PART_SIZE})
+    file_path = tmp_path / "three_parts.bin"
+    file_path.write_bytes(b"x" * (2 * MULTIPART_MIN_PART_SIZE + 1))
+    overlapped = overlapping_s3_calls("UploadPart", timeout=0.5)
+    upload_worker = S3BotoUploadWorker(s3_options=s3_options, status_file_path=temp_upload_log_file_path, threads=1)
+
+    upload_worker.upload_file(file_path, "three_parts.bin")
+
+    assert not overlapped(), "one thread should upload one part after the other"
