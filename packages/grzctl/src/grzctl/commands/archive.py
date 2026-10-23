@@ -40,6 +40,7 @@ def archive(
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
+        directory_mode=configuration.local_storage_mode,
     )
     encrypted_submission = worker_inst.parse_encrypted_submission()
     submission_id = encrypted_submission.submission_id
