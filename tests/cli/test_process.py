@@ -13,11 +13,11 @@ import os
 import signal
 import stat
 import threading
-import time
 from collections import Counter
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import boto3
 import botocore.client
@@ -27,6 +27,7 @@ import crypt4gh.keys
 import crypt4gh.lib
 import grz_db.models.author
 import grzctl.cli
+import grzctl.commands.process
 import grzctl.processor
 import pytest
 import requests
@@ -42,6 +43,7 @@ from .common import refused_connection
 # Path to test fixtures
 MOCK_FILES_DIR = Path(__file__).parent.parent / "mock_files"
 VALID_SUBMISSION_DIR = MOCK_FILES_DIR / "submissions" / "valid_submission"
+BFARM_UPLOAD_URL = "https://bfarm.localhost/api/upload"
 
 
 @pytest.fixture
@@ -190,6 +192,15 @@ def _run_process(
         *extra_args,
     ]
     return click.testing.CliRunner().invoke(grzctl.cli.build_cli(), args)
+
+
+def _run_process_with_unavailable_bucket(s3_requests, bucket, *args, **kwargs):
+    """Run ``grzctl process`` while every write to ``bucket`` fails, as :func:`_run_process` takes its arguments."""
+    s3_requests.unavailable_bucket = bucket.name
+    try:
+        return _run_process(*args, **kwargs)
+    finally:
+        s3_requests.unavailable_bucket = None
 
 
 def _latest_state(process_config_content: dict, submission_id: str) -> SubmissionStateLog:
@@ -542,6 +553,11 @@ def _metadata_file_checksums() -> dict[str, str]:
     }
 
 
+def _file_keys(submission_id: str) -> set[str]:
+    """The S3 keys of the valid submission's files, which the inbox, the staging area and an archive share."""
+    return {f"{submission_id}/files/{path}.c4gh" for path in _metadata_file_checksums()}
+
+
 def _assert_archived(bucket, submission_id: str, private_key_path: Path) -> None:
     """Assert that ``bucket`` holds every file of the submission, each decrypting to its metadata checksum.
 
@@ -549,7 +565,7 @@ def _assert_archived(bucket, submission_id: str, private_key_path: Path) -> None
     """
     expected = _metadata_file_checksums()
     archived_keys = {o.key for o in bucket.objects.filter(Prefix=f"{submission_id}/files/")}
-    assert archived_keys == {f"{submission_id}/files/{path}.c4gh" for path in expected}
+    assert archived_keys == _file_keys(submission_id)
     private_key = crypt4gh.keys.get_private_key(str(private_key_path), lambda: None)
     for path, checksum in expected.items():
         encrypted = bucket.Object(f"{submission_id}/files/{path}.c4gh").get()["Body"].read()
@@ -710,7 +726,7 @@ class TestProcessS3Failure:
         assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
         assert {o.key for o in s3_buckets["consented"].objects.filter(Prefix=f"{sid}/")} == set()
         inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
-        assert inbox_keys == {f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()}
+        assert inbox_keys == _file_keys(sid)
 
     def test_a_failed_copy_to_the_archive_fails_as_a_transfer_error(
         self,
@@ -1019,12 +1035,12 @@ class TestProcessRerun:
         local_files = Path(process_config_content["detailed_qc"]["local_storage"]) / sid / "files"
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
 
-        s3_requests.unavailable_bucket = s3_buckets["consented"].name
-        result = _run_process(rerun_config_file_path, sid, working_dir_path)
-        s3_requests.unavailable_bucket = None
+        result = _run_process_with_unavailable_bucket(
+            s3_requests, s3_buckets["consented"], rerun_config_file_path, sid, working_dir_path
+        )
         assert result.exit_code != 0, "the first run should fail while copying to the archive"
         staged_keys = {o.key for o in s3_buckets["interrogation"].objects.filter(Prefix=f"{sid}/files/")}
-        assert staged_keys == {f"{sid}/files/{path}.c4gh" for path in checksums}
+        assert staged_keys == _file_keys(sid)
         assert _qc_files(process_config_content, sid) == set(checksums)
 
         if not staged:
@@ -1167,7 +1183,7 @@ class TestProcessRerun:
         """The first run archives the submission and fails on the Prüfbericht, so the rerun finds it archived."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "invalid"}, status=400)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={"error": "invalid"}, status=400)
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
         assert result.exit_code != 0, "the first run should fail on the Prüfbericht"
         s3_requests.requests.clear()
@@ -1212,10 +1228,10 @@ class TestProcessRerun:
         """The first run selects the submission for detailed QC, so a failed rerun must not delete its QC files."""
         sid = self.SUBMISSION_ID
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
-        s3_requests.unavailable_bucket = s3_buckets["consented"].name
-        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+        result = _run_process_with_unavailable_bucket(
+            s3_requests, s3_buckets["consented"], rerun_config_file_path, sid, working_dir_path
+        )
         assert result.exit_code != 0, "the first run should fail while copying to the archive"
-        s3_requests.unavailable_bucket = None
         # every file of the rerun fails its staging check, before the QC decision
         s3_requests.failing_head_bucket = s3_buckets["interrogation"].name
 
@@ -1243,11 +1259,11 @@ class TestProcessStagingCheckFailure:
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
 
         # the first run stages every file and then fails while copying to the archive
-        s3_requests.unavailable_bucket = s3_buckets["consented"].name
-        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+        result = _run_process_with_unavailable_bucket(
+            s3_requests, s3_buckets["consented"], rerun_config_file_path, sid, working_dir_path
+        )
         assert result.exit_code != 0, "the first run should fail while copying to the archive"
 
-        s3_requests.unavailable_bucket = None
         s3_requests.failing_head_bucket = s3_buckets["interrogation"].name
 
         result = _run_process(rerun_config_file_path, sid, working_dir_path)
@@ -1287,7 +1303,7 @@ class TestProcessInboxCleanup:
         """Cleaning leaves the marker and an empty metadata file, and records its own two states."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
@@ -1322,9 +1338,7 @@ class TestProcessInboxCleanup:
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
-        assert keys == {f"{sid}/metadata/metadata.json"} | {
-            f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()
-        }
+        assert keys == {f"{sid}/metadata/metadata.json"} | _file_keys(sid)
         assert _states(process_config_content, sid) == [
             SubmissionStateEnum.PROCESSING,
             SubmissionStateEnum.PROCESSED,
@@ -1374,7 +1388,7 @@ class TestProcessInboxCleanup:
         """An archived and reported submission keeps those states, and only the cleaning records the failure."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
         s3_requests.unavailable_bucket = s3_buckets["inbox"].name
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
@@ -1405,9 +1419,7 @@ class TestProcessInboxCleanup:
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
-        assert keys == {f"{sid}/metadata/metadata.json"} | {
-            f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()
-        }
+        assert keys == {f"{sid}/metadata/metadata.json"} | _file_keys(sid)
         assert _states(process_config_content, sid) == [
             SubmissionStateEnum.PROCESSING,
             SubmissionStateEnum.PROCESSED,
@@ -1468,7 +1480,7 @@ class TestProcessDetailedQcAutoRun:
         """
         sid = self.SUBMISSION_ID
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
         config_file_path = _auto_run_config(tmp_path, process_config_content, "exit 3")
 
         result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
@@ -1501,7 +1513,7 @@ class TestProcessDetailedQcAutoRun:
         """The rerun finds the submission archived and reported, so it only runs the QC command and cleans the inbox."""
         sid = self.SUBMISSION_ID
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
         result = _run_process(
             _auto_run_config(tmp_path, process_config_content, "exit 3"),
             sid,
@@ -1537,13 +1549,13 @@ class TestProcessDetailedQcAutoRun:
         """The first run runs the QC command and fails to clean the inbox, so the rerun only cleans it."""
         sid = self.SUBMISSION_ID
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
         runs = tmp_path / "qc-runs.txt"
         config_file_path = _auto_run_config(tmp_path, process_config_content, f"echo run >> '{runs}'")
-        s3_requests.unavailable_bucket = s3_buckets["inbox"].name
-        result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+        result = _run_process_with_unavailable_bucket(
+            s3_requests, s3_buckets["inbox"], config_file_path, sid, working_dir_path, submit_pruefbericht=True
+        )
         assert result.exit_code != 0, "the first run should fail to clean the inbox"
-        s3_requests.unavailable_bucket = None
 
         result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
@@ -1569,6 +1581,17 @@ def bfarm_api():
             responses.POST, "https://bfarm.localhost/token", callback=issue_token, content_type="application/json"
         )
         yield mock
+
+
+@pytest.fixture
+def waits(monkeypatch) -> list[float]:
+    """Record the waits of the Prüfbericht backoff, which starts at 30 seconds, instead of waiting them out.
+
+    Only ``grzctl process`` gets the stub, so the waits of other code, such as a database start-up, stay real.
+    """
+    recorded: list[float] = []
+    monkeypatch.setattr(grzctl.commands.process, "time", SimpleNamespace(sleep=recorded.append))
+    return recorded
 
 
 def _submitted_tans(bfarm_api) -> list[str]:
@@ -1609,7 +1632,7 @@ class TestProcessPruefbericht:
         """BfArM receives the tanG, while the copy in the logs carries the redacted one."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
@@ -1638,11 +1661,16 @@ class TestProcessPruefbericht:
         """The first run reports the submission and fails to clean it. The rerun cleans it without reporting again."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
-        s3_requests.unavailable_bucket = s3_buckets["inbox"].name
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
+        result = _run_process_with_unavailable_bucket(
+            s3_requests,
+            s3_buckets["inbox"],
+            temp_process_config_file_path,
+            sid,
+            working_dir_path,
+            submit_pruefbericht=True,
+        )
         assert result.exit_code != 0, "the first run should fail to clean the inbox"
-        s3_requests.unavailable_bucket = None
         saved_copy = working_dir_path / "logs" / "pruefbericht.json"
         saved_copy.unlink()
 
@@ -1662,7 +1690,7 @@ class TestProcessPruefbericht:
         self,
         s3_buckets,
         bfarm_api,
-        monkeypatch,
+        waits,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
@@ -1673,13 +1701,8 @@ class TestProcessPruefbericht:
         """
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post(
-            "https://bfarm.localhost/api/upload", body=refused_connection("https://bfarm.localhost/api/upload")
-        )
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
-        # the backoff starts at 30 seconds, which the test records instead of waiting it out
-        waits: list[float] = []
-        monkeypatch.setattr(time, "sleep", waits.append)
+        bfarm_api.post(BFARM_UPLOAD_URL, body=refused_connection(BFARM_UPLOAD_URL))
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
@@ -1693,7 +1716,7 @@ class TestProcessPruefbericht:
         self,
         s3_buckets,
         bfarm_api,
-        monkeypatch,
+        waits,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
@@ -1701,10 +1724,7 @@ class TestProcessPruefbericht:
         """A Prüfbericht that never gets to BfArM leaves the reporting attempt in the states."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post(
-            "https://bfarm.localhost/api/upload", body=refused_connection("https://bfarm.localhost/api/upload")
-        )
-        monkeypatch.setattr(time, "sleep", lambda _: None)
+        bfarm_api.post(BFARM_UPLOAD_URL, body=refused_connection(BFARM_UPLOAD_URL))
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
@@ -1731,7 +1751,7 @@ class TestProcessPruefbericht:
         self,
         s3_buckets,
         bfarm_api,
-        monkeypatch,
+        waits,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
@@ -1740,9 +1760,7 @@ class TestProcessPruefbericht:
         """BfArM may have received the Prüfbericht, so the run fails at once and says to ask BfArM."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", **answer)
-        waits: list[float] = []
-        monkeypatch.setattr(time, "sleep", waits.append)
+        bfarm_api.post(BFARM_UPLOAD_URL, **answer)
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
@@ -1759,7 +1777,7 @@ class TestProcessPruefbericht:
         self,
         s3_buckets,
         bfarm_api,
-        monkeypatch,
+        waits,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
@@ -1768,8 +1786,6 @@ class TestProcessPruefbericht:
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
         bfarm_api.replace(responses.POST, "https://bfarm.localhost/token", json={"error": "invalid_client"}, status=401)
-        waits: list[float] = []
-        monkeypatch.setattr(time, "sleep", waits.append)
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
@@ -1784,7 +1800,7 @@ class TestProcessPruefbericht:
         self,
         s3_buckets,
         bfarm_api,
-        monkeypatch,
+        waits,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
@@ -1792,9 +1808,7 @@ class TestProcessPruefbericht:
         """BfArM rejects the same Prüfbericht again, so a client error is not retried."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "invalid"}, status=400)
-        waits: list[float] = []
-        monkeypatch.setattr(time, "sleep", waits.append)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={"error": "invalid"}, status=400)
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 

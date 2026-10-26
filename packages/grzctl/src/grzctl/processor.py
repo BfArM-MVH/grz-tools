@@ -52,7 +52,7 @@ from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
 from tqdm.auto import tqdm
 
-from .dbcontext import FilesFailedError
+from .dbcontext import FilesFailedError, has_state
 from .models.config import GrzctlConfig, InboxTarget
 
 
@@ -713,7 +713,7 @@ class SubmissionProcessor:
             finished = [
                 state
                 for state in (SubmissionStateEnum.PROCESSED, SubmissionStateEnum.ARCHIVED)
-                if submission is not None and submission.get_latest_state(filter_to_type=state)
+                if has_state(submission, state)
             ]
             if not finished:
                 log.warning(

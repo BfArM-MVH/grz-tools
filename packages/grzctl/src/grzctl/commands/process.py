@@ -46,7 +46,6 @@ copy is gone, making the pipeline effectively idempotent.
 import json
 import logging
 import time
-from contextlib import nullcontext
 from pathlib import Path
 
 import click
@@ -56,12 +55,12 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError
-from grz_db.models.submission import CASE_LINK_KEY, SubmissionStateEnum
+from grz_db.models.submission import CASE_LINK_KEY, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from ..commands import grzctl_configuration, inbox_option
-from ..dbcontext import DbContext
+from ..dbcontext import DbContext, has_state
 from ..models.config import GrzctlConfig
 from ..models.pruefbericht import PruefberichtModel
 from ..processor import SubmissionProcessor
@@ -138,12 +137,13 @@ def process(  # noqa: PLR0913, PLR0917
     re-running after a partial failure skips already-completed files.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
+    db = get_submission_db_instance(db_url=configuration.db.database_url)
     resolved_inbox = require_inbox(
         configuration,
         submitter_id=submitter_id,
         submission_id=submission_id,
         inbox_name=inbox_name,
-        db_service=get_submission_db_instance(db_url=configuration.db.database_url),
+        db_service=db,
         scan=True,
     )
     inbox = configuration.inbox_target(submitter_id=submitter_id, inbox_name=resolved_inbox)
@@ -213,6 +213,7 @@ def process(  # noqa: PLR0913, PLR0917
 
     _handle_pruefbericht(
         configuration=configuration,
+        db=db,
         submission_id=submission_id,
         log_dir=log_dir,
         submit_pruefbericht=submit_pruefbericht,
@@ -220,10 +221,10 @@ def process(  # noqa: PLR0913, PLR0917
         redact_pruefbericht=redact_pruefbericht,
     )
 
-    _run_detailed_qc(configuration, processor, submission_id)
+    _run_detailed_qc(configuration, db, processor, submission_id)
 
     if clean_inbox:
-        if not _has_state(configuration, submission_id, SubmissionStateEnum.REPORTED):
+        if not has_state(db.get_submission(submission_id), SubmissionStateEnum.REPORTED):
             log.warning(
                 f"BfArM has not accepted a Prüfbericht of submission '{submission_id}', so its inbox is kept. "
                 "`grzctl clean` cleans it."
@@ -238,13 +239,9 @@ def process(  # noqa: PLR0913, PLR0917
             _clean_submission_from_bucket(bucket_name, inbox.s3, submission_id, inbox_desc)
 
 
-def _has_state(configuration: GrzctlConfig, submission_id: str, state: SubmissionStateEnum) -> bool:
-    """Whether the database records ``state`` for the submission, at any point of its history."""
-    submission = get_submission_db_instance(db_url=configuration.db.database_url).get_submission(submission_id)
-    return submission is not None and submission.get_latest_state(filter_to_type=state) is not None
-
-
-def _run_detailed_qc(configuration: GrzctlConfig, processor: SubmissionProcessor, submission_id: str) -> None:
+def _run_detailed_qc(
+    configuration: GrzctlConfig, db: SubmissionDb, processor: SubmissionProcessor, submission_id: str
+) -> None:
     """Run the detailed QC workflow of a selected submission, if ``detailed_qc.auto_run`` is set.
 
     It runs after the archive copy and the Prüfbericht, so a failed workflow holds back neither of them.
@@ -252,10 +249,10 @@ def _run_detailed_qc(configuration: GrzctlConfig, processor: SubmissionProcessor
     """
     if not configuration.detailed_qc.auto_run:
         return
-    submission = get_submission_db_instance(db_url=configuration.db.database_url).get_submission(submission_id)
+    submission = db.get_submission(submission_id)
     if submission is None or submission.selected_for_qc is not True:
         return
-    if submission.get_latest_state(filter_to_type=SubmissionStateEnum.QCED):
+    if has_state(submission, SubmissionStateEnum.QCED):
         log.warning(f"Submission '{submission_id}' is already QCed. Its detailed QC workflow does not run again.")
         return
     with DbContext(
@@ -281,6 +278,7 @@ def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
 
 def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
+    db: SubmissionDb,
     submission_id: str,
     log_dir: Path,
     submit_pruefbericht: bool,
@@ -292,23 +290,19 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     Submitting makes this the reporting step, so a Prüfbericht that cannot be generated fails that
     step too. A Prüfbericht that the database records as reported is not submitted again.
     """
-    if submit_pruefbericht and _has_state(configuration, submission_id, SubmissionStateEnum.REPORTED):
+    if submit_pruefbericht and has_state(db.get_submission(submission_id), SubmissionStateEnum.REPORTED):
         log.warning(f"Submission '{submission_id}' is already reported. Its Prüfbericht is not submitted again.")
         submit_pruefbericht = False
     # Entering the context writes REPORTING and commits it, so the retries below hold no
     # transaction open. A Prüfbericht that never gets through is recorded as an error, and a
     # later ``grzctl pruefbericht submit`` records the reporting states again.
-    reporting = (
-        DbContext(
-            configuration=configuration,
-            submission_id=submission_id,
-            start_state=SubmissionStateEnum.REPORTING,
-            end_state=SubmissionStateEnum.REPORTED,
-        )
-        if submit_pruefbericht
-        else nullcontext()
-    )
-    with reporting:
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.REPORTING,
+        end_state=SubmissionStateEnum.REPORTED,
+        enabled=submit_pruefbericht,
+    ):
         log.info("Generating Prüfbericht...")
         # only a submission that passed basic QC gets here, so its Prüfbericht reports a pass
         pruefbericht = _generate_pruefbericht_from_database(submission_id, configuration, failed=False)
