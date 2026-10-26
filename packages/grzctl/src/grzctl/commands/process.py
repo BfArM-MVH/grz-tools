@@ -28,8 +28,10 @@ The submission state transitions through ``PROCESSING → PROCESSED`` (or
 that downstream Prüfbericht generation can read the required fields.  Unless
 ``--no-submit-pruefbericht`` is given, the Prüfbericht is then submitted to BfArM.
 Submitting records a separate ``REPORTING → REPORTED`` transition, or
-``REPORTING → ERROR`` if BfArM never accepts it.  Cleaning the inbox then records
-``CLEANING → CLEANED``.  A failed step ends the run, so the inbox keeps a submission
+``REPORTING → ERROR`` if BfArM never accepts it.  With ``detailed_qc.auto_run``, a
+submission selected for detailed QC then runs the QC workflow as ``QCING → QCED``.
+Cleaning the inbox then records ``CLEANING → CLEANED``, and only once ``REPORTED``
+is recorded.  A failed step ends the run, so the inbox keeps a submission
 until BfArM has accepted its Prüfbericht.
 
 Recovery
@@ -104,7 +106,7 @@ log = logging.getLogger(__name__)
 @click.option(
     "--clean-inbox/--no-clean-inbox",
     default=True,
-    help="Clean submission from inbox bucket after successful processing.",
+    help="Clean submission from inbox bucket once BfArM has accepted its Prüfbericht.",
 )
 def process(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
@@ -130,10 +132,10 @@ def process(  # noqa: PLR0913, PLR0917
     Prüfbericht generation can read the required fields (submission date,
     donor info, etc.).
 
-    Processing records ``PROCESSED`` once the submission is archived. Reporting and
-    cleaning the inbox follow as steps of their own, and a failed step records ``ERROR``
-    with its failure reason.  Files are processed idempotently: re-running after a
-    partial failure skips already-completed files.
+    Processing records ``PROCESSED`` once the submission is archived. Reporting, the
+    detailed QC workflow and cleaning the inbox follow as steps of their own, and a failed
+    step records ``ERROR`` with its failure reason.  Files are processed idempotently:
+    re-running after a partial failure skips already-completed files.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
     resolved_inbox = require_inbox(
@@ -218,7 +220,15 @@ def process(  # noqa: PLR0913, PLR0917
         redact_pruefbericht=redact_pruefbericht,
     )
 
+    _run_detailed_qc(configuration, processor, submission_id)
+
     if clean_inbox:
+        if not _has_state(configuration, submission_id, SubmissionStateEnum.REPORTED):
+            log.warning(
+                f"BfArM has not accepted a Prüfbericht of submission '{submission_id}', so its inbox is kept. "
+                "`grzctl clean` cleans it."
+            )
+            return
         with DbContext(
             configuration=configuration,
             submission_id=submission_id,
@@ -226,6 +236,35 @@ def process(  # noqa: PLR0913, PLR0917
             end_state=SubmissionStateEnum.CLEANED,
         ):
             _clean_submission_from_bucket(bucket_name, inbox.s3, submission_id, inbox_desc)
+
+
+def _has_state(configuration: GrzctlConfig, submission_id: str, state: SubmissionStateEnum) -> bool:
+    """Whether the database records ``state`` for the submission, at any point of its history."""
+    submission = get_submission_db_instance(db_url=configuration.db.database_url).get_submission(submission_id)
+    return submission is not None and submission.get_latest_state(filter_to_type=state) is not None
+
+
+def _run_detailed_qc(configuration: GrzctlConfig, processor: SubmissionProcessor, submission_id: str) -> None:
+    """Run the detailed QC workflow of a selected submission, if ``detailed_qc.auto_run`` is set.
+
+    It runs after the archive copy and the Prüfbericht, so a failed workflow holds back neither of them.
+    A rerun runs it again until ``QCED`` is recorded.
+    """
+    if not configuration.detailed_qc.auto_run:
+        return
+    submission = get_submission_db_instance(db_url=configuration.db.database_url).get_submission(submission_id)
+    if submission is None or submission.selected_for_qc is not True:
+        return
+    if submission.get_latest_state(filter_to_type=SubmissionStateEnum.QCED):
+        log.warning(f"Submission '{submission_id}' is already QCed. Its detailed QC workflow does not run again.")
+        return
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.QCING,
+        end_state=SubmissionStateEnum.QCED,
+    ):
+        processor.run_detailed_qc(submission_id)
 
 
 def _setup_directories(output_dir: str) -> tuple[Path, Path, Path]:
@@ -253,11 +292,9 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
     Submitting makes this the reporting step, so a Prüfbericht that cannot be generated fails that
     step too. A Prüfbericht that the database records as reported is not submitted again.
     """
-    if submit_pruefbericht:
-        submission = get_submission_db_instance(db_url=configuration.db.database_url).get_submission(submission_id)
-        if submission is not None and submission.get_latest_state(filter_to_type=SubmissionStateEnum.REPORTED):
-            log.warning(f"Submission '{submission_id}' is already reported. Its Prüfbericht is not submitted again.")
-            submit_pruefbericht = False
+    if submit_pruefbericht and _has_state(configuration, submission_id, SubmissionStateEnum.REPORTED):
+        log.warning(f"Submission '{submission_id}' is already reported. Its Prüfbericht is not submitted again.")
+        submit_pruefbericht = False
     # Entering the context writes REPORTING and commits it, so the retries below hold no
     # transaction open. A Prüfbericht that never gets through is recorded as an error, and a
     # later ``grzctl pruefbericht submit`` records the reporting states again.
