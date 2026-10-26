@@ -1,6 +1,6 @@
 # grzctl does not expand ${...} in this file. Replace the example values, or override any value with an
-# environment variable: GRZ_ followed by the keys of its path, joined by "__",
-# such as GRZ_PRUEFBERICHT__CLIENT_SECRET or GRZ_ARCHIVES__CONSENTED__S3__SECRET.
+# environment variable: grz_ followed by the keys of its path, joined by "__",
+# such as grz_pruefbericht__client_secret or grz_archives__consented__s3__secret.
 
 definitions:
   - &default_inbox_connection
