@@ -210,3 +210,23 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json's timestamp is invalid.
     raise_if_cleaned(s3_client, bucket, submission_id)
     return response["LastModified"]
+
+
+def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> str:
+    """Read and return the version number of grz-cli used to upload a given submission
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :returns: version number as a string. Return "UNKNOWN" if no version file is found
+    """
+    key = submission_id + "/version"
+    with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
+        try:
+            with s3_client.get_object(Bucket=bucket, Key=key)["Body"] as body:
+                grz_cli_version = body.read().decode("utf-8").strip()
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "NoSuchKey":
+                raise
+            grz_cli_version = "UNKNOWN"
+        return grz_cli_version
