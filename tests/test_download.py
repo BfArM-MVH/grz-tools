@@ -504,6 +504,131 @@ def test_download_file_fails_when_the_resumed_read_ignores_the_range(
     assert not local_file_path.exists(), "a failed download should leave no partial file behind"
 
 
+def test_download_file_fails_when_the_resumed_read_gets_another_object(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """A server that ignores If-Match sends the rest of a newer object, which must not complete the old one."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def replace_the_object_and_ignore_if_match(self, operation_name, kwargs):
+        if operation_name == "GetObject" and "Range" in kwargs:
+            # as long as the old object, so that only its ETag tells it apart
+            remote_bucket.put_object(Key=kwargs["Key"], Body=b"newer object body")
+            return original_call(self, operation_name, {k: v for k, v in kwargs.items() if k != "IfMatch"})
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            response["Body"] = _BreakingBody(response["Body"].read(len(b"encrypted ")))
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", replace_the_object_and_ignore_if_match)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.DownloadError):
+        download_worker.download_file(
+            local_file_path,
+            f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+            progress_logger,
+            file_metadata,
+            submission.submission_id,
+        )
+
+    assert not local_file_path.exists(), "a failed download should leave no partial file behind"
+
+
+def test_download_file_fails_when_the_resumed_read_ends_early(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """A proxy that caps ranges sends only part of the rest, which must not pass for the whole object."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def cap_the_range(self, operation_name, kwargs):
+        if operation_name == "GetObject" and "Range" in kwargs:
+            # status 206 for bytes 10 to 12 of 17, with a matching ContentLength
+            return original_call(self, operation_name, {**kwargs, "Range": "bytes=10-12"})
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            response["Body"] = _BreakingBody(response["Body"].read(len(b"encrypted ")))
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", cap_the_range)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.DownloadError):
+        download_worker.download_file(
+            local_file_path,
+            f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+            progress_logger,
+            file_metadata,
+            submission.submission_id,
+        )
+
+    assert not local_file_path.exists(), "a failed download should leave no partial file behind"
+
+
+def test_download_file_fails_to_resume_an_object_without_an_etag(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """Without an ETag, If-Match cannot make sure that the rest comes from the same object."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def drop_the_etag_and_break_the_body(self, operation_name, kwargs):
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            del response["ETag"]
+            response["Body"] = _BreakingBody(response["Body"].read(len(b"encrypted ")))
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", drop_the_etag_and_break_the_body)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.NetworkError):
+        download_worker.download_file(
+            local_file_path,
+            f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+            progress_logger,
+            file_metadata,
+            submission.submission_id,
+        )
+
+    assert not local_file_path.exists(), "a failed download should leave no partial file behind"
+
+
 def test_download_file_accepts_the_whole_object_when_it_resumes_at_the_start(
     s3_config_model,
     remote_bucket,

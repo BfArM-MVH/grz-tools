@@ -51,7 +51,8 @@ class S3Downloader(ReadStream):
 
     If the connection breaks while reading, the rest of the object is requested again, from the
     offset reached. The read fails after ``max_resumes`` breaks in a row without data in between.
-    ``IfMatch`` makes sure that the rest comes from the same object.
+    ``IfMatch`` and the ETag of the answer make sure that the rest comes from the same object.
+    A read that ends before ``length`` bytes raises a :class:`DownloadError`.
     """
 
     def __init__(  # noqa: PLR0913, PLR0917
@@ -89,6 +90,7 @@ class S3Downloader(ReadStream):
         self.response = self._get_object()
         self._source = self.response["Body"]
         self.length: int = self.response.get("ContentLength", 0)
+        self._etag: str | None = self.response.get("ETag")
 
     def _get_object(self, **kwargs: Any) -> dict[str, Any]:
         with s3_errors(f"Reading s3://{self._bucket}/{self._key}", DownloadError):
@@ -100,7 +102,7 @@ class S3Downloader(ReadStream):
                     raise self._missing_error(f"s3://{self._bucket}/{self._key} does not exist") from e
                 raise
 
-    def read(self, size: int | None = -1) -> bytes:
+    def read(self, size: int | None = -1) -> bytes:  # noqa: C901
         if self._stop is not None and self._stop.is_set():
             raise InterruptedError(f"Reading s3://{self._bucket}/{self._key} stopped at byte {self._offset}")
         while True:
@@ -109,10 +111,21 @@ class S3Downloader(ReadStream):
             except _RESUMABLE_READ_ERRORS as e:
                 if self._resumes >= self._max_resumes:
                     raise NetworkError(f"S3 read error: {e}") from e
+                if self._etag is None:
+                    raise NetworkError(
+                        f"Reading s3://{self._bucket}/{self._key} broke at byte {self._offset} "
+                        f"and cannot resume without an ETag: {e}"
+                    ) from e
                 self._resumes += 1
                 log.warning(f"Reading s3://{self._bucket}/{self._key} broke at byte {self._offset}, resuming: {e}")
-                response = self._get_object(Range=f"bytes={self._offset}-", IfMatch=self.response["ETag"])
+                response = self._get_object(Range=f"bytes={self._offset}-", IfMatch=self._etag)
                 self._source = response["Body"]
+                # a server that ignores IfMatch sends the rest of whatever object the key names now
+                if response.get("ETag") != self._etag:
+                    raise DownloadError(
+                        f"Resuming s3://{self._bucket}/{self._key} at byte {self._offset} got ETag "
+                        f"{response.get('ETag')!r} instead of {self._etag!r}"
+                    ) from e
                 status, content_range = response["ResponseMetadata"]["HTTPStatusCode"], response.get("ContentRange", "")
                 # A server that ignores Range sends the whole object. Before the first byte, that is the rest.
                 # Later, it would be appended to the bytes read.
@@ -128,6 +141,11 @@ class S3Downloader(ReadStream):
             if chunk:
                 # a long download may break more often than max_resumes, as long as it progresses
                 self._resumes = 0
+            elif size != 0 and self._offset < self.length:
+                # botocore checks each body against its own ContentLength only, so a short range passes
+                raise DownloadError(
+                    f"Reading s3://{self._bucket}/{self._key} ended at byte {self._offset} of {self.length}"
+                )
             self._offset += len(chunk)
             return chunk
 
