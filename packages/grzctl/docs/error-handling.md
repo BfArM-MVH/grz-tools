@@ -106,12 +106,20 @@ An upload or an archival then logs a warning that it cannot check for an earlier
 
 `grzctl pruefbericht submit` sorts the answers of BfArM like this:
 
-| BfArM answer                                 | Raised as                   | Reason |
-| -------------------------------------------- | --------------------------- | ------ |
-| `401` or `403`                               | `ConfigurationError`        | `configuration_error` |
-| Any other client error for the token request | `ConfigurationError`        | `configuration_error` |
-| Any other client error for the Prüfbericht   | `PruefberichtRejectedError` | `pruefbericht_rejected` |
-| A server error, a timeout, or no connection  | `NetworkError`              | `transfer_error` |
+| BfArM answer                                                                                  | Raised as                   | Reason |
+| --------------------------------------------------------------------------------------------- | --------------------------- | ------ |
+| `401` or `403`                                                                                | `ConfigurationError`        | `configuration_error` |
+| Any other client error for the token request                                                  | `ConfigurationError`        | `configuration_error` |
+| Any other client error for the Prüfbericht                                                    | `PruefberichtRejectedError` | `pruefbericht_rejected` |
+| A server error, a timeout, or no connection for the token request                             | `NetworkError`              | `transfer_error` |
+| A connection for the Prüfbericht that is refused, not resolved, or times out while connecting | `NetworkError`              | `transfer_error` |
+| A server error, a read timeout, or a dropped connection for the Prüfbericht                   | `TransferError`             | `transfer_error` |
 
 The token request carries only the client credentials, so any client error means that they are wrong.
 A `401` for the Prüfbericht first makes grzctl request a new token and send the Prüfbericht once more.
+
+`grzctl process` retries a `NetworkError` only, since BfArM has not received the Prüfbericht then.
+The other failures can come after BfArM got it, so their message says to ask BfArM before submitting it again.
+If BfArM did get it, `grzctl db submission update <submission_id> reported` records that.
+A rerun of `grzctl process` then cleans the inbox without sending the Prüfbericht again.
+Otherwise a rerun sends it.

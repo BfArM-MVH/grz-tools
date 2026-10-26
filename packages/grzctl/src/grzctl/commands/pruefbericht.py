@@ -8,12 +8,14 @@ from typing import Any
 import click
 import grz_common.cli as grzcli
 import requests
+import urllib3.exceptions
 from grz_common.exceptions import (
     ConfigurationError,
     GrzError,
     NetworkError,
     PruefberichtGenerationError,
     PruefberichtRejectedError,
+    TransferError,
 )
 from grz_common.workers.submission import Submission
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
@@ -50,6 +52,18 @@ def _http_error(error: requests.RequestException, client_error: type[GrzError]) 
     else:
         error_class = client_error
     return error_class(str(error))
+
+
+def _never_sent(error: requests.RequestException) -> bool:
+    """Whether a failed request provably never reached the server.
+
+    Only a connection that never came up proves it: refused, not resolved, or timed out while connecting.
+    A later failure, such as a read timeout, a dropped connection or a server error, can come after the
+    server got the request.
+    """
+    # requests wraps these in a MaxRetryError, both for ConnectTimeout and for ConnectionError
+    reason = getattr(error.args[0], "reason", None) if error.args else None
+    return isinstance(reason, urllib3.exceptions.ConnectTimeoutError)
 
 
 def _get_new_token(auth_url: str, client_id: str, client_secret: str) -> tuple[str, datetime.datetime]:
@@ -323,5 +337,11 @@ def _try_submit(  # noqa: PLR0913, PLR0917
             _submit_pruefbericht(base_url=api_base_url, token=token, pruefbericht=pruefbericht)
     except requests.RequestException as e:
         log.error("Submitting the Prüfbericht failed.")
-        raise _http_error(e, PruefberichtRejectedError) from e
+        failure = _http_error(e, PruefberichtRejectedError)
+        if isinstance(failure, NetworkError) and not _never_sent(e):
+            # a retry could leave BfArM with the same Prüfbericht twice
+            raise TransferError(
+                f"{e}. BfArM may have received the Prüfbericht, so ask BfArM before submitting it again."
+            ) from e
+        raise failure from e
     return expiry, token

@@ -29,11 +29,15 @@ import grz_db.models.author
 import grzctl.cli
 import grzctl.processor
 import pytest
+import requests
 import responses
 import yaml
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from grzctl.commands import inbox_resolution
+from urllib3.exceptions import ProtocolError
+
+from .common import refused_connection
 
 # Path to test fixtures
 MOCK_FILES_DIR = Path(__file__).parent.parent / "mock_files"
@@ -1528,13 +1532,15 @@ class TestProcessPruefbericht:
         process_config_content,
         working_dir_path,
     ):
-        """A submission that BfArM rejects once is sent again after the backoff, with a new token.
+        """A submission whose connection BfArM refuses once is sent again after the backoff, with a new token.
 
         The backoff can outlast a token's lifetime, so no attempt may reuse the token of an earlier one.
         """
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
+        bfarm_api.post(
+            "https://bfarm.localhost/api/upload", body=refused_connection("https://bfarm.localhost/api/upload")
+        )
         bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
         # the backoff starts at 30 seconds, which the test records instead of waiting it out
         waits: list[float] = []
@@ -1557,10 +1563,12 @@ class TestProcessPruefbericht:
         process_config_content,
         working_dir_path,
     ):
-        """A Prüfbericht that BfArM never accepts leaves the reporting attempt in the states."""
+        """A Prüfbericht that never gets to BfArM leaves the reporting attempt in the states."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        bfarm_api.post("https://bfarm.localhost/api/upload", json={"error": "unavailable"}, status=503)
+        bfarm_api.post(
+            "https://bfarm.localhost/api/upload", body=refused_connection("https://bfarm.localhost/api/upload")
+        )
         monkeypatch.setattr(time, "sleep", lambda _: None)
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
@@ -1574,6 +1582,43 @@ class TestProcessPruefbericht:
         assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.TRANSFER_ERROR
         inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
         assert inbox_keys, "the inbox keeps a submission whose Prüfbericht BfArM did not accept"
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            {"json": {"error": "unavailable"}, "status": 503},
+            {"body": requests.ReadTimeout("Read timed out.")},
+            {"body": requests.ConnectionError(ProtocolError("Connection aborted.", ConnectionResetError(104)))},
+        ],
+        ids=["server-error", "read-timeout", "dropped-connection"],
+    )
+    def test_a_failure_after_sending_is_not_sent_again(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        answer,
+    ):
+        """BfArM may have received the Prüfbericht, so the run fails at once and says to ask BfArM."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", **answer)
+        waits: list[float] = []
+        monkeypatch.setattr(time, "sleep", waits.append)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert len(_submitted_tans(bfarm_api)) == 1
+        assert waits == []
+        state = _latest_state(process_config_content, sid)
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+        assert "ask BfArM" in (state.data or {}).get("error", "")
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+        assert inbox_keys, "the inbox keeps a submission whose Prüfbericht BfArM may not have"
 
     def test_refused_credentials_fail_at_once_as_a_configuration_error(
         self,
