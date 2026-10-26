@@ -206,6 +206,8 @@ Two progress logs live under `<output-dir>/logs/`:
 Re-running the command after a partial failure is therefore idempotent at the file level: each pass downloads a file only for the outputs it is missing, and leaves the outputs that are still there untouched.
 A file whose staged copy is gone, for example after a failed run with `keep_failed: false`, is validated and staged again.
 A file whose local copy is gone is written again, by the main pass if the prediction is "yes", otherwise by the QC pass.
+A staging record does not store the archive key that its copy is encrypted for.
+So rotate an archive key only with a fresh `--output-dir`, or a rerun archives the copies that are still staged for the old key.
 
 Each interrupt stops a run one level further:
 
