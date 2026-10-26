@@ -1195,6 +1195,24 @@ class TestProcessRerun:
         assert result.exit_code == 0, f"Rerun failed: {result.output}"
         assert not list(s3_buckets["interrogation"].objects.all())
 
+    def test_a_rerun_that_fails_before_its_qc_decision_keeps_the_qc_files(
+        self, s3_buckets, s3_requests, rerun_config_file_path, process_config_content, working_dir_path
+    ):
+        """The first run selects the submission for detailed QC, so a failed rerun must not delete its QC files."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        s3_requests.unavailable_bucket = s3_buckets["consented"].name
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, "the first run should fail while copying to the archive"
+        s3_requests.unavailable_bucket = None
+        # every file of the rerun fails its staging check, before the QC decision
+        s3_requests.failing_head_bucket = s3_buckets["interrogation"].name
+
+        result = _run_process(rerun_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"the rerun should fail: {result.output}"
+        assert _qc_files(process_config_content, sid) == set(_metadata_file_checksums())
+
 
 class TestProcessStagingCheckFailure:
     """A rerun asks the interrogation bucket whether a file is still staged, and that question can fail."""
@@ -1243,13 +1261,14 @@ def _states(process_config_content: dict, submission_id: str) -> list[Submission
 
 
 class TestProcessInboxCleanup:
-    """A processed submission is cleaned from the inbox, unless the operator says otherwise."""
+    """A reported submission is cleaned from the inbox, unless the operator says otherwise."""
 
     SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
 
-    def test_a_processed_submission_is_cleaned_from_the_inbox(
+    def test_a_reported_submission_is_cleaned_from_the_inbox(
         self,
         s3_buckets,
+        bfarm_api,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
@@ -1257,8 +1276,9 @@ class TestProcessInboxCleanup:
         """Cleaning leaves the marker and an empty metadata file, and records its own two states."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
 
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
         assert result.exit_code == 0, f"Process failed: {result.output}"
         keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
@@ -1268,9 +1288,37 @@ class TestProcessInboxCleanup:
         assert _states(process_config_content, sid) == [
             SubmissionStateEnum.PROCESSING,
             SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.REPORTED,
             SubmissionStateEnum.CLEANING,
             SubmissionStateEnum.CLEANED,
         ]
+
+    def test_an_unreported_submission_stays_in_the_inbox(
+        self,
+        s3_buckets,
+        caplog,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Without a Prüfbericht that BfArM accepted, the run keeps the inbox and says how to clean it."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        with caplog.at_level(logging.WARNING, logger="grzctl.commands.process"):
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/")}
+        assert keys == {f"{sid}/metadata/metadata.json"} | {
+            f"{sid}/files/{path}.c4gh" for path in _metadata_file_checksums()
+        }
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+        ]
+        assert "so its inbox is kept" in caplog.text
 
     def test_a_clean_interrupted_after_its_deletes_finishes_on_a_rerun(
         self,
@@ -1307,21 +1355,25 @@ class TestProcessInboxCleanup:
         self,
         s3_buckets,
         s3_requests,
+        bfarm_api,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
     ):
-        """An archived submission stays processed, and only the cleaning records the failure."""
+        """An archived and reported submission keeps those states, and only the cleaning records the failure."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
         s3_requests.unavailable_bucket = s3_buckets["inbox"].name
 
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
 
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
         assert _states(process_config_content, sid) == [
             SubmissionStateEnum.PROCESSING,
             SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.REPORTED,
             SubmissionStateEnum.CLEANING,
             SubmissionStateEnum.ERROR,
         ]
@@ -1362,7 +1414,7 @@ def _auto_run_config(tmp_path: Path, process_config_content: dict, shell_command
 
 
 class TestProcessDetailedQcAutoRun:
-    """With ``auto_run``, the run calls the configured QC workflow once the files are on local storage."""
+    """With ``auto_run``, the run calls the configured QC workflow after the archive copy and the Prüfbericht."""
 
     SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
 
@@ -1390,31 +1442,103 @@ class TestProcessDetailedQcAutoRun:
         assert (qc_dir / "ran.txt").read_text() == sid
         assert set((qc_dir / "contents.txt").read_text().split()) == {"files", "metadata", "qc"}
 
-    def test_a_failing_qc_command_fails_the_run(
+    def test_a_failing_qc_command_fails_only_its_own_step(
         self,
         s3_buckets,
+        bfarm_api,
+        tmp_path,
+        process_config_content,
+        crypt4gh_grz_private_key_file_path,
+        working_dir_path,
+    ):
+        """A QC command that exits non-zero holds back neither the archive copy nor the Prüfbericht.
+
+        The inbox keeps the submission, so that a rerun can run the command again.
+        """
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        config_file_path = _auto_run_config(tmp_path, process_config_content, "exit 3")
+
+        result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert _states(process_config_content, sid) == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.REPORTED,
+            SubmissionStateEnum.QCING,
+            SubmissionStateEnum.ERROR,
+        ]
+        state = _latest_state(process_config_content, sid)
+        assert state.failure_reason == FailureReasonEnum.DETAILED_QC_ERROR
+        recorded_error = (state.data or {}).get("error", "")
+        assert "non-zero exit status 3" in recorded_error, f"the QC command should be the cause, got: {recorded_error}"
+        _assert_archived(s3_buckets["consented"], sid, crypt4gh_grz_private_key_file_path)
+        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
+        assert inbox_keys, "a failed QC command leaves the files in the inbox"
+
+    def test_a_rerun_runs_a_failed_qc_command_again(
+        self,
+        s3_buckets,
+        bfarm_api,
         tmp_path,
         process_config_content,
         working_dir_path,
     ):
-        """A QC command that exits non-zero fails the run, and no file reaches an archive."""
+        """The rerun finds the submission archived and reported, so it only runs the QC command and cleans the inbox."""
         sid = self.SUBMISSION_ID
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
-        config_file_path = _auto_run_config(tmp_path, process_config_content, "exit 3")
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        result = _run_process(
+            _auto_run_config(tmp_path, process_config_content, "exit 3"),
+            sid,
+            working_dir_path,
+            submit_pruefbericht=True,
+        )
+        assert result.exit_code != 0, "the first run should fail on the QC command"
 
-        result = _run_process(config_file_path, sid, working_dir_path)
+        result = _run_process(
+            _auto_run_config(tmp_path, process_config_content, "true"), sid, working_dir_path, submit_pruefbericht=True
+        )
 
-        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
-        state = _latest_state(process_config_content, sid)
-        assert state.state == SubmissionStateEnum.ERROR
-        assert state.failure_reason == FailureReasonEnum.DETAILED_QC_ERROR
-        recorded_error = (state.data or {}).get("error", "")
-        assert "non-zero exit status 3" in recorded_error, f"the QC command should be the cause, got: {recorded_error}"
-        for bucket in ("consented", "non_consented", "interrogation"):
-            keys = {o.key for o in s3_buckets[bucket].objects.all()}
-            assert not keys, f"The {bucket} bucket should be empty, has: {keys}"
-        inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
-        assert inbox_keys, "a failed run leaves the files in the inbox"
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()]
+        assert _states(process_config_content, sid)[-6:] == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.QCING,
+            SubmissionStateEnum.QCED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.CLEANED,
+        ]
+
+    def test_a_qced_submission_does_not_run_the_qc_command_again(
+        self,
+        s3_buckets,
+        s3_requests,
+        bfarm_api,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """The first run runs the QC command and fails to clean the inbox, so the rerun only cleans it."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post("https://bfarm.localhost/api/upload", json={}, status=200)
+        runs = tmp_path / "qc-runs.txt"
+        config_file_path = _auto_run_config(tmp_path, process_config_content, f"echo run >> '{runs}'")
+        s3_requests.unavailable_bucket = s3_buckets["inbox"].name
+        result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+        assert result.exit_code != 0, "the first run should fail to clean the inbox"
+        s3_requests.unavailable_bucket = None
+
+        result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert runs.read_text().splitlines() == ["run"]
+        assert _states(process_config_content, sid)[-2:] == [SubmissionStateEnum.CLEANING, SubmissionStateEnum.CLEANED]
 
 
 @pytest.fixture

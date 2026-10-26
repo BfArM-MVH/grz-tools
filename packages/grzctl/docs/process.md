@@ -82,9 +82,7 @@ $ grzctl --config $CONFIG_PATH process \
    without a local copy
    into local storage; write
    local_storage/<submission_id>/
-   metadata/metadata.json;
-   detailed_qc.auto_run: run
-   detailed_qc.shell_command
+   metadata/metadata.json
         └────────────┬─────────────┘
                      ▼
 7. upload redacted metadata.json + (redacted) log files to interrogation bucket
@@ -97,14 +95,19 @@ $ grzctl --config $CONFIG_PATH process \
    submit (unless --no-submit-pruefbericht or already REPORTED, with retries)
    (DB states REPORTING → REPORTED; ERROR if BfArM never accepts it, STOP)
                      ▼
-10. --clean-inbox (default on): remove submission from inbox
+10. detailed_qc.auto_run and selected (unless already QCED):
+    run detailed_qc.shell_command
+    (DB states QCING → QCED; ERROR (detailed_qc_error) if it exits non-zero, STOP)
+                     ▼
+11. --clean-inbox (default on), once REPORTED is recorded: remove submission from inbox
     (DB states CLEANING → CLEANED)
 ```
 
 Steps 1 to 8 run inside the DB state transition `PROCESSING → PROCESSED` (or `ERROR` on failure), except the download of `metadata.json`.
 Processing can create the submission in the database, so a mistyped submission ID has to fail before that.
-Steps 9 and 10 each record their own states, so a failure in them leaves `PROCESSED` in place.
+Steps 9 to 11 each record their own states, so a failure in them leaves `PROCESSED` in place.
 A Prüfbericht that BfArM does not accept keeps the submission in the inbox.
+So does `--no-submit-pruefbericht`, unless an earlier run recorded `REPORTED`; `grzctl clean` cleans such an inbox.
 
 ## Detailed QC: prediction and decision
 
@@ -131,11 +134,12 @@ So decisions are serialized, also across processes.
 
 - **Selected**: the QC pass downloads, decrypts, and checksum-checks into local storage only the files without a local copy (none, if the prediction was right).
   It then writes `<local_storage>/<submission_id>/metadata/metadata.json`.
-  If `detailed_qc.auto_run` is true, it runs `detailed_qc.shell_command`.
-  A command that exits non-zero fails the run, with the failure reason `detailed_qc_error`.
+  If `detailed_qc.auto_run` is true, `detailed_qc.shell_command` runs in step 10, after the archive copy and the Prüfbericht.
+  A command that exits non-zero fails that step with the failure reason `detailed_qc_error`, and keeps the inbox.
+  A rerun then runs it again, until `QCED` is recorded.
 - **Not selected**: the prefetched local copies are deleted.
-- If a later step fails after a positive decision, the local QC data is kept; a
-  rerun does not write it again.
+- If a later step fails after a positive decision, the local QC data is kept; a rerun does not write it again.
+  A rerun that fails before its decision keeps it too, since the database still records the earlier selection.
 
 ## Parallel instances
 
@@ -178,7 +182,8 @@ The lock is database-wide, not per submitter, because a decision itself takes on
 
 If any file fails in the main pass (step 3), the pipeline:
 
-1. deletes the prefetched local copies, if a prediction had written them,
+1. deletes the prefetched local copies, if a prediction had written them and the database does not record the
+   submission as selected for detailed QC,
 2. deletes the staged objects from the interrogation bucket, unless
    `archives.interrogation.keep_failed` is `true`,
 3. fails the run; the DB state becomes `ERROR`.
@@ -221,6 +226,7 @@ If it is there, the run deletes the staged copies that an interrupted run left b
 Write-only archive credentials cannot read the `metadata.json`.
 The run then counts the submission as archived if the database records `PROCESSED` or `ARCHIVED` for it.
 If the database already records `REPORTED`, step 9 does not submit the Prüfbericht again, but still generates and saves it.
+If it records `QCED`, step 10 does not run the detailed QC workflow again.
 
 Once a cleaning has started, the inbox holds a `cleaning` or `cleaned` marker.
 A rerun of `process` then fails with `submission_cleaned`.
@@ -233,8 +239,8 @@ A rerun of `process` then fails with `submission_cleaned`.
 | `--threads`                                          | `min(cpu_count, 4)`     | Number of files processed concurrently in the thread pool (step 3 and the QC pass). |
 | `--concurrent-uploads`                               | `4`                     | Maximum concurrent part uploads per file's multipart upload to the interrogation bucket. See [Memory use](#memory-use). |
 | `--inbox`                                            | `None`                  | Selects which inbox to read from. Defaults to the inbox recorded in the database, the submitter's only inbox, or the only inbox that holds the submission. |
-| `--clean-inbox` / `--no-clean-inbox`                 | `--clean-inbox`         | Whether step 10 removes the submission from the inbox after success. |
-| `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing. A server error, a timeout or no connection is retried with backoff. |
+| `--clean-inbox` / `--no-clean-inbox`                 | `--clean-inbox`         | Whether step 11 removes the submission from the inbox, once `REPORTED` is recorded. |
+| `--submit-pruefbericht` / `--no-submit-pruefbericht` | `--submit-pruefbericht` | Submits the generated Prüfbericht to BfArM after processing. A failed token request, or a connection that never comes up, is retried with backoff. A failure after sending is not, see [BfArM errors](error-handling.md#bfarm-errors). |
 | `--save-pruefbericht PATH`                           | `None`                  | Also writes the generated Prüfbericht to `PATH`. A copy with redacted TAN always goes to `logs/pruefbericht.json`. |
 | `--redact-pruefbericht` / `--no-redact-pruefbericht` | `--redact-pruefbericht` | Whether the TAN is redacted in the file written by `--save-pruefbericht`. |
 
@@ -267,7 +273,7 @@ A future `--max-memory` option should derive `--threads` and the part size from 
 | `detailed_qc.local_storage`                                                                  | required, no default                  | Base path for prefetched files and, if selected, the QC pass: `<local_storage>/<submission_id>/files/...` and `/metadata/metadata.json`. |
 | `detailed_qc.salt`                                                                           | required, no default                  | Salt for the deterministic random-selection part of `db.should_qc()`. |
 | `detailed_qc.target_percentage`                                                              | `2.0`                                 | Target percentage of a submitter's submissions selected for detailed QC. `0` disables prediction and decision entirely. |
-| `detailed_qc.auto_run`                                                                       | `false`                               | If `true`, runs `detailed_qc.shell_command` right after a selected submission's QC pass completes. |
+| `detailed_qc.auto_run`                                                                       | `false`                               | If `true`, runs `detailed_qc.shell_command` for a selected submission after its archive copy and Prüfbericht (step 10). |
 | `detailed_qc.shell_command`                                                                  | a `nextflow run main.nf ...` template | Shell command run when `auto_run` is `true`; templated with `{submission_basepath}`, `{output_basepath}`, `{submission_id}`. |
 | `archives.interrogation`                                                                     | required, no default                  | S3 connection and bucket of the staging area. Every grzctl command loads the whole config, so a config without this section fails for every command, not only for `process`. |
 | `archives.interrogation.keep_failed`                                                         | `false`                               | If `true`, leaves a failed submission's staged files in the interrogation bucket instead of deleting them. |

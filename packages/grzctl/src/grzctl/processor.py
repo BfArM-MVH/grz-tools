@@ -617,6 +617,19 @@ class SubmissionProcessor:
 
         return should_qc
 
+    @staticmethod
+    def _is_selected_for_qc(db: SubmissionDb, submission_id: str) -> bool:
+        """Whether the database records the submission as selected for detailed QC, by this run or an earlier one.
+
+        A failed lookup counts as selected, so a failure handler keeps the QC files instead of deleting them.
+        """
+        try:
+            submission = db.get_submission(submission_id)
+        except Exception as e:
+            log.warning(f"Could not read the detailed QC selection of {submission_id}, keeping its QC files: {e}")
+            return True
+        return submission is not None and submission.selected_for_qc is True
+
     def _discard_qc_prefetch(self, run_state: SubmissionRunState) -> None:
         """Delete the decrypted files that the main pass wrote to local storage."""
         log.info(f"Deleting the files prefetched for detailed QC of {run_state.submission_id}...")
@@ -775,7 +788,7 @@ class SubmissionProcessor:
         error = FilesFailedError(message, file_errors)
         raise error from error.decisive.error
 
-    def run(self, submission_metadata: SubmissionMetadata) -> None:  # noqa: PLR0915
+    def run(self, submission_metadata: SubmissionMetadata) -> None:
         """
         Execute the processing pipeline for a single submission.
 
@@ -791,7 +804,8 @@ class SubmissionProcessor:
            If it is not needed, delete the files that step 3 wrote.
         7. Stage redacted metadata.
         8. Copy files from interrogation bucket to target archive bucket, then clean up.
-        9. Optionally clean the inbox.
+
+        The detailed QC workflow runs later, with :meth:`run_detailed_qc`.
 
         See ``packages/grzctl/docs/process.md`` for the flow, including parallel runs.
 
@@ -818,7 +832,6 @@ class SubmissionProcessor:
                 "writing its decrypted files to QC storage during processing."
             )
 
-        selected_for_qc = False
         try:
             self._pipeline_executor.process_files(submission_run, stage=True, write_local=prefetch)
 
@@ -858,20 +871,6 @@ class SubmissionProcessor:
                 metadata_file.chmod(QC_FILE_MODE)
                 log.info(f"Wrote submission metadata to {metadata_file}")
 
-                if detailed_qc.auto_run:
-                    output_basepath = submission_basepath / "qc"
-                    shell_command = detailed_qc.shell_command.format(
-                        submission_basepath=str(submission_basepath),
-                        output_basepath=str(output_basepath),
-                        submission_id=submission_run.submission_id,
-                    )
-                    log.info(f"Running detailed QC workflow: {shell_command}")
-                    try:
-                        subprocess.run(shell_command, shell=True, check=True)  # noqa: S602
-                    except subprocess.CalledProcessError as e:
-                        raise DetailedQCError(f"Detailed QC workflow failed: {e}") from e
-                    log.info(f"Detailed QC workflow completed for {submission_run.submission_id}.")
-
             self._upload_final_metadata(submission_metadata, submission_run)
             self._upload_redacted_logs(submission_metadata, submission_run)
 
@@ -881,10 +880,30 @@ class SubmissionProcessor:
             log.info(f"Submission {submission_run.submission_id} processed successfully.")
         except Exception:
             # Validation failed, or a step after the upload to the interrogation bucket did
-            # (copy to final archive, metadata upload, QC workflow). Either way, clean up the
+            # (copy to final archive, metadata upload). Either way, clean up the
             # staged files so they don't linger.
             self._handle_interrogation_failure(submission_run)
-            # Decrypted files stay only for a submission that is selected for detailed QC.
-            if not selected_for_qc and prefetch:
+            # Decrypted files stay only for a submission that is selected for detailed QC,
+            # also when an earlier run selected it and this rerun failed before its decision.
+            if prefetch and not self._is_selected_for_qc(db, submission_run.submission_id):
                 self._discard_qc_prefetch(submission_run)
             raise
+
+    def run_detailed_qc(self, submission_id: str) -> None:
+        """Run ``detailed_qc.shell_command`` on the local QC files of a submission that :meth:`run` wrote.
+
+        :raises DetailedQCError: If the command exits non-zero.
+        """
+        detailed_qc = self.config.detailed_qc
+        submission_basepath = Path(detailed_qc.local_storage) / submission_id
+        shell_command = detailed_qc.shell_command.format(
+            submission_basepath=str(submission_basepath),
+            output_basepath=str(submission_basepath / "qc"),
+            submission_id=submission_id,
+        )
+        log.info(f"Running detailed QC workflow: {shell_command}")
+        try:
+            subprocess.run(shell_command, shell=True, check=True)  # noqa: S602
+        except subprocess.CalledProcessError as e:
+            raise DetailedQCError(f"Detailed QC workflow failed: {e}") from e
+        log.info(f"Detailed QC workflow completed for {submission_id}.")

@@ -47,13 +47,10 @@ Every other step stops for a mistyped submission ID before its context is open, 
 | `configuration_error`           | GRZ      | The setup is wrong or incomplete: a key or credential is missing, S3 or BfArM rejects the credentials, or a configured bucket does not exist. |
 | `transfer_error`                | GRZ      | Moving data to or from S3 or BfArM failed. A rerun usually succeeds. If the failure repeats, the message names the error code or HTTP status. |
 | `encryption_error`              | GRZ      | Re-encrypting a file for the archive failed. |
-| `detailed_qc_error`             | GRZ      | The detailed QC workflow exited with an error. |
+| `detailed_qc_error`             | GRZ      | The detailed QC workflow exited with an error. A rerun of `grzctl process` runs it again. |
 | `pruefbericht_generation_error` | GRZ      | The Prüfbericht cannot be generated, because the database lacks the submission or data that the Prüfbericht needs. |
 | `pruefbericht_rejected`         | GRZ      | BfArM rejected the Prüfbericht. Sending the same one again fails again. |
 | `unknown`                       | GRZ      | No code path accounts for this error. Treat it as a bug. |
-
-No grzctl step raises the error behind `detailed_qc_error` yet.
-`grzctl db submission update --failure-reason` can record it.
 
 Older states can carry `network_error` or `upload_error`.
 Both mean what `transfer_error` means. grzctl no longer writes them, and `grzctl db submission update` does not offer them.
