@@ -24,6 +24,7 @@ from grz_common.exceptions import (
 )
 from grz_common.interrupt import wait_for_files
 from grz_common.pipeline.components import (
+    DataValidationError,
     DevNullSink,
     ObserverWithMetrics,
     PipelineError,
@@ -501,6 +502,14 @@ class FilePipelineExecutor:
                     content_type="application/octet-stream",
                 )
                 pipeline >> uploader
+
+        # the checksum alone accepts a wrong declared size, which ``grzctl validate`` rejects
+        size = checksum_validator.metrics["size"]
+        if size != file_meta.file_size_in_bytes:
+            raise DataValidationError(
+                f"File size mismatch! Expected: '{file_meta.file_size_in_bytes}', observed: '{size}'.",
+                stage=ChecksumValidator.__name__,
+            )
 
         stats = checksum_validator.metrics
         if format_validator:
