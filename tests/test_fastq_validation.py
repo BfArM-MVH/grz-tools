@@ -119,16 +119,16 @@ def test_paired_end_all_checks_passed_stream():
     consistency.check(path2)
 
 
+@pytest.mark.parametrize("failing_call", [1, 2])
 @pytest.mark.parametrize("error", [MemoryError("out of memory"), OSError("disk gone")])
-def test_a_failing_source_read_is_not_a_data_validation_error(monkeypatch, error):
+def test_a_failing_source_read_is_not_a_data_validation_error(monkeypatch, error, failing_call):
     """A failure of the source's ``read()`` is the system failing, not the data being wrong."""
     real_read = PushToPullAdapter.read
     calls = []
 
     def failing_read(self, size=-1):
-        # the first read passes, as grz_check hides the cause of a failure while it detects the format
         calls.append(None)
-        if len(calls) > 1:
+        if len(calls) >= failing_call:
             raise error
         return real_read(self, size)
 
