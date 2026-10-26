@@ -308,7 +308,9 @@ def _save_pruefbericht(
 def _submit_pruefbericht_with_retries(pruefbericht: Pruefbericht, pruefbericht_config: PruefberichtModel) -> None:
     """Submit the Prüfbericht, retrying with exponential backoff; re-raise the last error.
 
-    Only a :class:`NetworkError` is retried: a server error, a timeout, or no connection.
+    Only a :class:`NetworkError` is retried: a failed token request, or a Prüfbericht whose connection never came up.
+    A read timeout, a dropped connection or a server error after sending fails at once, since BfArM may have
+    received the Prüfbericht and would get it twice.
     Refused credentials and a rejected Prüfbericht fail at once, since sending it again does not change them.
     Every attempt requests a new token, because the backoff outlasts a token's lifetime.
     """
