@@ -255,8 +255,12 @@ where
         StreamInput::FileLike(file_like) => {
             // The gzip decoder reads 32 KiB at a time, and each Python read() call needs the
             // GIL. A large buffer turns those into one Python call per STREAM_BUF_SIZE.
+            let mut buffered = BufReader::with_capacity(STREAM_BUF_SIZE, file_like);
+            // niffler turns any error of its first read into FileTooShort, so read here to keep the cause.
+            // This only fills the buffer, the hasher and niffler still see the stream from byte 0.
+            buffered.fill_buf().map_err(|e| e.to_string())?;
             let hash_reader = StreamHasher {
-                inner: BufReader::with_capacity(STREAM_BUF_SIZE, file_like),
+                inner: buffered,
                 hasher: hasher.clone(),
             };
             let (decompressed, _) = niffler::get_reader(Box::new(hash_reader))

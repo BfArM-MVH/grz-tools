@@ -228,8 +228,9 @@ def test_an_unreadable_file_raises_instead_of_failing_the_validation(
     assert not temp_seq_data_log.exists() or "Validation runtime error" not in temp_seq_data_log.read_text()
 
 
+@pytest.mark.parametrize("failing_read", [1, 2])
 def test_a_failed_source_read_raises_instead_of_failing_the_validation(
-    submission_copy, temp_checksum_log, temp_seq_data_log, monkeypatch
+    submission_copy, temp_checksum_log, temp_seq_data_log, monkeypatch, failing_read
 ):
     """An I/O error while grz-check reads the source is re-raised, not recorded as a validation runtime error.
 
@@ -237,15 +238,14 @@ def test_a_failed_source_read_raises_instead_of_failing_the_validation(
     """
     target = next(p for p in submission_copy.files if p.name.endswith(".read1.fastq.gz"))
 
-    class FailingOnSecondRead:
-        # The 2nd call, because grz-check loses the cause of a failure on the 1st read (format detection).
+    class FailingOnNthRead:
         def __init__(self, file):
             self._file = file
             self._reads = 0
 
         def read(self, size=-1):
             self._reads += 1
-            if self._reads == 2:
+            if self._reads == failing_read:
                 raise OSError(errno.EIO, "Input/output error")
             return self._file.read(size)
 
@@ -263,7 +263,7 @@ def test_a_failed_source_read_raises_instead_of_failing_the_validation(
 
     def fake_open(file, *args, **kwargs):
         f = real_open(file, *args, **kwargs)
-        return FailingOnSecondRead(f) if Path(file) == Path(target) else f
+        return FailingOnNthRead(f) if Path(file) == Path(target) else f
 
     monkeypatch.setattr("grz_common.workers.submission.open", fake_open, raising=False)
 
