@@ -96,6 +96,19 @@ def test_inbox_target_honors_an_explicit_bucket_override(configuration: dict):
     assert config.inbox_target(LE_ID, "inbox-external").s3.bucket == "grz-incoming-prod"
 
 
+@pytest.mark.parametrize("archive", ["consented", "non_consented", "interrogation"])
+@pytest.mark.parametrize("by_override", [False, True], ids=["inbox-name", "bucket-override"])
+def test_an_inbox_that_shares_a_bucket_with_an_archive_fails(configuration: dict, archive: str, by_override: bool):
+    """Archive keys equal inbox keys, so a shared bucket would lose the inbox files or the archive copies."""
+    bucket = configuration["archives"][archive]["s3"]["bucket"]
+    inbox = {**INBOX, "private_key_path": configuration["db"]["author"]["private_key_path"]}
+    inbox_buckets = {"inbox": {**inbox, "bucket": bucket}} if by_override else {bucket: inbox}
+    configuration["leistungserbringer"] = {LE_ID: {"inbox_buckets": inbox_buckets}}
+
+    with pytest.raises(ValidationError, match="must use distinct buckets"):
+        GrzctlConfig.from_configuration(configuration)
+
+
 @pytest.mark.parametrize("field", ["authorization_url", "client_id", "client_secret", "api_base_url"])
 def test_a_config_without_a_pruefbericht_field_fails(configuration: dict, field: str):
     """Every grzctl command loads the whole config.

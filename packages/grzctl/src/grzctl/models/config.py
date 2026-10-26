@@ -373,6 +373,25 @@ class GrzctlConfig(IgnoringBaseSettings):
             self._le_by_alias[entry.alias] = entry
         return self
 
+    @model_validator(mode="after")
+    def check_inboxes_are_not_archives(self) -> "GrzctlConfig":
+        # archive keys equal inbox keys, so an inbox bucket that is also an archive bucket has its files overwritten,
+        # and the cleanup of one deletes the files of the other
+        archive_buckets = {
+            self.archives.consented.s3.bucket: "consented",
+            self.archives.non_consented.s3.bucket: "non-consented",
+            self.archives.interrogation.s3.bucket: "interrogation",
+        }
+        for le_id, entry in self.leistungserbringer.items():
+            for inbox_name, inbox in entry.inbox_buckets.items():
+                bucket = inbox.bucket or inbox_name
+                if bucket in archive_buckets:
+                    raise ValueError(
+                        f"inbox '{inbox_name}' of LE '{le_id}' and the {archive_buckets[bucket]} archive "
+                        f"must use distinct buckets, but both use '{bucket}'."
+                    )
+        return self
+
     @staticmethod
     def _describe_le(le_id: str, entry: LeistungserbringerEntry) -> str:
         """Return a human-readable description with both id and alias."""
