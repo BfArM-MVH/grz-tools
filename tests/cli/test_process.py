@@ -439,28 +439,39 @@ class TestProcessValidationFailure:
         assert "does not match genomic data center identifier in config" in (state.data or {}).get("error", "")
         assert not s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], submission_id)
 
-    def test_checksum_mismatch_fails_processing(
+    @pytest.mark.parametrize(
+        ("field", "wrong_value", "message"),
+        [
+            ("fileChecksum", lambda _: "0" * 64, "Checksum mismatch"),
+            ("fileSizeInBytes", lambda size: size + 1, "File size mismatch"),
+        ],
+        ids=["checksum", "size"],
+    )
+    def test_a_checksum_or_size_mismatch_fails_processing(
         self,
         s3_buckets,
         s3_requests,
         temp_process_config_file_path,
         process_config_content,
         working_dir_path,
+        field,
+        wrong_value,
+        message,
     ):
-        """A file whose content does not match its metadata checksum must fail the run and reach no archive."""
+        """A file that does not match its metadata checksum or size must fail the run and reach no archive."""
         submission_id = "260914050_2024-07-15_c64603a7"
         upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
 
-        # replace the metadata with a copy in which one file has a wrong checksum; the last file in
+        # replace the metadata with a copy in which one file has a wrong value; the last file in
         # metadata order is the one to pick, because the files before it are staged by the time the
         # run fails, which is what leaves the cleanup something to delete
-        wrong_checksum_file = list(_metadata_file_checksums())[-1]
+        wrong_file = list(_metadata_file_checksums())[-1]
         metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
         for donor in metadata["donors"]:
             for lab_datum in donor["labData"]:
                 for file in lab_datum.get("sequenceData", {}).get("files", []):
-                    if file["filePath"] == wrong_checksum_file:
-                        file["fileChecksum"] = "0" * 64
+                    if file["filePath"] == wrong_file:
+                        file[field] = wrong_value(file[field])
         s3_buckets["inbox"].put_object(
             Key=f"{submission_id}/metadata/metadata.json", Body=json.dumps(metadata).encode()
         )
@@ -469,7 +480,7 @@ class TestProcessValidationFailure:
 
         assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
         logs = [path.read_text() for path in (working_dir_path / "logs").iterdir()]
-        assert any("Checksum mismatch" in log for log in logs)
+        assert any(message in log for log in logs)
         state = _latest_state(process_config_content, submission_id)
         assert state.state == SubmissionStateEnum.ERROR
         assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
