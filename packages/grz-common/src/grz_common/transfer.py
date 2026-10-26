@@ -152,8 +152,10 @@ def head_object(
                 raise
             head_error = e
         # a HEAD answer has no body, so its error code is only the HTTP status. A GET answers with the real code.
+        # The GET sends no Range header: a proxy that drops it breaks the request signature, and closing the
+        # body unread aborts the transfer before more than the first chunk arrives anyway.
         try:
-            s3_client.get_object(Bucket=bucket, Key=key, Range="bytes=0-0")["Body"].close()
+            s3_client.get_object(Bucket=bucket, Key=key)["Body"].close()
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey":
                 raise missing_error(f"s3://{bucket}/{key} does not exist") from e
