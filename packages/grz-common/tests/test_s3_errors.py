@@ -33,11 +33,13 @@ class _FailingClient:
         self.head_status = head_status
         self.get_code = get_code
         self.body = io.BytesIO(b"x")
+        self.get_kwargs: dict | None = None
 
     def head_object(self, **_kwargs):
         raise _head_error(self.head_status)
 
-    def get_object(self, **_kwargs):
+    def get_object(self, **kwargs):
+        self.get_kwargs = kwargs
         if self.get_code is None:
             return {"Body": self.body}
         raise _client_error(self.get_code, "GetObject")
@@ -113,6 +115,19 @@ def test_head_object_reports_a_refused_read_as_a_failed_download():
 def test_head_object_raises_the_given_class_for_a_failed_transfer():
     with pytest.raises(grzexc.UploadError):
         head_object(_FailingClient(HTTPStatus.FORBIDDEN, "AccessDenied"), "bucket", "key", grzexc.UploadError)
+
+
+def test_head_object_sends_the_get_request_without_a_range_header():
+    """A proxy at a submitter dropped the Range header, which broke the request signature (SignatureDoesNotMatch).
+
+    The code of the error is all that matters, so the request asks for the whole object and closes the body unread.
+    """
+    s3_client = _FailingClient(HTTPStatus.NOT_FOUND, "NoSuchKey")
+
+    with pytest.raises(grzexc.MissingObjectError):
+        head_object(s3_client, "bucket", "key")
+
+    assert "Range" not in s3_client.get_kwargs
 
 
 @pytest.mark.parametrize("head_status", [HTTPStatus.NOT_FOUND, HTTPStatus.FORBIDDEN])
