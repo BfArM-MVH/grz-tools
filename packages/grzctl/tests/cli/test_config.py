@@ -1,6 +1,7 @@
 """GrzctlConfig checks the configuration it loads, and merges environment variables into it."""
 
 import json
+import logging
 
 import pytest
 from grz_common.models.base import get_secret_value
@@ -58,6 +59,20 @@ def test_archive_public_key_can_come_from_an_env_var(monkeypatch, configuration:
     assert config.archives.consented.public_key_path is None
 
 
+def test_differing_archive_endpoints_warn_only_when_asked(configuration: dict, caplog):
+    """Only ``grzctl process`` copies from the interrogation bucket to an archive, so loading the config stays quiet."""
+    configuration["archives"]["interrogation"]["s3"]["endpoint_url"] = "https://other.example.org"
+
+    with caplog.at_level(logging.WARNING):
+        config = GrzctlConfig.from_configuration(configuration)
+    assert "endpoint" not in caplog.text
+
+    with caplog.at_level(logging.WARNING):
+        config.archives.warn_if_endpoints_differ()
+    assert "differs from consented archive endpoint" in caplog.text
+    assert "differs from non-consented archive endpoint" in caplog.text
+
+
 def test_inbox_target_defaults_the_bucket_to_the_inbox_name(configuration: dict):
     """Without an explicit ``bucket:``, the S3 bucket of an inbox is its name."""
     config = GrzctlConfig.from_configuration(configuration)
@@ -79,6 +94,19 @@ def test_inbox_target_honors_an_explicit_bucket_override(configuration: dict):
     config = GrzctlConfig.from_configuration(configuration)
 
     assert config.inbox_target(LE_ID, "inbox-external").s3.bucket == "grz-incoming-prod"
+
+
+@pytest.mark.parametrize("archive", ["consented", "non_consented", "interrogation"])
+@pytest.mark.parametrize("by_override", [False, True], ids=["inbox-name", "bucket-override"])
+def test_an_inbox_that_shares_a_bucket_with_an_archive_fails(configuration: dict, archive: str, by_override: bool):
+    """Archive keys equal inbox keys, so a shared bucket would lose the inbox files or the archive copies."""
+    bucket = configuration["archives"][archive]["s3"]["bucket"]
+    inbox = {**INBOX, "private_key_path": configuration["db"]["author"]["private_key_path"]}
+    inbox_buckets = {"inbox": {**inbox, "bucket": bucket}} if by_override else {bucket: inbox}
+    configuration["leistungserbringer"] = {LE_ID: {"inbox_buckets": inbox_buckets}}
+
+    with pytest.raises(ValidationError, match="must use distinct buckets"):
+        GrzctlConfig.from_configuration(configuration)
 
 
 @pytest.mark.parametrize("field", ["authorization_url", "client_id", "client_secret", "api_base_url"])
