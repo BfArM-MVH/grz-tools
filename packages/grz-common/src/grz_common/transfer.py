@@ -212,13 +212,19 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     return response["LastModified"]
 
 
+UNKNOWN_GRZ_CLI_VERSION = "UNKNOWN"
+"""Recorded when a submission's grz-cli version cannot be determined."""
+
+
 def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> str:
     """Read and return the version number of grz-cli used to upload a given submission
 
     :param s3_client: boto3 S3 client pointed at the inbox bucket.
     :param bucket: Name of the inbox bucket.
     :param submission_id: Submission identifier (the top-level S3 prefix).
-    :returns: version number as a string. Return "UNKNOWN" if no version file is found
+    :returns: The version string, or UNKNOWN_GRZ_CLI_VERSION if the submission has no ``version`` object.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
     """
     key = submission_id + "/version"
     with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
@@ -228,5 +234,5 @@ def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> 
         except ClientError as e:
             if e.response["Error"]["Code"] != "NoSuchKey":
                 raise
-            grz_cli_version = "UNKNOWN"
+            grz_cli_version = UNKNOWN_GRZ_CLI_VERSION
         return grz_cli_version

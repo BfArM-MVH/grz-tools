@@ -16,6 +16,7 @@ import grzctl.cli
 import pytest
 import yaml
 from grz_common.exceptions import ConfigurationError
+from grz_common.transfer import UNKNOWN_GRZ_CLI_VERSION
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
@@ -236,6 +237,43 @@ def test_download_records_inbox(migrated_database_config: GrzctlConfig, tmp_path
     assert recorded is not None
     assert recorded.inbox == INBOX
     assert recorded.grz_cli_version == "3.0.0"
+    get_version.assert_called_once()
+    worker.download.assert_called_once()
+
+
+def test_errored_grzcli_version_read(migrated_database_config: GrzctlConfig, tmp_path: Path, db: SubmissionDb):
+    """Make sure a failed grzcli version read does not completely stop a valid download, just gives a warning"""
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    db.add_submission(SUBMISSION_ID)
+    config_path = _config_with_inbox(migrated_database_config, tmp_path)
+
+    context = MagicMock()
+    context.__enter__.return_value.db = db
+    with (
+        patch("grzctl.commands.download.DbContext", return_value=context) as db_context,
+        patch("grzctl.commands.download.Worker") as worker_cls,
+        patch("grzctl.commands.download.get_grzcli_version", side_effect=Exception("trigger_exception")) as get_version,
+    ):
+        worker = worker_cls.return_value
+        result = _invoke(
+            "--config",
+            str(config_path),
+            "download",
+            "--submission-id",
+            SUBMISSION_ID,
+            "--output-dir",
+            str(output_dir),
+            "--inbox",
+            INBOX,
+            "--no-populate",
+        )
+
+    assert result.exit_code == 0, result.stderr
+    db_context.assert_called_once()
+    recorded = db.get_submission(SUBMISSION_ID)
+    assert recorded is not None
+    assert recorded.grz_cli_version == UNKNOWN_GRZ_CLI_VERSION
     get_version.assert_called_once()
     worker.download.assert_called_once()
 

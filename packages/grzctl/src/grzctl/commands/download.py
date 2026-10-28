@@ -5,7 +5,12 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
-from grz_common.transfer import get_grzcli_version, get_metadata_upload_timestamp, init_s3_client
+from grz_common.transfer import (
+    UNKNOWN_GRZ_CLI_VERSION,
+    get_grzcli_version,
+    get_metadata_upload_timestamp,
+    init_s3_client,
+)
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
@@ -103,8 +108,12 @@ def download(  # noqa: PLR0913, PLR0917
                 raise RuntimeError("A DbContext that update_db enables holds the database.")
             # Init S3 client
             s3_client = init_s3_client(s3_options)
-            # Add grz-cli version to db
-            grz_cli_version = get_grzcli_version(s3_client, s3_options.bucket, submission_id)
+            # Add grz-cli version to db. Informational, so failed read must not fail the download.
+            try:
+                grz_cli_version = get_grzcli_version(s3_client, s3_options.bucket, submission_id)
+            except Exception as e:
+                grz_cli_version = UNKNOWN_GRZ_CLI_VERSION
+                log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
             db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
             if populate:
                 submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
