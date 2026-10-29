@@ -1,7 +1,7 @@
 import csv
 import importlib.resources
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from operator import itemgetter
 from pathlib import Path
 from textwrap import dedent
@@ -619,6 +619,9 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     runner = CliRunner()
     cli = grzctl.cli.build_cli()
     common = ["--config", str(migrated_database_config_path)]
+    # grzctl compares the UTC timestamps of the database with month ends in UTC
+    today = datetime.now(UTC).date()
+    last_month = today.replace(day=1) - timedelta(days=1)
 
     metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
     metadata_raw["submission"]["submissionType"] = "initial"
@@ -643,7 +646,7 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
                 "populate",
                 "--no-confirm",
                 "--submission-date",
-                date.today().isoformat(),
+                today.isoformat(),
                 sid,
                 str(metadata_path),
             ],
@@ -665,13 +668,14 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
             result = runner.invoke(cli, [*common, "db", "submission", "modify", sid, key, value])
             assert result.exit_code == 0, result.output
 
-    # without a URL the report is printed; the configured LE without submissions gets a zero row
+    # without a URL the report is printed: the month before and the running month, so that a month
+    # keeps collecting what is recorded late; the configured LE without submissions gets a zero row
     result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
+    [before, payload] = json.loads(result.stdout)
     size = metadata.get_submission_size()
     assert payload["grz"] == "GRZK00007"
-    assert payload["month"] == date.today().strftime("%Y-%m")
+    assert (before["month"], payload["month"]) == (last_month.strftime("%Y-%m"), today.strftime("%Y-%m"))
     assert payload["reported_by"] == f"grzctl {grzctl.__version__} report monitoring"
     zero = {"cases": 0, "cases_with_size": 0, "bytes": 0, "bytes_consented": 0, "bytes_unconsented": 0, "active": 0}
     no_speed = {
@@ -681,6 +685,7 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
         "speed_max_mbs": None,
         "speed_sd_mbs": None,
     }
+    assert before["rows"] == [{"le_id": "000000000", **zero, **no_speed}]  # all of it happened this month
     [absent, present] = payload["rows"]
     assert absent == {"le_id": "000000000", **zero, **no_speed}
     assert present.keys() == absent.keys()  # the same shape for every row
@@ -695,25 +700,25 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     # a month before the submission: nothing reported or archived yet
     result = runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-01"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
-    earlier = json.loads(result.stdout)
+    [earlier] = json.loads(result.stdout)
     assert earlier["rows"] == [{"le_id": "000000000", **zero, **no_speed}]
 
     assert runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-13"]).exit_code == 2
 
     # with a URL the report goes to the intake, together with the token
-    sent = {}
+    sent = []
     answer = {"status": 200, "appended": 3}
 
     def fake_post(url, json, timeout):
-        sent.update(url=url, body=json)
+        sent.append((url, json))
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: answer)
 
     monkeypatch.setattr("grzctl.commands.report.requests.post", fake_post)
     env = {"GRZ_MONITORING_URL": "https://intake.example/exec", "GRZ_MONITORING_TOKEN": "s3cret"}
     result = runner.invoke(cli, [*common, "report", "monitoring"], env=env, catch_exceptions=False)
     assert result.exit_code == 0, result.output
-    assert sent["url"] == "https://intake.example/exec"
-    assert sent["body"] == {**payload, "token": "s3cret", "dry_run": False}
+    assert [body["month"] for _, body in sent] == [before["month"], payload["month"]]
+    assert sent[1] == ("https://intake.example/exec", {**payload, "token": "s3cret", "dry_run": False})
 
     # a rejected report fails the command, so cron reports it
     answer = {"status": 400, "error": "unknown le_id for GRZK00007"}
@@ -726,8 +731,25 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     assert result.exit_code == 0, result.output
     result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
-    [_, present] = json.loads(result.stdout)["rows"]
+    [_, present] = json.loads(result.stdout)[1]["rows"]
     assert (present["uploads"], present["speed_median_mbs"], present["speed_sd_mbs"]) == (1, 1.0, 0.0)
+
+    # an upload that finished last month, recorded only now (downloaded late): today's run still
+    # sends last month, so the upload counts in the month it happened
+    upload_end = datetime.combine(last_month.replace(day=15), time(12), UTC)
+    for key, value in (
+        ("upload_started_at", (upload_end - timedelta(seconds=4)).isoformat()),
+        ("upload_finished_at", upload_end.isoformat()),
+        ("upload_resumed", "no"),
+    ):
+        result = runner.invoke(cli, [*common, "db", "submission", "modify", rejected_id, key, value])
+        assert result.exit_code == 0, result.output
+    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    [before, payload] = json.loads(result.stdout)
+    late = {"uploads": 1, "speed_median_mbs": 0.25, "speed_min_mbs": 0.25, "speed_max_mbs": 0.25, "speed_sd_mbs": 0.0}
+    assert before["rows"][1] == {"le_id": present["le_id"], **zero, **late}
+    assert (payload["rows"][1]["uploads"], payload["rows"][1]["speed_median_mbs"]) == (1, 1.0)
 
     # a case without a known size still counts as a case, but not into the average size
     engine = sqlalchemy.create_engine(GrzctlConfig.from_path(migrated_database_config_path).db.database_url)
@@ -735,7 +757,7 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
         connection.execute(
             sqlalchemy.update(Submission).where(Submission.id == submission_id).values(submission_size=None)  # type: ignore[arg-type]
         )
-    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    result = runner.invoke(cli, [*common, "report", "monitoring", "--month", today.strftime("%Y-%m")])
     assert result.exit_code == 0, result.output
-    [_, present] = json.loads(result.stdout)["rows"]
+    [[_, present]] = [report["rows"] for report in json.loads(result.stdout)]
     assert (present["cases"], present["cases_with_size"], present["bytes"]) == (1, 0, 0)
