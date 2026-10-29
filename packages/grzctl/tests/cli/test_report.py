@@ -630,11 +630,16 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     rejected_raw = json.loads(json.dumps(metadata_raw))
     rejected_raw["submission"]["tanG"] = "f" * 64
     rejected_id = GrzSubmissionMetadata.model_validate(rejected_raw).submission_id
+    # a follow-up of the case that passed QC, archived and reported: data of the case, but no further case
+    followup_raw = json.loads(json.dumps(metadata_raw))
+    followup_raw["submission"].update(submissionType="followup", tanG="e" * 64)
+    followup_id = GrzSubmissionMetadata.model_validate(followup_raw).submission_id
     submission_id = metadata.submission_id
-    assert rejected_id != submission_id
+    assert len({rejected_id, followup_id, submission_id}) == 3
     for name, raw, sid, qc in (
         ("metadata", metadata_raw, submission_id, "yes"),
         ("rejected", rejected_raw, rejected_id, "no"),
+        ("followup", followup_raw, followup_id, "yes"),
     ):
         metadata_path = tmp_path / f"{name}.json"
         metadata_path.write_text(json.dumps(raw))
@@ -691,7 +696,8 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     assert present.keys() == absent.keys()  # the same shape for every row
     assert present["le_id"] == metadata.submission.submitter_id
     assert (present["cases"], present["cases_with_size"], present["active"], present["bytes"]) == (1, 1, 1, size)
-    assert present["bytes_consented"] + present["bytes_unconsented"] == size  # the rejected one is not archived
+    # the case and its follow-up are archived, the rejected one is not
+    assert present["bytes_consented"] + present["bytes_unconsented"] == 2 * size
     # 1002287 bytes in 1 s and in 4 s: 1.00 and 0.25 MB/s
     assert size == 1002287
     assert (present["uploads"], present["speed_min_mbs"], present["speed_max_mbs"]) == (2, 0.25, 1.0)
