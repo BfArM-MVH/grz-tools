@@ -715,7 +715,8 @@ def _monitoring_payload(
       standard deviation of the transfer speed in MB/s of the LE's non-test uploads that finished during
       the month: the submission size over the time between the uploader's start marker and its last
       object, as ``grzctl download`` recorded it (:attr:`Submission.upload_started_at`). A resumed upload
-      spans the pause, so it is left out.
+      spans the pause, so it is left out, and so is an upload without the uploader's ``version`` marker,
+      for which a resumption cannot be detected (``upload_resumed`` is NULL).
     """
     first, last = month_date_bounds(month.year, month.month)
     cutoff = datetime.datetime.combine(last + datetime.timedelta(days=1), datetime.time(), datetime.UTC)
