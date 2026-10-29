@@ -1340,6 +1340,7 @@ source = { editable = "packages/grzctl" }
 dependencies = [
     { name = "grz-common" },
     { name = "grz-db" },
+    { name = "grz-pydantic-models" },
     { name = "requests" },
     { name = "textual" },
 ]
@@ -1368,6 +1369,7 @@ test = [
 requires-dist = [
     { name = "grz-common", editable = "packages/grz-common" },
     { name = "grz-db", editable = "packages/grz-db" },
+    { name = "grz-pydantic-models", editable = "packages/grz-pydantic-models" },
     { name = "requests", specifier = ">=2.32.3,<3" },
     { name = "textual", specifier = "~=5.3" },
 ]
