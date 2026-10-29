@@ -187,6 +187,18 @@ class SubmissionBase(SQLModel):
     # and the decryption key lookup can locate it without asking for --inbox again
     inbox: str | None = None
 
+    # when the inbox received the first and the last object of the upload, and whether the upload
+    # was resumed after an interruption (None: not derivable, see grz_common.transfer.upload_timing).
+    # ``grzctl download --populate`` records them from the inbox's object listing, which
+    # ``grzctl clean`` erases; ``grzctl report monitoring`` aggregates transfer speeds from them.
+    upload_started_at: datetime.datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    upload_finished_at: datetime.datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    upload_resumed: bool | None = None
+
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""
@@ -1335,6 +1347,38 @@ class SubmissionDb:
                     "Overwriting inbox of submission %s: '%s' -> '%s'.", submission_id, previous_inbox, inbox_name
                 )
             submission.inbox = inbox_name
+            active_session.add(submission)
+            active_session.flush()
+            return submission
+
+    def set_submission_upload_timing(
+        self,
+        submission_id: str,
+        started: datetime.datetime,
+        finished: datetime.datetime,
+        resumed: bool | None,
+        session: Session | None = None,
+    ) -> Submission:
+        """Record when the inbox received the first and the last object of a submission's upload.
+
+        ``grzctl download --populate`` calls this while the inbox still lists the objects; see
+        :func:`grz_common.transfer.upload_timing` for how the values are derived.
+
+        :param submission_id: ID of the submission.
+        :param started: When the upload started.
+        :param finished: When the upload finished.
+        :param resumed: Whether the upload was resumed after an interruption, ``None`` when unknown.
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        :returns: The updated :class:`Submission`.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        """
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            submission.upload_started_at = started
+            submission.upload_finished_at = finished
+            submission.upload_resumed = resumed
             active_session.add(submission)
             active_session.flush()
             return submission
