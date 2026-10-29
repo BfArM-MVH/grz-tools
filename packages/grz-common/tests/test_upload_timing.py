@@ -23,7 +23,7 @@ def test_upload_timing_spans_marker_to_last_object():
             f"{SUBMISSION_ID}/metadata/metadata.json": _at(26),
         },
     )
-    assert (timing.started, timing.finished, timing.resumed) == (_at(0), _at(26), False)
+    assert timing == (_at(0), _at(26), False)
 
 
 def test_upload_timing_detects_a_resumed_upload():
@@ -37,7 +37,7 @@ def test_upload_timing_detects_a_resumed_upload():
             f"{SUBMISSION_ID}/metadata/metadata.json": _at(71),
         },
     )
-    assert (timing.started, timing.finished, timing.resumed) == (_at(60), _at(71), True)
+    assert timing == (_at(60), _at(71), True)
 
 
 def test_upload_timing_without_marker_cannot_tell():
@@ -46,7 +46,7 @@ def test_upload_timing_without_marker_cannot_tell():
         SUBMISSION_ID,
         {f"{SUBMISSION_ID}/files/a.c4gh": _at(10), f"{SUBMISSION_ID}/metadata/metadata.json": _at(26)},
     )
-    assert (timing.started, timing.finished, timing.resumed) == (_at(10), _at(26), None)
+    assert timing == (_at(10), _at(26), None)
 
 
 def test_upload_timing_needs_an_object():

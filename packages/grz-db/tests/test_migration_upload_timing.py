@@ -43,7 +43,8 @@ def test_upload_timing_migration_adds_the_columns(db_test_connection: str):
 
     started = datetime.datetime(2025, 1, 1, 10, 0, tzinfo=datetime.UTC)
     finished = started + datetime.timedelta(minutes=30)
-    db.set_submission_upload_timing(submission_id, started, finished, resumed=False)
+    for column, value in (("upload_started_at", started), ("upload_finished_at", finished), ("upload_resumed", False)):
+        db.modify_submission(submission_id, column, value)
     assert (recorded := db.get_submission(submission_id)) is not None
     assert recorded.upload_finished_at - recorded.upload_started_at == datetime.timedelta(minutes=30)
     assert recorded.upload_resumed is False
