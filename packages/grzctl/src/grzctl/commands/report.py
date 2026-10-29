@@ -689,7 +689,9 @@ def _monitoring_payload(
 
     Every LE in *le_ids* gets a row, also without submissions, so the sheet sees the month as complete,
     and every row has the same keys: a count that has nothing to count is ``0``, a statistic without
-    values ``None``. Sizes are in bytes; the sheet scales them.
+    values ``None``. Sizes are in bytes; the sheet scales them. Months end at midnight UTC, as the
+    database timestamps are in UTC. Only the state and change-request logs are read as of the month's
+    end; QC result, size and consent are the submissions' current values.
 
     Cumulative, as of the end of the month; the sheet derives monthly increments from them:
 
