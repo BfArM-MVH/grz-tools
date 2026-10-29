@@ -4,10 +4,10 @@ Common methods for transferring data to and from GRZ buckets.
 
 import datetime
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import boto3  # type: ignore[import-untyped]
 import grz_common.exceptions as grzexc
@@ -212,3 +212,60 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json's timestamp is invalid.
     raise_if_cleaned(s3_client, bucket, submission_id)
     return response["LastModified"]
+
+
+class UploadTiming(NamedTuple):
+    """When an inbox received the first and the last object of an upload, see :func:`upload_timing`."""
+
+    started: datetime.datetime
+    finished: datetime.datetime
+    resumed: bool | None
+    """Whether the upload was resumed after an interruption; ``None`` if the uploader wrote no ``version`` marker."""
+
+
+def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datetime]) -> UploadTiming:
+    """Derive the upload timing of a submission from the ``LastModified`` times of its inbox objects.
+
+    The uploader writes ``<submission_id>/version`` before the first file and ``metadata/metadata.json``
+    after the last one, so the marker's time is the start and the newest object's time is the end of the
+    upload. A resumed upload rewrites the marker and skips the files an earlier run completed, so an
+    object older than the marker means the upload was interrupted and resumed: its span then contains
+    the pause and does not measure the transfer speed. Without the marker (older grz-cli versions) the
+    oldest object is the start and a resumption cannot be detected.
+
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :param last_modified: ``LastModified`` of each object of the submission, by key.
+    :returns: The timing.
+    :raises MissingSubmissionFileError: If *last_modified* holds no object besides the marker.
+    """
+    marker_key = f"{submission_id}/version"
+    marker = last_modified.get(marker_key)
+    times = [modified for key, modified in last_modified.items() if key != marker_key]
+    if not times:
+        raise grzexc.MissingSubmissionFileError(f"{submission_id} has no uploaded object")
+    return UploadTiming(
+        started=marker or min(times),
+        finished=max(times),
+        resumed=None if marker is None else any(modified < marker for modified in times),
+    )
+
+
+def get_upload_timing(s3_client: S3Client, bucket: str, submission_id: str) -> UploadTiming:
+    """Return the upload timing of a submission in the inbox, see :func:`upload_timing`.
+
+    Only meaningful before ``grzctl clean`` runs: cleaning deletes the objects and writes markers of
+    its own. Check with :func:`raise_if_cleaned` (or :func:`get_metadata_upload_timestamp`) first.
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :returns: The timing.
+    :raises MissingSubmissionFileError: If the inbox holds no object of the submission.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    prefix = f"{submission_id}/"
+    with s3_errors(f"Listing s3://{bucket}/{prefix}", grzexc.DownloadError):
+        pages = s3_client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
+        last_modified = {obj["Key"]: obj["LastModified"] for page in pages for obj in page.get("Contents", [])}
+    return upload_timing(submission_id, last_modified)
