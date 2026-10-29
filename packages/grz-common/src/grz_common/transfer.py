@@ -223,7 +223,7 @@ class UploadTiming(NamedTuple):
     """Whether the upload was resumed after an interruption; ``None`` if the uploader wrote no ``version`` marker."""
 
 
-def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datetime]) -> UploadTiming:
+def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datetime]) -> UploadTiming | None:
     """Derive the upload timing of a submission from the ``LastModified`` times of its inbox objects.
 
     The uploader writes ``<submission_id>/version`` before the first file and ``metadata/metadata.json``
@@ -235,14 +235,13 @@ def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datet
 
     :param submission_id: Submission identifier (the top-level S3 prefix).
     :param last_modified: ``LastModified`` of each object of the submission, by key.
-    :returns: The timing.
-    :raises MissingSubmissionFileError: If *last_modified* holds no object besides the marker.
+    :returns: The timing, or ``None`` if *last_modified* holds no object besides the marker.
     """
     marker_key = f"{submission_id}/version"
     marker = last_modified.get(marker_key)
     times = [modified for key, modified in last_modified.items() if key != marker_key]
     if not times:
-        raise grzexc.MissingSubmissionFileError(f"{submission_id} has no uploaded object")
+        return None
     return UploadTiming(
         started=marker or min(times),
         finished=max(times),
@@ -250,7 +249,7 @@ def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datet
     )
 
 
-def get_upload_timing(s3_client: S3Client, bucket: str, submission_id: str) -> UploadTiming:
+def get_upload_timing(s3_client: S3Client, bucket: str, submission_id: str) -> UploadTiming | None:
     """Return the upload timing of a submission in the inbox, see :func:`upload_timing`.
 
     Only meaningful before ``grzctl clean`` runs: cleaning deletes the objects and writes markers of
@@ -259,8 +258,7 @@ def get_upload_timing(s3_client: S3Client, bucket: str, submission_id: str) -> U
     :param s3_client: boto3 S3 client pointed at the inbox bucket.
     :param bucket: Name of the inbox bucket.
     :param submission_id: Submission identifier (the top-level S3 prefix).
-    :returns: The timing.
-    :raises MissingSubmissionFileError: If the inbox holds no object of the submission.
+    :returns: The timing, or ``None`` if the inbox holds no object of the submission.
     :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
     :raises DownloadError: For any other error of the S3 client.
     """

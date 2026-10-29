@@ -672,23 +672,31 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     size = metadata.get_submission_size()
     assert payload["grz"] == "GRZK00007"
     assert payload["month"] == date.today().strftime("%Y-%m")
-    zero = {"cases": 0, "active": 0, "bytes_consented": 0, "bytes_unconsented": 0}
+    assert payload["reported_by"] == f"grzctl {grzctl.__version__} report monitoring"
+    zero = {"cases": 0, "cases_with_size": 0, "bytes": 0, "bytes_consented": 0, "bytes_unconsented": 0, "active": 0}
+    no_speed = {
+        "uploads": 0,
+        "speed_median_mbs": None,
+        "speed_min_mbs": None,
+        "speed_max_mbs": None,
+        "speed_sd_mbs": None,
+    }
     [absent, present] = payload["rows"]
-    assert absent == {"le_id": "000000000", **zero}
+    assert absent == {"le_id": "000000000", **zero, **no_speed}
+    assert present.keys() == absent.keys()  # the same shape for every row
     assert present["le_id"] == metadata.submission.submitter_id
-    assert (present["cases"], present["active"], present["bytes"]) == (1, 1, size)
+    assert (present["cases"], present["cases_with_size"], present["active"], present["bytes"]) == (1, 1, 1, size)
     assert present["bytes_consented"] + present["bytes_unconsented"] == size  # the rejected one is not archived
     # 1002287 bytes in 1 s and in 4 s: 1.00 and 0.25 MB/s
     assert size == 1002287
     assert (present["uploads"], present["speed_min_mbs"], present["speed_max_mbs"]) == (2, 0.25, 1.0)
     assert (present["speed_median_mbs"], present["speed_sd_mbs"]) == (0.63, 0.38)
-    assert "uploads" not in absent
 
     # a month before the submission: nothing reported or archived yet
     result = runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-01"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
     earlier = json.loads(result.stdout)
-    assert earlier["rows"] == [{"le_id": "000000000", **zero}]
+    assert earlier["rows"] == [{"le_id": "000000000", **zero, **no_speed}]
 
     assert runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-13"]).exit_code == 2
 
@@ -720,3 +728,14 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     assert result.exit_code == 0, result.output
     [_, present] = json.loads(result.stdout)["rows"]
     assert (present["uploads"], present["speed_median_mbs"], present["speed_sd_mbs"]) == (1, 1.0, 0.0)
+
+    # a case without a known size still counts as a case, but not into the average size
+    engine = sqlalchemy.create_engine(GrzctlConfig.from_path(migrated_database_config_path).db.database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.update(Submission).where(Submission.id == submission_id).values(submission_size=None)  # type: ignore[arg-type]
+        )
+    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    [_, present] = json.loads(result.stdout)["rows"]
+    assert (present["cases"], present["cases_with_size"], present["bytes"]) == (1, 0, 0)

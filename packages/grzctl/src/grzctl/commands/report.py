@@ -32,6 +32,7 @@ from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF
 from sqlalchemy import func as sqlfn
 from sqlmodel import Session, select
 
+from .. import __version__
 from ..commands import grzctl_configuration
 from ..models.config import GrzctlConfig
 
@@ -684,9 +685,13 @@ def quarterly(
 def _monitoring_payload(
     session: Session, grz_id: str, month: datetime.date, le_ids: typing.Iterable[str]
 ) -> dict[str, typing.Any]:
-    """Cumulative per-LE numbers for the GRZ monitoring sheet, as of the end of the month of *month*.
+    """Per-LE numbers for the GRZ monitoring sheet for the month of *month*.
 
-    Sizes are sent in bytes; the sheet scales them and divides by the number of cases.
+    Every LE in *le_ids* gets a row, also without submissions, so the sheet sees the month as complete,
+    and every row has the same keys: a count that has nothing to count is ``0``, a statistic without
+    values ``None``. Sizes are in bytes; the sheet scales them.
+
+    Cumulative, as of the end of the month; the sheet derives monthly increments from them:
 
     - ``cases``: cases whose initial submission passed basic QC (:attr:`Submission.is_qc_passed_initial`)
       and had its Prüfbericht submitted (state Reported) by then. A case has at most one such
@@ -694,17 +699,20 @@ def _monitoring_payload(
       submissions belong to a case already counted, and a rejected initial submission is no case. The
       QC flag matters because a Prüfbericht can be reported for a rejected submission too: older
       databases hold negative Prüfberichte with a Reported state.
-    - ``bytes``: total size of those initial submissions.
-    - ``active``: 1 if the LE uploaded a non-test submission during the month.
+    - ``cases_with_size`` and ``bytes``: how many of those initial submissions have a known size, and
+      their total size. The sheet divides the one by the other, so a case without a size still counts
+      as a case but does not lower the average size.
     - ``bytes_consented`` / ``bytes_unconsented``: the LE's archived, not deleted submissions by research
-      consent. A missing consent counts as unconsented, as in ``grzctl archive``.
+      consent. A missing consent counts as unconsented, as in ``grzctl archive``; a missing size as 0.
+
+    Of the month alone, because they cannot be accumulated; sending the month again replaces them:
+
+    - ``active``: 1 if the LE uploaded a non-test submission during the month, else 0.
     - ``uploads`` and ``speed_{median,min,max,sd}_mbs``: number, median, minimum, maximum and population
       standard deviation of the transfer speed in MB/s of the LE's non-test uploads that finished during
       the month: the submission size over the time between the uploader's start marker and its last
       object, as ``grzctl download`` recorded it (:attr:`Submission.upload_started_at`). A resumed upload
-      spans the pause, so it is left out; an LE without a complete upload that month gets no such keys.
-
-    Every LE in *le_ids* gets a row, also with zero cases, so the sheet sees the month as complete.
+      spans the pause, so it is left out.
     """
     first, last = month_date_bounds(month.year, month.month)
     cutoff = datetime.datetime.combine(last + datetime.timedelta(days=1), datetime.time(), datetime.UTC)
@@ -723,9 +731,9 @@ def _monitoring_payload(
     size = sqlfn.coalesce(sqlfn.sum(Submission.submission_size), 0)
 
     cases = {
-        le_id: (count, int(total))
-        for le_id, count, total in session.execute(
-            select(Submission.submitter_id, sqlfn.count(1), size)
+        le_id: (count, sized, int(total))
+        for le_id, count, sized, total in session.execute(
+            select(Submission.submitter_id, sqlfn.count(1), sqlfn.count(Submission.submission_size), size)  # type: ignore[arg-type]
             .where(real, Submission.is_qc_passed_initial, reported)
             .group_by(Submission.submitter_id)
         ).all()
@@ -764,26 +772,35 @@ def _monitoring_payload(
         if size and started and finished and (seconds := (finished - started).total_seconds()) > 0:
             speeds[le_id].append(size / 1e6 / seconds)
 
+    statistic: dict[str, typing.Callable[[list[float]], float]] = {
+        "median": statistics.median,
+        "min": min,
+        "max": max,
+        "sd": statistics.pstdev,
+    }
     rows = []
     for le_id in sorted(set(le_ids) | set(cases) | active | {le for le, _ in archived_bytes} | set(speeds)):
-        count, total = cases.get(le_id, (0, 0))
-        row: dict[str, typing.Any] = {
-            "le_id": le_id,
-            "cases": count,
-            "active": int(le_id in active),
-            "bytes_consented": archived_bytes[le_id, True],
-            "bytes_unconsented": archived_bytes[le_id, False],
-        }
-        if count:
-            row["bytes"] = total
-        if mbs := speeds.get(le_id):
-            row["uploads"] = len(mbs)
-            row["speed_median_mbs"] = round(statistics.median(mbs), 2)
-            row["speed_min_mbs"] = round(min(mbs), 2)
-            row["speed_max_mbs"] = round(max(mbs), 2)
-            row["speed_sd_mbs"] = round(statistics.pstdev(mbs), 2)
-        rows.append(row)
-    return {"grz": grz_id, "month": month.strftime("%Y-%m"), "reported_by": "grzctl report monitoring", "rows": rows}
+        count, sized, total = cases.get(le_id, (0, 0, 0))
+        mbs = speeds.get(le_id, [])
+        rows.append(
+            {
+                "le_id": le_id,
+                "cases": count,
+                "cases_with_size": sized,
+                "bytes": total,
+                "bytes_consented": archived_bytes[le_id, True],
+                "bytes_unconsented": archived_bytes[le_id, False],
+                "active": int(le_id in active),
+                "uploads": len(mbs),
+                **{f"speed_{name}_mbs": round(f(mbs), 2) if mbs else None for name, f in statistic.items()},
+            }
+        )
+    return {
+        "grz": grz_id,
+        "month": month.strftime("%Y-%m"),
+        "reported_by": f"grzctl {__version__} report monitoring",
+        "rows": rows,
+    }
 
 
 @report.command()

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
-from grz_common.exceptions import MissingSubmissionFileError
 from grz_common.transfer import get_metadata_upload_timestamp, get_upload_timing, init_s3_client
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
@@ -53,6 +52,7 @@ def download(  # noqa: PLR0913, PLR0917
     With --update-db (the default), download records the inbox of the submission in the database.
     With --populate (also the default), it also fills the submission metadata in the database and
     records when the upload started and finished, which only the inbox knows until `grzctl clean` runs.
+    If that timing cannot be read or stored, download logs a warning and carries on.
     With --no-update-db, download touches no database, and --populate only logs a warning.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
@@ -115,14 +115,15 @@ def download(  # noqa: PLR0913, PLR0917
                     on_missing="create",
                 )
                 # The timing lives only in the inbox's object listing, which ``grzctl clean`` erases.
-                # It is auxiliary: an inbox that lists nothing (cleaned meanwhile, or a stubbed client)
-                # costs the timing, not the download.
+                # It is auxiliary, so no error in getting or storing it may fail the download.
                 try:
                     timing = get_upload_timing(s3_client, s3_options.bucket, submission_id)
-                except MissingSubmissionFileError:
-                    log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
-                else:
-                    db.set_submission_upload_timing(submission_id, timing.started, timing.finished, timing.resumed)
+                    if timing is None:
+                        log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
+                    else:
+                        db.set_submission_upload_timing(submission_id, timing.started, timing.finished, timing.resumed)
+                except Exception as e:
+                    log.warning(f"Upload timing of {submission_id} not recorded: {e}")
             # The download knows the inbox, so record it.
             # Commands and the decryption key lookup can then find the submission without
             # being told the inbox again.

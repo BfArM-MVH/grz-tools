@@ -3,12 +3,9 @@ import datetime
 
 
 def quarter_date_bounds(year: int, quarter: int) -> tuple[datetime.date, datetime.date]:
-    quarter_start_date = datetime.date(year=year, month=((quarter - 1) * 3) + 1, day=1)
-    quarter_end_month = quarter_start_date.month + 2
-    _quarter_end_month_first_weekday, days_in_quarter_end_month = calendar.monthrange(year, quarter_end_month)
-    quarter_end_date = quarter_start_date.replace(month=quarter_end_month, day=days_in_quarter_end_month)
-
-    return quarter_start_date, quarter_end_date
+    """Return the first and last day of a quarter (1-based)."""
+    first_month = (quarter - 1) * 3 + 1
+    return month_date_bounds(year, first_month)[0], month_date_bounds(year, first_month + 2)[1]
 
 
 def month_date_bounds(year: int, month: int) -> tuple[datetime.date, datetime.date]:
