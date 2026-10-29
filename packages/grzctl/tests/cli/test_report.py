@@ -615,7 +615,7 @@ def test_quarterly_qc_includes_passing_submission_with_deviation(migrated_databa
 
 
 def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """The monitoring report counts reported submissions per LE and sends them to the intake."""
+    """The monitoring report counts cases per LE and sends them to the intake."""
     runner = CliRunner()
     cli = grzctl.cli.build_cli()
     common = ["--config", str(migrated_database_config_path)]
@@ -623,26 +623,36 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
     metadata_raw["submission"]["submissionType"] = "initial"
     metadata = GrzSubmissionMetadata.model_validate(metadata_raw)
-    metadata_path = tmp_path / "metadata.json"
-    metadata_path.write_text(json.dumps(metadata_raw))
+    # a second initial submission of the same case that failed basic QC: reported, but no case
+    rejected_raw = json.loads(json.dumps(metadata_raw))
+    rejected_raw["submission"]["tanG"] = "f" * 64
+    rejected_id = GrzSubmissionMetadata.model_validate(rejected_raw).submission_id
     submission_id = metadata.submission_id
-    for args in (
-        ["db", "submission", "add", submission_id],
-        [
-            "db",
-            "submission",
-            "populate",
-            "--no-confirm",
-            "--submission-date",
-            date.today().isoformat(),
-            submission_id,
-            str(metadata_path),
-        ],
-        ["db", "submission", "update", submission_id, "Archived"],
-        ["db", "submission", "update", submission_id, "Reported"],
+    assert rejected_id != submission_id
+    for name, raw, sid, qc in (
+        ("metadata", metadata_raw, submission_id, "yes"),
+        ("rejected", rejected_raw, rejected_id, "no"),
     ):
-        result = runner.invoke(cli, [*common, *args])
-        assert result.exit_code == 0, result.output
+        metadata_path = tmp_path / f"{name}.json"
+        metadata_path.write_text(json.dumps(raw))
+        for args in (
+            ["db", "submission", "add", sid],
+            [
+                "db",
+                "submission",
+                "populate",
+                "--no-confirm",
+                "--submission-date",
+                date.today().isoformat(),
+                sid,
+                str(metadata_path),
+            ],
+            ["db", "submission", "modify", sid, "basic_qc_passed", qc],
+            *([["db", "submission", "update", sid, "Archived"]] if qc == "yes" else []),
+            ["db", "submission", "update", sid, "Reported"],
+        ):
+            result = runner.invoke(cli, [*common, *args])
+            assert result.exit_code == 0, result.output
 
     # without a URL the report is printed; the configured LE without submissions gets a zero row
     result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
