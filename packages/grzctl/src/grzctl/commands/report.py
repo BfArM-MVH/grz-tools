@@ -694,7 +694,8 @@ def _monitoring_payload(
     - ``cases``: cases whose initial submission passed basic QC and had its Prüfbericht submitted (state
       Reported) by then. A case has at most one such submission, so this counts cases, not submissions:
       follow-up, addition and correction submissions belong to a case already counted, and a rejected
-      initial submission is reported but is no case.
+      initial submission is no case. The QC flag matters because a Prüfbericht can be reported for a
+      rejected submission too: older databases hold negative Prüfberichte with a Reported state.
     - ``avg_gb``: mean size of those initial submissions, in GB (10^9 bytes).
     - ``active``: 1 if the LE uploaded a non-test submission during *month*.
     - ``tb_consented`` / ``tb_unconsented``: archived, not deleted submissions by research consent, in TB (10^12
