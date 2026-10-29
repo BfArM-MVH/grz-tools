@@ -5,6 +5,7 @@ import datetime
 import itertools
 import json
 import logging
+import statistics
 import typing
 from collections import defaultdict
 from enum import StrEnum
@@ -697,6 +698,11 @@ def _monitoring_payload(
     - ``active``: 1 if the LE uploaded a non-test submission during the month.
     - ``bytes_consented`` / ``bytes_unconsented``: the LE's archived, not deleted submissions by research
       consent. A missing consent counts as unconsented, as in ``grzctl archive``.
+    - ``uploads`` and ``speed_{median,min,max,sd}_mbs``: number, median, minimum, maximum and population
+      standard deviation of the transfer speed in MB/s of the LE's non-test uploads that finished during
+      the month: the submission size over the time between the uploader's start marker and its last
+      object, as ``grzctl download`` recorded it (:attr:`Submission.upload_started_at`). A resumed upload
+      spans the pause, so it is left out; an LE without a complete upload that month gets no such keys.
 
     Every LE in *le_ids* gets a row, also with zero cases, so the sheet sees the month as complete.
     """
@@ -739,8 +745,27 @@ def _monitoring_payload(
     ).all():
         archived_bytes[le_id, bool(consented)] += int(total)
 
+    start = datetime.datetime.combine(first, datetime.time(), datetime.UTC)
+    speeds: defaultdict[str, list[float]] = defaultdict(list)
+    for le_id, size, started, finished in session.execute(
+        select(
+            Submission.submitter_id,
+            Submission.submission_size,
+            Submission.upload_started_at,
+            Submission.upload_finished_at,
+        ).where(
+            real,
+            Submission.upload_resumed.is_(False),  # type: ignore[union-attr]
+            Submission.upload_finished_at >= start,  # type: ignore[operator]
+            Submission.upload_finished_at < cutoff,  # type: ignore[operator]
+        )
+    ).all():
+        # ``db submission modify`` can set the flag alone, so the timestamps are not guaranteed
+        if size and started and finished and (seconds := (finished - started).total_seconds()) > 0:
+            speeds[le_id].append(size / 1e6 / seconds)
+
     rows = []
-    for le_id in sorted(set(le_ids) | set(cases) | active | {le for le, _ in archived_bytes}):
+    for le_id in sorted(set(le_ids) | set(cases) | active | {le for le, _ in archived_bytes} | set(speeds)):
         count, total = cases.get(le_id, (0, 0))
         row: dict[str, typing.Any] = {
             "le_id": le_id,
@@ -751,6 +776,12 @@ def _monitoring_payload(
         }
         if count:
             row["bytes"] = total
+        if mbs := speeds.get(le_id):
+            row["uploads"] = len(mbs)
+            row["speed_median_mbs"] = round(statistics.median(mbs), 2)
+            row["speed_min_mbs"] = round(min(mbs), 2)
+            row["speed_max_mbs"] = round(max(mbs), 2)
+            row["speed_sd_mbs"] = round(statistics.pstdev(mbs), 2)
         rows.append(row)
     return {"grz": grz_id, "month": month.strftime("%Y-%m"), "reported_by": "grzctl report monitoring", "rows": rows}
 

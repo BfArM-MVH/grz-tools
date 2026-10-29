@@ -1,7 +1,7 @@
 import csv
 import importlib.resources
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from operator import itemgetter
 from pathlib import Path
 from textwrap import dedent
@@ -654,6 +654,17 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
             result = runner.invoke(cli, [*common, *args])
             assert result.exit_code == 0, result.output
 
+    # upload timing as ``grzctl download`` records it: the ~1 MB submission in 1 s, the rejected one in 4 s
+    finished = datetime.now(UTC).replace(microsecond=0)
+    for sid, seconds in ((submission_id, 1), (rejected_id, 4)):
+        for key, value in (
+            ("upload_started_at", (finished - timedelta(seconds=seconds)).isoformat()),
+            ("upload_finished_at", finished.isoformat()),
+            ("upload_resumed", "no"),
+        ):
+            result = runner.invoke(cli, [*common, "db", "submission", "modify", sid, key, value])
+            assert result.exit_code == 0, result.output
+
     # without a URL the report is printed; the configured LE without submissions gets a zero row
     result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
@@ -667,6 +678,11 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     assert present["le_id"] == metadata.submission.submitter_id
     assert (present["cases"], present["active"], present["bytes"]) == (1, 1, size)
     assert present["bytes_consented"] + present["bytes_unconsented"] == size  # the rejected one is not archived
+    # 1002287 bytes in 1 s and in 4 s: 1.00 and 0.25 MB/s
+    assert size == 1002287
+    assert (present["uploads"], present["speed_min_mbs"], present["speed_max_mbs"]) == (2, 0.25, 1.0)
+    assert (present["speed_median_mbs"], present["speed_sd_mbs"]) == (0.63, 0.38)
+    assert "uploads" not in absent
 
     # a month before the submission: nothing reported or archived yet
     result = runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-01"], catch_exceptions=False)
@@ -696,3 +712,11 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     result = runner.invoke(cli, [*common, "report", "monitoring"], env=env)
     assert result.exit_code == 1
     assert "unknown le_id" in result.output
+
+    # a resumed upload spans the pause, so it is left out of the speed statistics
+    result = runner.invoke(cli, [*common, "db", "submission", "modify", rejected_id, "upload_resumed", "yes"])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    [_, present] = json.loads(result.stdout)["rows"]
+    assert (present["uploads"], present["speed_median_mbs"], present["speed_sd_mbs"]) == (1, 1.0, 0.0)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
-from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.transfer import get_metadata_upload_timestamp, get_upload_timing, init_s3_client
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
@@ -50,7 +50,8 @@ def download(  # noqa: PLR0913, PLR0917
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
 
     With --update-db (the default), download records the inbox of the submission in the database.
-    With --populate (also the default), it also fills the submission metadata in the database.
+    With --populate (also the default), it also fills the submission metadata in the database and
+    records when the upload started and finished, which only the inbox knows until `grzctl clean` runs.
     With --no-update-db, download touches no database, and --populate only logs a warning.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
@@ -112,6 +113,9 @@ def download(  # noqa: PLR0913, PLR0917
                     force=force,
                     on_missing="create",
                 )
+                # the timing lives only in the inbox's object listing, which ``grzctl clean`` erases
+                timing = get_upload_timing(s3_client, s3_options.bucket, submission_id)
+                db.set_submission_upload_timing(submission_id, timing.started, timing.finished, timing.resumed)
             # The download knows the inbox, so record it.
             # Commands and the decryption key lookup can then find the submission without
             # being told the inbox again.
