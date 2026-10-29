@@ -691,8 +691,10 @@ def _monitoring_payload(
 ) -> dict[str, typing.Any]:
     """Cumulative per-LE numbers for the GRZ monitoring sheet, as of the end of *month* (``YYYY-MM``).
 
-    - ``cases``: initial submissions whose Prüfbericht was submitted (state Reported) by then. Follow-up,
-      addition and correction submissions belong to a case already counted.
+    - ``cases``: cases whose initial submission passed basic QC and had its Prüfbericht submitted (state
+      Reported) by then. A case has at most one such submission, so this counts cases, not submissions:
+      follow-up, addition and correction submissions belong to a case already counted, and a rejected
+      initial submission is reported but is no case.
     - ``avg_gb``: mean size of those initial submissions, in GB (10^9 bytes).
     - ``active``: 1 if the LE uploaded a non-test submission during *month*.
     - ``tb_consented`` / ``tb_unconsented``: archived, not deleted submissions by research consent, in TB (10^12
@@ -716,7 +718,11 @@ def _monitoring_payload(
         if le_id is None or submission.submission_type == SubmissionType.test:
             continue
         states = [(state.state, state.timestamp) for state in submission.states]
-        if submission.submission_type == SubmissionType.initial and reached(states, SubmissionStateEnum.REPORTED):
+        if (
+            submission.submission_type == SubmissionType.initial
+            and submission.basic_qc_passed
+            and reached(states, SubmissionStateEnum.REPORTED)
+        ):
             cases[le_id] += 1
             if submission.submission_size is not None:
                 sizes[le_id].append(submission.submission_size)
