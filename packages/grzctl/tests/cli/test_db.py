@@ -1075,6 +1075,9 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
         "genomic_study_type": metadata.submission.genomic_study_type,
         "genomic_study_subtype": metadata.submission.genomic_study_subtype,
         "inbox": None,  # populated via download / sync-from-inbox / populate --inbox
+        "upload_started_at": None,  # recorded by download --populate while the inbox lists the objects
+        "upload_finished_at": None,
+        "upload_resumed": None,
         "states": [],
     }
 
