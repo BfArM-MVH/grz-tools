@@ -3,7 +3,9 @@
 import csv
 import datetime
 import itertools
+import json
 import logging
+import statistics
 import typing
 from collections import defaultdict
 from enum import StrEnum
@@ -11,6 +13,7 @@ from operator import attrgetter
 from pathlib import Path
 
 import click
+import requests
 import sqlalchemy as sa
 from grz_db.models.author import Author
 from grz_db.models.submission import (
@@ -21,13 +24,15 @@ from grz_db.models.submission import (
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
+    SubmissionStateLog,
 )
-from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
+from grz_pydantic_models.dates import date_to_quarter_year, month_date_bounds, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, SubmissionType
 from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF
 from sqlalchemy import func as sqlfn
-from sqlmodel import select
+from sqlmodel import Session, select
 
+from .. import __version__
 from ..commands import grzctl_configuration
 from ..models.config import GrzctlConfig
 
@@ -51,6 +56,7 @@ def report(ctx: click.Context, configuration: GrzctlConfig):
     ctx.obj = {
         "db_url": db.database_url,
         "grz_id": configuration.identifiers.grz,
+        "le_ids": list(configuration.leistungserbringer),
     }
 
 
@@ -674,3 +680,172 @@ def quarterly(
 
     qc_output_path = output_directory / f"3-Detailprüfung_{grz_id}_{quarter}_{year}.tsv"
     _dump_qc_report(qc_output_path, submission_db, year, quarter, with_submission_ids=with_submission_ids)
+
+
+def _monitoring_payload(
+    session: Session, grz_id: str, month: datetime.date, le_ids: typing.Iterable[str]
+) -> dict[str, typing.Any]:
+    """Per-LE numbers for the GRZ monitoring sheet for the month of *month*.
+
+    Every LE in *le_ids* gets a row, also without submissions, so the sheet sees the month as complete,
+    and every row has the same keys: a count that has nothing to count is ``0``, a statistic without
+    values ``None``. Sizes are in bytes; the sheet scales them.
+
+    Cumulative, as of the end of the month; the sheet derives monthly increments from them:
+
+    - ``cases``: cases whose initial submission passed basic QC (:attr:`Submission.is_qc_passed_initial`)
+      and had its Prüfbericht submitted (state Reported) by then. A case has at most one such
+      submission, so this counts cases, not submissions: follow-up, addition and correction
+      submissions belong to a case already counted, and a rejected initial submission is no case. The
+      QC flag matters because a Prüfbericht can be reported for a rejected submission too: older
+      databases hold negative Prüfberichte with a Reported state.
+    - ``cases_with_size`` and ``bytes``: how many of those initial submissions have a known size, and
+      their total size. The sheet divides the one by the other, so a case without a size still counts
+      as a case but does not lower the average size.
+    - ``bytes_consented`` / ``bytes_unconsented``: the LE's archived, not deleted submissions by research
+      consent. A missing consent counts as unconsented, as in ``grzctl archive``; a missing size as 0.
+
+    Of the month alone, because they cannot be accumulated; sending the month again replaces them:
+
+    - ``active``: 1 if the LE uploaded a non-test submission during the month, else 0.
+    - ``uploads`` and ``speed_{median,min,max,sd}_mbs``: number, median, minimum, maximum and population
+      standard deviation of the transfer speed in MB/s of the LE's non-test uploads that finished during
+      the month: the submission size over the time between the uploader's start marker and its last
+      object, as ``grzctl download`` recorded it (:attr:`Submission.upload_started_at`). A resumed upload
+      spans the pause, so it is left out.
+    """
+    first, last = month_date_bounds(month.year, month.month)
+    cutoff = datetime.datetime.combine(last + datetime.timedelta(days=1), datetime.time(), datetime.UTC)
+    real = sa.and_(
+        Submission.submitter_id.is_not(None),  # type: ignore[union-attr]
+        Submission.submission_type != SubmissionType.test,  # type: ignore[arg-type]
+    )
+
+    def logged(log: typing.Any, column: typing.Any, kind: str) -> sa.ColumnElement[bool]:
+        """A log entry of *kind* for the submission before the cutoff."""
+        return sa.exists().where(log.submission_id == Submission.id, column == kind, log.timestamp < cutoff)
+
+    reported = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.REPORTED)
+    archived = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.ARCHIVED)
+    deleted = logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.DELETE)
+    size = sqlfn.coalesce(sqlfn.sum(Submission.submission_size), 0)
+
+    cases = {
+        le_id: (count, sized, int(total))
+        for le_id, count, sized, total in session.execute(
+            select(Submission.submitter_id, sqlfn.count(1), sqlfn.count(Submission.submission_size), size)  # type: ignore[arg-type]
+            .where(real, Submission.is_qc_passed_initial, reported)
+            .group_by(Submission.submitter_id)
+        ).all()
+    }
+    active = set(
+        session.execute(
+            select(Submission.submitter_id)
+            .where(real, Submission.submission_uploaded_date.between(first, last))  # type: ignore[union-attr]
+            .distinct()
+        ).scalars()
+    )
+    archived_bytes: defaultdict[tuple[str, bool], int] = defaultdict(int)
+    for le_id, consented, total in session.execute(
+        select(Submission.submitter_id, Submission.consented, size)
+        .where(real, archived, sa.not_(deleted))
+        .group_by(Submission.submitter_id, Submission.consented)  # type: ignore[arg-type]
+    ).all():
+        archived_bytes[le_id, bool(consented)] += int(total)
+
+    start = datetime.datetime.combine(first, datetime.time(), datetime.UTC)
+    speeds: defaultdict[str, list[float]] = defaultdict(list)
+    for le_id, size, started, finished in session.execute(
+        select(
+            Submission.submitter_id,
+            Submission.submission_size,
+            Submission.upload_started_at,
+            Submission.upload_finished_at,
+        ).where(
+            real,
+            Submission.upload_resumed.is_(False),  # type: ignore[union-attr]
+            Submission.upload_finished_at >= start,  # type: ignore[operator]
+            Submission.upload_finished_at < cutoff,  # type: ignore[operator]
+        )
+    ).all():
+        # ``db submission modify`` can set the flag alone, so the timestamps are not guaranteed
+        if size and started and finished and (seconds := (finished - started).total_seconds()) > 0:
+            speeds[le_id].append(size / 1e6 / seconds)
+
+    statistic: dict[str, typing.Callable[[list[float]], float]] = {
+        "median": statistics.median,
+        "min": min,
+        "max": max,
+        "sd": statistics.pstdev,
+    }
+    rows = []
+    for le_id in sorted(set(le_ids) | set(cases) | active | {le for le, _ in archived_bytes} | set(speeds)):
+        count, sized, total = cases.get(le_id, (0, 0, 0))
+        mbs = speeds.get(le_id, [])
+        rows.append(
+            {
+                "le_id": le_id,
+                "cases": count,
+                "cases_with_size": sized,
+                "bytes": total,
+                "bytes_consented": archived_bytes[le_id, True],
+                "bytes_unconsented": archived_bytes[le_id, False],
+                "active": int(le_id in active),
+                "uploads": len(mbs),
+                **{f"speed_{name}_mbs": round(f(mbs), 2) if mbs else None for name, f in statistic.items()},
+            }
+        )
+    return {
+        "grz": grz_id,
+        "month": month.strftime("%Y-%m"),
+        "reported_by": f"grzctl {__version__} report monitoring",
+        "rows": rows,
+    }
+
+
+@report.command()
+@click.option(
+    "--month",
+    type=click.DateTime(formats=["%Y-%m"]),
+    default=lambda: datetime.date.today().strftime("%Y-%m"),
+    show_default="current month",
+    help="Report the state at the end of this month (YYYY-MM).",
+)
+@click.option(
+    "--url",
+    envvar="GRZ_MONITORING_URL",
+    help="Intake URL of the GRZ monitoring sheet (env GRZ_MONITORING_URL). Without it, the report is only printed.",
+)
+@click.option(
+    "--token",
+    envvar="GRZ_MONITORING_TOKEN",
+    help="This GRZ's intake token. Prefer the environment variable GRZ_MONITORING_TOKEN.",
+)
+@click.option("--dry-run", is_flag=True, help="Let the intake check the report without storing it.")
+@click.pass_context
+def monitoring(ctx: click.Context, month: datetime.datetime, url: str | None, token: str | None, dry_run: bool):
+    """
+    Send cumulative per-LE numbers to the GRZ monitoring sheet.
+
+    Meant for a daily cron job. Sending a month again replaces its numbers in the sheet.
+    """
+    submission_db = get_submission_db_instance(ctx.obj["db_url"])
+    with submission_db.transaction() as session:
+        payload = _monitoring_payload(session, ctx.obj["grz_id"], month.date(), ctx.obj["le_ids"])
+
+    if url is None:
+        click.echo(json.dumps(payload, indent=2))
+        return
+    if not token:
+        raise click.UsageError("--url needs --token or GRZ_MONITORING_TOKEN.")
+
+    # Apps Script answers with a redirect; requests follows it as GET, which is what the intake expects.
+    try:
+        response = requests.post(url, json={**payload, "token": token, "dry_run": dry_run}, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+    except requests.RequestException as e:
+        raise click.ClickException(f"intake not reachable: {e}") from e
+    click.echo(json.dumps(result))
+    if result.get("status") != 200:
+        raise click.ClickException(f"intake rejected the report: {result.get('error', result)}")

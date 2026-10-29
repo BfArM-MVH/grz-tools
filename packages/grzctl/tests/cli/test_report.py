@@ -1,10 +1,11 @@
 import csv
 import importlib.resources
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from operator import itemgetter
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 
 import grzctl.cli
 import pytest
@@ -611,3 +612,130 @@ def test_quarterly_qc_includes_passing_submission_with_deviation(migrated_databa
         overview_rows = list(csv.reader(overview_file, delimiter="\t"))[1:]
     assert len(overview_rows) == 1
     assert overview_rows[0][10] == "0"  # number_of_failed_qcs
+
+
+def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The monitoring report counts cases per LE and sends them to the intake."""
+    runner = CliRunner()
+    cli = grzctl.cli.build_cli()
+    common = ["--config", str(migrated_database_config_path)]
+
+    metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
+    metadata_raw["submission"]["submissionType"] = "initial"
+    metadata = GrzSubmissionMetadata.model_validate(metadata_raw)
+    # a second initial submission of the same case that failed basic QC: reported, but no case
+    rejected_raw = json.loads(json.dumps(metadata_raw))
+    rejected_raw["submission"]["tanG"] = "f" * 64
+    rejected_id = GrzSubmissionMetadata.model_validate(rejected_raw).submission_id
+    submission_id = metadata.submission_id
+    assert rejected_id != submission_id
+    for name, raw, sid, qc in (
+        ("metadata", metadata_raw, submission_id, "yes"),
+        ("rejected", rejected_raw, rejected_id, "no"),
+    ):
+        metadata_path = tmp_path / f"{name}.json"
+        metadata_path.write_text(json.dumps(raw))
+        for args in (
+            ["db", "submission", "add", sid],
+            [
+                "db",
+                "submission",
+                "populate",
+                "--no-confirm",
+                "--submission-date",
+                date.today().isoformat(),
+                sid,
+                str(metadata_path),
+            ],
+            ["db", "submission", "modify", sid, "basic_qc_passed", qc],
+            *([["db", "submission", "update", sid, "Archived"]] if qc == "yes" else []),
+            ["db", "submission", "update", sid, "Reported"],
+        ):
+            result = runner.invoke(cli, [*common, *args])
+            assert result.exit_code == 0, result.output
+
+    # upload timing as ``grzctl download`` records it: the ~1 MB submission in 1 s, the rejected one in 4 s
+    finished = datetime.now(UTC).replace(microsecond=0)
+    for sid, seconds in ((submission_id, 1), (rejected_id, 4)):
+        for key, value in (
+            ("upload_started_at", (finished - timedelta(seconds=seconds)).isoformat()),
+            ("upload_finished_at", finished.isoformat()),
+            ("upload_resumed", "no"),
+        ):
+            result = runner.invoke(cli, [*common, "db", "submission", "modify", sid, key, value])
+            assert result.exit_code == 0, result.output
+
+    # without a URL the report is printed; the configured LE without submissions gets a zero row
+    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    size = metadata.get_submission_size()
+    assert payload["grz"] == "GRZK00007"
+    assert payload["month"] == date.today().strftime("%Y-%m")
+    assert payload["reported_by"] == f"grzctl {grzctl.__version__} report monitoring"
+    zero = {"cases": 0, "cases_with_size": 0, "bytes": 0, "bytes_consented": 0, "bytes_unconsented": 0, "active": 0}
+    no_speed = {
+        "uploads": 0,
+        "speed_median_mbs": None,
+        "speed_min_mbs": None,
+        "speed_max_mbs": None,
+        "speed_sd_mbs": None,
+    }
+    [absent, present] = payload["rows"]
+    assert absent == {"le_id": "000000000", **zero, **no_speed}
+    assert present.keys() == absent.keys()  # the same shape for every row
+    assert present["le_id"] == metadata.submission.submitter_id
+    assert (present["cases"], present["cases_with_size"], present["active"], present["bytes"]) == (1, 1, 1, size)
+    assert present["bytes_consented"] + present["bytes_unconsented"] == size  # the rejected one is not archived
+    # 1002287 bytes in 1 s and in 4 s: 1.00 and 0.25 MB/s
+    assert size == 1002287
+    assert (present["uploads"], present["speed_min_mbs"], present["speed_max_mbs"]) == (2, 0.25, 1.0)
+    assert (present["speed_median_mbs"], present["speed_sd_mbs"]) == (0.63, 0.38)
+
+    # a month before the submission: nothing reported or archived yet
+    result = runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-01"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    earlier = json.loads(result.stdout)
+    assert earlier["rows"] == [{"le_id": "000000000", **zero, **no_speed}]
+
+    assert runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-13"]).exit_code == 2
+
+    # with a URL the report goes to the intake, together with the token
+    sent = {}
+    answer = {"status": 200, "appended": 3}
+
+    def fake_post(url, json, timeout):
+        sent.update(url=url, body=json)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: answer)
+
+    monkeypatch.setattr("grzctl.commands.report.requests.post", fake_post)
+    env = {"GRZ_MONITORING_URL": "https://intake.example/exec", "GRZ_MONITORING_TOKEN": "s3cret"}
+    result = runner.invoke(cli, [*common, "report", "monitoring"], env=env, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    assert sent["url"] == "https://intake.example/exec"
+    assert sent["body"] == {**payload, "token": "s3cret", "dry_run": False}
+
+    # a rejected report fails the command, so cron reports it
+    answer = {"status": 400, "error": "unknown le_id for GRZK00007"}
+    result = runner.invoke(cli, [*common, "report", "monitoring"], env=env)
+    assert result.exit_code == 1
+    assert "unknown le_id" in result.output
+
+    # a resumed upload spans the pause, so it is left out of the speed statistics
+    result = runner.invoke(cli, [*common, "db", "submission", "modify", rejected_id, "upload_resumed", "yes"])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    [_, present] = json.loads(result.stdout)["rows"]
+    assert (present["uploads"], present["speed_median_mbs"], present["speed_sd_mbs"]) == (1, 1.0, 0.0)
+
+    # a case without a known size still counts as a case, but not into the average size
+    engine = sqlalchemy.create_engine(GrzctlConfig.from_path(migrated_database_config_path).db.database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            sqlalchemy.update(Submission).where(Submission.id == submission_id).values(submission_size=None)  # type: ignore[arg-type]
+        )
+    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    [_, present] = json.loads(result.stdout)["rows"]
+    assert (present["cases"], present["cases_with_size"], present["bytes"]) == (1, 0, 0)

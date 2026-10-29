@@ -187,6 +187,18 @@ class SubmissionBase(SQLModel):
     # and the decryption key lookup can locate it without asking for --inbox again
     inbox: str | None = None
 
+    # when the inbox received the first and the last object of the upload, and whether the upload
+    # was resumed after an interruption (None: not derivable, see grz_common.transfer.upload_timing).
+    # ``grzctl download --populate`` records them from the inbox's object listing, which
+    # ``grzctl clean`` erases; ``grzctl report monitoring`` aggregates transfer speeds from them.
+    upload_started_at: datetime.datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    upload_finished_at: datetime.datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    upload_resumed: bool | None = None
+
 
 class Submission(SubmissionBase, table=True):
     """Submission table model."""
@@ -258,6 +270,24 @@ class Submission(SubmissionBase, table=True):
     @classmethod
     def _pseudonym_expression(cls) -> ColumnElement[str | None]:
         return select(Case.psn).where(Case.id == cls.case_id).scalar_subquery()
+
+    @hybrid_property
+    def is_qc_passed_initial(self) -> bool:
+        """Whether this is the ``initial`` submission of its case that passed basic QC.
+
+        A case has at most one such submission (partial unique index
+        ``ux_submissions_one_initial_per_case``), so these submissions stand for the cases. Earlier initial uploads that failed basic QC are retries
+        of the same patient, not further cases.
+        """
+        return self.submission_type == SubmissionType.initial and self.basic_qc_passed is True
+
+    @is_qc_passed_initial.inplace.expression
+    @classmethod
+    def _is_qc_passed_initial_expression(cls) -> ColumnElement[bool]:
+        return sa.and_(
+            cls.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
+            cls.basic_qc_passed.is_(True),  # type: ignore[union-attr]
+        )
 
     def diff(
         self,
@@ -1321,6 +1351,38 @@ class SubmissionDb:
             active_session.flush()
             return submission
 
+    def set_submission_upload_timing(
+        self,
+        submission_id: str,
+        started: datetime.datetime,
+        finished: datetime.datetime,
+        resumed: bool | None,
+        session: Session | None = None,
+    ) -> Submission:
+        """Record when the inbox received the first and the last object of a submission's upload.
+
+        ``grzctl download --populate`` calls this while the inbox still lists the objects; see
+        :func:`grz_common.transfer.upload_timing` for how the values are derived.
+
+        :param submission_id: ID of the submission.
+        :param started: When the upload started.
+        :param finished: When the upload finished.
+        :param resumed: Whether the upload was resumed after an interruption, ``None`` when unknown.
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
+        :returns: The updated :class:`Submission`.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        """
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            submission.upload_started_at = started
+            submission.upload_finished_at = finished
+            submission.upload_resumed = resumed
+            active_session.add(submission)
+            active_session.flush()
+            return submission
+
     def set_selected_for_qc(
         self, submission_id: str, selected_for_qc: bool, session: Session | None = None
     ) -> Submission:
@@ -1655,18 +1717,7 @@ class SubmissionDb:
         :param session: Transaction to read in.
         :returns: One entry per key, ordered by submitter then local case ID.
         """
-        qc_passed_initials = sqlfn.count(
-            sa.case(
-                (
-                    sa.and_(
-                        Submission.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
-                        Submission.basic_qc_passed.is_(True),  # type: ignore[union-attr]
-                    ),
-                    1,
-                ),
-                else_=None,
-            )
-        )
+        qc_passed_initials = sqlfn.count(sa.case((Submission.is_qc_passed_initial, 1), else_=None))
         rows = session.exec(
             select(
                 Submission.submitter_id,
@@ -1776,11 +1827,7 @@ class SubmissionDb:
     def _qc_passed_initial_of(session: Session, case_id: int) -> Submission | None:
         """Return the case's QC-passed ``initial`` submission, if any."""
         return session.exec(
-            select(Submission).where(
-                Submission.case_id == case_id,
-                Submission.submission_type == SubmissionType.initial,
-                Submission.basic_qc_passed.is_(True),  # type: ignore[union-attr]
-            )
+            select(Submission).where(Submission.case_id == case_id, Submission.is_qc_passed_initial)
         ).first()
 
     def get_initial_submission(self, case_id: int) -> Submission | None:
