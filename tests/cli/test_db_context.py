@@ -336,9 +336,11 @@ def test_db_wrappers(
                 "consents_to_research",
                 MagicMock(return_value=command_spec["consent_value"]),
             )
+        # The upload timing is auxiliary: an error in getting it must not fail the download.
         with (
             patch("grzctl.commands.download.init_s3_client") as mock_init_s3,
             patch("grzctl.commands.download.get_metadata_upload_timestamp") as mock_get_ts,
+            patch("grzctl.commands.download.get_upload_timing", side_effect=RuntimeError("listing failed")),
         ):
             mock_init_s3.return_value = MagicMock()
             mock_get_ts.return_value.date.return_value = datetime.date.today()

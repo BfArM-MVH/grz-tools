@@ -2,8 +2,6 @@
 
 import datetime
 
-import pytest
-from grz_common.exceptions import MissingSubmissionFileError
 from grz_common.transfer import upload_timing
 
 SUBMISSION_ID = "260914050_2025-09-15_c64603a7"
@@ -52,5 +50,6 @@ def test_upload_timing_without_marker_cannot_tell():
 
 
 def test_upload_timing_needs_an_object():
-    with pytest.raises(MissingSubmissionFileError):
-        upload_timing(SUBMISSION_ID, {f"{SUBMISSION_ID}/version": _at(0)})
+    """An inbox without uploaded objects (cleaned, or only the marker) has no timing; it is not the LE's fault."""
+    assert upload_timing(SUBMISSION_ID, {f"{SUBMISSION_ID}/version": _at(0)}) is None
+    assert upload_timing(SUBMISSION_ID, {}) is None
