@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v3.0.1...grz-cli-v3.0.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** require grz-common 4.0.3 ([#742](https://github.com/BfArM-MVH/grz-tools/issues/742)) ([323dc9f](https://github.com/BfArM-MVH/grz-tools/commit/323dc9f1c1ec735e975c28ed5105acaa87329f6c))
+
 ## [3.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v3.0.0...grz-cli-v3.0.1) (2026-10-22)
 
 
