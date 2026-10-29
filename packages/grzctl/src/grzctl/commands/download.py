@@ -121,7 +121,9 @@ def download(  # noqa: PLR0913, PLR0917
                     if timing is None:
                         log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
                     else:
-                        db.set_submission_upload_timing(submission_id, timing.started, timing.finished, timing.resumed)
+                        with db.transaction() as session:
+                            for column, value in timing._asdict().items():
+                                db.modify_submission(submission_id, column, value, session=session)
                 except Exception as e:
                     log.warning(f"Upload timing of {submission_id} not recorded: {e}")
             # The download knows the inbox, so record it.

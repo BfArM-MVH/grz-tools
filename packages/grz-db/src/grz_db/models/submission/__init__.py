@@ -1351,38 +1351,6 @@ class SubmissionDb:
             active_session.flush()
             return submission
 
-    def set_submission_upload_timing(
-        self,
-        submission_id: str,
-        started: datetime.datetime,
-        finished: datetime.datetime,
-        resumed: bool | None,
-        session: Session | None = None,
-    ) -> Submission:
-        """Record when the inbox received the first and the last object of a submission's upload.
-
-        ``grzctl download --populate`` calls this while the inbox still lists the objects; see
-        :func:`grz_common.transfer.upload_timing` for how the values are derived.
-
-        :param submission_id: ID of the submission.
-        :param started: When the upload started.
-        :param finished: When the upload finished.
-        :param resumed: Whether the upload was resumed after an interruption, ``None`` when unknown.
-        :param session: Transaction to join; a fresh one is opened and committed when absent.
-        :returns: The updated :class:`Submission`.
-        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
-        """
-        with self.transaction(session) as active_session:
-            submission = active_session.get(Submission, submission_id)
-            if submission is None:
-                raise SubmissionNotFoundError(submission_id)
-            submission.upload_started_at = started
-            submission.upload_finished_at = finished
-            submission.upload_resumed = resumed
-            active_session.add(submission)
-            active_session.flush()
-            return submission
-
     def set_selected_for_qc(
         self, submission_id: str, selected_for_qc: bool, session: Session | None = None
     ) -> Submission:

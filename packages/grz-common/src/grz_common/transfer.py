@@ -215,11 +215,14 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
 
 
 class UploadTiming(NamedTuple):
-    """When an inbox received the first and the last object of an upload, see :func:`upload_timing`."""
+    """When an inbox received the first and the last object of an upload, see :func:`upload_timing`.
 
-    started: datetime.datetime
-    finished: datetime.datetime
-    resumed: bool | None
+    The fields are named after the submission columns that store them.
+    """
+
+    upload_started_at: datetime.datetime
+    upload_finished_at: datetime.datetime
+    upload_resumed: bool | None
     """Whether the upload was resumed after an interruption; ``None`` if the uploader wrote no ``version`` marker."""
 
 
@@ -243,9 +246,9 @@ def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datet
     if not times:
         return None
     return UploadTiming(
-        started=marker or min(times),
-        finished=max(times),
-        resumed=None if marker is None else any(modified < marker for modified in times),
+        upload_started_at=marker or min(times),
+        upload_finished_at=max(times),
+        upload_resumed=None if marker is None else any(modified < marker for modified in times),
     )
 
 
