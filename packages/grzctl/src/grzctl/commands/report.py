@@ -691,8 +691,9 @@ def _monitoring_payload(
 ) -> dict[str, typing.Any]:
     """Cumulative per-LE numbers for the GRZ monitoring sheet, as of the end of *month* (``YYYY-MM``).
 
-    - ``cases``: cases whose initial submission passed basic QC and had its Prüfbericht submitted (state
-      Reported) by then. A case has at most one such submission, so this counts cases, not submissions:
+    - ``cases``: cases whose initial submission passed basic QC (:attr:`Submission.is_qc_passed_initial`)
+      and had its Prüfbericht submitted (state Reported) by then. A case has at most one such
+      submission, so this counts cases, not submissions:
       follow-up, addition and correction submissions belong to a case already counted, and a rejected
       initial submission is no case. The QC flag matters because a Prüfbericht can be reported for a
       rejected submission too: older databases hold negative Prüfberichte with a Reported state.
@@ -719,11 +720,7 @@ def _monitoring_payload(
         if le_id is None or submission.submission_type == SubmissionType.test:
             continue
         states = [(state.state, state.timestamp) for state in submission.states]
-        if (
-            submission.submission_type == SubmissionType.initial
-            and submission.basic_qc_passed
-            and reached(states, SubmissionStateEnum.REPORTED)
-        ):
+        if submission.is_qc_passed_initial and reached(states, SubmissionStateEnum.REPORTED):
             cases[le_id] += 1
             if submission.submission_size is not None:
                 sizes[le_id].append(submission.submission_size)

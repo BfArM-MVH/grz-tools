@@ -259,6 +259,24 @@ class Submission(SubmissionBase, table=True):
     def _pseudonym_expression(cls) -> ColumnElement[str | None]:
         return select(Case.psn).where(Case.id == cls.case_id).scalar_subquery()
 
+    @hybrid_property
+    def is_qc_passed_initial(self) -> bool:
+        """Whether this is the ``initial`` submission of its case that passed basic QC.
+
+        A case has at most one such submission (partial unique index
+        ``ux_submissions_one_initial_per_case``), so these submissions stand for the cases. Earlier initial uploads that failed basic QC are retries
+        of the same patient, not further cases.
+        """
+        return self.submission_type == SubmissionType.initial and self.basic_qc_passed is True
+
+    @is_qc_passed_initial.inplace.expression
+    @classmethod
+    def _is_qc_passed_initial_expression(cls) -> ColumnElement[bool]:
+        return sa.and_(
+            cls.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
+            cls.basic_qc_passed.is_(True),  # type: ignore[union-attr]
+        )
+
     def diff(
         self,
         other: Self,
@@ -1655,18 +1673,7 @@ class SubmissionDb:
         :param session: Transaction to read in.
         :returns: One entry per key, ordered by submitter then local case ID.
         """
-        qc_passed_initials = sqlfn.count(
-            sa.case(
-                (
-                    sa.and_(
-                        Submission.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
-                        Submission.basic_qc_passed.is_(True),  # type: ignore[union-attr]
-                    ),
-                    1,
-                ),
-                else_=None,
-            )
-        )
+        qc_passed_initials = sqlfn.count(sa.case((Submission.is_qc_passed_initial, 1), else_=None))
         rows = session.exec(
             select(
                 Submission.submitter_id,
@@ -1776,11 +1783,7 @@ class SubmissionDb:
     def _qc_passed_initial_of(session: Session, case_id: int) -> Submission | None:
         """Return the case's QC-passed ``initial`` submission, if any."""
         return session.exec(
-            select(Submission).where(
-                Submission.case_id == case_id,
-                Submission.submission_type == SubmissionType.initial,
-                Submission.basic_qc_passed.is_(True),  # type: ignore[union-attr]
-            )
+            select(Submission).where(Submission.case_id == case_id, Submission.is_qc_passed_initial)
         ).first()
 
     def get_initial_submission(self, case_id: int) -> Submission | None:
