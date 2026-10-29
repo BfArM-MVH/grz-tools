@@ -689,7 +689,9 @@ def _monitoring_payload(
 
     Every LE in *le_ids* gets a row, also without submissions, so the sheet sees the month as complete,
     and every row has the same keys: a count that has nothing to count is ``0``, a statistic without
-    values ``None``. Sizes are in bytes; the sheet scales them.
+    values ``None``. Sizes are in bytes; the sheet scales them. Months end at midnight UTC, as the
+    database timestamps are in UTC. Only the state and change-request logs are read as of the month's
+    end; QC result, size and consent are the submissions' current values.
 
     Cumulative, as of the end of the month; the sheet derives monthly increments from them:
 
@@ -705,14 +707,16 @@ def _monitoring_payload(
     - ``bytes_consented`` / ``bytes_unconsented``: the LE's archived, not deleted submissions by research
       consent. A missing consent counts as unconsented, as in ``grzctl archive``; a missing size as 0.
 
-    Of the month alone, because they cannot be accumulated; sending the month again replaces them:
+    Of the month alone, because they cannot be accumulated; sending the month again replaces them, so
+    the daily run sends the month before as well (see :func:`monitoring`):
 
     - ``active``: 1 if the LE uploaded a non-test submission during the month, else 0.
     - ``uploads`` and ``speed_{median,min,max,sd}_mbs``: number, median, minimum, maximum and population
       standard deviation of the transfer speed in MB/s of the LE's non-test uploads that finished during
       the month: the submission size over the time between the uploader's start marker and its last
       object, as ``grzctl download`` recorded it (:attr:`Submission.upload_started_at`). A resumed upload
-      spans the pause, so it is left out.
+      spans the pause, so it is left out, and so is an upload without the uploader's ``version`` marker,
+      for which a resumption cannot be detected (``upload_resumed`` is NULL).
     """
     first, last = month_date_bounds(month.year, month.month)
     cutoff = datetime.datetime.combine(last + datetime.timedelta(days=1), datetime.time(), datetime.UTC)
@@ -807,8 +811,7 @@ def _monitoring_payload(
 @click.option(
     "--month",
     type=click.DateTime(formats=["%Y-%m"]),
-    default=lambda: datetime.date.today().strftime("%Y-%m"),
-    show_default="current month",
+    show_default="the running month and the one before",
     help="Report the state at the end of this month (YYYY-MM).",
 )
 @click.option(
@@ -823,29 +826,36 @@ def _monitoring_payload(
 )
 @click.option("--dry-run", is_flag=True, help="Let the intake check the report without storing it.")
 @click.pass_context
-def monitoring(ctx: click.Context, month: datetime.datetime, url: str | None, token: str | None, dry_run: bool):
+def monitoring(ctx: click.Context, month: datetime.datetime | None, url: str | None, token: str | None, dry_run: bool):
     """
-    Send cumulative per-LE numbers to the GRZ monitoring sheet.
+    Send per-LE numbers to the GRZ monitoring sheet, one report per month.
 
-    Meant for a daily cron job. Sending a month again replaces its numbers in the sheet.
+    Meant for a daily cron job. Sending a month again replaces its numbers in the sheet. Without
+    --month, each run sends the running month and the one before, so that an upload downloaded after
+    its month ended still counts in that month's activity and transfer speed.
     """
+    today = datetime.datetime.now(datetime.UTC).date()  # the month ends of the report are in UTC
+    months = [month.date()] if month else [today.replace(day=1) - datetime.timedelta(days=1), today]
     submission_db = get_submission_db_instance(ctx.obj["db_url"])
     with submission_db.transaction() as session:
-        payload = _monitoring_payload(session, ctx.obj["grz_id"], month.date(), ctx.obj["le_ids"])
+        payloads = [_monitoring_payload(session, ctx.obj["grz_id"], m, ctx.obj["le_ids"]) for m in months]
 
     if url is None:
-        click.echo(json.dumps(payload, indent=2))
+        click.echo(json.dumps(payloads, indent=2))
         return
     if not token:
         raise click.UsageError("--url needs --token or GRZ_MONITORING_TOKEN.")
 
-    # Apps Script answers with a redirect; requests follows it as GET, which is what the intake expects.
-    try:
-        response = requests.post(url, json={**payload, "token": token, "dry_run": dry_run}, timeout=60)
-        response.raise_for_status()
-        result = response.json()
-    except requests.RequestException as e:
-        raise click.ClickException(f"intake not reachable: {e}") from e
-    click.echo(json.dumps(result))
-    if result.get("status") != 200:
-        raise click.ClickException(f"intake rejected the report: {result.get('error', result)}")
+    for payload in payloads:
+        # Apps Script answers with a redirect; requests follows it as GET, which is what the intake expects.
+        try:
+            response = requests.post(url, json={**payload, "token": token, "dry_run": dry_run}, timeout=60)
+            response.raise_for_status()
+            result = response.json()
+        except requests.RequestException as e:
+            raise click.ClickException(f"intake not reachable: {e}") from e
+        click.echo(json.dumps(result))
+        if result.get("status") != 200:
+            raise click.ClickException(
+                f"intake rejected the report of {payload['month']}: {result.get('error', result)}"
+            )
