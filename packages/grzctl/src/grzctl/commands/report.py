@@ -3,7 +3,9 @@
 import csv
 import datetime
 import itertools
+import json
 import logging
+import re
 import typing
 from collections import defaultdict
 from enum import StrEnum
@@ -11,6 +13,7 @@ from operator import attrgetter
 from pathlib import Path
 
 import click
+import requests
 import sqlalchemy as sa
 from grz_db.models.author import Author
 from grz_db.models.submission import (
@@ -26,6 +29,7 @@ from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, SubmissionType
 from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF
 from sqlalchemy import func as sqlfn
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from ..commands import grzctl_configuration
@@ -51,6 +55,7 @@ def report(ctx: click.Context, configuration: GrzctlConfig):
     ctx.obj = {
         "db_url": db.database_url,
         "grz_id": configuration.identifiers.grz,
+        "le_ids": list(configuration.leistungserbringer),
     }
 
 
@@ -674,3 +679,115 @@ def quarterly(
 
     qc_output_path = output_directory / f"3-Detailprüfung_{grz_id}_{quarter}_{year}.tsv"
     _dump_qc_report(qc_output_path, submission_db, year, quarter, with_submission_ids=with_submission_ids)
+
+
+def _utc(timestamp: datetime.datetime) -> datetime.datetime:
+    """SQLite returns naive timestamps; they are stored in UTC."""
+    return timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=datetime.UTC)
+
+
+def _monitoring_payload(
+    grz_id: str, month: str, le_ids: typing.Iterable[str], submissions: typing.Iterable[Submission]
+) -> dict[str, typing.Any]:
+    """Cumulative per-LE numbers for the GRZ monitoring sheet, as of the end of *month* (``YYYY-MM``).
+
+    - ``cases``: initial submissions whose Prüfbericht was submitted (state Reported) by then. Follow-up,
+      addition and correction submissions belong to a case already counted.
+    - ``avg_gb``: mean size of those initial submissions, in GB (10^9 bytes).
+    - ``active``: 1 if the LE uploaded a non-test submission during *month*.
+    - ``tb_consented`` / ``tb_unconsented``: archived, not deleted submissions by research consent, in TB (10^12
+      bytes). A missing consent counts as unconsented, as in ``grzctl archive``.
+
+    Every LE in *le_ids* gets a row, also with zero cases, so the sheet sees the month as complete.
+    """
+    first = datetime.date.fromisoformat(f"{month}-01")
+    after = datetime.date(first.year + first.month // 12, first.month % 12 + 1, 1)
+    cutoff = datetime.datetime.combine(after, datetime.time(), datetime.UTC)
+
+    def reached(log: typing.Iterable[tuple[str, datetime.datetime]], kind: str) -> bool:
+        return any(entry == kind and _utc(timestamp) < cutoff for entry, timestamp in log)
+
+    cases: defaultdict[str, int] = defaultdict(int)
+    sizes: defaultdict[str, list[int]] = defaultdict(list)
+    active: set[str] = set()
+    archived_bytes = {True: 0, False: 0}
+    for submission in submissions:
+        le_id = submission.submitter_id
+        if le_id is None or submission.submission_type == SubmissionType.test:
+            continue
+        states = [(state.state, state.timestamp) for state in submission.states]
+        if submission.submission_type == SubmissionType.initial and reached(states, SubmissionStateEnum.REPORTED):
+            cases[le_id] += 1
+            if submission.submission_size is not None:
+                sizes[le_id].append(submission.submission_size)
+        if submission.submission_uploaded_date and first <= submission.submission_uploaded_date < after:
+            active.add(le_id)
+        changes = [(change.change, change.timestamp) for change in submission.changes]
+        deleted = reached(changes, ChangeRequestEnum.DELETE)
+        if reached(states, SubmissionStateEnum.ARCHIVED) and not deleted:
+            archived_bytes[bool(submission.consented)] += submission.submission_size or 0
+
+    rows = []
+    for le_id in sorted(set(le_ids) | set(cases) | active):
+        row: dict[str, typing.Any] = {"le_id": le_id, "cases": cases[le_id], "active": int(le_id in active)}
+        if sizes[le_id]:
+            row["avg_gb"] = sum(sizes[le_id]) / len(sizes[le_id]) / 1e9
+        rows.append(row)
+    return {
+        "grz": grz_id,
+        "month": month,
+        "reported_by": "grzctl report monitoring",
+        "tb_consented": archived_bytes[True] / 1e12,
+        "tb_unconsented": archived_bytes[False] / 1e12,
+        "rows": rows,
+    }
+
+
+@report.command()
+@click.option(
+    "--month",
+    default=lambda: datetime.date.today().strftime("%Y-%m"),
+    show_default="current month",
+    help="Report the state at the end of this month (YYYY-MM).",
+)
+@click.option(
+    "--url",
+    envvar="GRZ_MONITORING_URL",
+    help="Intake URL of the GRZ monitoring sheet (env GRZ_MONITORING_URL). Without it, the report is only printed.",
+)
+@click.option(
+    "--token",
+    envvar="GRZ_MONITORING_TOKEN",
+    help="This GRZ's intake token. Prefer the environment variable GRZ_MONITORING_TOKEN.",
+)
+@click.option("--dry-run", is_flag=True, help="Let the intake check the report without storing it.")
+@click.pass_context
+def monitoring(ctx: click.Context, month: str, url: str | None, token: str | None, dry_run: bool):
+    """
+    Send cumulative per-LE numbers to the GRZ monitoring sheet.
+
+    Meant for a daily or weekly cron job. Sending a month again replaces its numbers in the sheet.
+    """
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise click.BadParameter("must be YYYY-MM", param_hint="--month")
+
+    submission_db = get_submission_db_instance(ctx.obj["db_url"])
+    with submission_db.transaction() as session:
+        submissions = session.exec(
+            select(Submission).options(selectinload(Submission.states), selectinload(Submission.changes))  # type: ignore[arg-type]
+        ).all()
+        payload = _monitoring_payload(ctx.obj["grz_id"], month, ctx.obj["le_ids"], submissions)
+
+    if url is None:
+        click.echo(json.dumps(payload, indent=2))
+        return
+    if not token:
+        raise click.UsageError("--url needs --token or GRZ_MONITORING_TOKEN.")
+
+    # Apps Script answers with a redirect; requests follows it as GET, which is what the intake expects.
+    response = requests.post(url, json={**payload, "token": token, "dry_run": dry_run}, timeout=60)
+    response.raise_for_status()
+    result = response.json()
+    click.echo(json.dumps(result))
+    if result.get("status") != 200:
+        raise click.ClickException(f"intake rejected the report: {result.get('error', result)}")

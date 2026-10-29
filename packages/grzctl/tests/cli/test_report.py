@@ -5,6 +5,7 @@ from datetime import date
 from operator import itemgetter
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 
 import grzctl.cli
 import pytest
@@ -611,3 +612,77 @@ def test_quarterly_qc_includes_passing_submission_with_deviation(migrated_databa
         overview_rows = list(csv.reader(overview_file, delimiter="\t"))[1:]
     assert len(overview_rows) == 1
     assert overview_rows[0][10] == "0"  # number_of_failed_qcs
+
+
+def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The monitoring report counts reported submissions per LE and sends them to the intake."""
+    runner = CliRunner()
+    cli = grzctl.cli.build_cli()
+    common = ["--config", str(migrated_database_config_path)]
+
+    metadata_raw = json.loads(TEST_METADATA_PATH.read_text())
+    metadata_raw["submission"]["submissionType"] = "initial"
+    metadata = GrzSubmissionMetadata.model_validate(metadata_raw)
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(json.dumps(metadata_raw))
+    submission_id = metadata.submission_id
+    for args in (
+        ["db", "submission", "add", submission_id],
+        [
+            "db",
+            "submission",
+            "populate",
+            "--no-confirm",
+            "--submission-date",
+            date.today().isoformat(),
+            submission_id,
+            str(metadata_path),
+        ],
+        ["db", "submission", "update", submission_id, "Archived"],
+        ["db", "submission", "update", submission_id, "Reported"],
+    ):
+        result = runner.invoke(cli, [*common, *args])
+        assert result.exit_code == 0, result.output
+
+    # without a URL the report is printed; the configured LE without submissions gets a zero row
+    result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    size = metadata.get_submission_size()
+    assert payload["grz"] == "GRZK00007"
+    assert payload["month"] == date.today().strftime("%Y-%m")
+    assert payload["rows"] == [
+        {"le_id": "000000000", "cases": 0, "active": 0},
+        {"le_id": metadata.submission.submitter_id, "cases": 1, "active": 1, "avg_gb": size / 1e9},
+    ]
+    assert payload["tb_consented"] + payload["tb_unconsented"] == pytest.approx(size / 1e12)
+
+    # a month before the submission: nothing reported or archived yet
+    result = runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-01"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    earlier = json.loads(result.stdout)
+    assert earlier["rows"] == [{"le_id": "000000000", "cases": 0, "active": 0}]
+    assert earlier["tb_consented"] == earlier["tb_unconsented"] == 0
+
+    assert runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-13"]).exit_code == 2
+
+    # with a URL the report goes to the intake, together with the token
+    sent = {}
+    answer = {"status": 200, "appended": 3}
+
+    def fake_post(url, json, timeout):
+        sent.update(url=url, body=json)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: answer)
+
+    monkeypatch.setattr("grzctl.commands.report.requests.post", fake_post)
+    env = {"GRZ_MONITORING_URL": "https://intake.example/exec", "GRZ_MONITORING_TOKEN": "s3cret"}
+    result = runner.invoke(cli, [*common, "report", "monitoring"], env=env, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    assert sent["url"] == "https://intake.example/exec"
+    assert sent["body"] == {**payload, "token": "s3cret", "dry_run": False}
+
+    # a rejected report fails the command, so cron reports it
+    answer = {"status": 400, "error": "unknown le_id for GRZK00007"}
+    result = runner.invoke(cli, [*common, "report", "monitoring"], env=env)
+    assert result.exit_code == 1
+    assert "unknown le_id" in result.output
