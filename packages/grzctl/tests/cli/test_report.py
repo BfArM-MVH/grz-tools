@@ -661,18 +661,18 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     size = metadata.get_submission_size()
     assert payload["grz"] == "GRZK00007"
     assert payload["month"] == date.today().strftime("%Y-%m")
-    assert payload["rows"] == [
-        {"le_id": "000000000", "cases": 0, "active": 0},
-        {"le_id": metadata.submission.submitter_id, "cases": 1, "active": 1, "avg_gb": size / 1e9},
-    ]
-    assert payload["tb_consented"] + payload["tb_unconsented"] == pytest.approx(size / 1e12)
+    zero = {"cases": 0, "active": 0, "bytes_consented": 0, "bytes_unconsented": 0}
+    [absent, present] = payload["rows"]
+    assert absent == {"le_id": "000000000", **zero}
+    assert present["le_id"] == metadata.submission.submitter_id
+    assert (present["cases"], present["active"], present["bytes"]) == (1, 1, size)
+    assert present["bytes_consented"] + present["bytes_unconsented"] == size  # the rejected one is not archived
 
     # a month before the submission: nothing reported or archived yet
     result = runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-01"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
     earlier = json.loads(result.stdout)
-    assert earlier["rows"] == [{"le_id": "000000000", "cases": 0, "active": 0}]
-    assert earlier["tb_consented"] == earlier["tb_unconsented"] == 0
+    assert earlier["rows"] == [{"le_id": "000000000", **zero}]
 
     assert runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-13"]).exit_code == 2
 
