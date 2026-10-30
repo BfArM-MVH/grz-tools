@@ -212,7 +212,8 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     return response["LastModified"]
 
 
-UNKNOWN_GRZ_CLI_VERSION = "UNKNOWN"
+MISSING_GRZ_CLI_VERSION = "VERSION FILE NOT FOUND"
+ERROR_GRZ_CLI_VERSION = "VERSION READ FAILED"
 """Recorded when a submission's grz-cli version cannot be determined."""
 
 
@@ -234,5 +235,5 @@ def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> 
         except ClientError as e:
             if e.response["Error"]["Code"] != "NoSuchKey":
                 raise
-            grz_cli_version = UNKNOWN_GRZ_CLI_VERSION
+            grz_cli_version = MISSING_GRZ_CLI_VERSION
         return grz_cli_version

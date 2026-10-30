@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 import grz_common.cli as grzcli
 from grz_common.transfer import (
-    UNKNOWN_GRZ_CLI_VERSION,
+    ERROR_GRZ_CLI_VERSION,
     get_grzcli_version,
     get_metadata_upload_timestamp,
     init_s3_client,
@@ -112,7 +112,7 @@ def download(  # noqa: PLR0913, PLR0917
             try:
                 grz_cli_version = get_grzcli_version(s3_client, s3_options.bucket, submission_id)
             except Exception as e:
-                grz_cli_version = UNKNOWN_GRZ_CLI_VERSION
+                grz_cli_version = ERROR_GRZ_CLI_VERSION
                 log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
             db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
             if populate:

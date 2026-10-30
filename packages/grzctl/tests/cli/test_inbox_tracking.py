@@ -16,7 +16,7 @@ import grzctl.cli
 import pytest
 import yaml
 from grz_common.exceptions import ConfigurationError
-from grz_common.transfer import UNKNOWN_GRZ_CLI_VERSION
+from grz_common.transfer import ERROR_GRZ_CLI_VERSION
 from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSummary
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
@@ -273,7 +273,7 @@ def test_errored_grzcli_version_read(migrated_database_config: GrzctlConfig, tmp
     db_context.assert_called_once()
     recorded = db.get_submission(SUBMISSION_ID)
     assert recorded is not None
-    assert recorded.grz_cli_version == UNKNOWN_GRZ_CLI_VERSION
+    assert recorded.grz_cli_version == ERROR_GRZ_CLI_VERSION
     get_version.assert_called_once()
     worker.download.assert_called_once()
 
