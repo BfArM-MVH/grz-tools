@@ -215,17 +215,20 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
 
 
 MISSING_GRZ_CLI_VERSION = "VERSION FILE NOT FOUND"
+"""Recorded when the submission holds no grz-cli version object (in a submission that has not undergone 'grzctl clean')"""
 ERROR_GRZ_CLI_VERSION = "VERSION READ FAILED"
-"""Recorded when a submission's grz-cli version cannot be determined."""
+"""Recorded when reading the grz-cli version object fails"""
 
 
 def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> str:
-    """Read and return the version number of grz-cli used to upload a given submission
+    """Read and return the version number of grz-cli used to upload a given submission from the version file.
+    Will not run on a cleaned submission (no version file present)
 
     :param s3_client: boto3 S3 client pointed at the inbox bucket.
     :param bucket: Name of the inbox bucket.
     :param submission_id: Submission identifier (the top-level S3 prefix).
-    :returns: The version string, or UNKNOWN_GRZ_CLI_VERSION if the submission has no ``version`` object.
+    :returns: The version string, or MISSING_GRZ_CLI_VERSION if the submission has no ``version`` object.
+    :raises SubmissionCleanedError: If 'grzctl clean' has started/finished on the submission.
     :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
     :raises DownloadError: For any other error of the S3 client.
     """
@@ -237,5 +240,7 @@ def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> 
         except ClientError as e:
             if e.response["Error"]["Code"] != "NoSuchKey":
                 raise
+            # Cleaned inbox should lack the version file, so don't call it missing if so
+            raise_if_cleaned(s3_client, bucket, submission_id)
             grz_cli_version = MISSING_GRZ_CLI_VERSION
         return grz_cli_version

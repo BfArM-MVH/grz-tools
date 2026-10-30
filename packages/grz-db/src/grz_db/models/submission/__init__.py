@@ -187,7 +187,9 @@ class SubmissionBase(SQLModel):
     # and the decryption key lookup can locate it without asking for --inbox again
     inbox: str | None = None
 
-    # version number of grz-cli tooling used (set to UNKNOWN if version file not present in submission directory in inbox)
+    # version number of grz-cli tooling used
+    # set to "VERSION FILE NOT FOUND" (constant defined in transfer.py) if version file not present in submission directory in inbox
+    # set to "VERSION READ FAILED" if reading it failed
     grz_cli_version: str | None = None
 
 
