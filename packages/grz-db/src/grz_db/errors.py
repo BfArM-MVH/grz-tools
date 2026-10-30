@@ -32,10 +32,17 @@ class DuplicateSubmissionError(SubmissionError):
 
 
 class DuplicateTanGError(SubmissionError):
-    """Exception for when a tanG is already in use."""
+    """Exception for when a tanG is already in use.
 
-    def __init__(self):
-        super().__init__("Duplicate tanG")
+    :param holder_id: ID of the submission that already holds the tanG, if known.
+    """
+
+    def __init__(self, holder_id: str | None = None):
+        self.holder_id = holder_id
+        message = "Duplicate tanG"
+        if holder_id is not None:
+            message += f", already used by submission '{holder_id}'"
+        super().__init__(message)
 
 
 class SubmissionDateIsNoneError(SubmissionError):

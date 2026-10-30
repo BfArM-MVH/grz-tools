@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import grz_common.exceptions as grzexc
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
@@ -17,6 +18,9 @@ from ..transfer import s3_errors
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission
 from .upload import S3BotoUploadWorker
+
+if TYPE_CHECKING:
+    from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 log = logging.getLogger(__name__)
 
@@ -292,9 +296,20 @@ class Worker:
         submission_id: str,
         force: bool = False,
         metadata_version_check: Callable[[str], None] | None = None,
+        metadata_check: Callable[[GrzSubmissionMetadata], None] | None = None,
     ):
         """
         Download an encrypted submission
+
+        The metadata is downloaded first, and the encrypted files only after the checks have passed.
+
+        :param s3_options: S3 options of the inbox to download from
+        :param submission_id: ID of the submission to download
+        :param force: Delete the download progress log and download everything again
+        :param metadata_version_check: Called with the metadata schema version, before any file is downloaded
+        :param metadata_check: Called with the parsed metadata, after the version check and before any file
+            is downloaded. An exception it raises aborts the download, so checks that need nothing but the
+            metadata can reject a submission before its large files are transferred.
         """
         if force:
             # delete the log file if it exists
@@ -314,6 +329,8 @@ class Worker:
         if metadata_version_check is not None:
             metadata_schema_version = encrypted_submission.metadata.content.get_schema_version()
             metadata_version_check(metadata_schema_version)
+        if metadata_check is not None:
+            metadata_check(encrypted_submission.metadata.content)
 
         self.__log.info("Downloading encrypted files...")
         download_worker.download(submission_id, encrypted_submission)

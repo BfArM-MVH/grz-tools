@@ -211,6 +211,69 @@ def test_worker_download_checks_metadata_version_before_files(
     assert not list((tmp_path / "encrypted_files").rglob("*.c4gh"))
 
 
+def test_worker_download_runs_metadata_check_before_files(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    tmp_path,
+):
+    """The metadata check sees the parsed metadata, and the files are downloaded after it passed."""
+    metadata_path, metadata_key = encrypted_submission.get_metadata_file_path_and_object_id()
+    upload_file(remote_bucket, metadata_path, metadata_key)
+    for local_file_path, s3_key in encrypted_submission.get_encrypted_files_and_object_id().items():
+        upload_file(remote_bucket, local_file_path, s3_key)
+
+    worker = Worker(
+        metadata_dir=tmp_path / "metadata",
+        files_dir=tmp_path / "files",
+        log_dir=tmp_path / "logs",
+        encrypted_files_dir=tmp_path / "encrypted_files",
+    )
+
+    checked = []
+
+    def metadata_check(metadata) -> None:
+        checked.append(metadata.submission_id)
+        assert not list((tmp_path / "encrypted_files").rglob("*.c4gh")), "files were downloaded before the check"
+
+    worker.download(s3_config_model.s3, encrypted_submission.submission_id, metadata_check=metadata_check)
+
+    assert checked == [encrypted_submission.metadata.content.submission_id]
+    assert list((tmp_path / "encrypted_files").rglob("*.c4gh"))
+
+
+def test_worker_download_aborts_before_files_when_the_metadata_check_fails(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    tmp_path,
+):
+    """An exception of the metadata check ends the download with the metadata in place and no file transferred."""
+    metadata_path, metadata_key = encrypted_submission.get_metadata_file_path_and_object_id()
+    upload_file(remote_bucket, metadata_path, metadata_key)
+    for local_file_path, s3_key in encrypted_submission.get_encrypted_files_and_object_id().items():
+        upload_file(remote_bucket, local_file_path, s3_key)
+
+    worker = Worker(
+        metadata_dir=tmp_path / "metadata",
+        files_dir=tmp_path / "files",
+        log_dir=tmp_path / "logs",
+        encrypted_files_dir=tmp_path / "encrypted_files",
+    )
+
+    class Rejected(Exception):
+        pass
+
+    def reject(metadata) -> None:
+        raise Rejected
+
+    with pytest.raises(Rejected):
+        worker.download(s3_config_model.s3, encrypted_submission.submission_id, metadata_check=reject)
+
+    assert (tmp_path / "metadata" / "metadata.json").exists()
+    assert not list((tmp_path / "encrypted_files").rglob("*.c4gh"))
+
+
 def test_download_file_fails_for_missing_key(
     s3_config_model,
     remote_bucket,
