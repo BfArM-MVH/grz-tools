@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.2...grz-common-v4.0.3) (2026-10-29)
+
+
+### Bug Fixes
+
+* **grz-common:** remove range header ([#739](https://github.com/BfArM-MVH/grz-tools/issues/739)) ([e71ac19](https://github.com/BfArM-MVH/grz-tools/commit/e71ac198644b9a1e7d8778e03215deeeb9673c30))
+
 ## [4.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.1...grz-common-v4.0.2) (2026-10-22)
 
 
