@@ -7,7 +7,7 @@ import grz_common.exceptions as grzexc
 from grz_common.pipeline.context import FileError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
-from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionDb, SubmissionStateEnum
 
 from . import get_versions
 from .commands.db.cli import get_submission_db_instance
@@ -51,6 +51,11 @@ _RANKS: tuple[frozenset[FailureReasonEnum], ...] = (
 
 A rejected submission stays rejected after any rerun, so the reasons that reject it come first.
 """
+
+
+def has_state(submission: Submission | None, state: SubmissionStateEnum) -> bool:
+    """Whether the state history of ``submission`` holds ``state``, at any point."""
+    return submission is not None and submission.get_latest_state(filter_to_type=state) is not None
 
 
 def _causes(error: BaseException | None) -> Iterator[BaseException]:

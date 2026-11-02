@@ -29,7 +29,7 @@ def full_config_path(
     migrated_db_config_content,
     pruefbericht_config_content,
 ):
-    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _GRZCTL_DETAILED_QC_DUMMY, _grzctl_archives
 
     archives = _grzctl_archives(endpoint_url="http://localhost:9000")
     # Use distinct public keys per archive so tests can assert that the consent
@@ -50,6 +50,7 @@ def full_config_path(
         },
         "archives": archives,
         "identifiers": {"grz": "GRZK00007"},
+        "detailed_qc": _GRZCTL_DETAILED_QC_DUMMY,
     }
     config_data.update(migrated_db_config_content)
     config_data.update(pruefbericht_config_content)

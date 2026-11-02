@@ -47,13 +47,10 @@ Every other step stops for a mistyped submission ID before its context is open, 
 | `configuration_error`           | GRZ      | The setup is wrong or incomplete: a key or credential is missing, S3 or BfArM rejects the credentials, or a configured bucket does not exist. |
 | `transfer_error`                | GRZ      | Moving data to or from S3 or BfArM failed. A rerun usually succeeds. If the failure repeats, the message names the error code or HTTP status. |
 | `encryption_error`              | GRZ      | Re-encrypting a file for the archive failed. |
-| `detailed_qc_error`             | GRZ      | The detailed QC workflow exited with an error. |
+| `detailed_qc_error`             | GRZ      | The detailed QC workflow exited with an error. A rerun of `grzctl process` runs it again. |
 | `pruefbericht_generation_error` | GRZ      | The Prüfbericht cannot be generated, because the database lacks the submission or data that the Prüfbericht needs. |
 | `pruefbericht_rejected`         | GRZ      | BfArM rejected the Prüfbericht. Sending the same one again fails again. |
 | `unknown`                       | GRZ      | No code path accounts for this error. Treat it as a bug. |
-
-No grzctl step raises the error behind `detailed_qc_error` yet.
-`grzctl db submission update --failure-reason` can record it.
 
 Older states can carry `network_error` or `upload_error`.
 Both mean what `transfer_error` means. grzctl no longer writes them, and `grzctl db submission update` does not offer them.
@@ -93,21 +90,33 @@ If it finds one, it raises a `SubmissionCleanedError`.
 An empty metadata.json without a marker was uploaded like that.
 So its `LastModified` is the upload date, and its download fails as an invalid metadata.json.
 
+A clean that finds nothing under the submission ID records `configuration_error` and writes no marker.
+Every clean keeps the metadata.json, so the submission ID or the inbox is wrong.
+
 `AccessDenied` is not a configuration error.
 S3 also answers 403 for a missing object if the credentials lack the permission to list the bucket.
 For the same reason, `AccessDenied` for the submission's metadata does not tell whether the bucket holds the submission.
 An upload or an archival then logs a warning that it cannot check for an earlier run, and it continues.
+`grzctl process` asks the database instead: a recorded `PROCESSED` or `ARCHIVED` state means an earlier run archived the submission.
 
 ## BfArM errors
 
 `grzctl pruefbericht submit` sorts the answers of BfArM like this:
 
-| BfArM answer                                 | Raised as                   | Reason |
-| -------------------------------------------- | --------------------------- | ------ |
-| `401` or `403`                               | `ConfigurationError`        | `configuration_error` |
-| Any other client error for the token request | `ConfigurationError`        | `configuration_error` |
-| Any other client error for the Prüfbericht   | `PruefberichtRejectedError` | `pruefbericht_rejected` |
-| A server error, a timeout, or no connection  | `NetworkError`              | `transfer_error` |
+| BfArM answer                                                                                  | Raised as                   | Reason |
+| --------------------------------------------------------------------------------------------- | --------------------------- | ------ |
+| `401` or `403`                                                                                | `ConfigurationError`        | `configuration_error` |
+| Any other client error for the token request                                                  | `ConfigurationError`        | `configuration_error` |
+| Any other client error for the Prüfbericht                                                    | `PruefberichtRejectedError` | `pruefbericht_rejected` |
+| A server error, a timeout, or no connection for the token request                             | `NetworkError`              | `transfer_error` |
+| A connection for the Prüfbericht that is refused, not resolved, or times out while connecting | `NetworkError`              | `transfer_error` |
+| A server error, a read timeout, or a dropped connection for the Prüfbericht                   | `TransferError`             | `transfer_error` |
 
 The token request carries only the client credentials, so any client error means that they are wrong.
 A `401` for the Prüfbericht first makes grzctl request a new token and send the Prüfbericht once more.
+
+`grzctl process` retries a `NetworkError` only, since BfArM has not received the Prüfbericht then.
+The other failures can come after BfArM got it, so their message says to ask BfArM before submitting it again.
+If BfArM did get it, `grzctl db submission update <submission_id> reported` records that.
+A rerun of `grzctl process` then cleans the inbox without sending the Prüfbericht again.
+Otherwise a rerun sends it.
