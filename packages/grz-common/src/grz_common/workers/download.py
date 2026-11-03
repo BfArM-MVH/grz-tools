@@ -256,6 +256,8 @@ class InboxSubmissionSummary(BaseModel):
     total_size_bytes: int
     upload_duration: datetime.timedelta | None = None
     """See :attr:`grz_common.transfer.UploadTiming.duration`; ``None`` while the inbox holds only the marker."""
+    upload_resumed: bool | None = None
+    """Whether the upload was resumed, so :attr:`upload_duration` covers only its last run; ``None`` if unknown."""
 
 
 def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSubmissionSummary]:
@@ -314,6 +316,7 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
             newest_upload=newest_object["LastModified"],
             total_size_bytes=total_size_bytes,
             upload_duration=timing.duration if timing else None,
+            upload_resumed=timing.upload_resumed if timing else None,
         )
 
         if state in {InboxSubmissionState.CLEANING, InboxSubmissionState.CLEANED} and (not show_cleaned):

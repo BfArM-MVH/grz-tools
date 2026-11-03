@@ -12,7 +12,7 @@ import pytest
 import sqlalchemy
 from click.testing import CliRunner
 from grz_db.models.submission import Submission
-from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, SubmissionType
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.report import date_to_quarter_year
 from grzctl.models.config import GrzctlConfig
@@ -794,8 +794,9 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
 
     def running_month_after(sid: str, **values) -> dict:
         """The LE's row of the running month, after setting columns that only an old database leaves unset."""
-        with engine.begin() as connection:
-            connection.execute(sqlalchemy.update(Submission).where(Submission.id == sid).values(**values))  # type: ignore[arg-type]
+        if values:
+            with engine.begin() as connection:
+                connection.execute(sqlalchemy.update(Submission).where(Submission.id == sid).values(**values))  # type: ignore[arg-type]
         result = runner.invoke(cli, [*common, "report", "monitoring", "--month", today.strftime("%Y-%m")])
         assert result.exit_code == 0, result.output
         [[_, row]] = [report["rows"] for report in json.loads(result.stdout)]
@@ -814,3 +815,32 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     present = running_month_after(followup_id, consented=None)
     assert present["archived_bytes_consent_unknown"] == size
     assert present["archived_bytes_consented"] == present["archived_bytes_non_consented"] == 0
+
+    # a month that has not begun is refused: it would carry today's numbers
+    next_month = (today.replace(day=28) + timedelta(days=4)).strftime("%Y-%m")
+    result = runner.invoke(cli, [*common, "report", "monitoring", "--month", next_month])
+    assert result.exit_code == 2
+    assert "has not begun" in result.output
+
+    # a test submission counts nowhere
+    before = running_month_after(followup_id)
+    present = running_month_after(followup_id, submission_type=SubmissionType.test)
+    assert (present["submissions"], present["archived"]) == (before["submissions"] - 1, before["archived"] - 1)
+    assert present["archived_bytes_consent_unknown"] == 0
+    running_month_after(followup_id, submission_type=SubmissionType.followup)
+
+    # a deleted submission, and one transferred to another GRZ, is no longer archived here
+    request = {
+        "requester_name": "Erika Mustermann",
+        "requester_email": "demo.requester@example.org",
+        "requested_at": today.isoformat(),
+        "request_email_content": "Bitte bearbeiten.",
+    }
+    for sid, change, archived in ((followup_id, "Delete", 1), (submission_id, "Transfer", 0)):
+        result = runner.invoke(
+            cli, [*common, "db", "submission", "change-request", sid, change, "--data", json.dumps(request)]
+        )
+        assert result.exit_code == 0, result.output
+        present = running_month_after(sid)
+        assert (present["archived"], present["submissions"]) == (archived, before["submissions"])
+    assert present["archived_bytes_consented"] + present["archived_bytes_non_consented"] == 0
