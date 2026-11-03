@@ -25,7 +25,7 @@ from tqdm.auto import tqdm
 from ..constants import TQDM_DEFAULTS
 from ..models.s3 import S3Options
 from ..progress import DownloadState, FileProgressLogger
-from ..transfer import head_object, init_s3_client, raise_if_cleaned, s3_errors
+from ..transfer import head_object, init_s3_client, raise_if_cleaned, s3_errors, upload_timing
 
 MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MiB, boto3 default
 MULTIPART_CHUNKSIZE = 8 * 1024 * 1024  # 8MiB, boto3 default
@@ -254,6 +254,8 @@ class InboxSubmissionSummary(BaseModel):
     oldest_upload: datetime.datetime
     newest_upload: datetime.datetime
     total_size_bytes: int
+    upload_duration: datetime.timedelta | None = None
+    """See :attr:`grz_common.transfer.UploadTiming.duration`; ``None`` while the inbox holds only the marker."""
 
 
 def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSubmissionSummary]:
@@ -304,12 +306,14 @@ def query_submissions(s3_options: S3Options, show_cleaned: bool) -> list[InboxSu
                 else InboxSubmissionState.INCOMPLETE
             )
 
+        timing = upload_timing(submission_id, {o["Key"]: o["LastModified"] for o in submission_objects})
         submission = InboxSubmissionSummary(
             submission_id=submission_id,
             state=state,
             oldest_upload=oldest_object["LastModified"],
             newest_upload=newest_object["LastModified"],
             total_size_bytes=total_size_bytes,
+            upload_duration=timing.duration if timing else None,
         )
 
         if state in {InboxSubmissionState.CLEANING, InboxSubmissionState.CLEANED} and (not show_cleaned):

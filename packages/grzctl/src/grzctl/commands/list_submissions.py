@@ -54,7 +54,10 @@ def _get_latest_state_txt(latest_state: str | None) -> rich.text.Text:
     return latest_state_txt
 
 
-def _format_upload_duration(duration: datetime.timedelta) -> rich.text.Text:
+def _format_upload_duration(duration: datetime.timedelta | None) -> rich.text.Text:
+    if duration is None:
+        return rich.text.Text("-")
+
     upload_hours_remainder = duration.seconds // 3600
     upload_minutes_remainder, upload_seconds_remainder = divmod(duration.seconds - (upload_hours_remainder * 3600), 60)
 
@@ -105,7 +108,7 @@ def _prepare_table(
         row: list[rich.console.RenderableType] = [
             summary.submission_id,
             status_text,
-            _format_upload_duration(summary.newest_upload - summary.oldest_upload),
+            _format_upload_duration(summary.upload_duration),
             summary.newest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
             f"{summary.total_size_bytes / BYTES_PER_GIGABYTE:.1f}",
         ]

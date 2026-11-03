@@ -225,6 +225,11 @@ class UploadTiming(NamedTuple):
     upload_resumed: bool | None
     """Whether the upload was resumed after an interruption; ``None`` if the uploader wrote no ``version`` marker."""
 
+    @property
+    def duration(self) -> datetime.timedelta:
+        """How long the upload took. For a resumed upload this is only the last run."""
+        return self.upload_finished_at - self.upload_started_at
+
 
 def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datetime]) -> UploadTiming | None:
     """Derive the upload timing of a submission from the ``LastModified`` times of its inbox objects.
@@ -232,8 +237,8 @@ def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datet
     The uploader writes ``<submission_id>/version`` before the first file and ``metadata/metadata.json``
     after the last one, so the marker's time is the start and the newest object's time is the end of the
     upload. A resumed upload rewrites the marker and skips the files an earlier run completed, so an
-    object older than the marker means the upload was interrupted and resumed: its span then contains
-    the pause and does not measure the transfer speed. Without the marker (older grz-cli versions) the
+    object older than the marker means the upload was interrupted and resumed: its span then covers only
+    the last run and does not measure the transfer speed. Without the marker (older grz-cli versions) the
     oldest object is the start and a resumption cannot be detected.
 
     :param submission_id: Submission identifier (the top-level S3 prefix).
