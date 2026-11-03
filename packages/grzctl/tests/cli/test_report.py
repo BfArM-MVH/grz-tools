@@ -802,8 +802,11 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
         [[_, row]] = [report["rows"] for report in json.loads(result.stdout)]
         return row
 
-    # an unset QC flag still counts as a case: older grzctl versions did not set it. False stays no case.
+    # an unset QC flag still counts as a case once archived: older grzctl versions did not set it.
+    # Unarchived it is no case (a failed submission is not archived), and False stays no case.
     assert running_month_after(submission_id, basic_qc_passed=None)["cases"] == 1
+    assert running_month_after(rejected_id, basic_qc_passed=None)["cases"] == 1
+    running_month_after(rejected_id, basic_qc_passed=False)
 
     # a missing size is not a size of 0: both counts show that the volume is incomplete
     present = running_month_after(submission_id, submission_size=None)

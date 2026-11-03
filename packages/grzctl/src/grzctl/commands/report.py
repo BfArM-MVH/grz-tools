@@ -701,8 +701,8 @@ def _monitoring_payload(
     - ``cases``: initial submissions that did not fail basic QC and had their Prüfbericht submitted
       (state Reported) by then. A case has at most one such submission, so this counts cases, not
       submissions: follow-up, addition and correction submissions belong to a case already counted, and
-      a rejected initial submission is no case. An unset QC flag counts, since ``grzctl validate`` has
-      only set it from 2026-07 on.
+      a rejected initial submission is no case. An unset QC flag counts if the submission was archived,
+      since ``grzctl validate`` has only set it from 2026-07 on and a failed submission is not archived.
     - ``cases_with_size`` and ``case_bytes``: how many of those initial submissions have a known size,
       and their total size. The sheet divides the one by the other.
     - ``archived`` and ``archived_with_size``: the LE's archived submissions that were neither deleted nor transferred to another GRZ, and how many
@@ -762,7 +762,9 @@ def _monitoring_payload(
             .where(
                 real,
                 Submission.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
-                Submission.basic_qc_passed.is_not(False),  # type: ignore[union-attr]
+                # an unset flag (set by ``grzctl validate`` only from 2026-07 on) counts once archived:
+                # a submission that failed QC is not archived
+                sa.or_(Submission.basic_qc_passed.is_(True), sa.and_(Submission.basic_qc_passed.is_(None), archived)),  # type: ignore[union-attr]
                 reported,
             )
             .group_by(Submission.submitter_id)
