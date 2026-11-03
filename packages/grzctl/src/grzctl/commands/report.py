@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 import requests
 import sqlalchemy as sa
+from grz_common.transfer import UploadTiming
 from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
@@ -56,7 +57,7 @@ def report(ctx: click.Context, configuration: GrzctlConfig):
     ctx.obj = {
         "db_url": db.database_url,
         "grz_id": configuration.identifiers.grz,
-        "le_ids": list(configuration.leistungserbringer),
+        "submitter_ids": list(configuration.leistungserbringer),
     }
 
 
@@ -683,42 +684,48 @@ def quarterly(
 
 
 def _monitoring_payload(
-    session: Session, grz_id: str, month: datetime.date, le_ids: typing.Iterable[str]
+    session: Session, grz_id: str, month: datetime.date, submitter_ids: typing.Iterable[str]
 ) -> dict[str, typing.Any]:
-    """Per-LE numbers for the GRZ monitoring sheet for the month of *month*.
+    """Per-LE numbers for the GRZ monitoring sheet, as of the end of the month of *month*.
 
-    Every LE in *le_ids* gets a row, also without submissions, so the sheet sees the month as complete,
-    and every row has the same keys: a count that has nothing to count is ``0``, a statistic without
-    values ``None``. Sizes are in bytes; the sheet scales them. Months end at midnight UTC, as the
-    database timestamps are in UTC. Only the state and change-request logs are read as of the month's
-    end; QC result, size and consent are the submissions' current values.
+    Every LE in *submitter_ids* gets a row, also without submissions, so the sheet sees the month as
+    complete, and every row has the same keys: a count that has nothing to count is ``0``, a statistic
+    without values ``None``. Sizes are in bytes; the sheet scales them. Months end at midnight UTC, as
+    the database timestamps are in UTC. Only the state and change-request logs are read as of the
+    month's end; QC result, size and consent are the submissions' current values.
 
-    Cumulative, as of the end of the month; the sheet derives monthly increments from them:
+    Cumulative, so the sheet derives monthly increments from them, and something recorded late shows up
+    in a later increment instead of getting lost:
 
-    - ``cases``: cases whose initial submission passed basic QC (:attr:`Submission.is_qc_passed_initial`)
-      and had its Prüfbericht submitted (state Reported) by then. A case has at most one such
-      submission, so this counts cases, not submissions: follow-up, addition and correction
-      submissions belong to a case already counted, and a rejected initial submission is no case. The
-      QC flag matters because a Prüfbericht can be reported for a rejected submission too: older
-      databases hold negative Prüfberichte with a Reported state.
-    - ``cases_with_size`` and ``bytes``: how many of those initial submissions have a known size, and
-      their total size. The sheet divides the one by the other, so a case without a size still counts
-      as a case but does not lower the average size.
-    - ``bytes_consented`` / ``bytes_unconsented``: the LE's archived, not deleted submissions by research
-      consent. A missing consent counts as unconsented, as in ``grzctl archive``; a missing size as 0.
+    - ``submissions``: non-test submissions uploaded by then. An LE was active in a month if this grew.
+    - ``cases``: initial submissions that did not fail basic QC and had their Prüfbericht submitted
+      (state Reported) by then. A case has at most one such submission, so this counts cases, not
+      submissions: follow-up, addition and correction submissions belong to a case already counted, and
+      a rejected initial submission is no case. An unset QC flag counts, since ``grzctl validate`` has
+      only set it from 2026-07 on.
+    - ``cases_with_size`` and ``case_bytes``: how many of those initial submissions have a known size,
+      and their total size. The sheet divides the one by the other.
+    - ``archived`` and ``archived_with_size``: the LE's archived, not deleted submissions, and how many
+      of them have a known size. A missing size is no size of 0, so the sheet can tell the volume below
+      is incomplete.
+    - ``archived_bytes_consented``, ``archived_bytes_non_consented`` and
+      ``archived_bytes_consent_unknown``: their total known size by research consent. Metadata without
+      a research consent is stored as ``False``, so it is non-consented, as in ``grzctl archive``.
+      Unknown means the database holds no value.
+    - ``timed_uploads``, ``timed_upload_bytes`` and ``timed_upload_seconds``: number, total size and
+      total duration of the LE's non-test uploads with a known duration that finished by then, as
+      ``grzctl download`` recorded them (:attr:`Submission.upload_started_at`). A resumed upload and an
+      upload without the uploader's ``version`` marker have none: the first took longer than its last
+      run, and for the second a resumption cannot be detected (``upload_resumed`` is NULL). The sheet
+      divides the increments of the bytes by those of the seconds to get the mean upload speed.
 
-    Of the month alone, because they cannot be accumulated; sending the month again replaces them, so
-    the daily run sends the month before as well (see :func:`monitoring`):
+    Of the month alone, because they cannot be accumulated:
 
-    - ``active``: 1 if the LE uploaded a non-test submission during the month, else 0.
-    - ``uploads`` and ``speed_{median,min,max,sd}_mbs``: number, median, minimum, maximum and population
-      standard deviation of the transfer speed in MB/s of the LE's non-test uploads that finished during
-      the month: the submission size over the time between the uploader's start marker and its last
-      object, as ``grzctl download`` recorded it (:attr:`Submission.upload_started_at`). A resumed upload
-      spans the pause, so it is left out, and so is an upload without the uploader's ``version`` marker,
-      for which a resumption cannot be detected (``upload_resumed`` is NULL).
+    - ``upload_speed_{median,min,max,sd}_mb_per_s``: median, minimum, maximum and population standard
+      deviation of the upload speed of those timed uploads that finished during the month.
     """
     first, last = month_date_bounds(month.year, month.month)
+    start = datetime.datetime.combine(first, datetime.time(), datetime.UTC)
     cutoff = datetime.datetime.combine(last + datetime.timedelta(days=1), datetime.time(), datetime.UTC)
     real = sa.and_(
         Submission.submitter_id.is_not(None),  # type: ignore[union-attr]
@@ -732,49 +739,69 @@ def _monitoring_payload(
     reported = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.REPORTED)
     archived = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.ARCHIVED)
     deleted = logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.DELETE)
-    size = sqlfn.coalesce(sqlfn.sum(Submission.submission_size), 0)
+    with_size = sqlfn.count(Submission.submission_size)  # type: ignore[arg-type]
+    total_size = sqlfn.coalesce(sqlfn.sum(Submission.submission_size), 0)
 
+    submissions: dict[str, int] = dict(
+        session.execute(
+            select(Submission.submitter_id, sqlfn.count(1))
+            .where(real, Submission.submission_uploaded_date <= last)  # type: ignore[operator]
+            .group_by(Submission.submitter_id)
+        )
+        .tuples()
+        .all()
+    )
     cases = {
-        le_id: (count, sized, int(total))
-        for le_id, count, sized, total in session.execute(
-            select(Submission.submitter_id, sqlfn.count(1), sqlfn.count(Submission.submission_size), size)  # type: ignore[arg-type]
-            .where(real, Submission.is_qc_passed_initial, reported)
+        submitter_id: (count, sized, int(total))
+        for submitter_id, count, sized, total in session.execute(
+            select(Submission.submitter_id, sqlfn.count(1), with_size, total_size)
+            .where(
+                real,
+                Submission.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
+                Submission.basic_qc_passed.is_not(False),  # type: ignore[union-attr]
+                reported,
+            )
             .group_by(Submission.submitter_id)
         ).all()
     }
-    active = set(
-        session.execute(
-            select(Submission.submitter_id)
-            .where(real, Submission.submission_uploaded_date.between(first, last))  # type: ignore[union-attr]
-            .distinct()
-        ).scalars()
-    )
-    archived_bytes: defaultdict[tuple[str, bool], int] = defaultdict(int)
-    for le_id, consented, total in session.execute(
-        select(Submission.submitter_id, Submission.consented, size)
+    archived_count: defaultdict[str, int] = defaultdict(int)
+    archived_sized: defaultdict[str, int] = defaultdict(int)
+    archived_bytes: defaultdict[tuple[str, bool | None], int] = defaultdict(int)
+    for submitter_id, consented, count, sized, total in session.execute(
+        select(Submission.submitter_id, Submission.consented, sqlfn.count(1), with_size, total_size)  # type: ignore[call-overload]
         .where(real, archived, sa.not_(deleted))
         .group_by(Submission.submitter_id, Submission.consented)  # type: ignore[arg-type]
     ).all():
-        archived_bytes[le_id, bool(consented)] += int(total)
+        archived_count[submitter_id] += count
+        archived_sized[submitter_id] += sized
+        archived_bytes[submitter_id, consented] = int(total)
 
-    start = datetime.datetime.combine(first, datetime.time(), datetime.UTC)
+    timed_uploads: defaultdict[str, int] = defaultdict(int)
+    timed_bytes: defaultdict[str, int] = defaultdict(int)
+    timed_seconds: defaultdict[str, float] = defaultdict(float)
     speeds: defaultdict[str, list[float]] = defaultdict(list)
-    for le_id, size, started, finished in session.execute(
-        select(
+    for submitter_id, size, started, finished, in_month in session.execute(
+        select(  # type: ignore[call-overload]
             Submission.submitter_id,
             Submission.submission_size,
             Submission.upload_started_at,
             Submission.upload_finished_at,
+            Submission.upload_finished_at >= start,  # type: ignore[operator]
         ).where(
             real,
+            Submission.submission_size > 0,  # type: ignore[operator]
             Submission.upload_resumed.is_(False),  # type: ignore[union-attr]
-            Submission.upload_finished_at >= start,  # type: ignore[operator]
+            Submission.upload_started_at.is_not(None),  # type: ignore[union-attr]
             Submission.upload_finished_at < cutoff,  # type: ignore[operator]
         )
     ).all():
-        # ``db submission modify`` can set the flag alone, so the timestamps are not guaranteed
-        if size and started and finished and (seconds := (finished - started).total_seconds()) > 0:
-            speeds[le_id].append(size / 1e6 / seconds)
+        seconds = UploadTiming(started, finished, upload_resumed=False).duration.total_seconds()
+        if seconds > 0:
+            timed_uploads[submitter_id] += 1
+            timed_bytes[submitter_id] += size
+            timed_seconds[submitter_id] += seconds
+            if in_month:
+                speeds[submitter_id].append(size / 1e6 / seconds)
 
     statistic: dict[str, typing.Callable[[list[float]], float]] = {
         "median": statistics.median,
@@ -783,20 +810,30 @@ def _monitoring_payload(
         "sd": statistics.pstdev,
     }
     rows = []
-    for le_id in sorted(set(le_ids) | set(cases) | active | {le for le, _ in archived_bytes} | set(speeds)):
-        count, sized, total = cases.get(le_id, (0, 0, 0))
-        mbs = speeds.get(le_id, [])
+    for submitter_id in sorted(
+        set(submitter_ids) | set(submissions) | set(cases) | set(archived_count) | set(timed_uploads)
+    ):
+        count, sized, total = cases.get(submitter_id, (0, 0, 0))
+        mb_per_s = speeds.get(submitter_id, [])
         rows.append(
             {
-                "le_id": le_id,
+                "submitter_id": submitter_id,
+                "submissions": submissions.get(submitter_id, 0),
                 "cases": count,
                 "cases_with_size": sized,
-                "bytes": total,
-                "bytes_consented": archived_bytes[le_id, True],
-                "bytes_unconsented": archived_bytes[le_id, False],
-                "active": int(le_id in active),
-                "uploads": len(mbs),
-                **{f"speed_{name}_mbs": round(f(mbs), 2) if mbs else None for name, f in statistic.items()},
+                "case_bytes": total,
+                "archived": archived_count[submitter_id],
+                "archived_with_size": archived_sized[submitter_id],
+                "archived_bytes_consented": archived_bytes[submitter_id, True],
+                "archived_bytes_non_consented": archived_bytes[submitter_id, False],
+                "archived_bytes_consent_unknown": archived_bytes[submitter_id, None],
+                "timed_uploads": timed_uploads[submitter_id],
+                "timed_upload_bytes": timed_bytes[submitter_id],
+                "timed_upload_seconds": round(timed_seconds[submitter_id]),
+                **{
+                    f"upload_speed_{name}_mb_per_s": round(f(mb_per_s), 2) if mb_per_s else None
+                    for name, f in statistic.items()
+                },
             }
         )
     return {
@@ -831,14 +868,14 @@ def monitoring(ctx: click.Context, month: datetime.datetime | None, url: str | N
     Send per-LE numbers to the GRZ monitoring sheet, one report per month.
 
     Meant for a daily cron job. Sending a month again replaces its numbers in the sheet. Without
-    --month, each run sends the running month and the one before, so that an upload downloaded after
-    its month ended still counts in that month's activity and transfer speed.
+    --month, each run sends the running month and the one before: the month before gets its final
+    figures, and its upload speed statistics still collect uploads downloaded late.
     """
     today = datetime.datetime.now(datetime.UTC).date()  # the month ends of the report are in UTC
     months = [month.date()] if month else [today.replace(day=1) - datetime.timedelta(days=1), today]
     submission_db = get_submission_db_instance(ctx.obj["db_url"])
     with submission_db.transaction() as session:
-        payloads = [_monitoring_payload(session, ctx.obj["grz_id"], m, ctx.obj["le_ids"]) for m in months]
+        payloads = [_monitoring_payload(session, ctx.obj["grz_id"], m, ctx.obj["submitter_ids"]) for m in months]
 
     if url is None:
         click.echo(json.dumps(payloads, indent=2))

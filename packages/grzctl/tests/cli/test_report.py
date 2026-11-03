@@ -682,32 +682,56 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     assert payload["grz"] == "GRZK00007"
     assert (before["month"], payload["month"]) == (last_month.strftime("%Y-%m"), today.strftime("%Y-%m"))
     assert payload["reported_by"] == f"grzctl {grzctl.__version__} report monitoring"
-    zero = {"cases": 0, "cases_with_size": 0, "bytes": 0, "bytes_consented": 0, "bytes_unconsented": 0, "active": 0}
-    no_speed = {
-        "uploads": 0,
-        "speed_median_mbs": None,
-        "speed_min_mbs": None,
-        "speed_max_mbs": None,
-        "speed_sd_mbs": None,
+    zero = {
+        "submissions": 0,
+        "cases": 0,
+        "cases_with_size": 0,
+        "case_bytes": 0,
+        "archived": 0,
+        "archived_with_size": 0,
+        "archived_bytes_consented": 0,
+        "archived_bytes_non_consented": 0,
+        "archived_bytes_consent_unknown": 0,
     }
-    assert before["rows"] == [{"le_id": "000000000", **zero, **no_speed}]  # all of it happened this month
+    no_speed = {
+        "timed_uploads": 0,
+        "timed_upload_bytes": 0,
+        "timed_upload_seconds": 0,
+        "upload_speed_median_mb_per_s": None,
+        "upload_speed_min_mb_per_s": None,
+        "upload_speed_max_mb_per_s": None,
+        "upload_speed_sd_mb_per_s": None,
+    }
+    assert before["rows"] == [{"submitter_id": "000000000", **zero, **no_speed}]  # all of it happened this month
     [absent, present] = payload["rows"]
-    assert absent == {"le_id": "000000000", **zero, **no_speed}
+    assert absent == {"submitter_id": "000000000", **zero, **no_speed}
     assert present.keys() == absent.keys()  # the same shape for every row
-    assert present["le_id"] == metadata.submission.submitter_id
-    assert (present["cases"], present["cases_with_size"], present["active"], present["bytes"]) == (1, 1, 1, size)
+    assert present["submitter_id"] == metadata.submission.submitter_id
+    assert (present["submissions"], present["cases"], present["cases_with_size"], present["case_bytes"]) == (
+        3,
+        1,
+        1,
+        size,
+    )
     # the case and its follow-up are archived, the rejected one is not
-    assert present["bytes_consented"] + present["bytes_unconsented"] == 2 * size
+    assert (present["archived"], present["archived_with_size"]) == (2, 2)
+    assert present["archived_bytes_consented"] + present["archived_bytes_non_consented"] == 2 * size
+    assert present["archived_bytes_consent_unknown"] == 0
     # 1002287 bytes in 1 s and in 4 s: 1.00 and 0.25 MB/s
     assert size == 1002287
-    assert (present["uploads"], present["speed_min_mbs"], present["speed_max_mbs"]) == (2, 0.25, 1.0)
-    assert (present["speed_median_mbs"], present["speed_sd_mbs"]) == (0.63, 0.38)
+    assert (present["timed_uploads"], present["timed_upload_bytes"], present["timed_upload_seconds"]) == (
+        2,
+        2 * size,
+        5,
+    )
+    assert (present["upload_speed_min_mb_per_s"], present["upload_speed_max_mb_per_s"]) == (0.25, 1.0)
+    assert (present["upload_speed_median_mb_per_s"], present["upload_speed_sd_mb_per_s"]) == (0.63, 0.38)
 
     # a month before the submission: nothing reported or archived yet
     result = runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-01"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
     [earlier] = json.loads(result.stdout)
-    assert earlier["rows"] == [{"le_id": "000000000", **zero, **no_speed}]
+    assert earlier["rows"] == [{"submitter_id": "000000000", **zero, **no_speed}]
 
     assert runner.invoke(cli, [*common, "report", "monitoring", "--month", "2025-13"]).exit_code == 2
 
@@ -727,21 +751,22 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     assert sent[1] == ("https://intake.example/exec", {**payload, "token": "s3cret", "dry_run": False})
 
     # a rejected report fails the command, so cron reports it
-    answer = {"status": 400, "error": "unknown le_id for GRZK00007"}
+    answer = {"status": 400, "error": "unknown submitter_id for GRZK00007"}
     result = runner.invoke(cli, [*common, "report", "monitoring"], env=env)
     assert result.exit_code == 1
-    assert "unknown le_id" in result.output
+    assert "unknown submitter_id" in result.output
 
-    # a resumed upload spans the pause, so it is left out of the speed statistics
+    # a resumed upload has no known duration, so it is left out of the timed uploads and the speed statistics
     result = runner.invoke(cli, [*common, "db", "submission", "modify", rejected_id, "upload_resumed", "yes"])
     assert result.exit_code == 0, result.output
     result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
     [_, present] = json.loads(result.stdout)[1]["rows"]
-    assert (present["uploads"], present["speed_median_mbs"], present["speed_sd_mbs"]) == (1, 1.0, 0.0)
+    assert (present["timed_uploads"], present["timed_upload_seconds"]) == (1, 1)
+    assert (present["upload_speed_median_mb_per_s"], present["upload_speed_sd_mb_per_s"]) == (1.0, 0.0)
 
     # an upload that finished last month, recorded only now (downloaded late): today's run still
-    # sends last month, so the upload counts in the month it happened
+    # sends last month, so the upload counts in the month it happened; the running month's sums include it
     upload_end = datetime.combine(last_month.replace(day=15), time(12), UTC)
     for key, value in (
         ("upload_started_at", (upload_end - timedelta(seconds=4)).isoformat()),
@@ -753,17 +778,39 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     result = runner.invoke(cli, [*common, "report", "monitoring"], catch_exceptions=False)
     assert result.exit_code == 0, result.output
     [before, payload] = json.loads(result.stdout)
-    late = {"uploads": 1, "speed_median_mbs": 0.25, "speed_min_mbs": 0.25, "speed_max_mbs": 0.25, "speed_sd_mbs": 0.0}
-    assert before["rows"][1] == {"le_id": present["le_id"], **zero, **late}
-    assert (payload["rows"][1]["uploads"], payload["rows"][1]["speed_median_mbs"]) == (1, 1.0)
+    late = {
+        "timed_uploads": 1,
+        "timed_upload_bytes": size,
+        "timed_upload_seconds": 4,
+        "upload_speed_median_mb_per_s": 0.25,
+        "upload_speed_min_mb_per_s": 0.25,
+        "upload_speed_max_mb_per_s": 0.25,
+        "upload_speed_sd_mb_per_s": 0.0,
+    }
+    assert before["rows"][1] == {"submitter_id": present["submitter_id"], **zero, **late}
+    assert (payload["rows"][1]["timed_uploads"], payload["rows"][1]["upload_speed_median_mb_per_s"]) == (2, 1.0)
 
-    # a case without a known size still counts as a case, but not into the average size
     engine = sqlalchemy.create_engine(GrzctlConfig.from_path(migrated_database_config_path).db.database_url)
-    with engine.begin() as connection:
-        connection.execute(
-            sqlalchemy.update(Submission).where(Submission.id == submission_id).values(submission_size=None)  # type: ignore[arg-type]
-        )
-    result = runner.invoke(cli, [*common, "report", "monitoring", "--month", today.strftime("%Y-%m")])
-    assert result.exit_code == 0, result.output
-    [[_, present]] = [report["rows"] for report in json.loads(result.stdout)]
-    assert (present["cases"], present["cases_with_size"], present["bytes"]) == (1, 0, 0)
+
+    def running_month_after(sid: str, **values) -> dict:
+        """The LE's row of the running month, after setting columns that only an old database leaves unset."""
+        with engine.begin() as connection:
+            connection.execute(sqlalchemy.update(Submission).where(Submission.id == sid).values(**values))  # type: ignore[arg-type]
+        result = runner.invoke(cli, [*common, "report", "monitoring", "--month", today.strftime("%Y-%m")])
+        assert result.exit_code == 0, result.output
+        [[_, row]] = [report["rows"] for report in json.loads(result.stdout)]
+        return row
+
+    # an unset QC flag still counts as a case: older grzctl versions did not set it. False stays no case.
+    assert running_month_after(submission_id, basic_qc_passed=None)["cases"] == 1
+
+    # a missing size is not a size of 0: both counts show that the volume is incomplete
+    present = running_month_after(submission_id, submission_size=None)
+    assert (present["cases"], present["cases_with_size"], present["case_bytes"]) == (1, 0, 0)
+    assert (present["archived"], present["archived_with_size"]) == (2, 1)
+    assert present["archived_bytes_consented"] + present["archived_bytes_non_consented"] == size
+
+    # an unset consent is neither consented nor non-consented
+    present = running_month_after(followup_id, consented=None)
+    assert present["archived_bytes_consent_unknown"] == size
+    assert present["archived_bytes_consented"] == present["archived_bytes_non_consented"] == 0
