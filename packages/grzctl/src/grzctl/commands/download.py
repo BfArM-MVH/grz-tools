@@ -15,6 +15,7 @@ from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
+from .paths import encrypted_files_dir_option, logs_dir_option, metadata_dir_option, resolve_dirs
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,16 @@ log = logging.getLogger(__name__)
 @click.command()
 @grzctl_configuration
 @grzcli.submission_id
-@grzcli.output_dir
+@click.option(
+    "--output-dir",
+    "output_dir",
+    type=grzcli.DIR_RW_C,
+    default=None,
+    help="Path to the target submission output directory.",
+)
+@metadata_dir_option
+@encrypted_files_dir_option
+@logs_dir_option
 @grzcli.threads
 @grzcli.force
 @grzcli.update_db
@@ -36,6 +46,9 @@ def download(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_id: str,
     output_dir: str,
+    metadata_dir,
+    encrypted_files_dir,
+    logs_dir,
     threads: int,
     force: bool,
     update_db: bool,
@@ -53,6 +66,18 @@ def download(  # noqa: PLR0913, PLR0917
     With --populate (also the default), it also fills the submission metadata in the database.
     With --no-update-db, download touches no database, and --populate only logs a warning.
     """
+    bundled_mode = output_dir is not None
+    paths = resolve_dirs(
+        bundled_dir=output_dir,
+        bundled_option="--output-dir",
+        explicit={
+            "--metadata-dir": metadata_dir,
+            "--encrypted-files-dir": encrypted_files_dir,
+            "--logs-dir": logs_dir,
+        },
+    )
+    metadata_path = paths["--metadata-dir"]
+
     submitter_id = submission_id.split("_", maxsplit=1)[0]
     resolved_inbox = require_inbox(
         configuration,
@@ -68,16 +93,17 @@ def download(  # noqa: PLR0913, PLR0917
 
     log.info(f"Starting download from inbox {inbox_desc}...")
 
-    submission_dir_path = Path(output_dir)
-    if not submission_dir_path.is_dir():
-        log.debug("Creating submission directory %s", submission_dir_path)
-        submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
+    if bundled_mode:
+        submission_dir_path = Path(output_dir)
+        if not submission_dir_path.is_dir():
+            log.debug("Creating submission directory %s", submission_dir_path)
+            submission_dir_path.mkdir(mode=0o770, parents=False, exist_ok=False)
 
     worker_inst = Worker(
-        metadata_dir=submission_dir_path / "metadata",
-        files_dir=submission_dir_path / "files",
-        log_dir=submission_dir_path / "logs",
-        encrypted_files_dir=submission_dir_path / "encrypted_files",
+        metadata_dir=metadata_path,
+        files_dir=metadata_path.parent / "files",
+        log_dir=paths["--logs-dir"],
+        encrypted_files_dir=paths["--encrypted-files-dir"],
         threads=threads,
     )
 
