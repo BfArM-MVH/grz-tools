@@ -5,8 +5,27 @@ from grz_common.models.base import Crypt4GHPublicKey, FilePath, IgnoringBaseMode
 from grz_common.models.identifiers import IdentifiersConfigModel
 from grz_common.models.s3 import S3ConfigModel
 from pydantic import ConfigDict, SecretStr, model_validator
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 log = logging.getLogger(__name__)
+
+
+class _EnvVarsOverrideConfigFile:
+    """Let a ``grz_`` environment variable override the config file, as in grzctl.
+
+    The commands pass the config file as init arguments, which pydantic-settings prefers by default.
+    """
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return env_settings, init_settings, dotenv_settings, file_secret_settings
 
 
 class KeyModel(IgnoringBaseModel):
@@ -62,7 +81,7 @@ class KeyConfigModel(IgnoringBaseModel):
     keys: KeyModel
 
 
-class UploadConfig(S3ConfigModel):
+class UploadConfig(_EnvVarsOverrideConfigFile, S3ConfigModel):
     pass
 
 
@@ -70,5 +89,5 @@ class EncryptConfig(KeyConfigModel):
     pass
 
 
-class ValidateConfig(IdentifiersConfigModel):
+class ValidateConfig(_EnvVarsOverrideConfigFile, IdentifiersConfigModel):
     pass

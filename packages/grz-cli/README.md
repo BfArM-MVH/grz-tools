@@ -89,6 +89,7 @@ The build process can take at least a few days after the Bioconda release, so do
 The tool requires a configuration file in YAML format to specify the S3 API parameters and other validation options.
 
 This file may be placed at `~/.config/grz-cli/config.yaml` or provided each time to `grz-cli` using the `--config-file` option on the command line.
+The environment variables `grz_s3__*` and `grz_identifiers__*` override the values in this file.
 
 The S3 secrets can either be directly within the config file or as defined with the usual AWS environment variables: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
 
