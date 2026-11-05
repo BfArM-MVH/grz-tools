@@ -90,7 +90,11 @@ The tool requires a configuration file in YAML format to specify the S3 API para
 
 This file may be placed at `~/.config/grz-cli/config.yaml` or provided each time to `grz-cli` using the `--config-file` option on the command line.
 
-The S3 secrets can either be directly within the config file or as defined with the usual AWS environment variables: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+The S3 secrets can either be directly within the config file or in the environment variables `grz_s3__access_key` and `grz_s3__secret`.
+If both places leave out both secrets, the usual AWS environment variables apply: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+If they leave out only one of the secrets, the upload fails, even if the AWS environment variables are set.
+
+The [example config](https://github.com/BfArM-MVH/grz-tools/blob/main/packages/grz-cli/docs/example-config.yaml) shows the structure of this file with placeholder values.
 
 ### Submission Layout
 
