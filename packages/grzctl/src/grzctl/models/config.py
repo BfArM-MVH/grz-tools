@@ -1,3 +1,5 @@
+import logging
+import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -17,10 +19,12 @@ from grz_common.models.s3 import S3ConnectionBase, S3Options
 from grz_common.utils.crypt import Crypt4GH
 from pydantic import Field, PrivateAttr, SecretStr, model_validator
 from pydantic.fields import FieldInfo
-from pydantic_settings import PydanticBaseSettingsSource
+from pydantic_settings import PydanticBaseSettingsSource, SettingsConfigDict
 
 from .db import DbModel
 from .pruefbericht import PruefberichtModel
+
+log = logging.getLogger(__name__)
 
 _config_ctx: ContextVar[dict[str, Any] | None] = ContextVar("_config_ctx", default=None)
 
@@ -260,6 +264,9 @@ class DictConfigSettingsSource(PydanticBaseSettingsSource):
 class GrzctlConfig(IgnoringBaseSettings):
     """Unified configuration for all grzctl commands."""
 
+    # environment variables spell the config keys as the file does, so an inbox may be named in any case
+    model_config = SettingsConfigDict(case_sensitive=True)
+
     leistungserbringer: Annotated[dict[str, LeistungserbringerEntry], Field(min_length=1)]
     """Mapping: LE-Id -> LeistungserbringerEntry."""
 
@@ -328,6 +335,7 @@ class GrzctlConfig(IgnoringBaseSettings):
     @classmethod
     def from_configuration(cls, configuration: dict[str, Any]) -> "GrzctlConfig":
         """Load config from a dict, letting env vars override dict values."""
+        _warn_about_miscased_env_vars()
         token = _config_ctx.set(configuration)
         try:
             return cls()
@@ -364,3 +372,24 @@ class GrzctlConfig(IgnoringBaseSettings):
             s3=S3Options(bucket=bucket, **inbox_cfg.model_dump(exclude={"bucket"})),
             **inbox_cfg.model_dump(include={"private_key", "private_key_path", "private_key_passphrase"}),
         )
+
+
+def _warn_about_miscased_env_vars() -> None:
+    """Warn about each environment variable that names a config section in another case than the config file.
+
+    pydantic-settings ignores such a variable without a word, since grzctl matches the names case-sensitively.
+    grzctl 5.0.0 to 5.1.1 matched them in any case, and their upgrade guide wrote them in uppercase.
+    """
+    prefix = GrzctlConfig.model_config["env_prefix"]
+    for name in os.environ:
+        lowered = name.lower()
+        section = lowered.removeprefix(prefix).split("__")[0]
+        if (
+            lowered.startswith(prefix)
+            and section in GrzctlConfig.model_fields
+            and not name.startswith(prefix + section)
+        ):
+            log.warning(
+                f"Ignoring the environment variable {name}: grzctl matches these names case-sensitively, "
+                f"so spell the config keys as the config file does, such as {lowered}"
+            )
