@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.4](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.3...grzctl-v5.1.4) (2026-11-05)
+
+
+### Documentation
+
+* **grz-cli,grzctl:** add example config files ([#750](https://github.com/BfArM-MVH/grz-tools/issues/750)) ([3baa49a](https://github.com/BfArM-MVH/grz-tools/commit/3baa49a4d2a06defba315e7ccaa15fcda758fe30)), closes [#749](https://github.com/BfArM-MVH/grz-tools/issues/749)
+
 ## [5.1.3](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.2...grzctl-v5.1.3) (2026-10-29)
 
 
