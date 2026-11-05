@@ -15,3 +15,4 @@ Command-line tool for internal GRZ operations.
 
 - [Registering change requests](docs/change-requests.md) — recording that a submission must be modified, deleted, or transferred, with the who/when/what audit trail.
 - [Crypt4GH keys](docs/crypt4gh-keys.md): which Crypt4GH keys grz-cli and grzctl need, where they go in each config, and the key layouts of grzctl.
+- [Example config](docs/example-config.yaml): a minimal grzctl config with placeholder values.
