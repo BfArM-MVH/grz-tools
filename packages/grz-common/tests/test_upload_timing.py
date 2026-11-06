@@ -62,6 +62,12 @@ def test_upload_timing_needs_an_object():
     assert upload_timing(SUBMISSION_ID, {}) is None
 
 
+def test_upload_timing_of_a_restart_without_a_new_file():
+    """A restarted upload rewrites the marker; until its first file is complete, every object is older."""
+    last_modified = {f"{SUBMISSION_ID}/files/a.c4gh": _at(10), f"{SUBMISSION_ID}/version": _at(60)}
+    assert upload_timing(SUBMISSION_ID, last_modified) is None
+
+
 def test_query_submissions_takes_the_duration_from_the_upload_timing():
     """``grzctl list`` shows the same duration as the monitoring report, not the oldest to the newest object."""
     only_marker = "260914050_2025-09-16_00000000"
@@ -93,10 +99,11 @@ def test_get_upload_timing_lists_the_inbox():
         put(f"{SUBMISSION_ID}/files/a.c4gh")  # from the interrupted first run
         time.sleep(1.1)  # S3 keeps LastModified to the second
         put(f"{SUBMISSION_ID}/version")
-        put(f"{SUBMISSION_ID}_other/files/late.c4gh")  # another submission sharing the prefix up to the slash
         time.sleep(1.1)
         put(f"{SUBMISSION_ID}/files/b.c4gh")
         put(f"{SUBMISSION_ID}/metadata/metadata.json")
+        time.sleep(1.1)
+        put(f"{SUBMISSION_ID}_other/files/late.c4gh")  # newest, so a prefix without the slash would end on it
         listed = {o["Key"]: o["LastModified"] for o in s3.list_objects_v2(Bucket="inbox")["Contents"]}
 
         timing = get_upload_timing(s3, "inbox", SUBMISSION_ID)

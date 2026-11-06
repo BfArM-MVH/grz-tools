@@ -243,12 +243,13 @@ def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datet
 
     :param submission_id: Submission identifier (the top-level S3 prefix).
     :param last_modified: ``LastModified`` of each object of the submission, by key.
-    :returns: The timing, or ``None`` if *last_modified* holds no object besides the marker.
+    :returns: The timing, or ``None`` if *last_modified* holds no object besides the marker, or none newer
+        than it: a restarted upload has rewritten the marker but not finished a file yet.
     """
     marker_key = f"{submission_id}/version"
     marker = last_modified.get(marker_key)
     times = [modified for key, modified in last_modified.items() if key != marker_key]
-    if not times:
+    if not times or (marker is not None and max(times) < marker):
         return None
     return UploadTiming(
         upload_started_at=marker or min(times),
