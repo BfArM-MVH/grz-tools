@@ -157,7 +157,14 @@ def mock_command(command_spec, submission_id):
         if "extra_patch" in command_spec:
             # Some commands invoke a standalone callable (e.g. validate.callback,
             # _clean_submission_from_bucket) instead of a Worker method.
-            mock_extra = stack.enter_context(patch(command_spec["extra_patch"]))
+            # If the standalone callable has no expected return:
+            if "extra_return_value" in command_spec:
+                mock_extra = stack.enter_context(
+                    patch(command_spec["extra_patch"], return_value=command_spec["extra_return_value"])
+                )
+            # If it does:
+            else:
+                mock_extra = stack.enter_context(patch(command_spec["extra_patch"]))
 
         yield mock_worker, mock_extra
 
@@ -196,6 +203,8 @@ def build_args(
         {
             "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.download.Worker",
+            "extra_patch": "grzctl.commands.download.get_grzcli_version",
+            "extra_return_value": "3.0.0",
             "id_source": "arg",
             "initial_state": None,
             "intermediate_state": SubmissionStateEnum.DOWNLOADING,
@@ -205,6 +214,8 @@ def build_args(
         {
             "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.download.Worker",
+            "extra_patch": "grzctl.commands.download.get_grzcli_version",
+            "extra_return_value": "3.0.0",
             "id_source": "arg",
             "initial_state": SubmissionStateEnum.UPLOADED,
             "intermediate_state": SubmissionStateEnum.DOWNLOADING,

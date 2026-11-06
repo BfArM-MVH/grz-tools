@@ -34,6 +34,8 @@ def test_inbox_migration_adds_the_inbox_column(db_test_connection: str):
     upgraded_submissions = sqlalchemy.Table("submissions", sqlalchemy.MetaData(), autoload_with=engine)
     assert "inbox" in {column.name for column in upgraded_submissions.columns}
 
+    db.upgrade_schema()
+
     submission = db.get_submission(submission_id)
     assert submission is not None
     assert submission.inbox is None

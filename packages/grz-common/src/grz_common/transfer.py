@@ -212,3 +212,35 @@ def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_i
     # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json's timestamp is invalid.
     raise_if_cleaned(s3_client, bucket, submission_id)
     return response["LastModified"]
+
+
+MISSING_GRZ_CLI_VERSION = "VERSION FILE NOT FOUND"
+"""Recorded when the submission holds no grz-cli version object (in a submission that has not undergone 'grzctl clean')"""
+ERROR_GRZ_CLI_VERSION = "VERSION READ FAILED"
+"""Recorded when reading the grz-cli version object fails"""
+
+
+def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> str:
+    """Read and return the version number of grz-cli used to upload a given submission from the version file.
+    Will not run on a cleaned submission (no version file present)
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :returns: The version string, or MISSING_GRZ_CLI_VERSION if the submission has no ``version`` object.
+    :raises SubmissionCleanedError: If 'grzctl clean' has started/finished on the submission.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    key = submission_id + "/version"
+    with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
+        try:
+            with s3_client.get_object(Bucket=bucket, Key=key)["Body"] as body:
+                grz_cli_version = body.read().decode("utf-8").strip()
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "NoSuchKey":
+                raise
+            # Cleaned inbox should lack the version file, so don't call it missing if so
+            raise_if_cleaned(s3_client, bucket, submission_id)
+            grz_cli_version = MISSING_GRZ_CLI_VERSION
+        return grz_cli_version

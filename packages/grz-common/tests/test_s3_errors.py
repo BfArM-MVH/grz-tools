@@ -8,7 +8,13 @@ import boto3
 import grz_common.exceptions as grzexc
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
-from grz_common.transfer import get_metadata_upload_timestamp, head_object, s3_errors
+from grz_common.transfer import (
+    MISSING_GRZ_CLI_VERSION,
+    get_grzcli_version,
+    get_metadata_upload_timestamp,
+    head_object,
+    s3_errors,
+)
 
 
 def _client_error(code: str, operation: str = "HeadObject") -> ClientError:
@@ -210,3 +216,23 @@ def test_get_metadata_upload_timestamp_reports_a_failed_marker_check_as_a_failed
     """Only a 404 means that a marker is missing, so a refused HEAD request does not count as clean."""
     with pytest.raises(grzexc.DownloadError):
         get_metadata_upload_timestamp(_InboxClient(missing_status=HTTPStatus.FORBIDDEN), "bucket", "submission")
+
+
+def test_missing_get_grzcli_version_read():
+    """Test if a missing grz_cli version object reads as MISSING_GRZ_CLI_VERSION"""
+    client = _FailingClient(HTTPStatus.NOT_FOUND, get_code="NoSuchKey")
+    assert get_grzcli_version(client, "bucket", "submission") == MISSING_GRZ_CLI_VERSION
+
+
+def test_errored_get_grzcli_version_read():
+    """Test if an errored grz_cli version read raises a grzexc.DownloadError"""
+    client = _FailingClient(HTTPStatus.NOT_FOUND, get_code="InternalError")
+    with pytest.raises(grzexc.DownloadError):
+        get_grzcli_version(client, "bucket", "submission")
+
+
+def test_successful_get_grzcli_version_read():
+    """Test if a successful grz_cli version read actually returns the version number as a string"""
+    client = _FailingClient(HTTPStatus.NOT_FOUND)
+    client.body = io.BytesIO(b"3.0.0\n")
+    assert get_grzcli_version(client, "bucket", "submission") == "3.0.0"
