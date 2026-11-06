@@ -1075,6 +1075,9 @@ def test_submission_show_json(migrated_database_config_path: Path, test_metadata
         "genomic_study_type": metadata.submission.genomic_study_type,
         "genomic_study_subtype": metadata.submission.genomic_study_subtype,
         "inbox": None,  # populated via download / sync-from-inbox / populate --inbox
+        "upload_started_at": None,  # recorded by download --populate while the inbox lists the objects
+        "upload_finished_at": None,
+        "upload_resumed": None,
         "states": [],
     }
 
@@ -2093,3 +2096,13 @@ def test_modify_refuses_an_unofferable_key_with_a_usage_error(migrated_database_
     assert result.exit_code == 2, result.output
     assert "An unexpected error occurred" not in result.output
     assert "Traceback" not in result.output
+
+
+def test_list_flags_a_resumed_upload():
+    """A resumed upload's duration covers only its last run, so the table says so."""
+    from grzctl.commands.list_submissions import _format_upload_duration
+
+    duration = datetime.timedelta(minutes=11)
+    assert _format_upload_duration(duration).plain == "11M0S"
+    assert _format_upload_duration(duration, resumed=True).plain == "11M0S (resumed)"
+    assert _format_upload_duration(None, resumed=True).plain == "-"
