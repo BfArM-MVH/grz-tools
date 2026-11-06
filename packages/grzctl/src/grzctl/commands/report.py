@@ -698,16 +698,18 @@ def _monitoring_payload(
     in a later increment instead of getting lost:
 
     - ``submissions``: non-test submissions uploaded by then. An LE was active in a month if this grew.
-    - ``cases``: initial submissions that did not fail basic QC and had their Prüfbericht submitted
-      (state Reported) by then. A case has at most one such submission, so this counts cases, not
-      submissions: follow-up, addition and correction submissions belong to a case already counted, and
-      a rejected initial submission is no case. An unset QC flag counts if the submission was archived,
-      since ``grzctl validate`` has only set it from 2026-07 on and a failed submission is not archived.
+    - ``cases``: initial submissions that passed basic QC and had their Prüfbericht submitted (state
+      Reported) by then. An unset QC flag counts if the submission was archived, since ``grzctl validate``
+      has only set it from 2026-07 on and a failed submission is not archived. Follow-up, addition and
+      correction submissions belong to a case already counted, and a rejected initial submission is no
+      case. The database allows a case only one initial submission with the flag set, so this counts
+      cases, not submissions; for an unset flag, which that index does not cover, it assumes that a case
+      has no second archived initial submission.
     - ``cases_with_size`` and ``case_bytes``: how many of those initial submissions have a known size,
       and their total size. The sheet divides the one by the other.
-    - ``archived`` and ``archived_with_size``: the LE's archived submissions that were neither deleted nor transferred to another GRZ, and how many
-      of them have a known size. A missing size is no size of 0, so the sheet can tell the volume below
-      is incomplete.
+    - ``archived`` and ``archived_with_size``: the LE's archived submissions that were neither deleted
+      nor transferred to another GRZ, and how many of them have a known size. A missing size is no size
+      of 0, so the sheet can tell the volume below is incomplete.
     - ``archived_bytes_consented``, ``archived_bytes_non_consented`` and
       ``archived_bytes_consent_unknown``: their total known size by research consent. Metadata without
       a research consent is stored as ``False``, so it is non-consented, as in ``grzctl archive``.
@@ -900,6 +902,8 @@ def monitoring(ctx: click.Context, month: datetime.datetime | None, url: str | N
         except requests.RequestException as e:
             raise click.ClickException(f"intake not reachable: {e}") from e
         click.echo(json.dumps(result))
+        if not isinstance(result, dict):
+            raise click.ClickException(f"intake answered the report of {payload['month']} with no JSON object")
         if result.get("status") != 200:
             raise click.ClickException(
                 f"intake rejected the report of {payload['month']}: {result.get('error', result)}"

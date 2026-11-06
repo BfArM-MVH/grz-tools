@@ -751,10 +751,15 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     assert sent[1] == ("https://intake.example/exec", {**payload, "token": "s3cret", "dry_run": False})
 
     # a rejected report fails the command, so cron reports it
-    answer = {"status": 400, "error": "unknown submitter_id for GRZK00007"}
+    answer = {"status": 400, "error": "unknown submitter_id", "unknown": ["submitter_id 999999999"]}
     result = runner.invoke(cli, [*common, "report", "monitoring"], env=env)
     assert result.exit_code == 1
     assert "unknown submitter_id" in result.output
+    # so does a reply that is JSON but no object, without a traceback
+    answer = ["ok"]
+    result = runner.invoke(cli, [*common, "report", "monitoring"], env=env)
+    assert (result.exit_code, type(result.exception)) == (1, SystemExit)
+    assert "no JSON object" in result.output
 
     # a resumed upload has no known duration, so it is left out of the timed uploads and the speed statistics
     result = runner.invoke(cli, [*common, "db", "submission", "modify", rejected_id, "upload_resumed", "yes"])
