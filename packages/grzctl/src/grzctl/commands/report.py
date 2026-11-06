@@ -701,11 +701,11 @@ def _monitoring_payload(
     - ``cases``: initial submissions that did not fail basic QC and had their Prüfbericht submitted
       (state Reported) by then. A case has at most one such submission, so this counts cases, not
       submissions: follow-up, addition and correction submissions belong to a case already counted, and
-      a rejected initial submission is no case. An unset QC flag counts, since ``grzctl validate`` has
-      only set it from 2026-07 on.
+      a rejected initial submission is no case. An unset QC flag counts if the submission was archived,
+      since ``grzctl validate`` has only set it from 2026-07 on and a failed submission is not archived.
     - ``cases_with_size`` and ``case_bytes``: how many of those initial submissions have a known size,
       and their total size. The sheet divides the one by the other.
-    - ``archived`` and ``archived_with_size``: the LE's archived, not deleted submissions, and how many
+    - ``archived`` and ``archived_with_size``: the LE's archived submissions that were neither deleted nor transferred to another GRZ, and how many
       of them have a known size. A missing size is no size of 0, so the sheet can tell the volume below
       is incomplete.
     - ``archived_bytes_consented``, ``archived_bytes_non_consented`` and
@@ -738,7 +738,11 @@ def _monitoring_payload(
 
     reported = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.REPORTED)
     archived = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.ARCHIVED)
-    deleted = logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.DELETE)
+    # a deleted submission is gone, a transferred one is held by another GRZ: neither is archived here anymore
+    gone = sa.or_(
+        logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.DELETE),
+        logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.TRANSFER),
+    )
     with_size = sqlfn.count(Submission.submission_size)  # type: ignore[arg-type]
     total_size = sqlfn.coalesce(sqlfn.sum(Submission.submission_size), 0)
 
@@ -758,7 +762,9 @@ def _monitoring_payload(
             .where(
                 real,
                 Submission.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
-                Submission.basic_qc_passed.is_not(False),  # type: ignore[union-attr]
+                # an unset flag (set by ``grzctl validate`` only from 2026-07 on) counts once archived:
+                # a submission that failed QC is not archived
+                sa.or_(Submission.basic_qc_passed.is_(True), sa.and_(Submission.basic_qc_passed.is_(None), archived)),  # type: ignore[union-attr]
                 reported,
             )
             .group_by(Submission.submitter_id)
@@ -769,7 +775,7 @@ def _monitoring_payload(
     archived_bytes: defaultdict[tuple[str, bool | None], int] = defaultdict(int)
     for submitter_id, consented, count, sized, total in session.execute(
         select(Submission.submitter_id, Submission.consented, sqlfn.count(1), with_size, total_size)  # type: ignore[call-overload]
-        .where(real, archived, sa.not_(deleted))
+        .where(real, archived, sa.not_(gone))
         .group_by(Submission.submitter_id, Submission.consented)  # type: ignore[arg-type]
     ).all():
         archived_count[submitter_id] += count
@@ -872,6 +878,8 @@ def monitoring(ctx: click.Context, month: datetime.datetime | None, url: str | N
     figures, and its upload speed statistics still collect uploads downloaded late.
     """
     today = datetime.datetime.now(datetime.UTC).date()  # the month ends of the report are in UTC
+    if month and month.date() > today:
+        raise click.BadParameter(f"{month:%Y-%m} has not begun yet.", param_hint="--month")
     months = [month.date()] if month else [today.replace(day=1) - datetime.timedelta(days=1), today]
     submission_db = get_submission_db_instance(ctx.obj["db_url"])
     with submission_db.transaction() as session:

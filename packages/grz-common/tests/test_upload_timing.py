@@ -1,11 +1,14 @@
 """Tests for deriving the upload timing of a submission from its inbox objects."""
 
 import datetime
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from grz_common.transfer import upload_timing
+import boto3
+from grz_common.transfer import get_upload_timing, upload_timing
 from grz_common.workers.download import query_submissions
+from moto import mock_aws
 
 SUBMISSION_ID = "260914050_2025-09-15_c64603a7"
 T0 = datetime.datetime(2025, 9, 15, 8, 0, tzinfo=datetime.UTC)
@@ -74,3 +77,31 @@ def test_query_submissions_takes_the_duration_from_the_upload_timing():
 
     durations = {summary.submission_id: summary.upload_duration for summary in summaries}
     assert durations == {SUBMISSION_ID: datetime.timedelta(minutes=11), only_marker: None}
+    # the duration of a resumed upload covers only its last run, so grzctl list flags it
+    assert {summary.submission_id: summary.upload_resumed for summary in summaries} == {
+        SUBMISSION_ID: True,
+        only_marker: None,
+    }
+
+
+def test_get_upload_timing_lists_the_inbox():
+    """The real S3 listing: only the submission's own objects count, and a file older than the marker shows a resumption."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="inbox")
+        put = lambda key: s3.put_object(Bucket="inbox", Key=key, Body=b"x")
+        put(f"{SUBMISSION_ID}/files/a.c4gh")  # from the interrupted first run
+        time.sleep(1.1)  # S3 keeps LastModified to the second
+        put(f"{SUBMISSION_ID}/version")
+        put(f"{SUBMISSION_ID}_other/files/late.c4gh")  # another submission sharing the prefix up to the slash
+        time.sleep(1.1)
+        put(f"{SUBMISSION_ID}/files/b.c4gh")
+        put(f"{SUBMISSION_ID}/metadata/metadata.json")
+        listed = {o["Key"]: o["LastModified"] for o in s3.list_objects_v2(Bucket="inbox")["Contents"]}
+
+        timing = get_upload_timing(s3, "inbox", SUBMISSION_ID)
+        assert timing is not None
+        assert timing.upload_started_at == listed[f"{SUBMISSION_ID}/version"]
+        assert timing.upload_finished_at == listed[f"{SUBMISSION_ID}/metadata/metadata.json"]
+        assert timing.upload_resumed is True
+        assert get_upload_timing(s3, "inbox", "260914050_2025-09-17_ffffffff") is None
