@@ -414,3 +414,42 @@ def test_the_migrations_get_the_password_of_the_database_url() -> None:
 
     assert migration_url.password == "p%ss"
     db.engine.dispose()
+
+
+def test_assert_no_duplicate_tan_g_finds_the_holder(db: SubmissionDb) -> None:
+    """Another submission's tan_g is reported, naming the submission that holds it."""
+    holder = db.add_submission(SUBMISSION_ID)
+    db.modify_submission(holder.id, "tan_g", TAN_G_1)
+    db.add_submission(SUBMISSION_ID_2)
+
+    with pytest.raises(DuplicateTanGError) as excinfo:
+        db.assert_no_duplicate_tan_g(SUBMISSION_ID_2, TAN_G_1)
+
+    assert excinfo.value.holder_id == SUBMISSION_ID
+    assert SUBMISSION_ID in str(excinfo.value)
+
+
+def test_assert_no_duplicate_tan_g_ignores_the_submissions_own_row(db: SubmissionDb) -> None:
+    """Asking again for the submission that already stores the tan_g is no conflict."""
+    holder = db.add_submission(SUBMISSION_ID)
+    db.modify_submission(holder.id, "tan_g", TAN_G_1)
+
+    db.assert_no_duplicate_tan_g(SUBMISSION_ID, TAN_G_1)
+
+
+def test_assert_no_duplicate_tan_g_passes_an_unused_tan_g(db: SubmissionDb) -> None:
+    holder = db.add_submission(SUBMISSION_ID)
+    db.modify_submission(holder.id, "tan_g", TAN_G_1)
+    db.add_submission(SUBMISSION_ID_2)
+
+    db.assert_no_duplicate_tan_g(SUBMISSION_ID_2, TAN_G_2)
+
+
+@pytest.mark.parametrize("tan_g", [None, REDACTED_TAN], ids=["missing", "redacted"])
+def test_assert_no_duplicate_tan_g_never_collides_on_a_tan_g_that_identifies_nothing(
+    db: SubmissionDb, tan_g: str | None
+) -> None:
+    db.add_submission(SUBMISSION_ID)
+    db.add_submission(SUBMISSION_ID_2)
+
+    db.assert_no_duplicate_tan_g(SUBMISSION_ID_2, tan_g)

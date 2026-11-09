@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import click
 import grz_common.cli as grzcli
@@ -15,32 +14,9 @@ from ..commands import grzctl_configuration
 from ..commands.db.cli import get_submission_db_instance
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
-
-if TYPE_CHECKING:
-    from grz_db.models.submission import SubmissionDb
+from .duplicate_checks import check_duplicate_initial
 
 log = logging.getLogger(__name__)
-
-
-def _check_duplicate_initial(db: "SubmissionDb", metadata: GrzSubmissionMetadata) -> None:
-    """Raise :class:`DuplicateInitialSubmissionError` if this initial submission is a duplicate.
-
-    The rule and the index enforcing it belong to the database layer, which answers this in
-    one transaction; all that is left here is unpacking the metadata. Validation is what the
-    answer buys: the database would reject the submission anyway, but only once basic QC is
-    being recorded, by which point the effort has been spent.
-
-    A resolution failure is left to propagate. Reporting "not a duplicate" when the
-    question could not be answered is how a duplicate would pass basic QC unnoticed.
-    Nothing later in this function asks again, so raising here is the only chance to notice.
-    """
-    submission = metadata.submission
-    db.assert_no_duplicate_initial(
-        metadata.submission_id,
-        submitter_id=submission.submitter_id,
-        local_case_id=submission.local_case_id,
-        submission_type=submission.submission_type,
-    )
 
 
 def _warn_on_duplicate_initial(configuration: GrzctlConfig, metadata: GrzSubmissionMetadata) -> None:
@@ -53,7 +29,7 @@ def _warn_on_duplicate_initial(configuration: GrzctlConfig, metadata: GrzSubmiss
     """
     try:
         db = get_submission_db_instance(configuration.db.database_url, author=None)
-        _check_duplicate_initial(db, metadata)
+        check_duplicate_initial(db, metadata)
     except DuplicateInitialSubmissionError as e:
         log.warning(f"{e} Basic QC would be recorded as failed; continuing because DB updates are disabled.")
     except Exception as e:
@@ -123,7 +99,7 @@ def validate(  # noqa: PLR0913, PLR0917
     ) as dbcontext_inst:
         if update_db:
             try:
-                _check_duplicate_initial(dbcontext_inst.db, submission.metadata.content)
+                check_duplicate_initial(dbcontext_inst.db, submission.metadata.content)
             except DuplicateInitialSubmissionError as e:
                 # Another initial submission of this case already passed basic QC, so this
                 # submission fails basic QC without spending any validation effort. Re-raising

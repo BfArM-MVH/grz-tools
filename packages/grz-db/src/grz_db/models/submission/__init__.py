@@ -2122,6 +2122,31 @@ class SubmissionDb:
             )
             return case
 
+    def assert_no_duplicate_tan_g(self, submission_id: str, tan_g: str | None) -> None:
+        """Check whether another submission already holds this ``tan_g``.
+
+        Storing a ``tan_g`` twice is rejected by a unique index, but only when the metadata is
+        written, which happens after the files are downloaded. This asks the same question
+        beforehand, for metadata that has been read but not yet stored.
+
+        A missing or redacted ``tan_g`` identifies nothing, so it never collides. Populating
+        rejects a redacted one on its own account.
+
+        :param submission_id: ID of the submission the ``tan_g`` belongs to. Its own row does not
+            count, so asking again after the metadata was stored finds no conflict.
+        :param tan_g: The ``tan_g`` of the submission's metadata.
+        :raises DuplicateTanGError: if a different submission holds ``tan_g``.
+        """
+        if tan_g is None or tan_g == REDACTED_TAN:
+            return
+
+        with self.transaction() as session:
+            holder_id = session.exec(
+                select(Submission.id).where(Submission.tan_g == tan_g, Submission.id != submission_id)
+            ).first()
+        if holder_id is not None:
+            raise DuplicateTanGError(holder_id)
+
     def assert_no_duplicate_initial(
         self,
         submission_id: str,
