@@ -1,0 +1,171 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Genom PseudonymService",
+    "contact": {
+      "name": "Robert Koch-Institut, Referat VIG - Vertrauensstellen, Nordufer 20, 13353 Berlin",
+      "email": "Vertrauensstelle-Genom@rki.de"
+    },
+    "version": "v1"
+  },
+  "paths": {
+    "psn/api/v1/pseudonym/result": {
+      "post": {
+        "summary": "Fragt für die angegebenen Daten das Pseudonym ab.",
+        "description": "Diese Methode ist öffentlich zugänglich und erfordert eine Authentifizierung.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PseudonymRequestData"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Die Operation wurde erfolgreich abgeschlossen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PseudonymResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Es wurden ungültige Daten gesendet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Die Authentifizierung an der Schnittstelle ist fehlgeschlagen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Die Anfrage war nicht autorisiert",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Es wurde ein falscher Content-Type gesendet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Es ist ein interner Fehler bei der Verarbeitung aufgetreten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorDetails": {
+        "required": [
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "detail": {
+            "minLength": 1,
+            "type": "string",
+            "description": "Eine für dieses Auftreten des Problems spezifische, für Menschen verständliche Erklärung."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Definiert einen Datensatz für die Beschreibung eines Problems"
+      },
+      "PseudonymRequestData": {
+        "required": [
+          "Signature",
+          "SubmitterId",
+          "VN"
+        ],
+        "type": "object",
+        "properties": {
+          "VN": {
+            "type": "string",
+            "description": "Definiert die Transaktionsnummer VNg/VNk.",
+            "format": "byte"
+          },
+          "SubmitterId": {
+            "type": "string",
+            "description": "Definiert die ID des Leistungserbringer.",
+            "format": "byte"
+          },
+          "Signature": {
+            "type": "string",
+            "description": "Signatur des SHA256-Hash des Datenpaketes",
+            "format": "byte"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Definiert einen Datensatz"
+      },
+      "PseudonymResult": {
+        "type": "object",
+        "properties": {
+          "psn": {
+            "type": "string",
+            "description": "Gibt das Pseudonym zurück.",
+            "format": "byte",
+            "nullable": true
+          },
+          "vn": {
+            "type": "string",
+            "description": "Gibt die Vorgangsnummer zurück, über die das Pseudonym abgerufen wurde.",
+            "nullable": true
+          },
+          "signature": {
+            "type": "string",
+            "description": "Gibt die Signatur des Datenpakets zurück",
+            "format": "byte",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false,
+        "description": "Klasse, die das Pseudonym kapselt"
+      }
+    },
+    "securitySchemes": {
+      "Custom": {
+        "type": "http",
+        "description": "Autorisierungsheader. Beispiel: \"Authorization: Custom {token}\""
+      }
+    }
+  },
+  "security": [
+    {
+      "Custom": [ ]
+    }
+  ]
+}

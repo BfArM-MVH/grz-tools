@@ -1,0 +1,158 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Genom PseudonymisationService",
+    "contact": {
+      "name": "Robert Koch-Institut, Referat VIG - Vertrauensstellen, Nordufer 20, 13353 Berlin",
+      "email": "Vertrauensstelle-Genom@rki.de"
+    },
+    "version": "v1"
+  },
+  "paths": {
+    "psngen/api/v1/pseudonym/migrate": {
+      "post": {
+        "summary": "Speichert die übergebenen Daten",
+        "description": "Diese Methode ist öffentlich zugänglich und erfordert eine Authentifizierung.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrationRequestData"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Die Operation wurde erfolgreich abgeschlossen"
+          },
+          "400": {
+            "description": "Es wurden ungültige Daten gesendet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Die Authentifizierung an der Schnittstelle ist fehlgeschlagen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Die Anfrage war nicht autorisiert",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Es wurde ein falscher Content-Type gesendet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Es ist ein interner Fehler bei der Verarbeitung aufgetreten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorDetails": {
+        "required": [
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "detail": {
+            "minLength": 1,
+            "type": "string",
+            "description": "Eine für dieses Auftreten des Problems spezifische, für Menschen verständliche Erklärung."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Definiert einen Datensatz für die Beschreibung eines Problems"
+      },
+      "MigrationRequestData": {
+        "required": [
+          "AN",
+          "DataNodeId",
+          "KVNR",
+          "Signature",
+          "SubmitterId",
+          "VN"
+        ],
+        "type": "object",
+        "properties": {
+          "AN": {
+            "type": "string",
+            "description": "Definiert die Arbeitsnummer des LEs.",
+            "format": "byte"
+          },
+          "KVNR": {
+            "type": "string",
+            "description": "Definiert die Identifikationsnummer des Versicherten.",
+            "format": "byte"
+          },
+          "VN": {
+            "type": "string",
+            "description": "Definiert die Transaktionsnummer VNg/VNk.",
+            "format": "byte"
+          },
+          "DataNodeId": {
+            "type": "string",
+            "description": "Definiert die Teilnehmer-Id des Knotens(GRZ-TID oder KDK-TID).",
+            "format": "byte"
+          },
+          "SubmitterId": {
+            "type": "string",
+            "description": "Definiert die Leistungserbringer-Teilnehmer-Id",
+            "format": "byte"
+          },
+          "Signature": {
+            "type": "string",
+            "description": "Signatur des SHA256-Hash des Datenpaketes",
+            "format": "byte"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Definiert einen Datensatz"
+      }
+    },
+    "securitySchemes": {
+      "Custom": {
+        "type": "http",
+        "description": "Autorisierungsheader. Beispiel: \"Authorization: Custom {token}\""
+      }
+    }
+  },
+  "security": [
+    {
+      "Custom": [ ]
+    }
+  ]
+}
