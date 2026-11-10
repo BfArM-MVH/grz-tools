@@ -1,6 +1,7 @@
 """Run every scenario of :mod:`scenarios` in both flows of the GRZ, from the LE's upload to the GRZ's last step."""
 
 import hashlib
+import importlib.metadata
 import io
 
 import crypt4gh.keys
@@ -66,6 +67,8 @@ def test_scenario(scenario: Scenario, flow: Flow, grz: Grz):
     assert [r["SubmittedCase"]["tan"].lower() for r in grz.bfarm.received] == [tan_g] * outcome.pruefberichte
 
     submission = grz.submission(submission_id)
+    downloaded = any(run.fails_at != "download" for run in scenario.runs)
+    assert submission.grz_cli_version == importlib.metadata.version("grz-cli") or not downloaded
     if outcome.detailed_qc:
         assert submission.selected_for_qc is True
         assert len(grz.qc_output(flow, submission_id).read_text().splitlines()) == len(file_keys)
