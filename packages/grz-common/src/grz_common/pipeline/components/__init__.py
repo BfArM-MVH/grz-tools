@@ -262,6 +262,22 @@ class WriteStream(io.BufferedIOBase, Pipeable):
         finally:
             super().close()
 
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Hand an error to the sink's ``__exit__`` so that wrapping a sink does not turn its abort into a close."""
+        sink_exit = getattr(self._sink, "__exit__", None)
+        if exc_type is None or sink_exit is None:
+            self.close()
+            return
+        try:
+            sink_exit(exc_type, exc_val, exc_tb)
+        finally:
+            super().close()
+
 
 class Observer(WriteStream, metaclass=abc.ABCMeta):
     """Accepts data via write(), processes it, and pushes to next observer (if any)."""
