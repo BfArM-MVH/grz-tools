@@ -451,8 +451,9 @@ class TestQcStrategy:
 
         assert should_run is False
 
+    @pytest.mark.parametrize("isolation_level", [None, "REPEATABLE READ", "SERIALIZABLE"])
     def test_should_qc_concurrent_decisions_select_only_one_submission(
-        self, db: SubmissionDb, migrated_db_connection: str, test_author, monkeypatch
+        self, db: SubmissionDb, migrated_db_connection: str, test_author, monkeypatch, isolation_level
     ):
         """Two should_qc calls racing for the same submitter and month must still select only one.
 
@@ -461,6 +462,8 @@ class TestQcStrategy:
         patched to sleep right after its read, widening the window in which a missing lock would
         let both calls read before either one writes.
         """
+        if isolation_level is not None and db.engine.dialect.name != "postgresql":
+            pytest.skip("only PostgreSQL takes a snapshot before the lock is held")
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
 
@@ -488,6 +491,10 @@ class TestQcStrategy:
         monkeypatch.setattr(SubmissionDb, "_list_submitter_qc_candidates", _slow_list_candidates)
 
         db_b = SubmissionDb(db_url=migrated_db_connection, author=test_author)
+        if isolation_level is not None:
+            # the isolation level a server or role default would impose
+            db.engine = db.engine.execution_options(isolation_level=isolation_level)
+            db_b.engine = db_b.engine.execution_options(isolation_level=isolation_level)
         try:
             barrier = threading.Barrier(2)
             results: dict[str, bool] = {}

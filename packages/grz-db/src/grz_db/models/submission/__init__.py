@@ -2336,10 +2336,17 @@ class SubmissionDb:
             return self._decide_qc(session, submission_id, target_percentage / 100.0, salt, predict)
 
     def _lock_qc_selection(self, session: Session) -> None:
-        """Block other QC selections until the transaction of *session* ends."""
+        """Block other QC selections until the transaction of *session* ends.
+
+        Must be the first statement of the transaction, as it pins the isolation level.
+        """
         dialect = self.engine.dialect.name
         if dialect == "postgresql":
-            session.connection().execute(sa.select(sqlfn.pg_advisory_xact_lock(_QC_SELECTION_LOCK_KEY)))
+            # Under REPEATABLE READ or SERIALIZABLE the snapshot is taken by the first statement, i.e. by
+            # the lock call itself before it waits, so the reads after it would miss the previous holder's
+            # decision. READ COMMITTED takes a new snapshot per statement, whatever the server default is.
+            connection = session.connection(execution_options={"isolation_level": "READ COMMITTED"})
+            connection.execute(sa.select(sqlfn.pg_advisory_xact_lock(_QC_SELECTION_LOCK_KEY)))
         elif dialect == "sqlite":
             # SQLite has no advisory locks; taking the database write lock right away has the same effect
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
