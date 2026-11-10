@@ -69,6 +69,9 @@ db:
     name: steward-name
     private_key_path: /path/to/steward-name.ssh
     private_key_passphrase: steward-key-passphrase
+  # Verifies the signatures, and every grzctl db subcommand reads it.
+  # One line per key: ssh-ed25519 <public key> <author name>
+  known_public_keys_file: /path/to/known_public_keys
 
 identifiers:
   grz: "GRZXYZ123"

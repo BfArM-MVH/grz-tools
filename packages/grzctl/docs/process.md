@@ -30,8 +30,10 @@ A basic invocation:
 ```console
 $ grzctl --config $CONFIG_PATH process \
     --submission-id $submission_id \
-    --output-dir ./out
+    --output-dir ./out/$submission_id
 ```
+
+`process` archives everything below the `logs/` of its output directory, so each submission needs its own output directory.
 
 ## The pipeline
 
@@ -148,6 +150,7 @@ So decisions are serialized, also across processes.
 Without `grzctl process`, `grzctl db should-qc <submission ID>` makes and stores the same decision, with the same `detailed_qc` settings.
 A `target_percentage` of `0` disables the selection: `process` and `db should-qc` select nothing and store nothing; a selection made earlier stands.
 Run the QC workflow on the decrypted files of a selected submission, and record it with `grzctl db submission update <submission ID> qcing`, then `qced`, or `error --failure-reason detailed_qc_error`.
+To run it again after `error`, record `qcing` with `--ignore-error-state`, since the command otherwise asks for confirmation.
 
 ## Parallel instances
 

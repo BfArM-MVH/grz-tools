@@ -37,8 +37,9 @@ The end-to-end tests in `tests/e2e` run every flow with exactly these permission
 
 - `s3:ListBucket` lets S3 answer a missing object with 404 instead of 403.
   Without it, grz-cli and grzctl cannot tell a missing object from denied access, see [Error handling](docs/error-handling.md).
-- The inbox credentials of the GRZ write and delete only in `grzctl clean`, and `grzctl inbox push-version` writes `version.json`.
-  Credentials that run neither need only `s3:GetObject` and `s3:ListBucket`.
+- The inbox credentials of the GRZ write and delete only in `grzctl clean` and in the clean step of `grzctl process`, which runs unless `--no-clean-inbox`.
+  `grzctl inbox push-version` writes `version.json`.
+  Credentials that run none of these need only `s3:GetObject` and `s3:ListBucket`.
 - `grzctl process` copies each file from the interrogation bucket to its archive on the S3 server, with the credentials of that archive.
   So the interrogation bucket must be on the same endpoint as both archives, and both archives' credentials read it.
   The credentials of the interrogation bucket delete the staged copies afterwards.
@@ -59,4 +60,4 @@ They are never written back to YAML, and `grzctl dump-config` prints `**********
 
 When a passphrase is not configured for a key, `grzctl process` falls back to the standard crypt4gh environment variable `C4GH_PASSPHRASE`.
 If that is also unset, you will be prompted interactively.
-Prefer an explicit `GRZ_...__PRIVATE_KEY_PASSPHRASE` environment variable (or the `private_key_passphrase` config key) for automated runs.
+Prefer an explicit `grz_...__private_key_passphrase` environment variable (or the `private_key_passphrase` config key) for automated runs.
