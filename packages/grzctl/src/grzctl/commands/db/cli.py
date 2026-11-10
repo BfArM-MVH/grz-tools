@@ -751,8 +751,10 @@ def tui(ctx: click.Context, quarter: int | None, year: int | None):
 @click.option(
     "--salt",
     "salt",
-    help="Secret random string used as part of seed for random generator [default: detailed_qc.salt of the config].",
-    envvar="GRZCTL_SHOULD_QC_SALT",
+    help=(
+        "Secret random string used as part of seed for random generator "
+        "[default: detailed_qc.salt of the config, as grzctl process uses it]."
+    ),
 )
 @click.pass_context
 def should_qc(ctx: click.Context, submission_id: str, target_percentage: float | None, salt: str | None):

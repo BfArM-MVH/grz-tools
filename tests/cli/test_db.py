@@ -100,14 +100,17 @@ def test_db(
 def test_should_qc_takes_its_settings_from_the_config(
     temp_migrated_db_config_file_path, monkeypatch, options, expected
 ):
-    """Without options, ``db should-qc`` decides with the ``detailed_qc`` settings that ``process`` uses."""
+    """Without options, ``db should-qc`` decides with the ``detailed_qc`` settings that ``process`` uses.
+
+    The variable ``GRZCTL_SHOULD_QC_SALT`` of older versions no longer overrides the salt.
+    """
     calls = []
     monkeypatch.setattr(
         SubmissionDb,
         "should_qc",
         lambda self, submission_id, target_percentage, salt: calls.append((target_percentage, salt)) or True,
     )
-    runner = CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test", "GRZCTL_SHOULD_QC_SALT": None})
+    runner = CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test", "GRZCTL_SHOULD_QC_SALT": "stale"})
     args = ["--config", str(temp_migrated_db_config_file_path), "db", "should-qc", "123456789_2025-01-01_a1b2c3d4"]
 
     result = runner.invoke(grzctl.cli.build_cli(), [*args, *options], catch_exceptions=False)
