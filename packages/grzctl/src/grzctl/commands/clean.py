@@ -11,7 +11,7 @@ from grz_common.transfer import init_s3_resource, s3_errors
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
-from ..dbcontext import DbContext
+from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
@@ -61,6 +61,7 @@ def clean(
             submission_id=submission_id,
             start_state=SubmissionStateEnum.CLEANING,
             end_state=SubmissionStateEnum.CLEANED,
+            transitions=STEP_TRANSITIONS,
             enabled=update_db,
         ):
             _clean_submission_from_bucket(bucket_name, s3_options, submission_id, inbox_desc)

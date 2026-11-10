@@ -17,7 +17,7 @@ from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
-from ..dbcontext import DbContext
+from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
@@ -94,6 +94,7 @@ def download(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.DOWNLOADING,
         end_state=SubmissionStateEnum.DOWNLOADED,
+        transitions=STEP_TRANSITIONS,
         enabled=update_db,
     ) as db_context:
         worker_inst.download(

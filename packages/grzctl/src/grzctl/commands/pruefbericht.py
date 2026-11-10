@@ -25,7 +25,7 @@ from grz_pydantic_models.submission.metadata.v1 import REDACTED_TAN, GrzSubmissi
 from pydantic_core import to_jsonable_python
 
 from ..commands import grzctl_configuration
-from ..dbcontext import DbContext
+from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
@@ -300,6 +300,7 @@ def submit(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.REPORTING,
         end_state=SubmissionStateEnum.REPORTED,
+        transitions=STEP_TRANSITIONS,
         enabled=update_db,
     ):
         expiry, token = _try_submit(

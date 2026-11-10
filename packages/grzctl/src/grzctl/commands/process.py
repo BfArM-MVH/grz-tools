@@ -59,7 +59,7 @@ from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
 from ..commands import grzctl_configuration, inbox_option
-from ..dbcontext import DbContext, has_state
+from ..dbcontext import PROCESS_TRANSITIONS, DbContext, has_state
 from ..models.config import GrzctlConfig
 from ..models.pruefbericht import PruefberichtModel
 from ..processor import SubmissionProcessor
@@ -162,6 +162,7 @@ def process(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.PROCESSING,
         end_state=SubmissionStateEnum.PROCESSED,
+        transitions=PROCESS_TRANSITIONS,
     ) as dbcontext_inst:
         # Record the inbox before any file is streamed.
         # A rerun and the other commands then find the submission without being told the inbox again.
@@ -232,6 +233,7 @@ def process(  # noqa: PLR0913, PLR0917
             submission_id=submission_id,
             start_state=SubmissionStateEnum.CLEANING,
             end_state=SubmissionStateEnum.CLEANED,
+            transitions=PROCESS_TRANSITIONS,
         ):
             _clean_submission_from_bucket(bucket_name, inbox.s3, submission_id, inbox_desc)
 
@@ -257,6 +259,7 @@ def _run_detailed_qc(
         submission_id=submission_id,
         start_state=SubmissionStateEnum.QCING,
         end_state=SubmissionStateEnum.QCED,
+        transitions=PROCESS_TRANSITIONS,
     ):
         processor.run_detailed_qc(submission_id)
 
@@ -298,6 +301,7 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.REPORTING,
         end_state=SubmissionStateEnum.REPORTED,
+        transitions=PROCESS_TRANSITIONS,
         enabled=submit_pruefbericht,
     ):
         log.info("Generating Prüfbericht...")

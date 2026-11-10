@@ -11,7 +11,7 @@ from grz_common.pipeline.context import FileError
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
-from grzctl.dbcontext import DbContext, FilesFailedError
+from grzctl.dbcontext import PROCESS_TRANSITIONS, STEP_TRANSITIONS, DbContext, FilesFailedError, Transitions
 from pydantic import ValidationError
 
 
@@ -36,6 +36,7 @@ def ctx(mock_db):
         submission_id="123_2025-01-01_00000000",
         start_state=SubmissionStateEnum.ENCRYPTING,
         end_state=SubmissionStateEnum.ENCRYPTED,
+        transitions=STEP_TRANSITIONS,
         enabled=True,
     )
     context.db = mock_db  # bypass __enter__
@@ -293,12 +294,18 @@ class TestDbContextFailureReason:
 
 class TestCheckPrerequisites:
     @staticmethod
-    def _context(mock_db, start_state: SubmissionStateEnum, end_state: SubmissionStateEnum) -> DbContext:
+    def _context(
+        mock_db,
+        start_state: SubmissionStateEnum,
+        end_state: SubmissionStateEnum,
+        transitions: Transitions = STEP_TRANSITIONS,
+    ) -> DbContext:
         context = DbContext(
             configuration={},
             submission_id="123_2025-01-01_00000000",
             start_state=start_state,
             end_state=end_state,
+            transitions=transitions,
             enabled=True,
         )
         context.db = mock_db  # bypass __enter__
@@ -309,7 +316,9 @@ class TestCheckPrerequisites:
         mock_db.get_submission.return_value = None
         mock_db.add_submission.return_value.get_latest_state.return_value = None
         mock_db.add_submission.return_value.states = []
-        context = self._context(mock_db, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING)
+        context = self._context(
+            mock_db, SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING, PROCESS_TRANSITIONS
+        )
 
         with caplog.at_level(logging.WARNING):
             context._check_prerequisites()
@@ -341,13 +350,13 @@ class TestCheckPrerequisites:
         mock_db.add_submission.assert_not_called()
 
     @pytest.mark.parametrize(
-        ("start_state", "end_state"),
+        ("start_state", "end_state", "transitions"),
         [
-            (SubmissionStateEnum.PROCESSING, SubmissionStateEnum.PROCESSED),
-            (SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED),
+            (SubmissionStateEnum.PROCESSING, SubmissionStateEnum.PROCESSED, PROCESS_TRANSITIONS),
+            (SubmissionStateEnum.UPLOADING, SubmissionStateEnum.UPLOADED, STEP_TRANSITIONS),
         ],
     )
-    def test_entry_state_adds_a_new_submission(self, db, start_state, end_state):
+    def test_entry_state_adds_a_new_submission(self, db, start_state, end_state, transitions):
         """Both entry states start a submission that the DB does not know yet.
 
         A real DB, unlike a mock, fails if the new submission's states are not loaded.
@@ -357,6 +366,7 @@ class TestCheckPrerequisites:
             submission_id="123456789_2025-01-01_a1b2c3d4",
             start_state=start_state,
             end_state=end_state,
+            transitions=transitions,
             enabled=True,
         )
         context.db = db  # bypass __enter__
@@ -374,4 +384,86 @@ class TestCheckPrerequisites:
         with caplog.at_level(logging.WARNING):
             context._check_prerequisites()
 
+        assert "state history does not contain" in caplog.text
+
+
+S = SubmissionStateEnum
+
+PROCESS_WITHOUT_QC = [S.PROCESSING, S.PROCESSED, S.REPORTING, S.REPORTED, S.CLEANING, S.CLEANED]
+STEP_BY_STEP = [
+    *(S.UPLOADING, S.UPLOADED, S.DOWNLOADING, S.DOWNLOADED, S.DECRYPTING, S.DECRYPTED),
+    *(S.VALIDATING, S.VALIDATED, S.ENCRYPTING, S.ENCRYPTED, S.ARCHIVING, S.ARCHIVED),
+    *(S.REPORTING, S.REPORTED, S.CLEANING, S.CLEANED),
+]
+
+
+class TestTransitions:
+    """Each flow expects the states of its own steps, so a successful run of either logs no warning."""
+
+    SUBMISSION_ID = "123456789_2025-01-01_a1b2c3d4"
+
+    def _record(self, db, transitions: Transitions, states: list[SubmissionStateEnum]) -> None:
+        """Record ``states`` in order, and check the prerequisites of each start state of the flow first.
+
+        A state that is no start state of the flow comes from elsewhere, such as ``grzctl db sync``.
+        """
+        db.add_submission(self.SUBMISSION_ID)
+        for state in states:
+            if state in transitions:
+                context = DbContext(
+                    configuration={},
+                    submission_id=self.SUBMISSION_ID,
+                    start_state=state,
+                    end_state=state,
+                    transitions=transitions,
+                )
+                context.db = db  # bypass __enter__
+                context._check_prerequisites()
+            db.update_submission_state(self.SUBMISSION_ID, state)
+
+    @pytest.mark.parametrize(
+        ("transitions", "states"),
+        [
+            (PROCESS_TRANSITIONS, PROCESS_WITHOUT_QC),
+            (PROCESS_TRANSITIONS, [*PROCESS_WITHOUT_QC[:4], S.QCING, S.QCED, S.CLEANING, S.CLEANED]),
+            (PROCESS_TRANSITIONS, [S.PROCESSING, S.PROCESSED, S.QCING, S.QCED]),
+            (PROCESS_TRANSITIONS, [S.UPLOADING, S.UPLOADED, *PROCESS_WITHOUT_QC]),
+            (PROCESS_TRANSITIONS, [*PROCESS_WITHOUT_QC[:4], *PROCESS_WITHOUT_QC[:2], S.CLEANING, S.CLEANED]),
+            (PROCESS_TRANSITIONS, [*PROCESS_WITHOUT_QC[:3], S.ERROR, *PROCESS_WITHOUT_QC]),
+            (STEP_TRANSITIONS, STEP_BY_STEP),
+            (STEP_TRANSITIONS, [*STEP_BY_STEP[:-2], S.QCING, S.QCED, S.CLEANING, S.CLEANED]),
+            (STEP_TRANSITIONS, [*PROCESS_WITHOUT_QC[:2], S.REPORTING, S.REPORTED, S.CLEANING, S.CLEANED]),
+        ],
+        ids=[
+            "process",
+            "process-with-detailed-qc",
+            "process-without-pruefbericht",
+            "process-after-db-sync",
+            "process-rerun-after-no-clean-inbox",
+            "process-rerun-after-a-failed-pruefbericht",
+            "step-by-step",
+            "step-by-step-with-detailed-qc",
+            "pruefbericht-submit-and-clean-after-process",
+        ],
+    )
+    def test_a_successful_run_logs_no_warning(self, db, caplog, transitions, states):
+        with caplog.at_level(logging.WARNING, logger="grzctl.dbcontext"):
+            self._record(db, transitions, states)
+
+        assert caplog.records == []
+
+    @pytest.mark.parametrize(
+        ("transitions", "states"),
+        [
+            (STEP_TRANSITIONS, [*STEP_BY_STEP[:6], S.ENCRYPTING]),
+            (STEP_TRANSITIONS, [*STEP_BY_STEP[:12], S.CLEANING]),
+            (PROCESS_TRANSITIONS, [S.PROCESSING, S.REPORTING]),
+        ],
+        ids=["encrypt-before-validate", "clean-before-pruefbericht", "pruefbericht-before-processed"],
+    )
+    def test_an_out_of_order_step_warns(self, db, caplog, transitions, states):
+        with caplog.at_level(logging.WARNING, logger="grzctl.dbcontext"):
+            self._record(db, transitions, states)
+
+        assert "currently in state" in caplog.text
         assert "state history does not contain" in caplog.text

@@ -1639,6 +1639,33 @@ class TestProcessDetailedQcAutoRun:
             SubmissionStateEnum.CLEANED,
         ]
 
+    @pytest.mark.parametrize("selected", [False, True], ids=["not-selected", "selected"])
+    def test_a_successful_run_logs_no_state_transition_warning(
+        self,
+        s3_buckets,
+        bfarm_api,
+        caplog,
+        tmp_path,
+        process_config_content,
+        working_dir_path,
+        selected,
+    ):
+        """Each step of the run follows the state that the process flow expects before it, with QC or without."""
+        sid = self.SUBMISSION_ID
+        # only an initial submission can be selected
+        upload = _upload_initial_submission_to_inbox if selected else upload_submission_to_inbox
+        upload(s3_buckets["inbox"], sid)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
+        config_file_path = _auto_run_config(tmp_path, process_config_content, "true")
+
+        with caplog.at_level(logging.WARNING, logger="grzctl.dbcontext"):
+            result = _run_process(config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code == 0, f"Process failed: {result.output}"
+        assert (SubmissionStateEnum.QCED in _states(process_config_content, sid)) == selected
+        assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.CLEANED
+        assert [record for record in caplog.records if record.name == "grzctl.dbcontext"] == []
+
     def test_a_qced_submission_does_not_run_the_qc_command_again(
         self,
         s3_buckets,
