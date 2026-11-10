@@ -120,6 +120,26 @@ def test_a_config_without_a_pruefbericht_field_fails(configuration: dict, field:
         GrzctlConfig.from_configuration(configuration)
 
 
+def test_a_qc_shell_command_with_the_placeholders_of_process_loads(configuration: dict):
+    command = "qc --in '{submission_basepath}' --out '{output_basepath}' --id {submission_id} --home ${{HOME}}"
+    configuration["detailed_qc"]["shell_command"] = command
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    assert config.detailed_qc.shell_command == command
+
+
+@pytest.mark.parametrize(
+    "command", ["${HOME}/{submission_basepath}", "qc {0}", "qc {submission_id"], ids=["key", "index", "unmatched"]
+)
+def test_a_qc_shell_command_with_another_brace_fails(configuration: dict, command: str):
+    """``process`` fills in the template only after the archive copy and the Prüfbericht, so a wrong one fails at load."""
+    configuration["detailed_qc"]["shell_command"] = command
+
+    with pytest.raises(ValidationError, match="double any other brace"):
+        GrzctlConfig.from_configuration(configuration)
+
+
 def test_an_env_var_overrides_the_s3_credentials_of_an_inbox(monkeypatch, configuration: dict):
     prefix = f"grz_leistungserbringer__{LE_ID}__inbox_buckets__{BUCKET_NAME}"
     monkeypatch.setenv(f"{prefix}__access_key", "env-key")

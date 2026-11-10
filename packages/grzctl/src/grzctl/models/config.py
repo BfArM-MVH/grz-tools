@@ -16,7 +16,7 @@ from grz_common.models.base import (
 from grz_common.models.identifiers import IdentifiersModel
 from grz_common.models.s3 import S3ConnectionBase, S3Options
 from grz_common.utils.crypt import Crypt4GH
-from pydantic import Field, PrivateAttr, SecretStr, model_validator
+from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
 
@@ -314,6 +314,23 @@ class DetailedQcModel(IgnoringBaseSettings):
 
     auto_run: bool = False
     """If true, automatically run the QC shell command after the QC pass completes."""
+
+    @field_validator("shell_command")
+    @classmethod
+    def check_shell_command_placeholders(cls, shell_command: str) -> str:
+        """Fill in the template as ``grzctl process`` does, so that a wrong one fails at load, not after the archive copy."""
+        try:
+            shell_command.format(
+                submission_basepath="submission_basepath",
+                output_basepath="output_basepath",
+                submission_id="submission_id",
+            )
+        except (KeyError, IndexError, ValueError) as e:
+            raise ValueError(
+                "shell_command can only use the placeholders {submission_basepath}, {output_basepath} and "
+                f"{{submission_id}}, so double any other brace, as in ${{{{HOME}}}}: {type(e).__name__}: {e}"
+            ) from e
+        return shell_command
 
 
 class DictConfigSettingsSource(PydanticBaseSettingsSource):
