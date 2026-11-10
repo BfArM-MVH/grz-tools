@@ -224,6 +224,7 @@ Each interrupt stops a run one level further:
 SIGTERM starts at the second level, because a supervisor follows it with SIGKILL after a grace period.
 Either way, the run records `interrupted`.
 It leaves the staged and local copies of the finished files in place, so the rerun reuses them.
+An interrupt while the Prüfbericht is sent records `transfer_error` instead, see [BfArM errors](error-handling.md#bfarm-errors).
 
 A rerun of an archived submission streams and copies nothing, and does not check its metadata again.
 This is the case after a failed Prüfbericht, for example.

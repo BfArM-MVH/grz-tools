@@ -94,14 +94,25 @@ def _get_new_token(auth_url: str, client_id: str, client_secret: str) -> tuple[s
 
 
 def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
+    """Send the Prüfbericht to BfArM.
+
+    :raises TransferError: If Ctrl-C or SIGTERM interrupts the request. BfArM may have received it by then, so
+        the operator has to ask BfArM before a rerun sends it again, as after the other failures after sending.
+    """
     log.info("Submitting Prüfbericht...")
 
-    response = requests.post(
-        base_url.rstrip("/") + "/upload",
-        headers={"Authorization": f"bearer {token}"},
-        json=to_jsonable_python(pruefbericht),
-        timeout=60,
-    )
+    try:
+        response = requests.post(
+            base_url.rstrip("/") + "/upload",
+            headers={"Authorization": f"bearer {token}"},
+            json=to_jsonable_python(pruefbericht),
+            timeout=60,
+        )
+    except KeyboardInterrupt as e:
+        raise TransferError(
+            "Interrupted while submitting the Prüfbericht. "
+            "BfArM may have received it, so ask BfArM before submitting it again."
+        ) from e
 
     if response.status_code != HTTPStatus.OK:
         log.warning("There was a problem submitting the Prüfbericht.")

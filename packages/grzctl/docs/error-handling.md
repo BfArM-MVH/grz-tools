@@ -43,7 +43,7 @@ Every other step stops for a mistyped submission ID before its context is open, 
 | `duplicate_initial`             | LE       | The case already has an initial submission that passed basic QC. |
 | `incomplete_submission`         | GRZ      | A command ran before an earlier step had passed for every file. |
 | `submission_cleaned`            | GRZ      | `grzctl clean` has started on the submission, so the inbox no longer holds it. |
-| `interrupted`                   | GRZ      | Ctrl-C or SIGTERM stopped the run. A rerun resumes it. |
+| `interrupted`                   | GRZ      | Ctrl-C or SIGTERM stopped the run. A rerun resumes it. An interrupt while the Prüfbericht is sent records `transfer_error`, see [BfArM errors](#bfarm-errors). |
 | `configuration_error`           | GRZ      | The setup is wrong or incomplete: a key or credential is missing, S3 or BfArM rejects the credentials, or a configured bucket does not exist. |
 | `transfer_error`                | GRZ      | Moving data to or from S3 or BfArM failed. A rerun usually succeeds. If the failure repeats, the message names the error code or HTTP status. |
 | `encryption_error`              | GRZ      | Re-encrypting a file for the archive failed. |
@@ -117,6 +117,7 @@ A `401` for the Prüfbericht first makes grzctl request a new token and send the
 
 `grzctl process` retries a `NetworkError` only, since BfArM has not received the Prüfbericht then.
 The other failures can come after BfArM got it, so their message says to ask BfArM before submitting it again.
+So can Ctrl-C or SIGTERM while the Prüfbericht is sent, which therefore raises a `TransferError` with the same message instead of recording `interrupted`.
 If BfArM did get it, `grzctl db submission update <submission_id> reported` records that.
 A rerun of `grzctl process` then cleans the inbox without sending the Prüfbericht again.
 Otherwise a rerun sends it.

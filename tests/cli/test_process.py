@@ -1875,6 +1875,32 @@ class TestProcessPruefbericht:
         inbox_keys = {o.key for o in s3_buckets["inbox"].objects.filter(Prefix=f"{sid}/files/")}
         assert inbox_keys, "the inbox keeps a submission whose Prüfbericht BfArM may not have"
 
+    def test_an_interrupt_while_sending_says_to_ask_bfarm(
+        self,
+        s3_buckets,
+        bfarm_api,
+        waits,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """BfArM may have received a Prüfbericht whose upload Ctrl-C interrupts, so the run does not record ``interrupted``.
+
+        A rerun after ``interrupted`` would send it again without asking BfArM first.
+        """
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.add_callback(responses.POST, BFARM_UPLOAD_URL, callback=_interrupt)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Process should have failed but succeeded: {result.output}"
+        assert len(_submitted_tans(bfarm_api)) == 1
+        assert waits == []
+        state = _latest_state(process_config_content, sid)
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+        assert "ask BfArM" in (state.data or {}).get("error", "")
+
     def test_refused_credentials_fail_at_once_as_a_configuration_error(
         self,
         s3_buckets,
