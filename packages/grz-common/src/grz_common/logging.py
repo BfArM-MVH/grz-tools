@@ -50,7 +50,7 @@ class AlembicInfoNoiseFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if record.name == "alembic.runtime.migration":
             msg = record.getMessage()
-            if "Context impl" in msg or "Will assume transactional DDL" in msg:
+            if "Context impl" in msg or "transactional DDL" in msg:  # "non-transactional" on SQLite
                 return False
         return True
 
