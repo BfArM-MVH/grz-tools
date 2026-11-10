@@ -43,9 +43,11 @@ failure streams each file only into the outputs that are not recorded or whose
 copy is gone, making the pipeline effectively idempotent.
 """
 
+import itertools
 import json
 import logging
 import time
+from operator import attrgetter
 from pathlib import Path
 
 import click
@@ -54,7 +56,7 @@ import grz_common.exceptions as grzexc
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
-from grz_db.models.submission import CASE_LINK_KEY, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import CASE_LINK_KEY, Submission, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
@@ -66,7 +68,7 @@ from ..processor import SubmissionProcessor
 from .clean import _clean_submission_from_bucket
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
-from .pruefbericht import _generate_pruefbericht_from_database
+from .pruefbericht import ASK_BFARM, _generate_pruefbericht_from_database
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
 
 log = logging.getLogger(__name__)
@@ -289,8 +291,12 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
 
     Submitting makes this the reporting step, so a Prüfbericht that cannot be generated fails that
     step too. A Prüfbericht that the database records as reported is not submitted again.
+    Nor is one that an earlier run may have sent, because it stopped in ``REPORTING``: the step then
+    fails with a :class:`TransferError` that says to ask BfArM.
     """
-    if submit_pruefbericht and has_state(db.get_submission(submission_id), SubmissionStateEnum.REPORTED):
+    # read before the context below records REPORTING
+    submission = db.get_submission(submission_id)
+    if submit_pruefbericht and has_state(submission, SubmissionStateEnum.REPORTED):
         log.warning(f"Submission '{submission_id}' is already reported. Its Prüfbericht is not submitted again.")
         submit_pruefbericht = False
     # Entering the context writes REPORTING and commits it, so the retries below hold no
@@ -310,8 +316,26 @@ def _handle_pruefbericht(  # noqa: PLR0913, PLR0917
         log.info("Prüfbericht generated successfully")
         _save_pruefbericht(pruefbericht, log_dir, save_pruefbericht, redact_pruefbericht)
         if submit_pruefbericht:
+            if _stopped_while_reporting(submission):
+                raise grzexc.TransferError(
+                    f"An earlier run stopped in state 'Reporting' after it began to submit the Prüfbericht "
+                    f"of submission '{submission_id}'. {ASK_BFARM}"
+                )
             _submit_pruefbericht_with_retries(pruefbericht, configuration.pruefbericht)
             log.info("Prüfbericht submitted successfully!")
+
+
+def _stopped_while_reporting(submission: Submission | None) -> bool:
+    """Whether the latest ``REPORTING`` of ``submission`` has no outcome, ``REPORTED`` or ``ERROR``, right after it.
+
+    The run that recorded it was killed while it sent the Prüfbericht, or could not record ``REPORTED``.
+    """
+    if submission is None:
+        return False
+    states = [entry.state for entry in sorted(submission.states, key=attrgetter("timestamp", "id"))]
+    # the state right after each REPORTING, None if nothing follows it
+    outcomes = [after for state, after in itertools.pairwise([*states, None]) if state == SubmissionStateEnum.REPORTING]
+    return bool(outcomes) and outcomes[-1] not in {SubmissionStateEnum.REPORTED, SubmissionStateEnum.ERROR}
 
 
 def _save_pruefbericht(

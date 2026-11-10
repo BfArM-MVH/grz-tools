@@ -29,6 +29,10 @@ from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
+
+ASK_BFARM = "BfArM may have received it, so ask BfArM before submitting it again."
+"""The hint for a Prüfbericht that may have reached BfArM, after a sentence that names the Prüfbericht."""
+
 fail_or_pass = click.option(
     "--fail/--pass", "failed", help="Fail an otherwise valid submission (e.g. failed internal QC)"
 )
@@ -109,10 +113,7 @@ def _submit_pruefbericht(base_url: str, token: str, pruefbericht: Pruefbericht):
             timeout=60,
         )
     except KeyboardInterrupt as e:
-        raise TransferError(
-            "Interrupted while submitting the Prüfbericht. "
-            "BfArM may have received it, so ask BfArM before submitting it again."
-        ) from e
+        raise TransferError(f"Interrupted while submitting the Prüfbericht. {ASK_BFARM}") from e
 
     if response.status_code != HTTPStatus.OK:
         log.warning("There was a problem submitting the Prüfbericht.")

@@ -37,6 +37,7 @@ import yaml
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from grzctl.commands import inbox_resolution
+from grzctl.commands.pruefbericht import ASK_BFARM
 from urllib3.exceptions import ProtocolError
 
 from .common import refused_connection
@@ -2030,6 +2031,52 @@ class TestProcessUnrecordedEndState:
             SubmissionStateEnum.CLEANING,
             SubmissionStateEnum.CLEANED,
         ]
+
+    def test_a_rerun_does_not_send_a_pruefbericht_whose_reported_is_unrecorded(
+        self,
+        s3_buckets,
+        bfarm_api,
+        waits,
+        monkeypatch,
+        caplog,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """BfArM accepted the Prüfbericht, so the rerun says to ask BfArM, and records ``transfer_error``.
+
+        Once the operator records ``reported``, the next run cleans the inbox without sending the Prüfbericht.
+        """
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
+        _fail_recording_once(monkeypatch, SubmissionStateEnum.REPORTED)
+
+        with caplog.at_level(logging.ERROR, logger="grzctl.dbcontext"):
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, "the run should stop when REPORTED is not recorded"
+        assert f"grzctl db submission update {sid} reported" in caplog.text
+        assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.REPORTING
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Rerun should have failed but succeeded: {result.output}"
+        assert len(_submitted_tans(bfarm_api)) == 1, "the rerun must not send the Prüfbericht again"
+        state = _latest_state(process_config_content, sid)
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+        assert ASK_BFARM in (state.data or {}).get("error", "")
+
+        update = ["--config", str(temp_process_config_file_path), "db", "submission", "update", sid, "reported"]
+        result = click.testing.CliRunner().invoke(grzctl.cli.build_cli(), [*update, "--ignore-error-state"])
+        assert result.exit_code == 0, result.output
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert len(_submitted_tans(bfarm_api)) == 1
+        assert _states(process_config_content, sid)[-2:] == [SubmissionStateEnum.CLEANING, SubmissionStateEnum.CLEANED]
+        assert waits == []
 
 
 def _config_with_distinct_archive_keys(tmp_path: Path, process_config_content: dict) -> Path:
