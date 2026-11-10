@@ -3,7 +3,9 @@
 import json
 
 import grzctl.cli
+import pytest
 from click.testing import CliRunner
+from grz_db.models.submission import SubmissionDb
 
 
 def test_db(
@@ -88,3 +90,28 @@ def test_db(
     actual_output = json.loads(result.stdout)
     actual_output[0]["latest_state"]["timestamp"] = "MASKED"
     assert actual_output == expected_output
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [([], (0.0, "test")), (["--target-percentage", "5", "--salt", "other"], (5.0, "other"))],
+    ids=["from-config", "from-options"],
+)
+def test_should_qc_takes_its_settings_from_the_config(
+    temp_migrated_db_config_file_path, monkeypatch, options, expected
+):
+    """Without options, ``db should-qc`` decides with the ``detailed_qc`` settings that ``process`` uses."""
+    calls = []
+    monkeypatch.setattr(
+        SubmissionDb,
+        "should_qc",
+        lambda self, submission_id, target_percentage, salt: calls.append((target_percentage, salt)) or True,
+    )
+    runner = CliRunner(env={"GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test", "GRZCTL_SHOULD_QC_SALT": None})
+    args = ["--config", str(temp_migrated_db_config_file_path), "db", "should-qc", "123456789_2025-01-01_a1b2c3d4"]
+
+    result = runner.invoke(grzctl.cli.build_cli(), [*args, *options], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "true"
+    assert calls == [expected]

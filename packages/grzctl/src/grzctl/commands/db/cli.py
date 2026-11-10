@@ -184,6 +184,7 @@ def db(
             "author": author,
             "public_keys": public_keys,
             "db_url": db_config.database_url,
+            "detailed_qc": configuration.detailed_qc,
         }
     )
 
@@ -742,18 +743,23 @@ def tui(ctx: click.Context, quarter: int | None, year: int | None):
     "target_percentage",
     type=click.FloatRange(0.0, 100.0),
     metavar="FLOAT",
-    help="Minimum proportion of submissions that should be QCed (default = 2.0).",
-    default=2.0,
+    help="Minimum proportion of submissions that should be QCed [default: detailed_qc.target_percentage of the config].",
 )
 @click.option(
     "--salt",
     "salt",
-    help="Secret random string used as part of seed for random generator.",
+    help="Secret random string used as part of seed for random generator [default: detailed_qc.salt of the config].",
     envvar="GRZCTL_SHOULD_QC_SALT",
 )
 @click.pass_context
-def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, salt: str | None):
-    """Check whether a submission should be QCed."""
+def should_qc(ctx: click.Context, submission_id: str, target_percentage: float | None, salt: str | None):
+    """Check whether a submission should be QCed.
+
+    Without options, it decides with the ``detailed_qc`` settings of the config, as ``grzctl process`` does.
+    """
+    detailed_qc = ctx.obj["detailed_qc"]
+    target_percentage = detailed_qc.target_percentage if target_percentage is None else target_percentage
+    salt = detailed_qc.salt if salt is None else salt
     database_url = ctx.obj["db_url"]
     database = get_submission_db_instance(database_url)
 

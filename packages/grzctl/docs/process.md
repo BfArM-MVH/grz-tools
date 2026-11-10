@@ -147,6 +147,9 @@ So decisions are serialized, also across processes.
 - If a later step fails after a positive decision, the local QC data is kept; a rerun does not write it again.
   A rerun that fails before its decision keeps it too, since the database still records the earlier selection.
 
+Without `grzctl process`, `grzctl db should-qc <submission ID>` makes and stores the same decision, with the same `detailed_qc` settings.
+Run the QC workflow on the decrypted files of a selected submission, and record it with `grzctl db submission update <submission ID> qcing`, then `qced`, or `error --failure-reason detailed_qc_error`.
+
 ## Parallel instances
 
 Two `grzctl process` runs, for different submissions of the same submitter in the same month, where nobody has been selected for QC yet:
