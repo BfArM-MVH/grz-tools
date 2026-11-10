@@ -95,6 +95,8 @@ class TestManualCliVsStreamingPipeline:
                 "--submission-dir",
                 str(working_dir),
                 "--no-update-db",
+                # the encrypted files are copied in, not downloaded
+                "--no-check-download-logs",
             ],
             catch_exceptions=False,
         )
