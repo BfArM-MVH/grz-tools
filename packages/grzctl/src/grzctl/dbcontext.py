@@ -94,7 +94,10 @@ STEP_TRANSITIONS: Transitions = {
     SubmissionStateEnum.ENCRYPTING: frozenset({SubmissionStateEnum.VALIDATED}),
     SubmissionStateEnum.ARCHIVING: frozenset({SubmissionStateEnum.ENCRYPTED}),
     # PROCESSED: after ``grzctl process --no-submit-pruefbericht``
-    SubmissionStateEnum.REPORTING: frozenset({SubmissionStateEnum.ARCHIVED, SubmissionStateEnum.PROCESSED}),
+    # QCED: the same, where ``detailed_qc.auto_run`` ran the detailed QC workflow of a selected submission
+    SubmissionStateEnum.REPORTING: frozenset(
+        {SubmissionStateEnum.ARCHIVED, SubmissionStateEnum.PROCESSED, SubmissionStateEnum.QCED}
+    ),
     # detailed QC is optional and runs apart from these commands
     SubmissionStateEnum.CLEANING: frozenset({SubmissionStateEnum.REPORTED, SubmissionStateEnum.QCED}),
 }

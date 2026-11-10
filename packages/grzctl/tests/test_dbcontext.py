@@ -442,6 +442,7 @@ class TestTransitions:
             (STEP_TRANSITIONS, STEP_BY_STEP),
             (STEP_TRANSITIONS, [*STEP_BY_STEP[:-2], S.QCING, S.QCED, S.CLEANING, S.CLEANED]),
             (STEP_TRANSITIONS, [*PROCESS_WITHOUT_QC[:2], S.REPORTING, S.REPORTED, S.CLEANING, S.CLEANED]),
+            (STEP_TRANSITIONS, [*PROCESS_WITHOUT_QC[:2], S.QCING, S.QCED, *PROCESS_WITHOUT_QC[2:]]),
             (STEP_TRANSITIONS, [*STEP_BY_STEP[:13], S.ERROR, *STEP_BY_STEP[12:]]),
         ],
         ids=[
@@ -454,6 +455,7 @@ class TestTransitions:
             "step-by-step",
             "step-by-step-with-detailed-qc",
             "pruefbericht-submit-and-clean-after-process",
+            "pruefbericht-submit-and-clean-after-process-with-detailed-qc",
             "step-by-step-retry-of-a-failed-pruefbericht",
         ],
     )
@@ -474,8 +476,8 @@ class TestTransitions:
         ids=[
             "encrypt-before-validate",
             "clean-before-pruefbericht",
-            "pruefbericht-before-processed",
             "another-step-after-an-error",
+            "pruefbericht-before-processed",
         ],
     )
     def test_an_out_of_order_step_warns(self, db, caplog, transitions, states):
