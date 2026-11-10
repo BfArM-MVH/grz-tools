@@ -38,7 +38,9 @@ TRANSITION_WARNINGS = ("Expected any of", "does not contain any of")
 class Grz:
     """One GRZ with its own database and QC storage, on the shared buckets, and its LE.
 
-    Each submission gets a random tanG, so scenarios never meet in the buckets.
+    Each submission gets a random tanG, and so its own submission ID. The scenarios of one test worker share the
+    inbox, so ``db sync-from-inbox`` also records the submissions of the worker's earlier scenarios; nothing asserts
+    on them.
     """
 
     def __init__(
