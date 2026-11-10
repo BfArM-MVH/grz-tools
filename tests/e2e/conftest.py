@@ -45,7 +45,11 @@ def bfarm_mock(bfarm_certificate) -> Iterator[services.BfarmMock]:
 def grz(tmp_path, s3_endpoint, migrated_db_connection, bfarm_mock, bfarm_certificate, request) -> Grz:
     """A GRZ with a fresh database, on SQLite and on PostgreSQL."""
     bfarm_mock.reset()
-    cache = request.config.cache.mkdir("grz-mini-test-data")
+    # -p no:cacheprovider leaves no config.cache; fall back to the directory that the cache provider uses outside tox
+    if pytest_cache := getattr(request.config, "cache", None):
+        cache = pytest_cache.mkdir("grz-mini-test-data")
+    else:
+        cache = request.config.rootpath / ".pytest_cache" / "d" / "grz-mini-test-data"
     return Grz(
         tmp_path,
         s3_endpoint,

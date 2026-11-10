@@ -25,7 +25,7 @@ The default `pytest` run skips them through the `e2e` marker.
 | Database    | `grz_db.testing`'s `migrated_db_connection`, a fresh one per test. |
 | BfArM API   | An HTTPS mock in the test process, which a scenario can make reject the Prüfbericht. |
 | Detailed QC | A shell command that lists the files it got, or fails. |
-| Test data   | The submissions of [grz-mini-test-data](https://github.com/twrightsman/grz-mini-test-data), pinned by SHA-256 and cached in `.pytest_cache`. |
+| Test data   | The submissions of [grz-mini-test-data](https://github.com/twrightsman/grz-mini-test-data), pinned by SHA-256 and cached in pytest's cache directory, which is `.tox/e2e/.pytest_cache` under tox and `.pytest_cache` otherwise. |
 | Keys        | The mock keys in `tests/mock_files`. |
 
 Mini files fit into one part, so the configs lower the part size to the 5 MiB that S3 allows at least, and two scenarios grow FASTQs beyond it.
