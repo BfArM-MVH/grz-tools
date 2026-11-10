@@ -635,26 +635,40 @@ class SubmissionProcessor:
             return True
         return submission is not None and submission.selected_for_qc is True
 
-    def _discard_qc_prefetch(self, run_state: SubmissionRunState) -> None:
+    def discard_qc_prefetch_unless_selected(self, db: SubmissionDb, submission_id: str) -> None:
+        """Delete the files prefetched for detailed QC after a failure, unless the database records a selection.
+
+        A failed rerun keeps the files that an earlier run selected, also if it failed before its own decision.
+        """
+        if not self._is_selected_for_qc(db, submission_id):
+            self._discard_qc_prefetch(submission_id)
+
+    def _discard_qc_prefetch(self, submission_id: str) -> None:
         """Delete the decrypted files that the main pass of this run or of an earlier one wrote to local storage.
 
         An interrupted run keeps them, and the prediction of its rerun can differ.
+        The files are found in their directory, so a run whose metadata no longer parses deletes them too.
         """
-        paths = [
-            _qc_file_path(self.config.detailed_qc.local_storage, run_state.submission_id, file_meta)
-            for file_meta in run_state.submission_metadata.files.values()
-        ]
+        files_dir = Path(self.config.detailed_qc.local_storage) / submission_id / "files"
+
+        def warn(error: OSError) -> None:
+            # a run that prefetched nothing has no directory
+            if not isinstance(error, FileNotFoundError):
+                log.warning(f"Could not list the prefetched QC files in {error.filename}: {error}")
+
         deleted = 0
-        for path in paths:
-            try:
-                path.unlink()
-                deleted += 1
-            except FileNotFoundError:
-                pass  # nothing to delete
-            except OSError as e:
-                log.warning(f"Could not delete prefetched QC file {path}: {e}")
+        for directory, _, file_names in os.walk(files_dir, onerror=warn):
+            for file_name in file_names:
+                path = Path(directory) / file_name
+                try:
+                    path.unlink()
+                    deleted += 1
+                except FileNotFoundError:
+                    pass  # nothing to delete
+                except OSError as e:
+                    log.warning(f"Could not delete prefetched QC file {path}: {e}")
         if deleted:
-            log.info(f"Deleted {deleted} file(s) prefetched for detailed QC of {run_state.submission_id}.")
+            log.info(f"Deleted {deleted} file(s) prefetched for detailed QC of {submission_id}.")
 
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata, run_state: SubmissionRunState) -> None:
         redacted_metadata = submission_metadata.content.to_redacted_dict()
@@ -869,17 +883,17 @@ class SubmissionProcessor:
             # a run interrupted while it deleted the staged copies leaves the rest of them behind
             self._delete_staged_copies(submission_run, self._get_expected_keys(submission_run))
             return
-        # An archived submission skips the checks: they can fail by now, after an upgrade or once a
-        # consent has lapsed, but they cannot undo the archival.
-        self._check_metadata(db, submission_metadata, identifiers)
-        prefetch = self._predict_qc(db, submission_run.submission_id)
-        if prefetch:
-            log.info(
-                f"Submission {submission_run.submission_id} is likely to be selected for detailed QC, "
-                "writing its decrypted files to QC storage during processing."
-            )
-
         try:
+            # An archived submission skips the checks: they can fail by now, after an upgrade or once a
+            # consent has lapsed, but they cannot undo the archival.
+            self._check_metadata(db, submission_metadata, identifiers)
+            prefetch = self._predict_qc(db, submission_run.submission_id)
+            if prefetch:
+                log.info(
+                    f"Submission {submission_run.submission_id} is likely to be selected for detailed QC, "
+                    "writing its decrypted files to QC storage during processing."
+                )
+
             self._pipeline_executor.process_files(submission_run, stage=True, write_local=prefetch)
 
             self._raise_on_file_errors(submission_run, "Processing failed")
@@ -899,7 +913,7 @@ class SubmissionProcessor:
             # determine whether to perform detailed QC (now that basic QC is marked as passed).
             selected_for_qc = self._determine_qc_flag(db, submission_run.submission_id)
             if not selected_for_qc:
-                self._discard_qc_prefetch(submission_run)
+                self._discard_qc_prefetch(submission_run.submission_id)
 
             if selected_for_qc:
                 log.info(f"Running detailed QC pass for {submission_run.submission_id}...")
@@ -932,8 +946,7 @@ class SubmissionProcessor:
             self._handle_interrogation_failure(submission_run)
             # Decrypted files stay only for a submission that is selected for detailed QC,
             # also when an earlier run selected it and this rerun failed before its decision.
-            if not self._is_selected_for_qc(db, submission_run.submission_id):
-                self._discard_qc_prefetch(submission_run)
+            self.discard_qc_prefetch_unless_selected(db, submission_run.submission_id)
             raise
 
     def run_detailed_qc(self, submission_id: str) -> None:

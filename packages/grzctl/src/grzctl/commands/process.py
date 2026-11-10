@@ -188,30 +188,36 @@ def process(  # noqa: PLR0913, PLR0917
                 "and nothing is streamed or copied again."
             )
         else:
-            submission_metadata = SubmissionMetadata(metadata_dir / "metadata.json")
-            check_metadata_version_and_exit_if_needed(inbox.s3, submission_metadata.content.get_schema_version())
-            # Populate the DB record with parsed metadata (donors, files, dates, etc.)
-            # so that downstream Prüfbericht generation can read the required fields.
-            # A rejected write, such as a duplicate tanG, then records the ERROR state.
-            submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
-            # A case link set by hand, with ``db case relink``, outlives a rerun. Resolving the case from
-            # the metadata key again would undo that repair, and populate refuses to without --force.
-            stored_case_id = stored.case_id if stored else None
-            if stored_case_id is not None:
-                log.warning(
-                    f"Submission '{submission_id}' keeps its case link (case {stored_case_id}); "
-                    "its metadata is not resolved to a case again."
+            try:
+                submission_metadata = SubmissionMetadata(metadata_dir / "metadata.json")
+                check_metadata_version_and_exit_if_needed(inbox.s3, submission_metadata.content.get_schema_version())
+                # Populate the DB record with parsed metadata (donors, files, dates, etc.)
+                # so that downstream Prüfbericht generation can read the required fields.
+                # A rejected write, such as a duplicate tanG, then records the ERROR state.
+                submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
+                # A case link set by hand, with ``db case relink``, outlives a rerun. Resolving the case from
+                # the metadata key again would undo that repair, and populate refuses to without --force.
+                stored_case_id = stored.case_id if stored else None
+                if stored_case_id is not None:
+                    log.warning(
+                        f"Submission '{submission_id}' keeps its case link (case {stored_case_id}); "
+                        "its metadata is not resolved to a case again."
+                    )
+                dbcontext_inst.db.populate(
+                    submission_id,
+                    submission_metadata.content,
+                    submission_date,
+                    force=False,
+                    on_missing="create",
+                    ignore_fields={CASE_LINK_KEY} if stored_case_id is not None else None,
                 )
-            dbcontext_inst.db.populate(
-                submission_id,
-                submission_metadata.content,
-                submission_date,
-                force=False,
-                on_missing="create",
-                ignore_fields={CASE_LINK_KEY} if stored_case_id is not None else None,
-            )
-            identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
-            processor.run(submission_metadata, identifiers)
+                identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
+                processor.run(submission_metadata, identifiers)
+            except (Exception, SystemExit):
+                # An interrupted earlier run may have prefetched files for a submission that this run rejects.
+                # SystemExit comes from the version check. An interrupt keeps the files for the rerun.
+                processor.discard_qc_prefetch_unless_selected(dbcontext_inst.db, submission_id)
+                raise
 
     _handle_pruefbericht(
         configuration=configuration,

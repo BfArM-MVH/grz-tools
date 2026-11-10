@@ -47,6 +47,10 @@ from .common import refused_connection
 MOCK_FILES_DIR = Path(__file__).parent.parent / "mock_files"
 VALID_SUBMISSION_DIR = MOCK_FILES_DIR / "submissions" / "valid_submission"
 BFARM_UPLOAD_URL = "https://bfarm.localhost/api/upload"
+NEWER_METADATA_VERSION_POLICY = {
+    "metadata_version": [{"minimal_version": "99.0.0", "enforced_from": "2020-01-01T00:00:00"}]
+}
+"""A ``version.json`` whose policy the metadata version of the valid submission falls below."""
 
 
 @pytest.fixture
@@ -467,7 +471,7 @@ class TestProcessValidationFailure:
 
     @pytest.mark.parametrize(
         "version_file",
-        [{"metadata_version": [{"minimal_version": "99.0.0", "enforced_from": "2020-01-01T00:00:00"}]}, None],
+        [NEWER_METADATA_VERSION_POLICY, None],
         ids=["schema-version-below-the-policy", "no-version-file"],
     )
     def test_the_inbox_version_policy_fails_process_as_it_fails_download(
@@ -949,6 +953,57 @@ class TestProcessDetailedQc:
         result = _run_process(_config_without_detailed_qc(tmp_path, process_config_content), sid, working_dir_path)
 
         assert (result.exit_code != 0) == rerun_fails, result.output
+        assert _qc_files(process_config_content, sid) == set()
+
+    @pytest.mark.parametrize(
+        ("reject", "failure_reason"),
+        [
+            (
+                lambda monkeypatch, inbox, sid: monkeypatch.setattr(
+                    grz_common.workers.submission, "get_accepted_versions", lambda: []
+                ),
+                FailureReasonEnum.VALIDATION_ERROR,
+            ),
+            (
+                lambda monkeypatch, inbox, sid: inbox.put_object(
+                    Key=VERSION_FILE_KEY, Body=json.dumps(NEWER_METADATA_VERSION_POLICY).encode()
+                ),
+                FailureReasonEnum.UNKNOWN,
+            ),
+            (
+                lambda monkeypatch, inbox, sid: inbox.put_object(Key=f"{sid}/metadata/metadata.json", Body=b"{}"),
+                FailureReasonEnum.VALIDATION_ERROR,
+            ),
+        ],
+        ids=["retired-schema-version", "metadata-version-policy", "unparsable-metadata"],
+    )
+    def test_a_rerun_that_rejects_the_submission_deletes_the_files_an_interrupted_run_prefetched(
+        self,
+        s3_buckets,
+        qc_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        monkeypatch,
+        reject,
+        failure_reason,
+    ):
+        """The first run guesses "selected", prefetches, and is interrupted before its decision.
+
+        The rerun rejects the submission before it streams any file, so nobody runs it again to delete the files.
+        """
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        with monkeypatch.context() as patch:
+            patch.setattr(grzctl.processor.SubmissionProcessor, "_determine_qc_flag", _interrupt)
+            result = _run_process(qc_process_config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, "the first run should be interrupted"
+        assert _qc_files(process_config_content, sid) == set(_metadata_file_checksums())
+        reject(monkeypatch, s3_buckets["inbox"], sid)
+
+        result = _run_process(qc_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code != 0, f"the rerun should reject the submission: {result.output}"
+        assert _latest_state(process_config_content, sid).failure_reason == failure_reason
         assert _qc_files(process_config_content, sid) == set()
 
     def test_a_rerun_without_detailed_qc_completes_the_files_of_a_selected_submission(

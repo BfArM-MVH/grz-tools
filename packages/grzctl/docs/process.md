@@ -197,6 +197,9 @@ If any file fails in the main pass (step 3), the pipeline:
 2. deletes the staged objects from the interrogation bucket, unless `archives.interrogation.keep_failed` is `true`,
 3. fails the run; the DB state becomes `ERROR`.
 
+The metadata checks of step 1 fail the same way.
+Any other failure in step 1, such as metadata that no longer parses after an upgrade, deletes only the prefetched local copies, as in item 1.
+
 Step 5 can fail the same way.
 If another initial submission of the same case passed basic QC during the main pass, the database rejects `basic_qc_passed = true`.
 The pipeline then stores `basic_qc_passed = false` and handles the failure as above, with the failure reason `duplicate_initial`.
