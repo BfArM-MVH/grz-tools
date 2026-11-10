@@ -1,13 +1,20 @@
 import logging
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from functools import cached_property
+from operator import attrgetter
 from typing import Any
 
 import grz_common.exceptions as grzexc
 from grz_common.pipeline.context import FileError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
-from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import (
+    FailureReasonEnum,
+    Submission,
+    SubmissionDb,
+    SubmissionStateEnum,
+    SubmissionStateLog,
+)
 
 from . import get_versions
 from .commands.db.cli import get_submission_db_instance
@@ -322,6 +329,15 @@ class DbContext:
         """Map an exception to its failure reason, see :func:`_classify`."""
         return _classify(exc_val)[0]
 
+    def _retries_failed_step(self, history: Iterable[SubmissionStateLog]) -> bool:
+        """Whether this transition starts the step again that failed last.
+
+        :param history: The state log of the submission.
+        :returns: True if the latest state is ``ERROR`` and the state before it is ``start_state``.
+        """
+        states = [entry.state for entry in sorted(history, key=attrgetter("timestamp", "id"))]
+        return states[-2:] == [self.start_state, SubmissionStateEnum.ERROR]
+
     def _check_prerequisites(self):
         """
         Checks if the state transition is valid.
@@ -337,7 +353,7 @@ class DbContext:
         latest_state_log = submission.get_latest_state()
         current_state = latest_state_log.state if latest_state_log else None
 
-        if current_state not in self.expected_prior_states:
+        if current_state not in self.expected_prior_states and not self._retries_failed_step(submission.states):
             log.warning(
                 f"Submission {self.submission_id} is currently in state '{current_state}'. "
                 f"Expected any of '{self.expected_prior_states}' before updating to '{self.start_state.name}'."

@@ -433,6 +433,7 @@ class TestTransitions:
             (STEP_TRANSITIONS, STEP_BY_STEP),
             (STEP_TRANSITIONS, [*STEP_BY_STEP[:-2], S.QCING, S.QCED, S.CLEANING, S.CLEANED]),
             (STEP_TRANSITIONS, [*PROCESS_WITHOUT_QC[:2], S.REPORTING, S.REPORTED, S.CLEANING, S.CLEANED]),
+            (STEP_TRANSITIONS, [*STEP_BY_STEP[:13], S.ERROR, *STEP_BY_STEP[12:]]),
         ],
         ids=[
             "process",
@@ -444,6 +445,7 @@ class TestTransitions:
             "step-by-step",
             "step-by-step-with-detailed-qc",
             "pruefbericht-submit-and-clean-after-process",
+            "step-by-step-retry-of-a-failed-pruefbericht",
         ],
     )
     def test_a_successful_run_logs_no_warning(self, db, caplog, transitions, states):
@@ -457,9 +459,15 @@ class TestTransitions:
         [
             (STEP_TRANSITIONS, [*STEP_BY_STEP[:6], S.ENCRYPTING]),
             (STEP_TRANSITIONS, [*STEP_BY_STEP[:12], S.CLEANING]),
+            (STEP_TRANSITIONS, [*STEP_BY_STEP[:13], S.ERROR, S.CLEANING]),
             (PROCESS_TRANSITIONS, [S.PROCESSING, S.REPORTING]),
         ],
-        ids=["encrypt-before-validate", "clean-before-pruefbericht", "pruefbericht-before-processed"],
+        ids=[
+            "encrypt-before-validate",
+            "clean-before-pruefbericht",
+            "pruefbericht-before-processed",
+            "another-step-after-an-error",
+        ],
     )
     def test_an_out_of_order_step_warns(self, db, caplog, transitions, states):
         with caplog.at_level(logging.WARNING, logger="grzctl.dbcontext"):
