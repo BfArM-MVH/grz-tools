@@ -833,6 +833,66 @@ class TestProcessDetailedQc:
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
 
+    @pytest.mark.parametrize("rerun_fails", [False, True], ids=["rerun-succeeds", "rerun-fails"])
+    def test_a_rerun_deletes_the_files_an_interrupted_run_prefetched(
+        self,
+        s3_buckets,
+        s3_requests,
+        qc_process_config_file_path,
+        process_config_content,
+        tmp_path,
+        working_dir_path,
+        monkeypatch,
+        rerun_fails,
+    ):
+        """The first run guesses "selected", prefetches, and is interrupted before its decision.
+
+        The rerun does not prefetch, so only the files of the first run can be on local storage.
+        The failing rerun fails before its decision.
+        """
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+
+        def interrupt(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        with monkeypatch.context() as patch:
+            patch.setattr(grzctl.processor.SubmissionProcessor, "_determine_qc_flag", interrupt)
+            result = _run_process(qc_process_config_file_path, sid, working_dir_path)
+        assert result.exit_code != 0, "the first run should be interrupted"
+        assert _qc_files(process_config_content, sid) == set(_metadata_file_checksums())
+        if rerun_fails:
+            s3_requests.failing_head_bucket = s3_buckets["interrogation"].name
+
+        result = _run_process(_config_without_detailed_qc(tmp_path, process_config_content), sid, working_dir_path)
+
+        assert (result.exit_code != 0) == rerun_fails, result.output
+        assert _qc_files(process_config_content, sid) == set()
+
+    def test_a_rerun_without_detailed_qc_keeps_the_files_of_a_selected_submission(
+        self, s3_buckets, s3_requests, qc_process_config_file_path, process_config_content, tmp_path, working_dir_path
+    ):
+        """The first run selects the submission and fails while copying to the archive; the rerun makes no decision."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        result = _run_process_with_unavailable_bucket(
+            s3_requests, s3_buckets["consented"], qc_process_config_file_path, sid, working_dir_path
+        )
+        assert result.exit_code != 0, "the first run should fail while copying to the archive"
+
+        result = _run_process(_config_without_detailed_qc(tmp_path, process_config_content), sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert _qc_files(process_config_content, sid) == set(_metadata_file_checksums())
+
+
+def _config_without_detailed_qc(tmp_path: Path, process_config_content: dict) -> Path:
+    """Write a process config with detailed QC switched off, as an operator might between two runs."""
+    process_config_content["detailed_qc"]["target_percentage"] = "0.0"
+    config_file = tmp_path / "config.process.no-qc.yaml"
+    config_file.write_text(yaml.dump(process_config_content))
+    return config_file
+
 
 class TestProcessDuplicateInitial:
     """An initial submission fails basic QC when its case already has a QC-passed initial submission."""

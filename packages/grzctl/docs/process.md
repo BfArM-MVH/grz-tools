@@ -137,7 +137,8 @@ So decisions are serialized, also across processes.
   If `detailed_qc.auto_run` is true, `detailed_qc.shell_command` runs in step 10, after the archive copy and the Prüfbericht.
   A command that exits non-zero fails that step with the failure reason `detailed_qc_error`, and keeps the inbox.
   A rerun then runs it again, until `QCED` is recorded.
-- **Not selected**: the prefetched local copies are deleted.
+- **Not selected**: the prefetched local copies are deleted, also those that an interrupted earlier run prefetched.
+  The copies of a submission that the database records as selected are kept, also if `target_percentage` is `0` by now.
 - If a later step fails after a positive decision, the local QC data is kept; a rerun does not write it again.
   A rerun that fails before its decision keeps it too, since the database still records the earlier selection.
 
@@ -182,7 +183,7 @@ The lock is database-wide, not per submitter, because a decision itself takes on
 
 If any file fails in the main pass (step 3), the pipeline:
 
-1. deletes the prefetched local copies, if a prediction had written them and the database does not record the submission as selected for detailed QC,
+1. deletes the prefetched local copies of this run or of an interrupted earlier run, unless the database records the submission as selected for detailed QC,
 2. deletes the staged objects from the interrogation bucket, unless `archives.interrogation.keep_failed` is `true`,
 3. fails the run; the DB state becomes `ERROR`.
 

@@ -640,10 +640,18 @@ class SubmissionProcessor:
         return submission is not None and submission.selected_for_qc is True
 
     def _discard_qc_prefetch(self, run_state: SubmissionRunState) -> None:
-        """Delete the decrypted files that the main pass wrote to local storage."""
+        """Delete the decrypted files that the main pass of this run or of an earlier one wrote to local storage.
+
+        An interrupted run keeps them, and the prediction of its rerun can differ.
+        """
+        paths = [
+            _qc_file_path(self.config.detailed_qc.local_storage, run_state.submission_id, file_meta)
+            for file_meta in run_state.submission_metadata.files.values()
+        ]
+        if not any(path.exists() for path in paths):
+            return
         log.info(f"Deleting the files prefetched for detailed QC of {run_state.submission_id}...")
-        for file_meta in run_state.submission_metadata.files.values():
-            path = _qc_file_path(self.config.detailed_qc.local_storage, run_state.submission_id, file_meta)
+        for path in paths:
             try:
                 path.unlink(missing_ok=True)
             except OSError as e:
@@ -810,7 +818,7 @@ class SubmissionProcessor:
         4. Mark basic QC as passed in the database.
         5. Determine detailed QC eligibility and update the database accordingly.
         6. If detailed QC is needed, fetch the files that step 3 did not write to local storage.
-           If it is not needed, delete the files that step 3 wrote.
+           If it is not needed, delete the files that step 3 of this run or an earlier one wrote.
         7. Stage redacted metadata.
         8. Copy files from interrogation bucket to target archive bucket, then clean up.
 
@@ -860,7 +868,8 @@ class SubmissionProcessor:
 
             # determine whether to perform detailed QC (now that basic QC is marked as passed).
             selected_for_qc = self._determine_qc_flag(db, submission_run.submission_id)
-            if not selected_for_qc and prefetch:
+            # without a decision, as with target_percentage 0, an earlier selection still keeps the files
+            if not selected_for_qc and not self._is_selected_for_qc(db, submission_run.submission_id):
                 self._discard_qc_prefetch(submission_run)
 
             if selected_for_qc:
@@ -894,7 +903,7 @@ class SubmissionProcessor:
             self._handle_interrogation_failure(submission_run)
             # Decrypted files stay only for a submission that is selected for detailed QC,
             # also when an earlier run selected it and this rerun failed before its decision.
-            if prefetch and not self._is_selected_for_qc(db, submission_run.submission_id):
+            if not self._is_selected_for_qc(db, submission_run.submission_id):
                 self._discard_qc_prefetch(submission_run)
             raise
 
