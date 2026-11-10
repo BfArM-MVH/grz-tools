@@ -36,10 +36,15 @@ $ grzctl --config $CONFIG_PATH process \
 
 ```text
 1. download metadata.json from inbox
-   add + populate submission's DB row, and record its inbox;
+   add submission's DB row, and record its inbox;
+   PROCESSED recorded by an earlier run?
+   state = PROCESSED; go on with step 9 (see Recovery and reruns)
+   populate submission's DB row;
    a case link set by `db case relink` is kept;
    tanG already held by another submission?
    state = ERROR (duplicate_tang); STOP
+   target archive already holds the submission?
+   state = PROCESSED; go on with step 9 (see Recovery and reruns)
    case already has a QC-passed initial submission?
    basic_qc_passed = false, state = ERROR (duplicate_initial); STOP
    metadata fails the metadata checks of `grzctl validate`?
@@ -220,12 +225,16 @@ SIGTERM starts at the second level, because a supervisor follows it with SIGKILL
 Either way, the run records `interrupted`.
 It leaves the staged and local copies of the finished files in place, so the rerun reuses them.
 
-If the target archive already holds the submission, a rerun streams and copies nothing.
+A rerun of an archived submission streams and copies nothing, and does not check its metadata again.
 This is the case after a failed Prüfbericht, for example.
-The run checks the target archive for the submission's `metadata.json`, which step 8 copies last.
+An upgrade or a lapsed consent can fail the metadata checks by now, but that cannot undo the archival.
+If the database records `PROCESSED`, the rerun neither parses the metadata nor checks the target archive.
+It records `PROCESSED` again, and step 9 reads the database record that the earlier run populated.
+Otherwise the run checks the target archive for the submission's `metadata.json`, which step 8 copies last.
 If it is there, the run deletes the staged copies that an interrupted run left behind, logs a warning and records `PROCESSED`.
+Finding the target archive takes the parsed metadata, so this rerun still fails for metadata that no longer parses.
 Write-only archive credentials cannot read the `metadata.json`.
-The run then counts the submission as archived if the database records `PROCESSED` or `ARCHIVED` for it.
+The run then counts the submission as archived if the database records `ARCHIVED` for it.
 If the database already records `REPORTED`, step 9 does not submit the Prüfbericht again, but still generates and saves it.
 If it records `QCED`, step 10 does not run the detailed QC workflow again.
 

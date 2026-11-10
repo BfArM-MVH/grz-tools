@@ -25,6 +25,7 @@ import botocore.exceptions
 import click.testing
 import crypt4gh.keys
 import crypt4gh.lib
+import grz_common.workers.submission
 import grz_db.models.author
 import grzctl.cli
 import grzctl.commands.process
@@ -201,6 +202,11 @@ def _run_process_with_unavailable_bucket(s3_requests, bucket, *args, **kwargs):
         return _run_process(*args, **kwargs)
     finally:
         s3_requests.unavailable_bucket = None
+
+
+def _interrupt(*args, **kwargs):
+    """Stand in for a method that Ctrl-C interrupts."""
+    raise KeyboardInterrupt
 
 
 def _latest_state(process_config_content: dict, submission_id: str) -> SubmissionStateLog:
@@ -852,12 +858,8 @@ class TestProcessDetailedQc:
         """
         sid = self.SUBMISSION_ID
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
-
-        def interrupt(*args, **kwargs):
-            raise KeyboardInterrupt
-
         with monkeypatch.context() as patch:
-            patch.setattr(grzctl.processor.SubmissionProcessor, "_determine_qc_flag", interrupt)
+            patch.setattr(grzctl.processor.SubmissionProcessor, "_determine_qc_flag", _interrupt)
             result = _run_process(qc_process_config_file_path, sid, working_dir_path)
         assert result.exit_code != 0, "the first run should be interrupted"
         assert _qc_files(process_config_content, sid) == set(_metadata_file_checksums())
@@ -1047,6 +1049,17 @@ class TestProcessDuplicateTanG:
         assert state.state == SubmissionStateEnum.ERROR
         assert state.failure_reason == FailureReasonEnum.DUPLICATE_TANG
         assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], duplicate_id) == Counter()
+
+
+def _archive_and_interrupt(monkeypatch, config_file_path: Path, submission_id: str, output_dir: Path) -> None:
+    """Run ``grzctl process`` and interrupt it once the archive holds the submission, before ``PROCESSED``.
+
+    The interrupt comes while the run deletes the staged copies, so it leaves them all behind.
+    """
+    with monkeypatch.context() as patch:
+        patch.setattr(grzctl.processor.SubmissionProcessor, "_delete_staged_copies", _interrupt)
+        result = _run_process(config_file_path, submission_id, output_dir)
+    assert result.exit_code != 0, "the run should be interrupted"
 
 
 @pytest.fixture
@@ -1248,7 +1261,7 @@ class TestProcessRerun:
         assert result.exit_code != 0, "the first run should fail on the Prüfbericht"
         s3_requests.requests.clear()
 
-        with caplog.at_level(logging.WARNING, logger="grzctl.processor"):
+        with caplog.at_level(logging.WARNING, logger="grzctl.commands.process"):
             result = _run_process(temp_process_config_file_path, sid, working_dir_path)
 
         assert result.exit_code == 0, f"Rerun failed: {result.output}"
@@ -1260,27 +1273,56 @@ class TestProcessRerun:
             if operation in S3_WRITE_OPERATIONS and bucket in archive_buckets
         ]
         assert archive_writes == []
-        assert f"Submission '{sid}' is already archived" in caplog.text
+        assert f"Submission '{sid}' is already processed" in caplog.text
 
     def test_a_rerun_of_an_archived_submission_deletes_staged_copies_left_behind(
-        self, s3_buckets, temp_process_config_file_path, working_dir_path
+        self, s3_buckets, monkeypatch, temp_process_config_file_path, process_config_content, working_dir_path
     ):
-        """A run interrupted while it deleted the staged copies leaves some behind, though the archive is complete."""
+        """A run interrupted while it deleted the staged copies leaves them behind, though the archive is complete."""
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
-        assert result.exit_code == 0, f"Process failed: {result.output}"
-        left_behind = next(
-            o.key
-            for name in ("consented", "non_consented")
-            for o in s3_buckets[name].objects.filter(Prefix=f"{sid}/files/")
-        )
-        s3_buckets["interrogation"].put_object(Key=left_behind, Body=b"staged copy")
+        _archive_and_interrupt(monkeypatch, temp_process_config_file_path, sid, working_dir_path)
+        assert list(s3_buckets["interrogation"].objects.all()), "the first run should leave the staged copies behind"
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
 
         assert result.exit_code == 0, f"Rerun failed: {result.output}"
         assert not list(s3_buckets["interrogation"].objects.all())
+        assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.PROCESSED
+
+    @pytest.mark.parametrize("processed", [True, False], ids=["processed-recorded", "processed-not-recorded"])
+    def test_a_rerun_of_an_archived_submission_does_not_check_its_metadata_again(
+        self,
+        s3_buckets,
+        s3_requests,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        processed,
+    ):
+        """An upgrade no longer accepts the schema version of the archived submission, and the rerun still succeeds.
+
+        Without a recorded ``PROCESSED``, the rerun finds the submission in the archive.
+        """
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        if processed:
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+            assert result.exit_code == 0, f"Process failed: {result.output}"
+        else:
+            _archive_and_interrupt(monkeypatch, temp_process_config_file_path, sid, working_dir_path)
+        monkeypatch.setattr(grz_common.workers.submission, "get_accepted_versions", lambda: [])
+        s3_requests.requests.clear()
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert _states(process_config_content, sid)[-2:] == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+        ]
+        assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid) == Counter()
 
     def test_a_rerun_that_fails_before_its_qc_decision_keeps_the_qc_files(
         self, s3_buckets, s3_requests, rerun_config_file_path, process_config_content, working_dir_path
@@ -2045,23 +2087,27 @@ class TestProcessArchiveCommit:
         assert metadata_key in {o.key for o in s3_buckets["consented"].objects.all()}
         assert f"Cannot check whether submission '{sid}' is already archived" in caplog.text
 
-    def test_a_denied_check_after_a_processed_run_streams_nothing(
+    def test_a_denied_check_after_an_archival_streams_nothing(
         self, s3_buckets, s3_requests, monkeypatch, caplog, temp_process_config_file_path, working_dir_path
     ):
-        """Write-only archive credentials cannot see the archived metadata, but the database records PROCESSED."""
+        """Write-only archive credentials cannot see the archived metadata, but the database records ARCHIVED.
+
+        ``grzctl archive`` records it. A recorded PROCESSED would skip the check of the archive.
+        """
         sid = self.SUBMISSION_ID
         upload_submission_to_inbox(s3_buckets["inbox"], sid)
-        result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
-        assert result.exit_code == 0, f"Process failed: {result.output}"
-        s3_requests.requests.clear()
+        db_args = ["--config", str(temp_process_config_file_path), "db", "submission"]
+        for args in (["add", sid], ["update", sid, SubmissionStateEnum.ARCHIVED.value]):
+            result = click.testing.CliRunner().invoke(grzctl.cli.build_cli(), [*db_args, *args])
+            assert result.exit_code == 0, result.output
         _deny_reading(monkeypatch, s3_buckets["consented"].name)
 
         with caplog.at_level(logging.WARNING, logger="grzctl.processor"):
             result = _run_process(temp_process_config_file_path, sid, working_dir_path, "--no-clean-inbox")
 
-        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert result.exit_code == 0, f"Process failed: {result.output}"
         assert s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], sid) == Counter()
-        assert f"the database records submission '{sid}' as Processed" in caplog.text
+        assert f"the database records submission '{sid}' as Archived" in caplog.text
 
 
 class _Panic(BaseException):

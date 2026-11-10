@@ -20,9 +20,11 @@ from grz_common.exceptions import (
     DownloadError,
     MissingObjectError,
     MissingSubmissionFileError,
+    SubmissionValidationError,
     UploadError,
 )
 from grz_common.interrupt import wait_for_files
+from grz_common.models.identifiers import IdentifiersModel
 from grz_common.pipeline.components import (
     DataValidationError,
     DevNullSink,
@@ -52,6 +54,7 @@ from grz_pydantic_models.submission.metadata import File, FileType
 from grz_pydantic_models.submission.thresholds import Thresholds
 from tqdm.auto import tqdm
 
+from .commands.validate import _check_duplicate_initial
 from .dbcontext import FilesFailedError, has_state
 from .models.config import GrzctlConfig, InboxTarget
 
@@ -805,13 +808,38 @@ class SubmissionProcessor:
         error = FilesFailedError(message, file_errors)
         raise error from error.decisive.error
 
-    def run(self, submission_metadata: SubmissionMetadata) -> None:
+    @staticmethod
+    def _check_metadata(
+        db: SubmissionDb, submission_metadata: SubmissionMetadata, identifiers: IdentifiersModel
+    ) -> None:
+        """Run the checks of ``grzctl validate`` that the metadata alone decides.
+
+        :param db: The submission database.
+        :param submission_metadata: The parsed metadata of the submission.
+        :param identifiers: The GRZ and LE identifiers that the metadata must name.
+        :raises DuplicateInitialSubmissionError: If the case already has an initial submission that passed basic QC.
+            The submission then fails basic QC.
+        :raises SubmissionValidationError: If the metadata fails a check.
+        """
+        try:
+            _check_duplicate_initial(db, submission_metadata.content)
+        except DuplicateInitialSubmissionError as e:
+            # fail basic QC before any file is streamed, as ``grzctl validate`` does
+            submission_id = submission_metadata.content.submission_id
+            log.warning(f"{e} Failing basic QC for submission '{submission_id}' without processing.")
+            db.modify_submission(submission_id, "basic_qc_passed", False)
+            raise
+        if errors := list(submission_metadata.validate(identifiers)):
+            raise SubmissionValidationError("\n".join(["Metadata validation failed! Errors:", *errors]))
+
+    def run(self, submission_metadata: SubmissionMetadata, identifiers: IdentifiersModel) -> None:
         """
         Execute the processing pipeline for a single submission.
 
         High-level view:
         1. Determine the target archive from the consent status at the submission date.
            If it already holds the submission's metadata, stop.
+           Otherwise check the metadata as ``grzctl validate`` does.
         2. Guess whether the submission will be selected for detailed QC.
         3. Spawn threads to process files (Download -> Decrypt -> Validate -> Encrypt -> Archive).
            If the guess is yes, also write the decrypted data to local QC storage.
@@ -833,6 +861,9 @@ class SubmissionProcessor:
         recommended to automatically clean up orphaned files from incomplete transfers.
 
         :param submission_metadata: The parsed metadata object containing donor and file information.
+        :param identifiers: The GRZ and LE identifiers that the metadata must name.
+        :raises DuplicateInitialSubmissionError: If the case already has an initial submission that passed basic QC.
+        :raises SubmissionValidationError: If the metadata fails a check of ``grzctl validate``.
         :raises FilesFailedError: If processing a file fails, in the main pass or in the detailed QC pass.
             Its ``__cause__`` is the decisive file error.
         """
@@ -842,6 +873,9 @@ class SubmissionProcessor:
             # a run interrupted while it deleted the staged copies leaves the rest of them behind
             self._delete_staged_copies(submission_run, self._get_expected_keys(submission_run))
             return
+        # An archived submission skips the checks: they can fail by now, after an upgrade or once a
+        # consent has lapsed, but they cannot undo the archival.
+        self._check_metadata(db, submission_metadata, identifiers)
         prefetch = self._predict_qc(db, submission_run.submission_id)
         if prefetch:
             log.info(

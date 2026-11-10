@@ -54,7 +54,6 @@ import grz_common.exceptions as grzexc
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
-from grz_db.errors import DuplicateInitialSubmissionError
 from grz_db.models.submission import CASE_LINK_KEY, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
@@ -69,7 +68,6 @@ from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
 from .pruefbericht import _generate_pruefbericht_from_database
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
-from .validate import _check_duplicate_initial
 
 log = logging.getLogger(__name__)
 
@@ -169,7 +167,6 @@ def process(  # noqa: PLR0913, PLR0917
         # A rerun and the other commands then find the submission without being told the inbox again.
         log.info(f"Recording inbox {resolved_inbox} for submission {submission_id}...")
         dbcontext_inst.db.set_submission_inbox(submission_id, resolved_inbox)
-        submission_metadata = SubmissionMetadata(metadata_dir / "metadata.json")
         processor = SubmissionProcessor(
             configuration=configuration,
             inbox=inbox,
@@ -177,39 +174,39 @@ def process(  # noqa: PLR0913, PLR0917
             threads=threads,
             max_concurrent_uploads=concurrent_uploads,
         )
-        # Populate the DB record with parsed metadata (donors, files, dates, etc.)
-        # so that downstream Prüfbericht generation can read the required fields.
-        # A rejected write, such as a duplicate tanG, then records the ERROR state.
-        submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
-        # A case link set by hand, with ``db case relink``, outlives a rerun. Resolving the case from
-        # the metadata key again would undo that repair, and populate refuses to without --force.
         stored = dbcontext_inst.db.get_submission(submission_id)
-        stored_case_id = stored.case_id if stored else None
-        if stored_case_id is not None:
+        if has_state(stored, SubmissionStateEnum.PROCESSED):
+            # The steps below need only the record that the earlier run populated. Parsing and checking
+            # the metadata again can fail by now, after an upgrade or once a consent has lapsed, but that
+            # cannot undo the archival.
             log.warning(
-                f"Submission '{submission_id}' keeps its case link (case {stored_case_id}); "
-                "its metadata is not resolved to a case again."
+                f"Submission '{submission_id}' is already processed, so its metadata is not checked again "
+                "and nothing is streamed or copied again."
             )
-        dbcontext_inst.db.populate(
-            submission_id,
-            submission_metadata.content,
-            submission_date,
-            force=False,
-            on_missing="create",
-            ignore_fields={CASE_LINK_KEY} if stored_case_id is not None else None,
-        )
-        try:
-            _check_duplicate_initial(dbcontext_inst.db, submission_metadata.content)
-        except DuplicateInitialSubmissionError as e:
-            # fail basic QC before any file is streamed, as ``grzctl validate`` does
-            log.warning(f"{e} Failing basic QC for submission '{submission_id}' without processing.")
-            dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", False)
-            raise
-        # the checks of ``grzctl validate`` that the metadata alone decides
-        identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
-        if errors := list(submission_metadata.validate(identifiers)):
-            raise grzexc.SubmissionValidationError("\n".join(["Metadata validation failed! Errors:", *errors]))
-        processor.run(submission_metadata)
+        else:
+            submission_metadata = SubmissionMetadata(metadata_dir / "metadata.json")
+            # Populate the DB record with parsed metadata (donors, files, dates, etc.)
+            # so that downstream Prüfbericht generation can read the required fields.
+            # A rejected write, such as a duplicate tanG, then records the ERROR state.
+            submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
+            # A case link set by hand, with ``db case relink``, outlives a rerun. Resolving the case from
+            # the metadata key again would undo that repair, and populate refuses to without --force.
+            stored_case_id = stored.case_id if stored else None
+            if stored_case_id is not None:
+                log.warning(
+                    f"Submission '{submission_id}' keeps its case link (case {stored_case_id}); "
+                    "its metadata is not resolved to a case again."
+                )
+            dbcontext_inst.db.populate(
+                submission_id,
+                submission_metadata.content,
+                submission_date,
+                force=False,
+                on_missing="create",
+                ignore_fields={CASE_LINK_KEY} if stored_case_id is not None else None,
+            )
+            identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
+            processor.run(submission_metadata, identifiers)
 
     _handle_pruefbericht(
         configuration=configuration,
