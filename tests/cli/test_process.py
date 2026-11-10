@@ -34,6 +34,7 @@ import pytest
 import requests
 import responses
 import yaml
+from grz_common.models.version import VERSION_FILE_KEY, VersionFile
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from grzctl.commands import inbox_resolution
@@ -142,12 +143,18 @@ def s3_buckets(aws_credentials):
     conn.create_bucket(Bucket="interrogation-archive")
 
     s3 = boto3.resource("s3")
+    _push_version_file(s3.Bucket("inbox"))
     return {
         "inbox": s3.Bucket("inbox"),
         "consented": s3.Bucket("consented-archive"),
         "non_consented": s3.Bucket("non-consented-archive"),
         "interrogation": s3.Bucket("interrogation-archive"),
     }
+
+
+def _push_version_file(inbox_bucket) -> None:
+    """Put the ``version.json`` that ``grzctl inbox push-version`` publishes into the inbox, as process needs it."""
+    inbox_bucket.put_object(Key=VERSION_FILE_KEY, Body=VersionFile.read_bundled_text().encode())
 
 
 def upload_submission_to_inbox(inbox_bucket, submission_id: str):
@@ -338,6 +345,7 @@ class TestGrzctlProcess:
 
         s3_resource = boto3.resource("s3")
         inbox_b = s3_resource.Bucket("inbox-b")
+        _push_version_file(inbox_b)
 
         submission_id = "260914050_2024-07-15_c64603a7"
         le_id = "260914050"
@@ -455,6 +463,44 @@ class TestProcessValidationFailure:
         assert state.state == SubmissionStateEnum.ERROR
         assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
         assert "does not match genomic data center identifier in config" in (state.data or {}).get("error", "")
+        assert not s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], submission_id)
+
+    @pytest.mark.parametrize(
+        "version_file",
+        [{"metadata_version": [{"minimal_version": "99.0.0", "enforced_from": "2020-01-01T00:00:00"}]}, None],
+        ids=["schema-version-below-the-policy", "no-version-file"],
+    )
+    def test_the_inbox_version_policy_fails_process_as_it_fails_download(
+        self,
+        s3_buckets,
+        s3_requests,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+        tmp_path,
+        version_file,
+    ):
+        """``grzctl process`` checks the metadata version against the ``version.json`` of the inbox, as ``download`` does."""
+        submission_id = "260914050_2024-07-15_c64603a7"
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+        if version_file is None:
+            s3_buckets["inbox"].Object(VERSION_FILE_KEY).delete()
+        else:
+            s3_buckets["inbox"].put_object(Key=VERSION_FILE_KEY, Body=json.dumps(version_file).encode())
+
+        processed = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+        process_state = _latest_state(process_config_content, submission_id)
+        # download needs the submission in the database, where process has added it
+        download_args = ["--submission-id", submission_id, "--output-dir", str(tmp_path / "download")]
+        downloaded = click.testing.CliRunner().invoke(
+            grzctl.cli.build_cli(), ["--config", str(temp_process_config_file_path), "download", *download_args]
+        )
+        download_state = _latest_state(process_config_content, submission_id)
+
+        assert processed.exit_code == downloaded.exit_code != 0
+        assert process_state.state == download_state.state == SubmissionStateEnum.ERROR
+        assert process_state.failure_reason == download_state.failure_reason
+        assert process_state.data == download_state.data
         assert not s3_requests.per_file({"GetObject"}, s3_buckets["inbox"], submission_id)
 
     @pytest.mark.parametrize(

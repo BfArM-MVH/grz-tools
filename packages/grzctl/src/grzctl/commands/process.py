@@ -54,6 +54,7 @@ import click
 import grz_common.cli as grzcli
 import grz_common.exceptions as grzexc
 from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.models.submission import CASE_LINK_KEY, Submission, SubmissionDb, SubmissionStateEnum
@@ -188,6 +189,7 @@ def process(  # noqa: PLR0913, PLR0917
             )
         else:
             submission_metadata = SubmissionMetadata(metadata_dir / "metadata.json")
+            check_metadata_version_and_exit_if_needed(inbox.s3, submission_metadata.content.get_schema_version())
             # Populate the DB record with parsed metadata (donors, files, dates, etc.)
             # so that downstream Prüfbericht generation can read the required fields.
             # A rejected write, such as a duplicate tanG, then records the ERROR state.

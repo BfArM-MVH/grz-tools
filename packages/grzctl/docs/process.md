@@ -23,6 +23,7 @@ The _interrogation bucket_ is a staging area: each file is uploaded there first,
 If processing fails, the staged files are either cleaned up or kept, depending on `archives.interrogation.keep_failed`.
 
 The [README](../README.md#s3-permissions) lists the S3 permissions that `process` needs.
+The inbox needs the `version.json` that `grzctl inbox push-version` writes, as for `grzctl download`, and its metadata version policy applies.
 
 A basic invocation:
 
