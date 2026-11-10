@@ -1,3 +1,4 @@
+import errno
 import json
 import logging
 
@@ -127,3 +128,26 @@ def test_an_interrupted_validation_stops_as_an_interruption(
 
     assert result.exit_code == 1
     assert "Aborted!" in result.output, "click reports an interruption as aborted"
+
+
+def test_validate_lets_an_error_the_files_did_not_cause_through(
+    temp_identifiers_config_file_path, working_dir_path, monkeypatch
+):
+    """A full disk is no fault of the submitter, so validation does not turn it into a validation error."""
+    copy_submission(working_dir_path, "files", "metadata")
+
+    def fail(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Submission, "validate_files", fail)
+    testargs = [
+        "validate",
+        "--config-file",
+        temp_identifiers_config_file_path,
+        "--submission-dir",
+        str(working_dir_path),
+    ]
+
+    result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs)
+
+    assert isinstance(result.exception, OSError), result.output

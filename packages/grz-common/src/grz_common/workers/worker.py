@@ -119,29 +119,23 @@ class Worker:
             self.progress_file_checksum_validation.unlink(missing_ok=True)
             self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
 
-        try:
-            self.__log.info("Starting file validation with `grz-check`...")
-            errors = list(
-                submission.validate_files(
-                    checksum_progress_file=self.progress_file_checksum_validation,
-                    seq_data_progress_file=self.progress_file_sequencing_data_validation,
-                    threads=self._threads,
-                    no_mmap=no_mmap,
-                )
+        self.__log.info("Starting file validation with `grz-check`...")
+        # grz-check reports a broken file as a failed validation. Any other error, such as a full
+        # disk, is no fault of the submitter, so it passes unwrapped and records ``unknown``.
+        errors = list(
+            submission.validate_files(
+                checksum_progress_file=self.progress_file_checksum_validation,
+                seq_data_progress_file=self.progress_file_sequencing_data_validation,
+                threads=self._threads,
+                no_mmap=no_mmap,
             )
-            if errors:
-                error_msg = "\n".join(["File validation failed! Errors:", *errors])
-                self.__log.error(error_msg)
-                raise grzexc.SubmissionValidationError(error_msg)
-            else:
-                self.__log.info("File validation successful!")
-        except grzexc.GrzError:
-            # already logged and typed above, so wrapping it again would log and double-report it
-            raise
-        except Exception as e:
-            error_msg = f"Validation failed due to an error: {e}"
+        )
+        if errors:
+            error_msg = "\n".join(["File validation failed! Errors:", *errors])
             self.__log.error(error_msg)
-            raise grzexc.SubmissionValidationError(error_msg) from e
+            raise grzexc.SubmissionValidationError(error_msg)
+        else:
+            self.__log.info("File validation successful!")
 
     def encrypt(
         self,
