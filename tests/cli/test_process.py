@@ -951,16 +951,21 @@ class TestProcessDetailedQc:
         assert (result.exit_code != 0) == rerun_fails, result.output
         assert _qc_files(process_config_content, sid) == set()
 
-    def test_a_rerun_without_detailed_qc_keeps_the_files_of_a_selected_submission(
+    def test_a_rerun_without_detailed_qc_completes_the_files_of_a_selected_submission(
         self, s3_buckets, s3_requests, qc_process_config_file_path, process_config_content, tmp_path, working_dir_path
     ):
-        """The first run selects the submission and fails while copying to the archive; the rerun makes no decision."""
+        """The first run selects the submission and fails while copying to the archive.
+
+        The selection stands at a target of 0, so the rerun keeps the QC files and writes a missing one again.
+        """
         sid = self.SUBMISSION_ID
         _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
         result = _run_process_with_unavailable_bucket(
             s3_requests, s3_buckets["consented"], qc_process_config_file_path, sid, working_dir_path
         )
         assert result.exit_code != 0, "the first run should fail while copying to the archive"
+        files_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / sid / "files"
+        (files_dir / next(iter(_metadata_file_checksums()))).unlink()
 
         result = _run_process(_config_without_detailed_qc(tmp_path, process_config_content), sid, working_dir_path)
 

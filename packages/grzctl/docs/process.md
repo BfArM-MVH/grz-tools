@@ -52,7 +52,7 @@ $ grzctl --config $CONFIG_PATH process \
    state = ERROR (validation_error); STOP
                      │
                      ▼
-2. predict detailed QC (detailed_qc.target_percentage > 0 only)
+2. predict detailed QC
    db.should_qc(predict=True): skips the basic-QC check, stores nothing,
    returns an already-stored decision if there is one
                      │
@@ -76,7 +76,6 @@ $ grzctl --config $CONFIG_PATH process \
                      │                                   interrogation bucket (unless
                      ▼                                   keep_failed); state = ERROR
 6. decide detailed QC                                    STOP
-   (target_percentage > 0 only)
    db.should_qc(): reads submitter's QC queue and
    stores selected_for_qc, one decision at a time
    (database-wide lock)
@@ -117,8 +116,6 @@ So does `--no-submit-pruefbericht`, unless an earlier run recorded `REPORTED`; `
 
 ## Detailed QC: prediction and decision
 
-Detailed QC only runs when `detailed_qc.target_percentage` is greater than `0`.
-
 **Prediction (step 2)** happens before the main pass, so the pipeline can decide whether to prefetch a decrypted copy of each file while it is already streaming through decrypt anyway.
 It calls `db.should_qc(predict=True)`, which:
 
@@ -149,6 +146,7 @@ So decisions are serialized, also across processes.
   A rerun that fails before its decision keeps it too, since the database still records the earlier selection.
 
 Without `grzctl process`, `grzctl db should-qc <submission ID>` makes and stores the same decision, with the same `detailed_qc` settings.
+A `target_percentage` of `0` disables the selection: `process` and `db should-qc` select nothing and store nothing; a selection made earlier stands.
 Run the QC workflow on the decrypted files of a selected submission, and record it with `grzctl db submission update <submission ID> qcing`, then `qced`, or `error --failure-reason detailed_qc_error`.
 
 ## Parallel instances
@@ -292,7 +290,7 @@ A future `--max-memory` option should derive `--threads` and the part size from 
 | -------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------- |
 | `detailed_qc.local_storage`                                                                  | required, no default                  | Base path for prefetched files and, if selected, the QC pass: `<local_storage>/<submission_id>/files/...` and `/metadata/metadata.json`. |
 | `detailed_qc.salt`                                                                           | required, no default                  | Salt for the deterministic random-selection part of `db.should_qc()`. |
-| `detailed_qc.target_percentage`                                                              | `2.0`                                 | Target percentage of a submitter's submissions selected for detailed QC. `0` disables prediction and decision entirely. |
+| `detailed_qc.target_percentage`                                                              | `2.0`                                 | Target percentage of a submitter's submissions selected for detailed QC. `0` disables the selection: `process` and `db should-qc` select nothing and store nothing; a selection made earlier stands. |
 | `detailed_qc.auto_run`                                                                       | `false`                               | If `true`, runs `detailed_qc.shell_command` for a selected submission after its archive copy and Prüfbericht (step 10). |
 | `detailed_qc.shell_command`                                                                  | a `nextflow run main.nf ...` template | Shell command run when `auto_run` is `true`; templated with `{submission_basepath}`, `{output_basepath}`, `{submission_id}`. |
 | `archives.interrogation`                                                                     | required, no default                  | S3 connection and bucket of the staging area. Every grzctl command loads the whole config, so a config without this section fails for every command, not only for `process`. |

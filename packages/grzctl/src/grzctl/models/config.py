@@ -292,7 +292,11 @@ class DetailedQcModel(IgnoringBaseSettings):
     """Salt to use for deterministic determination of submissions selected for detailed QC."""
 
     target_percentage: Annotated[float, Field(ge=0.0, le=100.0)] = 2.0
-    """Target percentage of submissions selected for detailed QC per month."""
+    """Target percentage of submissions selected for detailed QC per month.
+
+    ``0`` disables the selection: ``process`` and ``db should-qc`` select nothing and store nothing;
+    a selection made earlier stands.
+    """
 
     shell_command: Annotated[str, Field(min_length=1)] = (
         "nextflow run main.nf -profile docker "

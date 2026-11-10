@@ -743,7 +743,10 @@ def tui(ctx: click.Context, quarter: int | None, year: int | None):
     "target_percentage",
     type=click.FloatRange(0.0, 100.0),
     metavar="FLOAT",
-    help="Minimum proportion of submissions that should be QCed [default: detailed_qc.target_percentage of the config].",
+    help=(
+        "Minimum proportion of submissions that should be QCed. 0 selects nothing and stores nothing, "
+        "but a selection made earlier stands [default: detailed_qc.target_percentage of the config]."
+    ),
 )
 @click.option(
     "--salt",

@@ -605,13 +605,8 @@ class SubmissionProcessor:
 
         return run_state
 
-    def _qc_selection_enabled(self) -> bool:
-        return self.config.detailed_qc.target_percentage > 0.0
-
     def _predict_qc(self, db: SubmissionDb, submission_id: str) -> bool:
         """Guess the detailed QC decision before basic QC has passed."""
-        if not self._qc_selection_enabled():
-            return False
         detailed_qc = self.config.detailed_qc
         try:
             return db.should_qc(submission_id, detailed_qc.target_percentage, detailed_qc.salt, predict=True)
@@ -621,9 +616,7 @@ class SubmissionProcessor:
 
     def _determine_qc_flag(self, db: SubmissionDb, submission_id: str) -> bool:
         detailed_qc = self.config.detailed_qc
-        should_qc = self._qc_selection_enabled() and db.should_qc(
-            submission_id, detailed_qc.target_percentage, detailed_qc.salt
-        )
+        should_qc = db.should_qc(submission_id, detailed_qc.target_percentage, detailed_qc.salt)
         if should_qc:
             log.info(f"Submission {submission_id} selected for detailed QC.")
 
@@ -905,8 +898,7 @@ class SubmissionProcessor:
 
             # determine whether to perform detailed QC (now that basic QC is marked as passed).
             selected_for_qc = self._determine_qc_flag(db, submission_run.submission_id)
-            # without a decision, as with target_percentage 0, an earlier selection still keeps the files
-            if not selected_for_qc and not self._is_selected_for_qc(db, submission_run.submission_id):
+            if not selected_for_qc:
                 self._discard_qc_prefetch(submission_run)
 
             if selected_for_qc:
