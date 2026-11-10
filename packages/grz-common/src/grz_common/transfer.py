@@ -276,3 +276,35 @@ def get_upload_timing(s3_client: S3Client, bucket: str, submission_id: str) -> U
         pages = s3_client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
         last_modified = {obj["Key"]: obj["LastModified"] for page in pages for obj in page.get("Contents", [])}
     return upload_timing(submission_id, last_modified)
+
+
+MISSING_GRZ_CLI_VERSION = "VERSION FILE NOT FOUND"
+"""Recorded when the submission holds no grz-cli version object (in a submission that has not undergone 'grzctl clean')"""
+ERROR_GRZ_CLI_VERSION = "VERSION READ FAILED"
+"""Recorded when reading the grz-cli version object fails"""
+
+
+def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> str:
+    """Read and return the version number of grz-cli used to upload a given submission from the version file.
+    Will not run on a cleaned submission (no version file present)
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :returns: The version string, or MISSING_GRZ_CLI_VERSION if the submission has no ``version`` object.
+    :raises SubmissionCleanedError: If 'grzctl clean' has started/finished on the submission.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    key = submission_id + "/version"
+    with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
+        try:
+            with s3_client.get_object(Bucket=bucket, Key=key)["Body"] as body:
+                grz_cli_version = body.read().decode("utf-8").strip()
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "NoSuchKey":
+                raise
+            # Cleaned inbox should lack the version file, so don't call it missing if so
+            raise_if_cleaned(s3_client, bucket, submission_id)
+            grz_cli_version = MISSING_GRZ_CLI_VERSION
+        return grz_cli_version

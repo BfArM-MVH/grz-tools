@@ -36,6 +36,7 @@ def test_inbox_migration_adds_the_inbox_column(db_test_connection: str):
 
     # the ORM refuses a database behind the head, so bring it there for the reads below
     db.upgrade_schema()
+
     submission = db.get_submission(submission_id)
     assert submission is not None
     assert submission.inbox is None
