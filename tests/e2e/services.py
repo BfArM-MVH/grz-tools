@@ -97,7 +97,10 @@ def seaweedfs(work_dir: Path, engine_env: dict[str, str]) -> Iterator[str]:
         _create_buckets(endpoint)
         yield endpoint
     finally:
-        subprocess.run([engine, "rm", "--force", container], env=engine_env, check=False, capture_output=True)
+        # the image declares /data a volume, which rm keeps without --volumes
+        subprocess.run(
+            [engine, "rm", "--force", "--volumes", container], env=engine_env, check=False, capture_output=True
+        )
 
 
 def _create_buckets(endpoint: str, timeout: float = 120) -> None:
