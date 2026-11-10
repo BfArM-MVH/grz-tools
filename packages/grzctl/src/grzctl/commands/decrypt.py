@@ -44,6 +44,12 @@ _ARCHIVES: dict[str, Literal["consented", "non_consented"]] = {
         "Its passphrase comes from C4GH_PASSPHRASE, else a prompt."
     ),
 )
+@click.option(
+    "--check-download-logs/--no-check-download-logs",
+    "check_download_logs",
+    default=True,
+    help="Check the download log before decrypting with the key of the inbox.",
+)
 @grzcli.force
 @grzcli.update_db
 def decrypt(  # noqa: PLR0913, PLR0917
@@ -52,6 +58,7 @@ def decrypt(  # noqa: PLR0913, PLR0917
     inbox_name,
     archive: str | None,
     private_key_path: Path | None,
+    check_download_logs: bool,
     force,
     update_db,
     **kwargs,
@@ -71,6 +78,12 @@ def decrypt(  # noqa: PLR0913, PLR0917
     --archive decrypts it with the private key of that archive, from archives.<archive>.private_key[_path].
     --private-key-path names a private key file, and that key wins over any key from the config.
     With --archive or --private-key-path, grzctl resolves no inbox, so neither goes with --inbox.
+
+    Before it decrypts with the key of the inbox, grzctl checks the download log.
+    The log has to record each encrypted file as downloaded by `grzctl download` and unchanged since.
+    Otherwise decrypt fails with incomplete_submission, so a broken download does not count against the submitter.
+    --no-check-download-logs skips this check for files that `grzctl download` did not fetch.
+    The files of --archive and --private-key-path need not come from `grzctl download`, so grzctl skips the check for them.
 
     --no-update-db keeps the state of the submission unchanged, for example when decrypting an archived submission.
     """
@@ -116,6 +129,10 @@ def decrypt(  # noqa: PLR0913, PLR0917
                 exc_type=ConfigurationError,
             )
             private_key = configuration.inbox_target(submitter_id, inbox_name).load_private_key()
-        worker_inst.decrypt(recipient_private_key=private_key, force=force)
+        worker_inst.decrypt(
+            recipient_private_key=private_key,
+            force=force,
+            check_download_logs=check_download_logs and archive is None and private_key_path is None,
+        )
 
     log.info("Decryption successful!")

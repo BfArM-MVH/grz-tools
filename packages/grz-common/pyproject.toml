@@ -18,6 +18,7 @@ dependencies = [
     # botocore verifies TLS against certifi's CA bundle when it is installed, else its own outdated copy
     "certifi >=2026.10.19",
     # older urllib3 can apply the target's TLS settings to an HTTPS proxy (GHSA-8988-9cw3-xx77)
+    # pipeline/components/s3.py imports urllib3.exceptions, so the dependency stays when that floor goes
     "urllib3 >=2.8.0,<3",
     "click >=8.2,<9",
     "crypt4gh >=1.8.6,<2",
