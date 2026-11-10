@@ -36,7 +36,8 @@ A FULL_OBJECT checksum covers the bytes of the whole object, and exists only for
 
 The ETag comparison does not rely on the server rejecting anything.
 A mismatch raises `UploadIntegrityError`.
-A mismatch in step 3, or in the ETag of the PUT, also deletes the stored object.
+After a mismatch in step 3, or in the ETag of the PUT, the uploader also tries to delete the stored object.
+A failed delete only logs a warning, so with credentials that lack `s3:DeleteObject` the object stays.
 
 ## Memory
 
