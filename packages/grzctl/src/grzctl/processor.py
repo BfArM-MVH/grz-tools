@@ -651,14 +651,17 @@ class SubmissionProcessor:
             _qc_file_path(self.config.detailed_qc.local_storage, run_state.submission_id, file_meta)
             for file_meta in run_state.submission_metadata.files.values()
         ]
-        if not any(path.exists() for path in paths):
-            return
-        log.info(f"Deleting the files prefetched for detailed QC of {run_state.submission_id}...")
+        deleted = 0
         for path in paths:
             try:
-                path.unlink(missing_ok=True)
+                path.unlink()
+                deleted += 1
+            except FileNotFoundError:
+                pass  # nothing to delete
             except OSError as e:
                 log.warning(f"Could not delete prefetched QC file {path}: {e}")
+        if deleted:
+            log.info(f"Deleted {deleted} file(s) prefetched for detailed QC of {run_state.submission_id}.")
 
     def _upload_final_metadata(self, submission_metadata: SubmissionMetadata, run_state: SubmissionRunState) -> None:
         redacted_metadata = submission_metadata.content.to_redacted_dict()

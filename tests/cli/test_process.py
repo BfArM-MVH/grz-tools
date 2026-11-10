@@ -840,6 +840,39 @@ class TestProcessDetailedQc:
         assert result.exit_code == 0, f"Process failed: {result.output}"
         assert _qc_files(process_config_content, self.SUBMISSION_ID) == set()
 
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads directories regardless of their mode")
+    @pytest.mark.parametrize("checksum_mismatch", [False, True], ids=["valid", "checksum-mismatch"])
+    def test_an_unreadable_qc_storage_does_not_change_the_outcome(
+        self, s3_buckets, temp_process_config_file_path, process_config_content, working_dir_path, checksum_mismatch
+    ):
+        """A run without detailed QC writes nothing to QC storage, so it only warns that it cannot delete there."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        if checksum_mismatch:
+            wrong_file = list(_metadata_file_checksums())[-1]
+            metadata = json.loads((VALID_SUBMISSION_DIR / "metadata" / "metadata.json").read_text())
+            for donor in metadata["donors"]:
+                for lab_datum in donor["labData"]:
+                    for file in lab_datum.get("sequenceData", {}).get("files", []):
+                        if file["filePath"] == wrong_file:
+                            file["fileChecksum"] = "0" * 64
+            s3_buckets["inbox"].put_object(Key=f"{sid}/metadata/metadata.json", Body=json.dumps(metadata).encode())
+        qc_dir = Path(process_config_content["detailed_qc"]["local_storage"]) / sid
+        qc_dir.mkdir()
+        qc_dir.chmod(0o000)
+
+        try:
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path)
+        finally:
+            qc_dir.chmod(0o770)
+
+        state = _latest_state(process_config_content, sid)
+        if checksum_mismatch:
+            assert state.failure_reason == FailureReasonEnum.VALIDATION_ERROR
+        else:
+            assert result.exit_code == 0, f"Process failed: {result.output}"
+            assert state.state == SubmissionStateEnum.PROCESSED
+
     @pytest.mark.parametrize("rerun_fails", [False, True], ids=["rerun-succeeds", "rerun-fails"])
     def test_a_rerun_deletes_the_files_an_interrupted_run_prefetched(
         self,
