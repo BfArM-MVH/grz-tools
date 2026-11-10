@@ -192,10 +192,11 @@ class TestQcStrategy:
         assert submission.selected_for_qc is True
 
     def test_should_qc_persists_a_negative_decision(self, db: SubmissionDb):
-        """A zero target leaves no branch that can select, so the stored flag must go to False.
+        """A target that no branch reaches gives a negative decision, so the stored flag must go to False.
 
         The month rule ignores the target and fires whenever nothing has been selected yet, so an
         already-selected submission is needed for the decision to reach the target-driven branches.
+        A tiny target then fails the quarter rule, and its random block is far too large to pick the candidate.
         """
         base_date = datetime.date(2025, 12, 1)
         start_time = datetime.datetime.combine(base_date, datetime.time(9, 0), tzinfo=datetime.UTC)
@@ -216,10 +217,37 @@ class TestQcStrategy:
             base_timestamp=start_time + datetime.timedelta(minutes=10),
         )
 
-        assert db.should_qc(candidate_submission_id, 0.0, "any-salt") is False
+        assert db.should_qc(candidate_submission_id, 0.001, "any-salt") is False
         submission = db.get_submission(candidate_submission_id)
         assert submission is not None
         assert submission.selected_for_qc is False
+
+    def test_a_zero_target_selects_nothing_and_stores_nothing(self, db: SubmissionDb):
+        """A target of 0 disables the selection: the month rule would select, but nothing is selected or stored."""
+        test_date = datetime.date(2025, 12, 1)
+        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
+        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+        _add_submission_with_history(
+            db, submission_id, SUBMITTER_ID, test_date, DEFAULT_HISTORY, base_timestamp=base_timestamp, is_qced=False
+        )
+
+        assert db.should_qc(submission_id, 0.0, "any_salt", predict=True) is False
+        assert db.should_qc(submission_id, 0.0, "any_salt") is False
+        submission = db.get_submission(submission_id)
+        assert submission is not None
+        assert submission.selected_for_qc is None
+
+    def test_a_zero_target_keeps_a_stored_selection(self, db: SubmissionDb):
+        """Disabling the selection does not undo a decision made while it was enabled."""
+        test_date = datetime.date(2025, 12, 1)
+        base_timestamp = datetime.datetime.combine(test_date, datetime.time(10, 0), tzinfo=datetime.UTC)
+        submission_id = f"{SUBMITTER_ID}_{test_date}_00000000"
+        _add_submission_with_history(
+            db, submission_id, SUBMITTER_ID, test_date, DEFAULT_HISTORY, base_timestamp=base_timestamp, is_qced=False
+        )
+        db.modify_submission(submission_id, "selected_for_qc", "true")
+
+        assert db.should_qc(submission_id, 0.0, "any_salt") is True
 
     def test_a_submission_with_qc_history_counts_toward_the_target(self, db: SubmissionDb):
         """A submission already QCed counts even though its selected_for_qc flag was never set.

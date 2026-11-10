@@ -2326,6 +2326,9 @@ class SubmissionDb:
         transaction, and only one decision runs at a time. A decision therefore sees every
         decision made before it, also those made by other processes.
 
+        A stored decision stands. Otherwise a ``target_percentage`` of 0 disables the selection:
+        the answer is ``False`` and nothing is stored.
+
         :param predict: Answer before basic QC has passed, as if it had: skip that check and
             store nothing. While the submission is not in the QC queue, the answer never
             includes a random selection.
@@ -2351,7 +2354,7 @@ class SubmissionDb:
             # SQLite has no advisory locks; taking the database write lock right away has the same effect
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
 
-    def _decide_qc(  # noqa: C901
+    def _decide_qc(  # noqa: C901, PLR0912
         self, session: Session, submission_id: str, target_proportion: float, salt: str | None, predict: bool
     ) -> bool:
         submission = self.get_submission(submission_id, session=session)
@@ -2373,6 +2376,9 @@ class SubmissionDb:
         if submission.selected_for_qc is True:
             return True
         if submission.selected_for_qc is False:
+            return False
+        if target_proportion <= 0:
+            # detailed QC selection is disabled: no new selection, and nothing is stored
             return False
 
         submission_month = submission_date.month
