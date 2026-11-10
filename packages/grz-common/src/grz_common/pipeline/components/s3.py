@@ -101,13 +101,18 @@ class S3Downloader(ReadStream):
         self.length: int = self.response.get("ContentLength", 0)
         self._etag: str | None = self.response.get("ETag")
 
-    def _get_object(self, **kwargs: Any) -> dict[str, Any]:
+    def _get_object(self, *, resuming: bool = False, **kwargs: Any) -> dict[str, Any]:
         with s3_errors(f"Reading s3://{self._bucket}/{self._key}", DownloadError):
             try:
                 return self._s3_client.get_object(Bucket=self._bucket, Key=self._key, **kwargs)
             except ClientError as e:
                 # a GET answer carries the real error code, unlike a HEAD answer
                 if e.response["Error"]["Code"] == "NoSuchKey":
+                    if resuming:
+                        # it existed at the first GET, so the GRZ side deleted it, such as a concurrent grzctl clean
+                        raise DownloadError(
+                            f"s3://{self._bucket}/{self._key} disappeared during the download, at byte {self._offset}"
+                        ) from e
                     raise self._missing_error(f"s3://{self._bucket}/{self._key} does not exist") from e
                 raise
 
@@ -132,7 +137,7 @@ class S3Downloader(ReadStream):
                     ) from e
                 self._resumes += 1
                 log.warning(f"Reading s3://{self._bucket}/{self._key} broke at byte {self._offset}, resuming: {e}")
-                response = self._get_object(Range=f"bytes={self._offset}-", IfMatch=self._etag)
+                response = self._get_object(resuming=True, Range=f"bytes={self._offset}-", IfMatch=self._etag)
                 self._source = response["Body"]
                 # a server that ignores IfMatch sends the rest of whatever object the key names now
                 if response.get("ETag") != self._etag:

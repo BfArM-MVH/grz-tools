@@ -653,6 +653,50 @@ def test_download_file_fails_when_the_resumed_read_gets_another_object(
     assert not local_file_path.exists(), "a failed download should leave no partial file behind"
 
 
+def test_download_file_fails_as_a_failed_download_when_the_object_vanishes_before_the_resume(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """The object existed at the first request, so its absence at the resume is no file the submitter left out."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def delete_the_object_before_the_resume(self, operation_name, kwargs):
+        if operation_name == "GetObject" and "Range" in kwargs:
+            # such as a concurrent grzctl clean
+            remote_bucket.Object(kwargs["Key"]).delete()
+            return original_call(self, operation_name, kwargs)
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            response["Body"] = _BreakingBody(response["Body"].read(len(b"encrypted ")))
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", delete_the_object_before_the_resume)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    # a MissingSubmissionFileError is no DownloadError
+    with pytest.raises(grzexc.DownloadError):
+        download_worker.download_file(
+            local_file_path,
+            f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+            progress_logger,
+            file_metadata,
+            submission.submission_id,
+        )
+
+    assert not local_file_path.exists(), "a failed download should leave no partial file behind"
+
+
 def test_download_file_fails_when_the_resumed_read_ends_early(
     s3_config_model,
     remote_bucket,
