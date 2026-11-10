@@ -753,9 +753,7 @@ def _monitoring_payload(
             select(Submission.submitter_id, sqlfn.count(1))
             .where(real, Submission.submission_uploaded_date <= last)  # type: ignore[operator]
             .group_by(Submission.submitter_id)
-        )
-        .tuples()
-        .all()
+        ).all()
     )
     cases = {
         submitter_id: (count, sized, int(total))
