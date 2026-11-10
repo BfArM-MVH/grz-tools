@@ -182,10 +182,8 @@ The lock is database-wide, not per submitter, because a decision itself takes on
 
 If any file fails in the main pass (step 3), the pipeline:
 
-1. deletes the prefetched local copies, if a prediction had written them and the database does not record the
-   submission as selected for detailed QC,
-2. deletes the staged objects from the interrogation bucket, unless
-   `archives.interrogation.keep_failed` is `true`,
+1. deletes the prefetched local copies, if a prediction had written them and the database does not record the submission as selected for detailed QC,
+2. deletes the staged objects from the interrogation bucket, unless `archives.interrogation.keep_failed` is `true`,
 3. fails the run; the DB state becomes `ERROR`.
 
 Step 5 can fail the same way.
@@ -256,8 +254,7 @@ For one file, they hold up to
 ```
 
 - C is `--concurrent-uploads`.
-- P is the part size: `archives.interrogation.s3.multipart_chunksize`, raised to the file size / 1000 for a file
-  above 1000 parts.
+- P is the part size: `archives.interrogation.s3.multipart_chunksize`, raised to the file size / 1000 for a file above 1000 parts.
 
 Decryption, validation and re-encryption add about 60 MiB per file, measured for a gzipped FASTQ.
 The validators queue Crypt4GH segments of 64 KiB, and grz-check reads through buffers of 8 MiB.
