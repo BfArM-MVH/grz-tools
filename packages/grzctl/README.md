@@ -19,20 +19,37 @@ Command-line tool for internal GRZ operations.
 - [Processing a submission](docs/process.md): the `grzctl process` streaming pipeline, detailed QC prediction and selection, and recovery from partial failures.
 - [Error handling](docs/error-handling.md): what a failed step records, the failure reasons and who acts on each.
 
-## S3 permissions for `grzctl process`
+## S3 permissions
 
-`grzctl process` uploads files to the interrogation bucket using multipart uploads, and later copies them to an archive bucket, in parts for a large file.
-The credentials you give it must be allowed to **abort** a multipart upload, not just to write — these are often separate permissions.
+Each set of credentials needs these actions on its buckets, for `grzctl process` and for the single commands from `download` to `clean` alike.
+The names are those of bucket policies on AWS and Ceph RGW; other S3 servers may name them differently.
+The end-to-end tests in `tests/e2e` run every flow with exactly these permissions.
 
-This matters when an upload fails partway through: the tool tries to abort the upload so no partial object is left behind.
-If the credentials lack abort permission, the abort is skipped — processing still fails with the original error, but the already-uploaded parts stay in the bucket and you can't remove them yourself.
-Over time these orphaned parts pile up and cost storage.
+| Credentials                                     | Bucket                | Actions |
+| ----------------------------------------------- | --------------------- | ------- |
+| `s3` of the LE's grz-cli config                 | inbox                 | `s3:GetObject`, `s3:PutObject`, `s3:AbortMultipartUpload`, `s3:ListBucket` |
+| `leistungserbringer.<LE>.inbox_buckets.<inbox>` | inbox                 | `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket` |
+| `archives.interrogation.s3`                     | interrogation         | `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload`, `s3:ListBucket` |
+| `archives.consented.s3`                         | consented archive     | `s3:GetObject`, `s3:PutObject`, `s3:AbortMultipartUpload`, `s3:ListBucket` |
+| `archives.consented.s3`                         | interrogation         | `s3:GetObject`, `s3:ListBucket` |
+| `archives.non_consented.s3`                     | non-consented archive | `s3:GetObject`, `s3:PutObject`, `s3:AbortMultipartUpload`, `s3:ListBucket` |
+| `archives.non_consented.s3`                     | interrogation         | `s3:GetObject`, `s3:ListBucket` |
 
-Confusingly, S3 providers split multipart permissions in non-obvious ways (AWS, for example, has both object-level and bucket-level multipart actions), and our archive backend is Ceph/RGW rather than AWS, so check your provider's own documentation for the exact action names.
-The practical point holds everywhere: it's easy to grant write while leaving abort ungranted (see [velero-io/velero#416](https://github.com/velero-io/velero/issues/416) for one instance), so verify abort works — or rely on a bucket lifecycle rule that deletes incomplete multipart uploads after a few days.
+- `s3:ListBucket` lets S3 answer a missing object with 404 instead of 403.
+  Without it, grz-cli and grzctl cannot tell a missing object from denied access, see [Error handling](docs/error-handling.md).
+- The inbox credentials of the GRZ write and delete only in `grzctl clean`, and `grzctl inbox push-version` writes `version.json`.
+  Credentials that run neither need only `s3:GetObject` and `s3:ListBucket`.
+- `grzctl process` copies each file from the interrogation bucket to its archive on the S3 server, with the credentials of that archive.
+  So the interrogation bucket must be on the same endpoint as both archives, and both archives' credentials read it.
+  The credentials of the interrogation bucket delete the staged copies afterwards.
+- Write-only archive credentials, without `s3:GetObject` and `s3:ListBucket` on the archive, work too.
+  `grzctl process` then asks the database whether an earlier run archived the submission, and `grzctl archive` warns and uploads.
+- No command lists multipart uploads or their parts, so `s3:ListBucketMultipartUploads` and `s3:ListMultipartUploadParts` are not needed.
 
-The S3 server copies each file from the interrogation bucket to the archive bucket, with the credentials of that archive.
-So the interrogation bucket must be on the same endpoint as both archive buckets, and the credentials of both archives need read access to the interrogation bucket.
+Grant `s3:AbortMultipartUpload`, not only the write actions; S3 servers often keep them apart.
+A failed upload aborts its multipart upload, so that no parts stay behind.
+Without the permission, the abort is skipped: the run still fails with the original error, but the uploaded parts stay in the bucket and cost storage.
+A lifecycle rule that deletes incomplete multipart uploads after a few days covers that too.
 
 ## Sensitive configuration
 

@@ -22,7 +22,7 @@ A wrong guess costs a full plaintext copy on disk until the real decision runs; 
 The _interrogation bucket_ is a staging area: each file is uploaded there first, under its archive key, and only copied to the final archive bucket once the whole submission has passed.
 If processing fails, the staged files are either cleaned up or kept, depending on `archives.interrogation.keep_failed`.
 
-The [README](../README.md#s3-permissions-for-grzctl-process) lists the S3 permissions that `process` needs.
+The [README](../README.md#s3-permissions) lists the S3 permissions that `process` needs.
 
 A basic invocation:
 
