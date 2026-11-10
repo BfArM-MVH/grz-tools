@@ -477,9 +477,10 @@ class FilePipelineExecutor:
                 pipeline |= Tee(metrics.measure("2b_Write")(writer))
 
             pipeline |= Tee(validation_chain)
+            # the bars count decrypted bytes, as their totals do
+            pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]))
 
             if not stage:
-                pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]))
                 pipeline >> DevNullSink()
             else:
                 # re-encrypt
@@ -491,7 +492,6 @@ class FilePipelineExecutor:
                     )
                     | metrics.measure("4_Encrypt")
                 )
-                pipeline |= Tee(TqdmObserver([pbar_global, pbar_local]))
 
                 # upload to the interrogation bucket, under the file's archive key.
                 # Size the parts by the inbox object: the re-encrypted object has the same payload and a
