@@ -14,10 +14,10 @@ import grzctl.cli
 import pytest
 import yaml
 from click.testing import CliRunner
-from grz_common.progress import FileProgressLogger, ValidationState
+from grz_common.progress import DownloadState, FileProgressLogger, ValidationState
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.utils.crypt import Crypt4GH
-from grz_common.workers.submission import Submission
+from grz_common.workers.submission import EncryptedSubmission, Submission
 
 from ..conftest import _grzctl_config_dict
 from .common import SUBMISSION_DIR, copy_submission
@@ -81,6 +81,7 @@ def test_encrypt_with_an_unreadable_public_key_fails_as_a_configuration_error(
 
 def test_decrypt_submission(working_dir_path, temp_grzctl_keys_config_file_path):
     copy_submission(working_dir_path, "encrypted_files", "metadata")
+    _record_downloads(working_dir_path)
 
     testargs = [
         "--config",
@@ -136,6 +137,7 @@ def test_decrypt_lets_an_error_the_file_did_not_cause_through(
         "--inbox",
         "testing",
         "--no-update-db",
+        "--no-check-download-logs",
     ]
 
     result = CliRunner().invoke(grzctl.cli.build_cli(), testargs)
@@ -178,6 +180,7 @@ def test_encrypt_decrypt_submission(
         "--inbox",
         "testing",
         "--no-update-db",
+        "--no-check-download-logs",
     ]
 
     runner = CliRunner()
@@ -408,6 +411,19 @@ def _loaded_key_paths() -> Iterator[list[str]]:
         yield loaded
 
 
+def _record_downloads(submission_dir: Path) -> None:
+    """Write the download log that ``grzctl download`` leaves for the encrypted files in *submission_dir*."""
+    submission = EncryptedSubmission(submission_dir / "metadata", submission_dir / "encrypted_files")
+    (submission_dir / "logs").mkdir(exist_ok=True)
+    progress_logger = FileProgressLogger[DownloadState](submission_dir / "logs" / "progress_download.cjson")
+    for file_path, file_metadata in submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=DownloadState(download_successful=True, submission_id=submission.submission_id),
+        )
+
+
 def _assert_decrypted(working_dir_path: Path):
     expected_checksum = calculate_sha256(SUBMISSION_DIR / "files" / DECRYPTED_FILE)
     assert calculate_sha256(working_dir_path / "files" / DECRYPTED_FILE) == expected_checksum
@@ -430,7 +446,7 @@ def test_decrypt_uses_the_key_of_the_inbox_that_inbox_names(working_dir_path, tm
     )
 
     with _loaded_key_paths() as loaded:
-        result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "second")
+        result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "second", "--no-check-download-logs")
 
     assert result.exit_code == 0, result.output
     assert loaded == [GRZ_PRIVATE_KEY]
@@ -502,7 +518,7 @@ def test_decrypt_fails_if_the_inbox_key_does_not_open_the_files(working_dir_path
         tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key": CONSENTED_PRIVATE_KEY.read_text()}}}}
     )
 
-    result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "testing")
+    result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "testing", "--no-check-download-logs")
 
     assert isinstance(result.exception, grzexc.DecryptionError), result.output
     message = str(result.exception)
@@ -544,3 +560,40 @@ def test_decrypt_fails_for_an_inbox_that_the_submitter_does_not_have(working_dir
     assert f"Inbox 'other' not configured for submitter '{SUBMITTER_ID}'" in str(result.exception)
     assert loaded == []
     assert not (working_dir_path / "files" / DECRYPTED_FILE).exists()
+
+
+def test_decrypt_refuses_a_file_that_the_download_did_not_complete(working_dir_path, tmp_path):
+    """A file cut short after its download, as a killed download leaves it, is not the submitter's fault."""
+    copy_submission(working_dir_path, "encrypted_files", "metadata")
+    _record_downloads(working_dir_path)
+    truncated_file_path = working_dir_path / "encrypted_files" / f"{DECRYPTED_FILE}.c4gh"
+    truncated_file_path.write_bytes(truncated_file_path.read_bytes()[:100])
+    config_path = _write_grzctl_config(
+        tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": GRZ_PRIVATE_KEY}}}}
+    )
+
+    result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "testing")
+
+    assert isinstance(result.exception, grzexc.IncompleteSubmissionError), result.output
+    message = str(result.exception)
+    assert "Will not decrypt" in message
+    assert str(truncated_file_path) in message
+    assert "blood_normal.vcf.c4gh" not in message, "the files downloaded completely pass"
+    assert not (working_dir_path / "files").exists()
+
+
+def test_decrypt_refuses_files_without_a_download_log(working_dir_path, tmp_path):
+    """Without a download log, nothing shows that the files are complete, and the error names the way around."""
+    copy_submission(working_dir_path, "encrypted_files", "metadata")
+    config_path = _write_grzctl_config(
+        tmp_path, {SUBMITTER_ID: {"inbox_buckets": {"testing": {"private_key_path": GRZ_PRIVATE_KEY}}}}
+    )
+
+    result = _run_grzctl(config_path, "decrypt", working_dir_path, "--inbox", "testing")
+
+    assert isinstance(result.exception, grzexc.IncompleteSubmissionError), result.output
+    message = str(result.exception)
+    assert "progress_download.cjson" in message
+    assert DECRYPTED_FILE in message
+    assert "--no-check-download-logs" in message
+    assert not (working_dir_path / "files").exists()
