@@ -18,6 +18,8 @@ For developers, [Raising errors](../../../CONTRIBUTING.md#raising-errors) descri
 Each grzctl command that takes `--update-db` runs its step in a database context.
 The context records the step's start state, such as `DOWNLOADING`, when the step begins.
 It records the end state when the step succeeds.
+If that write fails, the command fails, although the step's work is done.
+Its log names the command that records the end state by hand, such as `grzctl db submission update <submission_id> reported`.
 When the step fails, it records `ERROR` with:
 
 - `failure_reason`: one of the [failure reasons](#failure-reasons).

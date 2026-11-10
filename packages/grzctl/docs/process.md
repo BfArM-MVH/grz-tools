@@ -242,6 +242,9 @@ The run then counts the submission as archived if the database records `ARCHIVED
 If the database already records `REPORTED`, step 9 does not submit the Prüfbericht again, but still generates and saves it.
 If it records `QCED`, step 10 does not run the detailed QC workflow again.
 
+If a step cannot record its end state, the run stops there.
+The log names the command that records the state by hand, `grzctl db submission update <submission ID> <state>`.
+
 Once a cleaning has started, the inbox holds a `cleaning` or `cleaned` marker.
 A rerun of `process` then fails with a `SubmissionCleanedError` while it downloads the `metadata.json`, before it records anything.
 So the submission keeps its states, such as `CLEANED`.

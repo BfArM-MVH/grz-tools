@@ -291,6 +291,15 @@ class TestDbContextFailureReason:
             grzctl_versions=mock.ANY,
         )
 
+    def test_a_failed_end_state_write_fails_the_step(self, ctx, mock_db, caplog):
+        """The step's work is done but not recorded, so the log names the command that records it by hand."""
+        mock_db.update_submission_state.side_effect = RuntimeError("connection to server lost")
+
+        with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError, match="Failed to record state ENCRYPTED"):
+            ctx.__exit__(None, None, None)
+
+        assert f"grzctl db submission update {ctx.submission_id} encrypted" in caplog.text
+
 
 class TestCheckPrerequisites:
     @staticmethod

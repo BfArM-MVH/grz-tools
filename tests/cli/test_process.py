@@ -1975,6 +1975,63 @@ class TestProcessPruefbericht:
         assert state.failure_reason == FailureReasonEnum.PRUEFBERICHT_REJECTED
 
 
+def _fail_recording_once(monkeypatch, state: SubmissionStateEnum) -> None:
+    """Fail the first write of ``state`` to the database, as a database connection lost during the step does."""
+    original = SubmissionDb.update_submission_state
+    failed: list[SubmissionStateEnum] = []
+
+    def update_submission_state(self, submission_id, new_state, *args, **kwargs):
+        if new_state == state and not failed:
+            failed.append(new_state)
+            raise RuntimeError("connection to server lost")
+        return original(self, submission_id, new_state, *args, **kwargs)
+
+    monkeypatch.setattr(SubmissionDb, "update_submission_state", update_submission_state)
+
+
+class TestProcessUnrecordedEndState:
+    """A step whose end state is not recorded stops the run, and the rerun neither repeats nor skips its work."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    def test_a_rerun_records_an_unrecorded_processed_from_the_archive(
+        self,
+        s3_buckets,
+        bfarm_api,
+        monkeypatch,
+        caplog,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """The archive copy is complete, so the rerun finds it there, records ``PROCESSED``, reports and cleans."""
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
+        _fail_recording_once(monkeypatch, SubmissionStateEnum.PROCESSED)
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, "the run should stop when PROCESSED is not recorded"
+        assert _submitted_tans(bfarm_api) == []
+        assert _states(process_config_content, sid) == [SubmissionStateEnum.PROCESSING]
+
+        with caplog.at_level(logging.WARNING, logger="grzctl.processor"):
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code == 0, f"Rerun failed: {result.output}"
+        assert f"Submission '{sid}' is already archived" in caplog.text
+        assert _submitted_tans(bfarm_api) == [_tan_g_of_the_valid_submission()]
+        assert _states(process_config_content, sid)[1:] == [
+            SubmissionStateEnum.PROCESSING,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.REPORTING,
+            SubmissionStateEnum.REPORTED,
+            SubmissionStateEnum.CLEANING,
+            SubmissionStateEnum.CLEANED,
+        ]
+
+
 def _config_with_distinct_archive_keys(tmp_path: Path, process_config_content: dict) -> Path:
     """Write a process config whose two archives have different keys, so their contents tell them apart."""
     process_config_content["archives"]["consented"]["public_key_path"] = str(MOCK_FILES_DIR / "archive_consented.pub")

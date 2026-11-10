@@ -167,9 +167,12 @@ class DbContext:
     1. *Enter*: connects to the DB, validates prerequisites (see below), then
        transitions the submission to ``start_state``.
     2. *Body*: the caller performs the actual work.
-    3. *Exit (success)*: transitions the submission to ``end_state``.
+    3. *Exit (success)*: transitions the submission to ``end_state``. If that write fails,
+       it raises ``RuntimeError``, and the log names the ``grzctl db submission update``
+       command that records ``end_state`` by hand.
        *Exit (exception)*: transitions the submission to ``ERROR`` and stores
-       ``{"error": "<message>"}`` in the state log; the exception is then re-raised.
+       ``{"error": "<message>"}`` in the state log; the exception is then re-raised,
+       also if that write fails.
 
     **Prerequisite validation:**
 
@@ -272,9 +275,10 @@ class DbContext:
     ) -> bool:
         """Exit the database context.
 
-        Commits the transaction if no exception occurred, otherwise rolls back.
+        Records ``end_state`` if no exception occurred, otherwise ``ERROR`` with the failure reason of the exception.
 
         :returns: ``False``, so any exception is propagated.
+        :raises RuntimeError: If ``end_state`` cannot be recorded.
         """
         if not self.db:
             return False
@@ -315,7 +319,12 @@ class DbContext:
                     self.submission_id, self.end_state, grzctl_versions=self.grzctl_versions
                 )
             except Exception as db_exc:
-                log.error(f"Failed to write success state to DB: {db_exc}")
+                log.error(
+                    f"Failed to record state {self.end_state.name} for {self.submission_id}: {db_exc}. "
+                    f"The step itself succeeded, so record it with "
+                    f"`grzctl db submission update {self.submission_id} {self.end_state.value.lower()}`."
+                )
+                raise RuntimeError(f"Failed to record state {self.end_state.name} for {self.submission_id}") from db_exc
 
         return True
 
