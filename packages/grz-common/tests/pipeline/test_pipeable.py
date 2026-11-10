@@ -4,7 +4,7 @@ import io
 import logging
 
 import pytest
-from grz_common.pipeline.components import DevNullSink, Observer, ReadStream, Tee
+from grz_common.pipeline.components import DevNullSink, Observer, ReadStream, Tee, WriteStream
 from grz_common.pipeline.components.perf import StreamMetricsRegistry
 
 
@@ -97,3 +97,40 @@ def test_a_wrapped_sink_is_completed_on_success(wrap):
     sink = _RecordingSink()
     ReadStream(io.BytesIO(b"data")) >> wrap(sink)
     assert sink.events == ["complete"]
+
+
+class _ClosingWrapper(WriteStream):
+    """A wrapper with its own ``close()``, as a validator that sends EOF to its thread there."""
+
+    def __init__(self, sink) -> None:
+        super().__init__(sink)
+        self.closed_itself = False
+
+    def close(self) -> None:
+        self.closed_itself = True
+        super().close()
+
+
+def test_a_wrapper_runs_its_own_close_when_the_stream_fails():
+    sink = _RecordingSink()
+    wrapper = _ClosingWrapper(sink)
+    with pytest.raises(_StreamError):
+        ReadStream(_FailingSource()) >> wrapper
+    assert wrapper.closed_itself
+    assert sink.events == ["abort"]
+
+
+def test_a_wrapper_runs_its_own_close_when_the_stream_succeeds():
+    sink = _RecordingSink()
+    wrapper = _ClosingWrapper(sink)
+    ReadStream(io.BytesIO(b"data")) >> wrapper
+    assert wrapper.closed_itself
+    assert sink.events == ["complete"]
+
+
+def test_a_wrapper_close_error_after_a_stream_error_is_logged_not_raised(caplog):
+    sink = _RecordingSink()
+    with caplog.at_level(logging.WARNING), pytest.raises(_StreamError):
+        ReadStream(_FailingSource()) >> (_PanicOnClose() | sink)
+    assert sink.events == ["abort"]
+    assert "Closing a sink wrapper after a failed stream failed as well" in caplog.text

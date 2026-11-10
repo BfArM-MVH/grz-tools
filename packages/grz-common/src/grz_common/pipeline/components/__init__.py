@@ -268,7 +268,10 @@ class WriteStream(io.BufferedIOBase, Pipeable):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        """Hand an error to the sink's ``__exit__`` so that wrapping a sink does not turn its abort into a close."""
+        """Hand an error to the sink's ``__exit__`` so that wrapping a sink does not turn its abort into a close.
+
+        The wrapper then still runs its own ``close()``, so a sink must ignore ``close()`` once it is aborted.
+        """
         sink_exit = getattr(self._sink, "__exit__", None)
         if exc_type is None or sink_exit is None:
             self.close()
@@ -276,7 +279,10 @@ class WriteStream(io.BufferedIOBase, Pipeable):
         try:
             sink_exit(exc_type, exc_val, exc_tb)
         finally:
-            super().close()
+            try:
+                self.close()
+            except BaseException:
+                log.warning("Closing a sink wrapper after a failed stream failed as well", exc_info=True)
 
 
 class Observer(WriteStream, metaclass=abc.ABCMeta):
