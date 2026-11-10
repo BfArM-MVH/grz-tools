@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v4.1.0...grz-db-v4.2.0) (2026-11-10)
+
+
+### Features
+
+* **grz-common,grz-db,grzctl:** Record the version of grz-cli used by the LE into the database ([#738](https://github.com/BfArM-MVH/grz-tools/issues/738)) ([bc0ca37](https://github.com/BfArM-MVH/grz-tools/commit/bc0ca3749e1691bd677a972b5520174aba37bf79))
+
 ## [4.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-db-v4.0.1...grz-db-v4.1.0) (2026-11-10)
 
 
