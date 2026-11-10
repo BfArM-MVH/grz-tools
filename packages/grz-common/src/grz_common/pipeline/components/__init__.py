@@ -369,7 +369,10 @@ class PushToPullAdapter(io.RawIOBase):
 
 
 class Tee(ReadStream):
-    """Branches the stream to an observer."""
+    """Branches the stream to an observer.
+
+    When the stream fails, the observer is closed, not aborted, so it must not be a sink that needs an abort.
+    """
 
     def __init__(self, observer: Writable):
         super().__init__(None)
