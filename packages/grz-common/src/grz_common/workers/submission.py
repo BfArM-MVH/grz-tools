@@ -2,36 +2,40 @@
 
 from __future__ import annotations
 
+import concurrent
 import json
 import logging
-import subprocess
-import typing
+import mmap
 from collections.abc import Generator
+from contextlib import ExitStack
 from itertools import groupby
 from os import PathLike
 from pathlib import Path
 
-import grz_pydantic_models.submission.thresholds as thresholds_model
+import grz_check
+import grz_common.exceptions as grzexc
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from grz_pydantic_models.mii.consent import Consent
 from grz_pydantic_models.submission.metadata import get_accepted_versions
 from grz_pydantic_models.submission.metadata.v1 import (
     ChecksumType,
-    File,
+    Donor,
     FileType,
     GrzSubmissionMetadata,
+    LabDatum,
     ReadOrder,
-    SequenceData,
     SequencingLayout,
 )
 from grz_pydantic_models.submission.metadata.v1 import File as SubmissionFileMetadata
+from grz_pydantic_models.submission.thresholds import Thresholds
 from pydantic import ValidationError
+from tqdm.auto import tqdm
 
+from ..constants import TQDM_DEFAULTS
 from ..models.identifiers import IdentifiersModel
 from ..progress import DecryptionState, EncryptionState, FileProgressLogger, ValidationState
 from ..utils.checksums import calculate_sha256
 from ..utils.crypt import Crypt4GH
-from ..validation import UserInterruptException, run_grz_check
-from ..validation.bam import validate_bam
-from ..validation.fastq import validate_paired_end_reads, validate_single_end_reads
 
 log = logging.getLogger(__name__)
 
@@ -51,8 +55,7 @@ class SubmissionMetadata:
         Load, parse and validate the metadata file.
 
         :param metadata_file: path to the metadata.json file
-        :raises json.JSONDecodeError: if failed to read the metadata.json file
-        :raises jsonschema.exceptions.ValidationError: if metadata does not match expected schema
+        :raises SubmissionValidationError: if the file is no JSON, or the metadata breaks the specification
         """
         self.file_path = metadata_file
         self.content = self._read_metadata(self.file_path)
@@ -67,20 +70,17 @@ class SubmissionMetadata:
 
         :param file_path: Path to the metadata JSON file
         :return: Parsed metadata as a dictionary
-        :raises json.JSONDecodeError: if failed to read the metadata.json file
+        :raises SubmissionValidationError: if the file is no JSON, or the metadata breaks the specification
         """
         try:
             with open(file_path, encoding="utf-8") as jsonfile:
                 metadata = json.load(jsonfile)
-                try:
-                    metadata_model = GrzSubmissionMetadata(**metadata)
-                except ValidationError as ve:
-                    cls.__log.error("Invalid metadata format in metadata file: %s", file_path)
-                    raise SystemExit(ve) from ve
-                return metadata_model
-        except json.JSONDecodeError as e:
-            cls.__log.error("Invalid JSON format in metadata file: %s", file_path)
-            raise e
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise grzexc.SubmissionValidationError(f"Invalid JSON in metadata file {file_path}: {e}") from e
+        try:
+            return GrzSubmissionMetadata.model_validate(metadata)
+        except ValidationError as ve:
+            raise grzexc.SubmissionValidationError(f"Invalid metadata in {file_path}: {ve}") from ve
 
     @property
     def transaction_id(self) -> str:
@@ -112,6 +112,79 @@ class SubmissionMetadata:
         self._files = submission_files
         return self._files
 
+    @staticmethod
+    def pair_files(
+        files: list[SubmissionFileMetadata],
+    ) -> Generator[tuple[SubmissionFileMetadata, SubmissionFileMetadata], None, None]:
+        """
+        Groups a list of FASTQ files by Flowcell and Lane, yielding (R1, R2) pairs.
+        """
+        key_func = lambda f: (f.flowcell_id, f.lane_id)
+        files.sort(key=key_func)
+
+        for _, group in groupby(files, key_func):
+            group_files = list(group)
+
+            r1_files = [f for f in group_files if f.read_order == ReadOrder.r1]
+            r2_files = [f for f in group_files if f.read_order == ReadOrder.r2]
+
+            if r1_files and r2_files:
+                yield from zip(r1_files, r2_files, strict=True)
+
+    def iter_paired_end_fastqs(
+        self,
+    ) -> Generator[
+        tuple[Donor, LabDatum, list[tuple[SubmissionFileMetadata, SubmissionFileMetadata]], Thresholds], None, None
+    ]:
+        """
+        Yields (Donor, LabDatum, List of R1/R2 Pairs, Threshold) for every Paired-End unit.
+        """
+        for donor in self.content.donors:
+            for lab_datum in donor.lab_data:
+                if lab_datum.sequencing_layout != SequencingLayout.paired_end:
+                    continue
+                if not lab_datum.sequence_data:
+                    continue
+
+                files = [f for f in lab_datum.sequence_data.files if f.file_type == FileType.fastq]
+                thresholds = self.content.determine_thresholds_for(donor, lab_datum)
+                pairs = list(self.pair_files(files))
+
+                if pairs:
+                    yield donor, lab_datum, pairs, thresholds
+
+    def iter_single_end_fastqs(
+        self,
+    ) -> Generator[tuple[Donor, LabDatum, list[SubmissionFileMetadata], Thresholds], None, None]:
+        """
+        Yields (Donor, LabDatum, List of Files, Threshold) for every Single-End unit.
+        """
+        for donor in self.content.donors:
+            for lab_datum in donor.lab_data:
+                # Handle Single, Reverse, Other, etc.
+                if lab_datum.sequencing_layout == SequencingLayout.paired_end:
+                    continue
+                if not lab_datum.sequence_data:
+                    continue
+
+                files = [f for f in lab_datum.sequence_data.files if f.file_type == FileType.fastq]
+                thresholds = self.content.determine_thresholds_for(donor, lab_datum)
+
+                if files:
+                    yield donor, lab_datum, files, thresholds
+
+    def iter_bams(self) -> Generator[tuple[Donor, LabDatum, SubmissionFileMetadata], None, None]:
+        """
+        Yields every BAM file in the submission.
+        """
+        for donor in self.content.donors:
+            for lab_datum in donor.lab_data:
+                if not lab_datum.sequence_data:
+                    continue
+                for f in lab_datum.sequence_data.files:
+                    if f.file_type == FileType.bam:
+                        yield donor, lab_datum, f
+
     def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """
         Validates this submission's metadata (content).
@@ -135,6 +208,19 @@ class SubmissionMetadata:
                 f"Submitter (LE) identifier specified in the metadata.json ({submitted_le_id}) "
                 f"does not match submitter (LE) identifier in config ({expected_le_id})"
             )
+
+        # The models keep a consent dateTime as submitted, so a document written before FHIR's
+        # timezone requirement was enforced still parses and stays readable. Holding submitters to
+        # the specification is a submission-time rule, so it lives here rather than in the model.
+        for donor in self.content.donors:
+            for research_consent in donor.research_consents:
+                if not isinstance(research_consent.scope, Consent):
+                    continue
+                for offending in research_consent.scope.datetimes_fhir_does_not_permit():
+                    yield (
+                        f"Consent dateTime '{offending}' states a time without a timezone. "
+                        f"FHIR requires one, e.g. '{offending}Z' or '{offending}+02:00'."
+                    )
 
         submission_files: dict[str | PathLike, SubmissionFileMetadata] = {}
         for donor in self.content.donors:
@@ -186,6 +272,10 @@ class Submission:
         self.metadata = SubmissionMetadata(self.metadata_dir / "metadata.json")
 
     @property
+    def submission_id(self) -> str:
+        return self.metadata.content.submission_id
+
+    @property
     def files(self) -> dict[Path, SubmissionFileMetadata]:
         """
         The files liked in the metadata.
@@ -200,114 +290,10 @@ class Submission:
 
         return retval
 
-    def validate_files_with_grz_check(  # noqa: C901, PLR0915, PLR0912
-        self, checksum_progress_file: str | PathLike, seq_data_progress_file: str | PathLike, threads: int | None
+    def _aggregate_validation_errors(
+        self, checksum_progress_logger: FileProgressLogger, seq_data_progress_logger: FileProgressLogger
     ) -> Generator[str, None, None]:
-        """
-        Validates submission files using `grz-check` and populates both progress logs.
-        """
-        checksum_progress_logger = FileProgressLogger[ValidationState](log_file_path=checksum_progress_file)
-        checksum_progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
-
-        seq_data_progress_logger = FileProgressLogger[ValidationState](log_file_path=seq_data_progress_file)
-        seq_data_progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
-
-        grz_check_args = []
-        checked_files = set()
-
-        def should_check_file(file_path: Path, file_metadata: File) -> bool:
-            # Check against both logs. If either is missing a "pass", re-check.
-            checksum_state = checksum_progress_logger.get_state(file_path, file_metadata)
-            seq_data_state = seq_data_progress_logger.get_state(file_path, file_metadata)
-            is_seq_file = file_metadata.file_type in ("fastq", "bam")
-
-            checksum_passed = checksum_state and checksum_state.get("validation_passed")
-            seq_data_passed = seq_data_state and seq_data_state.get("validation_passed")
-
-            if is_seq_file:
-                return not (checksum_passed and seq_data_passed)
-            return not checksum_passed
-
-        # Collect args for FASTQ and BAM from sequencing data
-        for donor in self.metadata.content.donors:
-            for lab_data in donor.lab_data:
-                if not lab_data.sequence_data:
-                    continue
-
-                thresholds = self.metadata.content.determine_thresholds_for(donor, lab_data)
-                mean_read_length_threshold = thresholds.mean_read_length
-
-                sequence_data = lab_data.sequence_data
-                fastq_files = [f for f in sequence_data.files if f.file_type == FileType.fastq]
-                bam_files = [f for f in sequence_data.files if f.file_type == FileType.bam]
-
-                if lab_data.sequencing_layout == SequencingLayout.paired_end:
-                    key = lambda f: (f.flowcell_id, f.lane_id)
-                    fastq_files.sort(key=key)
-                    for _key, group in groupby(fastq_files, key):
-                        files = list(group)
-                        fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
-                        fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
-
-                        for r1_meta, r2_meta in zip(fastq_r1_files, fastq_r2_files, strict=True):
-                            r1_path = self.files_dir / r1_meta.file_path
-                            r2_path = self.files_dir / r2_meta.file_path
-                            if should_check_file(r1_path, r1_meta) or should_check_file(r2_path, r2_meta):
-                                grz_check_args.extend(
-                                    ["--fastq-paired", str(r1_path), str(r2_path), str(mean_read_length_threshold)]
-                                )
-                            checked_files.add(r1_path)
-                            checked_files.add(r2_path)
-                else:
-                    for f_meta in fastq_files:
-                        f_path = self.files_dir / f_meta.file_path
-                        if f_path in checked_files:
-                            continue
-                        if should_check_file(f_path, f_meta):
-                            grz_check_args.extend(["--fastq-single", str(f_path), str(mean_read_length_threshold)])
-                        checked_files.add(f_path)
-
-                for bam_meta in bam_files:
-                    bam_path = self.files_dir / bam_meta.file_path
-                    if bam_path in checked_files:
-                        continue
-                    if should_check_file(bam_path, bam_meta):
-                        grz_check_args.extend(["--bam", str(bam_path)])
-                    checked_files.add(bam_path)
-
-        # Handle any other files with --raw for calculating checksums
-        for file_path, file_metadata in self.files.items():
-            if file_path not in checked_files and should_check_file(file_path, file_metadata):
-                grz_check_args.extend(["--raw", str(file_path)])
-
-        if not grz_check_args:
-            self.__log.info("All files are already validated. Skipping `grz-check`.")
-        else:
-            log_dir = Path(checksum_progress_file).parent
-            temp_report_path = log_dir / "grz-check.report.jsonl"
-            temp_report_path.unlink(missing_ok=True)
-
-            command_args = ["--output", str(temp_report_path), *grz_check_args]
-            if threads:
-                command_args.extend(["--threads", str(threads)])
-            try:
-                run_grz_check(command_args)
-            except UserInterruptException:
-                self.__log.warning("Validation cancelled by user. Processing partial results...")
-                raise
-            except subprocess.CalledProcessError as e:
-                self.__log.error(f"`grz-check` failed with exit code {e.returncode}")
-                yield "`grz-check` execution failed. See logs for details."
-            finally:
-                if temp_report_path.is_file():
-                    self.__log.info(f"Processing report file: {temp_report_path}")
-                    with temp_report_path.open("r") as f:
-                        self._process_grz_check_report(f, checksum_progress_logger, seq_data_progress_logger)  # type: ignore
-                    temp_report_path.unlink()
-                else:
-                    self.__log.warning("`grz-check` did not produce a report file.")
-
-        # Aggregate errors from both logs
+        """Aggregates all errors from both progress loggers into a flat generator."""
         all_errors = set()
         for local_file_path, file_metadata in self.files.items():
             checksum_state = checksum_progress_logger.get_state(local_file_path, file_metadata)
@@ -322,317 +308,197 @@ class Submission:
                         all_errors.add(f"{local_file_path.relative_to(self.files_dir)}: {error}")
         yield from all_errors
 
-    def _process_grz_check_report(  # noqa: C901
+    def validate_files(  # noqa: C901, PLR0912, PLR0915
         self,
-        report_file: typing.TextIO,
-        checksum_progress_logger: FileProgressLogger[ValidationState],
-        seq_data_progress_logger: FileProgressLogger[ValidationState],
-    ):
-        """
-        Parses the JSONL report from `grz-check` and updates both progress loggers.
-        """
-        for line in report_file:
-            try:
-                report_entry = json.loads(line)
-                data = report_entry.get("data", {})
-                file_path_str = data.get("path")
-                if not file_path_str:
-                    continue
-
-                file_path = Path(file_path_str).resolve()
-                file_metadata = self.files.get(file_path)
-
-                if not file_metadata:
-                    self.__log.warning(f"Could not find metadata for file in grz-check report: {file_path_str}")
-                    continue
-
-                status = data.get("status")
-                errors = data.get("errors", [])
-                warnings = data.get("warnings", [])
-                checksum = data.get("checksum")
-
-                if warnings:
-                    for w in warnings:
-                        self.__log.warning(w)
-
-                checksum_issues = []
-                if (
-                    checksum
-                    and (file_metadata.checksum_type or "").lower() == "sha256"
-                    and file_metadata.file_checksum != checksum
-                ):
-                    checksum_issues.append(
-                        f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{checksum}'"
-                    )
-
-                if file_path.exists() and file_path.is_file():
-                    if file_metadata.file_size_in_bytes != file_path.stat().st_size:
-                        checksum_issues.append(
-                            f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
-                        )
-                else:
-                    checksum_issues.append("File not found for size check.")
-
-                checksum_passed = not checksum_issues
-                checksum_state = ValidationState(errors=checksum_issues, validation_passed=checksum_passed)
-                checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
-
-                if file_metadata.file_type in ("fastq", "bam"):
-                    integrity_passed = status == "OK"
-                    integrity_errors = errors if not integrity_passed else []
-
-                    seq_data_state = ValidationState(errors=integrity_errors, validation_passed=integrity_passed)
-                    seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
-
-            except json.JSONDecodeError:
-                self.__log.warning(f"Could not parse line in grz-check report: {line.strip()}")
-            except Exception as e:
-                self.__log.error(f"Error processing grz-check report entry: {line.strip()}. Error: {e}")
-
-    @staticmethod
-    def _validate_file_data_fallback(metadata: File, local_file_path: Path) -> Generator[str]:
-        """
-        Validates whether the provided file matches this metadata.
-        (Fallback method)
-
-        :param metadata: Metadata model object
-        :param local_file_path: Path to the actual file (resolved if symlinked)
-        :return: Generator of errors
-        """
-        # Resolve file path
-        local_file_path = local_file_path.resolve()
-
-        # Check if path exists
-        if not local_file_path.exists():
-            yield f"{str(Path('files') / metadata.file_path)} does not exist! Ensure filePath is relative to the files/ directory under the submission root."
-            # Return here as following tests cannot work
-            return
-
-        # Check if path is a file
-        if not local_file_path.is_file():
-            yield f"{str(metadata.file_path)} is not a file!"
-            # Return here as following tests cannot work
-            return
-
-        # Check if the checksum is correct
-        if metadata.checksum_type == "sha256":
-            calculated_checksum = calculate_sha256(local_file_path)
-            if metadata.file_checksum != calculated_checksum:
-                yield (
-                    f"{str(metadata.file_path)}: Checksum mismatch! "
-                    f"Expected: '{metadata.file_checksum}', calculated: '{calculated_checksum}'."
-                )
-        else:
-            yield (
-                f"{str(metadata.file_path)}: Unsupported checksum type: {metadata.checksum_type}. "
-                f"Supported types: {[e.value for e in ChecksumType]}"
-            )
-
-        # Check file size
-        if metadata.file_size_in_bytes != local_file_path.stat().st_size:
-            yield (
-                f"{str(metadata.file_path)}: File size mismatch! "
-                f"Expected: '{metadata.file_size_in_bytes}', observed: '{local_file_path.stat().st_size}'."
-            )
-
-    def _validate_checksums_fallback(self, progress_log_file: str | PathLike) -> Generator[str]:
-        """
-        Validates the checksum of the files against the metadata.
-        (Fallback method)
-
-        :return: Generator of errors
-        """
-        progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
-        # cleanup log file and keep only files listed here
-        progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
-        # fields:
-        # - "errors": List[str]
-        # - "validation_passed": bool
-
-        def validate_file(local_file_path, file_metadata):
-            self.__log.debug("Validating '%s'...", str(local_file_path))
-
-            # validate the file
-            errors = list(self._validate_file_data_fallback(file_metadata, local_file_path))
-            validation_passed = len(errors) == 0
-
-            # return log state
-            return ValidationState(errors=errors, validation_passed=validation_passed)
-
-        for local_file_path, file_metadata in self.files.items():
-            logged_state = progress_logger.get_state(
-                local_file_path,
-                file_metadata,
-                default=validate_file,  # validate the file if the state was not calculated yet
-            )
-
-            if logged_state:
-                yield from logged_state["errors"]
-
-    def _validate_sequencing_data_fallback(self, progress_log_file: str | PathLike) -> Generator[str]:
-        """
-        Quick-validates sequencing data linked in this submission.
-        (Fallback method)
-
-        :return: Generator of errors
-        """
-        # Import here to avoid circular import issues
-        from ..progress import FileProgressLogger  # noqa: PLC0415
-
-        progress_logger = FileProgressLogger[ValidationState](log_file_path=progress_log_file)
-        # cleanup log file and keep only files listed here
-        progress_logger.cleanup(keep=[(file_path, file_metadata) for file_path, file_metadata in self.files.items()])
-        # fields:
-        # - "errors": List[str]
-        # - "validation_passed": bool
-
-        def find_fastq_files(sequence_data: SequenceData) -> list[File]:
-            return [f for f in sequence_data.files if f.file_type == FileType.fastq]
-
-        def find_bam_files(sequence_data: SequenceData) -> list[File]:
-            return [f for f in sequence_data.files if f.file_type == FileType.bam]
-
-        for donor in self.metadata.content.donors:
-            for lab_datum in donor.lab_data:
-                sequencing_layout = lab_datum.sequencing_layout
-                sequence_data = lab_datum.sequence_data
-                # find all FASTQ files
-                fastq_files = find_fastq_files(sequence_data) if sequence_data else []
-                bam_files = find_bam_files(sequence_data) if sequence_data else []
-
-                if not lab_datum.library_type.endswith("_lr"):
-                    match sequencing_layout:
-                        case SequencingLayout.single_end | SequencingLayout.reverse | SequencingLayout.other:
-                            yield from self._validate_single_end_fallback(
-                                fastq_files,
-                                progress_logger,
-                                self.metadata.content.determine_thresholds_for(donor, lab_datum),
-                            )
-                        case SequencingLayout.paired_end:
-                            yield from self._validate_paired_end_fallback(
-                                fastq_files,
-                                progress_logger,
-                                self.metadata.content.determine_thresholds_for(donor, lab_datum),
-                            )
-                yield from self._validate_bams_fallback(bam_files, progress_logger)
-
-    def _validate_bams_fallback(
-        self,
-        bam_files: list[File],
-        progress_logger: FileProgressLogger[ValidationState],
+        checksum_progress_file: str | PathLike,
+        seq_data_progress_file: str | PathLike,
+        threads: int | None,
+        no_mmap: bool = False,
     ) -> Generator[str, None, None]:
         """
-        Basic BAM sanity checks.
-        (Fallback method)
-
-        :param bam_files: List of BAM files
-        :param progress_logger: Progress logger
+        Validates submission files using native `grz-check` PyO3 bindings and populates progress logs.
         """
+        checksum_progress_logger = FileProgressLogger[ValidationState](log_file_path=checksum_progress_file)
+        checksum_progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
 
-        def validate_file(local_file_path, _file_metadata) -> ValidationState:
-            self.__log.debug("Validating '%s'...", str(local_file_path))
+        seq_data_progress_logger = FileProgressLogger[ValidationState](log_file_path=seq_data_progress_file)
+        seq_data_progress_logger.cleanup(keep=[(fp, fm) for fp, fm in self.files.items()])
 
-            # validate the file
-            errors = list(validate_bam(local_file_path))
-            validation_passed = len(errors) == 0
+        checked_files = set()
+        tasks = []
 
-            # return log state
-            return ValidationState(
-                errors=errors,
-                validation_passed=validation_passed,
+        def should_check_file(file_path: Path, file_metadata: SubmissionFileMetadata) -> bool:
+            checksum_state = checksum_progress_logger.get_state(file_path, file_metadata)
+            seq_data_state = seq_data_progress_logger.get_state(file_path, file_metadata)
+            is_seq_file = file_metadata.file_type in ("fastq", "bam")
+            checksum_passed = (
+                checksum_state
+                and checksum_state.get("validation_passed")
+                and checksum_state.get("submission_id") == self.submission_id
             )
-
-        for bam_file in bam_files:
-            logged_state = progress_logger.get_state(
-                self.files_dir / bam_file.file_path,
-                bam_file,
-                default=validate_file,  # validate the file if the state was not calculated yet
+            seq_data_passed = (
+                seq_data_state
+                and seq_data_state.get("validation_passed")
+                and seq_data_state.get("submission_id") == self.submission_id
             )
-            if logged_state:
-                yield from logged_state["errors"]
+            if is_seq_file:
+                return not (checksum_passed and seq_data_passed)
+            return not checksum_passed
 
-    def _validate_single_end_fallback(
-        self,
-        fastq_files: list[File],
-        progress_logger: FileProgressLogger[ValidationState],
-        thresholds: thresholds_model.Thresholds,
-    ) -> Generator[str, None, None]:
-        def validate_file(local_file_path, file_metadata: SubmissionFileMetadata) -> ValidationState:
-            self.__log.debug("Validating '%s'...", str(local_file_path))
-
-            # validate the file
+        for _donor, _lab_datum, pairs, thresholds in self.metadata.iter_paired_end_fastqs():
             mean_read_length_threshold = thresholds.mean_read_length
-            errors = list(
-                validate_single_end_reads(local_file_path, mean_read_length_threshold=mean_read_length_threshold)
-            )
-            validation_passed = len(errors) == 0
+            for r1_meta, r2_meta in pairs:
+                r1_path = self.files_dir / r1_meta.file_path
+                r2_path = self.files_dir / r2_meta.file_path
 
-            # return log state
-            return ValidationState(errors=errors, validation_passed=validation_passed)
-
-        for fastq_file in fastq_files:
-            logged_state = progress_logger.get_state(
-                self.files_dir / fastq_file.file_path,
-                fastq_file,
-                default=validate_file,  # validate the file if the state was not calculated yet
-            )
-            if logged_state:
-                yield from logged_state["errors"]
-
-    def _validate_paired_end_fallback(
-        self,
-        fastq_files: list[File],
-        progress_logger: FileProgressLogger[ValidationState],
-        thresholds: thresholds_model.Thresholds,
-    ) -> Generator[str, None, None]:
-        mean_read_length_threshold = thresholds.mean_read_length
-        key = lambda f: (f.flowcell_id, f.lane_id)
-        fastq_files.sort(key=key)
-        for _key, group in groupby(fastq_files, key):
-            files = list(group)
-
-            # separate R1 and R2 files
-            fastq_r1_files = [f for f in files if f.read_order == ReadOrder.r1]
-            fastq_r2_files = [f for f in files if f.read_order == ReadOrder.r2]
-
-            for fastq_r1, fastq_r2 in zip(fastq_r1_files, fastq_r2_files, strict=True):
-                local_fastq_r1_path = self.files_dir / fastq_r1.file_path
-                local_fastq_r2_path = self.files_dir / fastq_r2.file_path
-
-                # get saved state
-                logged_state_r1 = progress_logger.get_state(local_fastq_r1_path, fastq_r1)
-                logged_state_r2 = progress_logger.get_state(local_fastq_r2_path, fastq_r2)
-
-                if logged_state_r1 is None or logged_state_r2 is None or logged_state_r1 != logged_state_r2:
-                    # calculate state
-                    errors = list(
-                        validate_paired_end_reads(
-                            local_fastq_r1_path,  # fastq R1
-                            local_fastq_r2_path,  # fastq R2
-                            mean_read_length_threshold=mean_read_length_threshold,
+                if should_check_file(r1_path, r1_meta) or should_check_file(r2_path, r2_meta):
+                    tasks.append(
+                        (
+                            "fastq_paired",
+                            [r1_path, r2_path],
+                            [r1_meta, r2_meta],
+                            {"min_mean_read_length": mean_read_length_threshold},
                         )
                     )
-                    validation_passed = len(errors) == 0
+                checked_files.update({r1_path, r2_path})
 
-                    state = ValidationState(errors=errors, validation_passed=validation_passed)
-                    # update state for both files
-                    progress_logger.set_state(  # fastq R1
-                        local_fastq_r1_path, fastq_r1, state
+        for _donor, _lab_datum, fastq_files, thresholds in self.metadata.iter_single_end_fastqs():
+            mean_read_length_threshold = thresholds.mean_read_length
+            for f_meta in fastq_files:
+                f_path = self.files_dir / f_meta.file_path
+                if f_path not in checked_files and should_check_file(f_path, f_meta):
+                    tasks.append(
+                        ("fastq_single", [f_path], [f_meta], {"min_mean_read_length": mean_read_length_threshold})
                     )
-                    progress_logger.set_state(  # fastq R2
-                        local_fastq_r2_path, fastq_r2, state
-                    )
-                    yield from state["errors"]
-                else:
-                    # both fastq states are equal, so simply yield one of them
-                    yield from logged_state_r1["errors"]
+                checked_files.add(f_path)
+
+        for _donor, _lab_datum, bam_meta in self.metadata.iter_bams():
+            bam_path = self.files_dir / bam_meta.file_path
+            if bam_path not in checked_files and should_check_file(bam_path, bam_meta):
+                tasks.append(("bam", [bam_path], [bam_meta], {}))
+            checked_files.add(bam_path)
+
+        for file_path, file_metadata in self.files.items():
+            if file_path not in checked_files and should_check_file(file_path, file_metadata):
+                tasks.append(("raw", [file_path], [file_metadata], {}))
+
+        if not tasks:
+            self.__log.info("All files are already validated. Skipping `grz-check`.")
+            yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
+            return
+
+        total_bytes_to_process = sum(
+            meta.file_size_in_bytes for task in tasks for meta in task[2] if meta.file_size_in_bytes
+        )
+
+        class TqdmFileReader:
+            def __init__(self, file_obj, pbar):
+                self._file = file_obj
+                self._pbar = pbar
+
+            def read(self, size=-1):
+                data = self._file.read(size)
+                if data:
+                    self._pbar.update(len(data))
+                return data
+
+        def _execute_task(task_type, paths, metas, kwargs, pbar):
+            reports = []
+            try:
+                with ExitStack() as stack:
+                    sources = []
+                    for p in paths:
+                        if not p.exists() or p.stat().st_size == 0:
+                            sources.append(str(p))
+                        else:
+                            f = stack.enter_context(open(p, "rb"))
+                            if no_mmap:
+                                sources.append(TqdmFileReader(f, pbar))
+                            else:
+                                mm = stack.enter_context(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
+                                sources.append(mm)
+
+                    if task_type == "fastq_paired":
+                        reports = grz_check.validate_fastq_paired(sources[0], sources[1], **kwargs)
+                    elif task_type == "fastq_single":
+                        reports = [grz_check.validate_fastq(sources[0], **kwargs)]
+                    elif task_type == "bam":
+                        reports = [grz_check.validate_bam(sources[0])]
+                    elif task_type == "raw":
+                        reports = [grz_check.validate_raw(sources[0])]
+            except Exception as e:
+                raise e
+
+            return paths, metas, reports
+
+        with (
+            concurrent.futures.ThreadPoolExecutor(max_workers=threads or 1) as executor,
+            tqdm(total=total_bytes_to_process, desc="VALIDATE", leave=False, **TQDM_DEFAULTS) as pbar,  # type: ignore[call-overload]
+        ):
+            try:
+                futures = [executor.submit(_execute_task, *t, pbar) for t in tasks]
+
+                for future in concurrent.futures.as_completed(futures):
+                    paths, metas, reports = future.result()
+
+                    pbar.set_postfix({"finished": ", ".join(p.name for p in paths)})
+
+                    for file_path, file_metadata, report in zip(paths, metas, reports, strict=True):
+                        checksum_issues = []
+
+                        for w in report.warnings:
+                            self.__log.warning(f"{file_path.name}: {w}")
+
+                        if not report.sha256:
+                            checksum_issues.append("No checksum found.")
+
+                        if (
+                            report.sha256
+                            and file_metadata.checksum_type == ChecksumType.sha256
+                            and file_metadata.file_checksum != report.sha256
+                        ):
+                            checksum_issues.append(
+                                f"Checksum mismatch! Expected: '{file_metadata.file_checksum}', calculated: '{report.sha256}'"
+                            )
+
+                        if file_path.exists() and file_path.is_file():
+                            if file_metadata.file_size_in_bytes != file_path.stat().st_size:
+                                checksum_issues.append(
+                                    f"File size mismatch! Expected: '{file_metadata.file_size_in_bytes}', observed: '{file_path.stat().st_size}'."
+                                )
+                        else:
+                            checksum_issues.append("File not found for size check.")
+
+                        checksum_passed = not checksum_issues
+                        checksum_state = ValidationState(
+                            errors=checksum_issues, validation_passed=checksum_passed, submission_id=self.submission_id
+                        )
+                        checksum_progress_logger.set_state(file_path, file_metadata, checksum_state)
+
+                        if file_metadata.file_type in ("fastq", "bam"):
+                            seq_data_state = ValidationState(
+                                errors=report.errors,
+                                validation_passed=report.is_valid,
+                                submission_id=self.submission_id,
+                            )
+                            seq_data_progress_logger.set_state(file_path, file_metadata, seq_data_state)
+
+                    if not no_mmap:
+                        task_bytes = sum(m.file_size_in_bytes for m in metas if m.file_size_in_bytes)
+                        pbar.update(task_bytes)
+            except BaseException:
+                # the with block would otherwise run every queued task before it lets the error through
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
+
+        yield from self._aggregate_validation_errors(checksum_progress_logger, seq_data_progress_logger)
 
     def encrypt(
         self,
         encrypted_files_dir: str | PathLike,
         progress_log_file: str | PathLike,
-        recipient_public_key_path: str | PathLike,
-        submitter_private_key_path: str | PathLike | None = None,
+        recipient_public_key: X25519PublicKey,
+        submitter_private_key: X25519PrivateKey | None = None,
         force: bool = False,
     ) -> EncryptedSubmission:
         """
@@ -640,8 +506,8 @@ class Submission:
 
         :param encrypted_files_dir: Output directory of the encrypted files
         :param progress_log_file: Path to a log file to store the progress of the encryption process
-        :param recipient_public_key_path: Path to the public key file which will be used for encryption
-        :param submitter_private_key_path: Path to the private key file which will be used to sign the encryption
+        :param recipient_public_key: The public key which will be used for encryption
+        :param submitter_private_key: The private key which will be used to sign the encryption
         :param force: Force encryption even if target files already exist
         :return: EncryptedSubmission instance
         """
@@ -650,16 +516,10 @@ class Submission:
 
         encrypted_files_dir = Path(encrypted_files_dir)
 
-        if not Path(recipient_public_key_path).expanduser().is_file():
-            msg = f"Public key file does not exist: {recipient_public_key_path}"
-            self.__log.error(msg)
-            raise FileNotFoundError(msg)
-        if not submitter_private_key_path:
-            self.__log.warning("No submitter private key provided, skipping signing.")
-        elif not Path(submitter_private_key_path).expanduser().is_file():
-            msg = f"Private key file does not exist: {submitter_private_key_path}"
-            self.__log.error(msg)
-            raise FileNotFoundError(msg)
+        if submitter_private_key is None:
+            self.__log.warning("No submitter private key provided, so the files are signed with a random key.")
+
+        public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key, submitter_private_key)
 
         if not encrypted_files_dir.is_dir():
             self.__log.debug(
@@ -669,12 +529,6 @@ class Submission:
             encrypted_files_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
 
         progress_logger = FileProgressLogger[EncryptionState](log_file_path=progress_log_file)
-
-        try:
-            public_keys = Crypt4GH.prepare_c4gh_keys(recipient_public_key_path)
-        except Exception as e:
-            self.__log.error(f"Error preparing public keys: {e}")
-            raise e
 
         for file_path, file_metadata in self.files.items():
             # encryption_successful = True
@@ -690,6 +544,7 @@ class Submission:
                 (logged_state is None)
                 or not logged_state.get("encryption_successful", False)
                 or not encrypted_file_path.is_file()
+                or logged_state.get("submission_id") != self.submission_id
             ):
                 self.__log.info(
                     "Encrypting file: '%s' -> '%s'",
@@ -709,7 +564,7 @@ class Submission:
                     progress_logger.set_state(
                         file_path,
                         file_metadata,
-                        state=EncryptionState(encryption_successful=True),
+                        state=EncryptionState(encryption_successful=True, submission_id=self.submission_id),
                     )
                 except Exception as e:
                     self.__log.error("Encryption failed for '%s'", str(file_path))
@@ -717,7 +572,9 @@ class Submission:
                     progress_logger.set_state(
                         file_path,
                         file_metadata,
-                        state=EncryptionState(encryption_successful=False, errors=[str(e)]),
+                        state=EncryptionState(
+                            encryption_successful=False, errors=[str(e)], submission_id=self.submission_id
+                        ),
                     )
 
                     raise e
@@ -829,14 +686,14 @@ class EncryptedSubmission:
         self,
         files_dir: str | PathLike,
         progress_log_file: str | PathLike,
-        recipient_private_key_path: str | PathLike,
+        recipient_private_key: X25519PrivateKey,
     ) -> Submission:
         """
         Decrypt this encrypted submission with a private key using Crypt4Gh
 
         :param files_dir: Output directory of the decrypted files
         :param progress_log_file: Path to a log file to store the progress of the decryption process
-        :param recipient_private_key_path: Path to the private key file which will be used for decryption
+        :param recipient_private_key: The private key which will be used for decryption
         :return: Submission instance
         """
         # Import here to avoid circular import issues
@@ -853,12 +710,6 @@ class EncryptedSubmission:
 
         progress_logger = FileProgressLogger[DecryptionState](log_file_path=progress_log_file)
 
-        try:
-            private_key = Crypt4GH.retrieve_private_key(recipient_private_key_path)
-        except Exception as e:
-            self.__log.error(f"Error preparing private key: {e}")
-            raise e
-
         for encrypted_file_path, file_metadata in self.encrypted_files.items():
             logged_state = progress_logger.get_state(encrypted_file_path, file_metadata)
             self.__log.debug("state for %s: %s", encrypted_file_path, logged_state)
@@ -870,6 +721,7 @@ class EncryptedSubmission:
             if (
                 (logged_state is None)
                 or not logged_state.get("decryption_successful", False)
+                or logged_state.get("submission_id") != self.submission_id
                 or not decrypted_file_path.is_file()
             ):
                 self.__log.info(
@@ -879,13 +731,13 @@ class EncryptedSubmission:
                 )
 
                 try:
-                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, private_key)
+                    Crypt4GH.decrypt_file(encrypted_file_path, decrypted_file_path, recipient_private_key)
 
                     self.__log.info(f"Decryption complete for {str(encrypted_file_path)}. ")
                     progress_logger.set_state(
                         encrypted_file_path,
                         file_metadata,
-                        state=DecryptionState(decryption_successful=True),
+                        state=DecryptionState(decryption_successful=True, submission_id=self.submission_id),
                     )
                 except Exception as e:
                     self.__log.error("Decryption failed for '%s'", str(encrypted_file_path))
@@ -893,7 +745,9 @@ class EncryptedSubmission:
                     progress_logger.set_state(
                         encrypted_file_path,
                         file_metadata,
-                        state=DecryptionState(decryption_successful=False, errors=[str(e)]),
+                        state=DecryptionState(
+                            decryption_successful=False, errors=[str(e)], submission_id=self.submission_id
+                        ),
                     )
 
                     raise e
@@ -910,9 +764,3 @@ class EncryptedSubmission:
             metadata_dir=self.metadata_dir,
             files_dir=files_dir,
         )
-
-
-class SubmissionValidationError(Exception):
-    """Exception raised when validation of a submission fails"""
-
-    pass

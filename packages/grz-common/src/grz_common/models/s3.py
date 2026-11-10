@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import AnyHttpUrl, AnyUrl
+from pydantic import AnyHttpUrl, AnyUrl, SecretStr
 
 from .base import IgnoringBaseModel, IgnoringBaseSettings
 
@@ -22,30 +22,34 @@ class ProxyOptions(IgnoringBaseModel):
     """
 
 
-class S3Options(IgnoringBaseModel):
-    endpoint_url: AnyHttpUrl
+class S3ConnectionBase(IgnoringBaseModel):
     """
-    The URL for the S3 service.
+    Base configuration for S3 connection details.
     """
 
-    bucket: str
+    endpoint_url: AnyHttpUrl | None = None
     """
-    The name of the S3 bucket.
+    The URL for the S3 service.
+    If undefined, the default AWS endpoint is used.
     """
 
     access_key: str | None = None
     """
     The access key for the S3 bucket.
-    If undefined, it is read from the AWS_ACCESS_KEY_ID environment variable.
+    If neither this field nor ``secret`` is set, boto3 looks for credentials itself,
+    for example in ``AWS_ACCESS_KEY_ID`` and ``AWS_SECRET_ACCESS_KEY``.
+    Setting only one of the two fails.
     """
 
-    secret: str | None = None
+    secret: SecretStr | None = None
     """
     The secret key for the S3 bucket.
-    If undefined, it is read from the AWS_SECRET_ACCESS_KEY environment variable.
+    If neither this field nor ``access_key`` is set, boto3 looks for credentials itself,
+    for example in ``AWS_ACCESS_KEY_ID`` and ``AWS_SECRET_ACCESS_KEY``.
+    Setting only one of the two fails.
     """
 
-    session_token: str | None = None
+    session_token: SecretStr | None = None
     """
     The session token for temporary credentials (optional).
     """
@@ -94,6 +98,17 @@ class S3Options(IgnoringBaseModel):
     multipart_chunksize: int = 256 * 1024**2
     """
     The size of the chunks to use for multipart uploads in bytes.
+    """
+
+
+class S3Options(S3ConnectionBase):
+    """
+    S3ConnectionBase with a mandatory bucket name.
+    """
+
+    bucket: str
+    """
+    The name of the S3 bucket.
     """
 
 

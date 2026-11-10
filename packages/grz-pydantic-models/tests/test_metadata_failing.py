@@ -4,40 +4,29 @@ import importlib.resources
 
 import pytest
 from grz_pydantic_models.submission.metadata.v1 import GrzSubmissionMetadata
+from grz_pydantic_models_testing import failing_metadata
 from pydantic import ValidationError
 
-from . import resources
+resource_files = importlib.resources.files(failing_metadata)
 
-resource_files = importlib.resources.files(resources)
+error_types = (ValueError, ValidationError, SystemExit)
 
-metadata_missing_read_order = resource_files.joinpath("failing_metadata/missing-read-order.json")
-metadata_missing_vcf_file = resource_files.joinpath("failing_metadata/missing-vcf-file.json")
-metadata_missing_fastq_r2 = resource_files.joinpath("failing_metadata/missing-fastq-r2.json")
-metadata_no_target_regions = resource_files.joinpath("failing_metadata/missing-target-regions.json")
-metadata_incompatible_reference_genomes = resource_files.joinpath(
-    "failing_metadata/incompatible-reference-genomes.json"
+
+@pytest.mark.parametrize(
+    "fixture_name,expected_match",
+    (
+        ("missing-read-order.json", "No read order specified for FASTQ file"),
+        ("missing-target-regions.json", "BED file missing for lab datum"),
+        ("missing-fastq-r2.json", "Paired end sequencing layout but not there is not exactly one R1 and one R2"),
+        ("incompatible-reference-genomes.json", "Incompatible reference genomes found"),
+        ("duplicate-run-id.json", "must have a unique combination of flowcell_id, lane_id, and read_order"),
+    ),
 )
-metadata_duplicate_run_id = resource_files.joinpath("failing_metadata/duplicate-run-id.json")
+def test_submission_metadata_fails(fixture_name: str, expected_match: str):
+    with pytest.raises(error_types, match=expected_match):
+        GrzSubmissionMetadata.model_validate_json(resource_files.joinpath(fixture_name).read_text())
 
 
-def test_submission_metadata_fails():
-    error_types = (ValueError, ValidationError, SystemExit)
-    with pytest.raises(error_types, match="No read order specified for FASTQ file"):
-        GrzSubmissionMetadata.model_validate_json(metadata_missing_read_order.read_text())
-
-    with pytest.raises(error_types, match="BED file missing for lab datum"):
-        GrzSubmissionMetadata.model_validate_json(metadata_no_target_regions.read_text())
-
-    # missing VCF is allowed
-    GrzSubmissionMetadata.model_validate_json(metadata_missing_vcf_file.read_text())
-
-    with pytest.raises(
-        error_types, match="Paired end sequencing layout but not there is not exactly one R1 and one R2"
-    ):
-        GrzSubmissionMetadata.model_validate_json(metadata_missing_fastq_r2.read_text())
-
-    with pytest.raises(error_types, match="Incompatible reference genomes found"):
-        GrzSubmissionMetadata.model_validate_json(metadata_incompatible_reference_genomes.read_text())
-
-    with pytest.raises(error_types, match="must have a unique combination of flowcell_id, lane_id, and read_order"):
-        GrzSubmissionMetadata.model_validate_json(metadata_duplicate_run_id.read_text())
+def test_submission_metadata_missing_vcf_file_passes():
+    """A missing VCF file is allowed."""
+    GrzSubmissionMetadata.model_validate_json(resource_files.joinpath("missing-vcf-file.json").read_text())

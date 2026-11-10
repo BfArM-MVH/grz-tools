@@ -1,5 +1,176 @@
 # Changelog
 
+## [4.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.3...grz-common-v4.1.0) (2026-11-10)
+
+
+### Features
+
+* **grz-common:** derive the upload timing of a submission from its ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** add `Submission.is_qc_passed_initial` ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** record when a submission's upload started and finished ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-pydantic-models:** add `month_date_bounds` ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grzctl:** add `report monitoring` for the GDC monitoring dashboard ([#741](https://github.com/BfArM-MVH/grz-tools/issues/741)) ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+
+
+### Bug Fixes
+
+* **grz-common:** drop SQLite's DDL banner too, so cron runs stay silent ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** require grz-pydantic-models 4.2.0 ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grzctl:** show only the last run of a resumed upload in grzctl list ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+
+
+### Documentation
+
+* **grz-cli,grzctl:** add example config files ([#750](https://github.com/BfArM-MVH/grz-tools/issues/750)) ([3baa49a](https://github.com/BfArM-MVH/grz-tools/commit/3baa49a4d2a06defba315e7ccaa15fcda758fe30)), closes [#749](https://github.com/BfArM-MVH/grz-tools/issues/749)
+
+## [4.0.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.2...grz-common-v4.0.3) (2026-10-29)
+
+
+### Bug Fixes
+
+* **grz-common:** remove range header ([#739](https://github.com/BfArM-MVH/grz-tools/issues/739)) ([e71ac19](https://github.com/BfArM-MVH/grz-tools/commit/e71ac198644b9a1e7d8778e03215deeeb9673c30))
+
+## [4.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.1...grz-common-v4.0.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **grz-common:** require certifi &gt;=2026.10.19 and urllib3 &gt;=2.8.0 ([#734](https://github.com/BfArM-MVH/grz-tools/issues/734)) ([337183e](https://github.com/BfArM-MVH/grz-tools/commit/337183eb1337bfc5fe409210d3fcfde9ccdc46b2))
+
+## [4.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.0...grz-common-v4.0.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **grz-common,grzctl:** write CLI log records apart from tqdm progress ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** count inboxes and expired consents in db backfill dry runs ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** print the db backfill report on stdout and logs on stderr ([#705](https://github.com/BfArM-MVH/grz-tools/issues/705)) ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+* **grzctl:** show [dry-run] and full error text in db backfill ([7436099](https://github.com/BfArM-MVH/grz-tools/commit/74360993747dbcbe010074da286328e2f6ae7bd8))
+
+## [4.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v3.0.0...grz-common-v4.0.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** the grzctl config has no `keys` section. Each inbox names its private key. An inbox's `private_key_passphrase` comes before `C4GH_PASSPHRASE`.
+* **grz-cli:** `Crypt4GH.prepare_c4gh_keys`, `Crypt4GH.decrypt_file`, `Submission.encrypt`, `EncryptedSubmission.decrypt`, `Worker.encrypt` and `Worker.decrypt` take `X25519PrivateKey` and `X25519PublicKey` objects instead of paths. The `Crypt4GH` key loaders return these objects.
+* **grzctl,grz-common:** `S3ConnectionBase.secret`, `S3ConnectionBase.session_token`, `Author.private_key_passphrase`, `InboxConfig.private_key_passphrase`, `InboxTarget.private_key_passphrase` and `PruefberichtModel.client_secret` are now `SecretStr | None`. Read them with `.get_secret_value()` or `grz_common.models.base.get_secret_value()`.
+* **grzctl:** unified config ([#635](https://github.com/BfArM-MVH/grz-tools/issues/635))
+
+### Features
+
+* **grz-cli,grz-common,grz-db,grzctl:** record why a submission failed and classify S3 errors ([#690](https://github.com/BfArM-MVH/grz-tools/issues/690)) ([f1d3fc8](https://github.com/BfArM-MVH/grz-tools/commit/f1d3fc804387c4fb6de861cccb6a99b521ac0056))
+* **grz-cli:** accept the submitter private key inline ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-cli:** add keys.submitter_private_key_passphrase ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** load crypt4gh keys in memory ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** recommend grz-cli 3.0.0 in the bundled version policy ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grz-common:** sign encrypted files with the submitter's private key ([#691](https://github.com/BfArM-MVH/grz-tools/issues/691)) ([449258c](https://github.com/BfArM-MVH/grz-tools/commit/449258c4bac0d3e65587f5e6744c71f7f759b8fa))
+* **grz-db,grzctl:** track which inbox a submission came from and use it for decryption ([#696](https://github.com/BfArM-MVH/grz-tools/issues/696)) ([ce95f8c](https://github.com/BfArM-MVH/grz-tools/commit/ce95f8c8d472f36ea62b47c7527e0d03a58647b0))
+* **grz-pydantic-models,grz-common:** keep a parsed submission lossless and redact it by one rule ([#654](https://github.com/BfArM-MVH/grz-tools/issues/654)) ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-pydantic-models:** add get_raw_dict for the document as ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grzctl,grz-common:** store sensitive config values as SecretStr and dump config without revealing them ([#680](https://github.com/BfArM-MVH/grz-tools/issues/680)) ([b383ac4](https://github.com/BfArM-MVH/grz-tools/commit/b383ac49a1f0dd5ec8d05aee7b645c2252ca40b3))
+* **grzctl:** accept every crypt4gh key in the config inline ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl:** Centralized version.json and its distribution using grzctl ([#667](https://github.com/BfArM-MVH/grz-tools/issues/667)) ([6ed9cb0](https://github.com/BfArM-MVH/grz-tools/commit/6ed9cb04bede9fc9b34b7ce6d3aa9a0df9d42ae4))
+* **grzctl:** configure each crypt4gh key where grzctl uses it ([#694](https://github.com/BfArM-MVH/grz-tools/issues/694)) ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl:** sign archived files with the private key of the ([ce95f8c](https://github.com/BfArM-MVH/grz-tools/commit/ce95f8c8d472f36ea62b47c7527e0d03a58647b0))
+* **grzctl:** unified config ([#635](https://github.com/BfArM-MVH/grz-tools/issues/635)) ([f993399](https://github.com/BfArM-MVH/grz-tools/commit/f993399d433c246f4cb4f162d5122397283f6bce))
+
+
+### Bug Fixes
+
+* **grz-cli,grz-common,grz-db,grzctl:** require grz-common 4, grz-db 4 and grz-pydantic-models 4 ([#688](https://github.com/BfArM-MVH/grz-tools/issues/688)) ([bf3e6bf](https://github.com/BfArM-MVH/grz-tools/commit/bf3e6bf4f2ed21cd1c7bdf4d6aa8710ece4f60d3))
+* **grz-common:** keep crypt4gh private keys out of DEBUG logs ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** KeyModel/KeyConfigModel use BaseModel not BaseSettings ([f993399](https://github.com/BfArM-MVH/grz-tools/commit/f993399d433c246f4cb4f162d5122397283f6bce))
+* **grz-common:** leave the raw input out of config validation errors ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grz-common:** require grz-pydantic-models &gt;=3.1 for ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** apply a change set as one transaction ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grz-db:** export db_backend from grz_db.testing ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+* **grzctl,grz-common,grz-cli:** drop grzctl submit and grzctl's grz-cli dependency ([#675](https://github.com/BfArM-MVH/grz-tools/issues/675)) ([e6f27c1](https://github.com/BfArM-MVH/grz-tools/commit/e6f27c1714fc73d5159b29356914bc345a797c0a))
+* **grzctl:** keep the stored upload date in db submission populate ([f1d3fc8](https://github.com/BfArM-MVH/grz-tools/commit/f1d3fc804387c4fb6de861cccb6a99b521ac0056))
+* **grzctl:** mask db.author.private_key in dump-config ([06f12e6](https://github.com/BfArM-MVH/grz-tools/commit/06f12e625878c87413fbc1afa77ce8708c03a3df))
+* **grzctl:** name the submission fields the database actually has ([ec46603](https://github.com/BfArM-MVH/grz-tools/commit/ec46603c8659d3e12759fa895e1593916822d36d))
+
+## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.1.0...grz-common-v3.0.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grz-pydantic-models:** a consent dateTime stating a time must spell out seconds and separate date from time by T, and a date must be a dashed calendar date, as the FHIR dateTime regex requires. Metadata stating a bound in any other form is now rejected rather than parsed. The four fields hold a FhirDateTime rather than a datetime, keeping the value as submitted and resolving to a moment through .first_moment or .last_moment. A naive datetime handed to one of them in code is refused rather than read as UTC.
+* **grz-pydantic-models:** ResearchConsent.consents_to_research, and with it the consented flag grz-db records for a submission, now returns False for every consent whose status is not active. Metadata that declares a 2025 researchConsent schemaVersion and leaves any provision period open-ended is now rejected rather than accepted.
+
+### Features
+
+* **grz-common:** Log hostname ([#599](https://github.com/BfArM-MVH/grz-tools/issues/599)) ([9e5b74e](https://github.com/BfArM-MVH/grz-tools/commit/9e5b74e9643f9f8f426bdcd2af2aee7fd81c4acc))
+* **grz-common:** report a consent dateTime without a timezone when ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+* **grz-db:** let a submission diff withhold overwrites outside an ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+* **grzctl, grz-db, grz-common:** Metadata schema version check via version.json ([#624](https://github.com/BfArM-MVH/grz-tools/issues/624)) ([c6f1e7c](https://github.com/BfArM-MVH/grz-tools/commit/c6f1e7ce07cd5772beee5551e0b95b02a9f83914))
+* **grzctl:** overwrite selected fields during db backfill ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+
+
+### Bug Fixes
+
+* **grz-common,grz-db:** map duplicate tanG and upload errors correctly   ([#617](https://github.com/BfArM-MVH/grz-tools/issues/617)) ([7c6fe27](https://github.com/BfArM-MVH/grz-tools/commit/7c6fe271a15011a6925a2f2a8a1167f832d78f9c))
+* **grz-common,grz-db:** require grz-pydantic-models 3 ([0d17b7e](https://github.com/BfArM-MVH/grz-tools/commit/0d17b7e81ded026ee41762d02b0f84c4a1b2f9b3))
+* **grz-pydantic-models-testing:** require grz-pydantic-models 3 ([0d17b7e](https://github.com/BfArM-MVH/grz-tools/commit/0d17b7e81ded026ee41762d02b0f84c4a1b2f9b3))
+* **grz-pydantic-models:** grant research consent only while in force ([#642](https://github.com/BfArM-MVH/grz-tools/issues/642)) ([0d17b7e](https://github.com/BfArM-MVH/grz-tools/commit/0d17b7e81ded026ee41762d02b0f84c4a1b2f9b3))
+* **grz-pydantic-models:** read consent dateTimes as FHIR defines them ([#646](https://github.com/BfArM-MVH/grz-tools/issues/646)) ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f)), closes [#645](https://github.com/BfArM-MVH/grz-tools/issues/645)
+* **grzctl:** require grz-db 2.2 ([c6c4f2f](https://github.com/BfArM-MVH/grz-tools/commit/c6c4f2ff051f581430653b2efcc4b156fe5ea33f))
+
+## [2.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.0.1...grz-common-v2.1.0) (2026-05-19)
+
+
+### Features
+
+* **grz-db,grz-common:** clean up SubmissionDb.populate API surface ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
+
+### Bug Fixes
+
+* **grz-common,grz-db,grzctl:** move populate logic into SubmissionDb ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grz-pydantic-models,grz-db:** align inconsistent version pins ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+* **grzctl:** correct stale grz-cli hint in submission-not-found errors ([a0fc796](https://github.com/BfArM-MVH/grz-tools/commit/a0fc7961e30c7689d469ecf4fcb3eec65f4a8398))
+
+## [2.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v2.0.0...grz-common-v2.0.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **grz-common:** drop pynacl, use cryptography for X25519 keygen ([#572](https://github.com/BfArM-MVH/grz-tools/issues/572)) ([ea7b3f3](https://github.com/BfArM-MVH/grz-tools/commit/ea7b3f34446e855bcc7d1a551542ae5932577872))
+
+## [2.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.6.1...grz-common-v2.0.0) (2026-05-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501))
+
+### Features
+
+* **grz-cli,grz-common:** Add version checks to upload/submit ([#477](https://github.com/BfArM-MVH/grz-tools/issues/477)) ([289683d](https://github.com/BfArM-MVH/grz-tools/commit/289683d6154df7fb175ad4db9671f28e1cdd0eb3))
+* **grz-cli,grzctl,grz-common,grz-check:** use grz check python bindings ([#554](https://github.com/BfArM-MVH/grz-tools/issues/554)) ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-cli,grzctl,grz-common:** use grz-check python bindings instead ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-tools:** add structured failure reason tracking for submissions ([#544](https://github.com/BfArM-MVH/grz-tools/issues/544)) ([65a2143](https://github.com/BfArM-MVH/grz-tools/commit/65a214389e91be00e99fb812293bfe40cca45cf0))
+* **grzctl, grz-db, grz-pydantic-models:** Improved populate ([#547](https://github.com/BfArM-MVH/grz-tools/issues/547)) ([8cbf232](https://github.com/BfArM-MVH/grz-tools/commit/8cbf2323747a3a2c35623b80f7ad1ef420217f07))
+* **grzctl,grz-cli,grz-common:** Merge multiple configuration files ([#490](https://github.com/BfArM-MVH/grz-tools/issues/490)) ([8ae881d](https://github.com/BfArM-MVH/grz-tools/commit/8ae881d4f65882ae5d8823bdb00971eec246a395))
+* **grzctl:** Automatically update submission state upon subcommand invocation ([#501](https://github.com/BfArM-MVH/grz-tools/issues/501)) ([8953102](https://github.com/BfArM-MVH/grz-tools/commit/895310211d36796d995c37f1929a12458195d4c7))
+* **grzctl:** Improved redaction during archival ([#517](https://github.com/BfArM-MVH/grz-tools/issues/517)) ([a10e63f](https://github.com/BfArM-MVH/grz-tools/commit/a10e63ff4eadfc09b060509f004518dba01154df))
+* **grzctl:** Introduce "backfill" command to re-read metadata from the archive ([#559](https://github.com/BfArM-MVH/grz-tools/issues/559)) ([9e83ad3](https://github.com/BfArM-MVH/grz-tools/commit/9e83ad31dbb9dd44f18d1f0ed1dbef82f4f1f63e))
+
+
+### Bug Fixes
+
+* **grz-check:** actually calculate checksums in python exposed API ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** add return types to public python functions ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** do not silently ignore pair errors ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** expose validate_raw* functions that also return a ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** set source.name as path in report as a fallback ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-check:** use 8MB as buffer size to match python codebase defaults ([5dce167](https://github.com/BfArM-MVH/grz-tools/commit/5dce16733e549e92de546f298d821f6202bcee9f))
+* **grz-cli:** Submission id upload tracking ([#556](https://github.com/BfArM-MVH/grz-tools/issues/556)) ([66d185a](https://github.com/BfArM-MVH/grz-tools/commit/66d185a73cae217d5ffb3995bbaff61502723858))
+* **grz-common,grzctl,grz-cli:** add pynacl to dependencies, update crypt4gh ([#560](https://github.com/BfArM-MVH/grz-tools/issues/560)) ([9060876](https://github.com/BfArM-MVH/grz-tools/commit/9060876094d9f2a97ea7d351e0adcfc34a6bbd39))
+* **grz-common,grzctl,grz-cli:** update crypt4gh dependency version ([9060876](https://github.com/BfArM-MVH/grz-tools/commit/9060876094d9f2a97ea7d351e0adcfc34a6bbd39))
+* **grz-common:** add pynacl to dependencies ([9060876](https://github.com/BfArM-MVH/grz-tools/commit/9060876094d9f2a97ea7d351e0adcfc34a6bbd39))
+* **repo:** Update dependencies ([#498](https://github.com/BfArM-MVH/grz-tools/issues/498)) ([368dfdb](https://github.com/BfArM-MVH/grz-tools/commit/368dfdbaa703f17f0c290ea051be30f9be4bebf3))
+
 ## [1.6.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v1.6.0...grz-common-v1.6.1) (2025-12-14)
 
 

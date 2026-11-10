@@ -3,17 +3,19 @@
 import csv
 import datetime
 import itertools
+import json
 import logging
+import statistics
 import typing
 from collections import defaultdict
 from enum import StrEnum
 from operator import attrgetter
 from pathlib import Path
-from typing import Any
 
 import click
-import grz_common.cli as grzctl
+import requests
 import sqlalchemy as sa
+from grz_common.transfer import UploadTiming
 from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
@@ -23,13 +25,17 @@ from grz_db.models.submission import (
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
+    SubmissionStateLog,
 )
-from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
+from grz_pydantic_models.dates import date_to_quarter_year, month_date_bounds, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import GenomicStudyType, Relation, SubmissionType
+from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF
 from sqlalchemy import func as sqlfn
-from sqlmodel import select
+from sqlmodel import Session, select
 
-from ..models.config import ReportConfig
+from .. import __version__
+from ..commands import grzctl_configuration
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
@@ -40,19 +46,18 @@ def get_submission_db_instance(db_url: str, author: Author | None = None) -> Sub
 
 
 @click.group()
-@grzctl.configuration
+@grzctl_configuration
 @click.pass_context
-def report(ctx: click.Context, configuration: dict[str, Any], config_file: tuple[Path]):
+def report(ctx: click.Context, configuration: GrzctlConfig):
     """
     Generate various reports related to GRZ activities.
     """
-    config = ReportConfig.model_validate(configuration)
-    if not config:
-        raise ValueError("DB config not found")
+    db = configuration.db
 
     ctx.obj = {
-        "db_url": config.db.database_url,
-        "grz_id": config.identifiers.grz,
+        "db_url": db.database_url,
+        "grz_id": configuration.identifiers.grz,
+        "submitter_ids": list(configuration.leistungserbringer),
     }
 
 
@@ -122,23 +127,25 @@ def _get_consent_revocations(
 
     A donor pseudonym is only unique within a single submitter.
 
+    The index donor has no pseudonym of its own: its donorPseudonym is the literal "index", so
+    ``submissions.local_case_id`` stands in for it here. ``Submission.pseudonym``, the case's
+    psn, takes over once the local case ID is removed; keying on it while no psn is assigned
+    would merge every index donor of a submitter into one. Until then the two index counts are
+    only as good as that localCaseId. A localCaseId reused across patients merges those
+    patients into a single donor.
+    That donor's consent history is then several people's, read in upload order. The rule below
+    decides a revocation from that mixture. The cases migration logs these keys once, when
+    ``grzctl db upgrade`` runs; case tracking refuses to group their submissions for the same
+    reason.
+
     The basic logic for determining revocation is:
     "unconsented at end of quarter" AND ("consented at end of prior quarter" OR "consented sometime within current quarter")
     """
-    subquery_quarter_submissions = (
-        select(Submission)
-        .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
-        .subquery()
-    )
     query_quarter_donors = (
-        select(
-            subquery_quarter_submissions.c.data_node_id,
-            subquery_quarter_submissions.c.submitter_id,
-            subquery_quarter_submissions.c.pseudonym,
-            Donor,
-        )
-        .join(subquery_quarter_submissions, subquery_quarter_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_quarter_submissions.c.submission_date)
+        select(Submission.data_node_id, Submission.submitter_id, Submission.local_case_id, Donor)
+        .join_from(Donor, Submission, Submission.id == Donor.submission_id)  # type: ignore[arg-type]
+        .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+        .order_by(Submission.submission_uploaded_date)  # type: ignore[arg-type]
     )
     quarter_donors = session.exec(query_quarter_donors).all()
 
@@ -147,8 +154,8 @@ def _get_consent_revocations(
     # key is (data_node_id, submiter_id, pseudonym)
     relation_by_donor: dict[tuple[str, str, str], Relation] = {}
     # iterate over donors from earliest submission to latest, tracking all consent states
-    for data_node_id, submitter_id, index_pseudonym, donor in quarter_donors:
-        pseudonym = index_pseudonym if donor.relation == Relation.index_ else donor.pseudonym
+    for data_node_id, submitter_id, index_local_case_id, donor in quarter_donors:
+        pseudonym = index_local_case_id if donor.relation == Relation.index_ else donor.pseudonym
         quarter_consent_states_by_donor[
             (
                 data_node_id,
@@ -168,23 +175,18 @@ def _get_consent_revocations(
         relation_by_donor[(data_node_id, submitter_id, pseudonym)] = donor.relation
 
     # now query before the current quarter
-    subquery_prior_submissions = select(Submission).where(Submission.submission_date < quarter_start_date).subquery()
     query_prior_donors = (
-        select(
-            subquery_prior_submissions.c.data_node_id,
-            subquery_prior_submissions.c.submitter_id,
-            subquery_prior_submissions.c.pseudonym,
-            Donor,
-        )
-        .join(subquery_prior_submissions, subquery_prior_submissions.c.id == Donor.submission_id)
-        .order_by(subquery_prior_submissions.c.submission_date)
+        select(Submission.data_node_id, Submission.submitter_id, Submission.local_case_id, Donor)
+        .join_from(Donor, Submission, Submission.id == Donor.submission_id)  # type: ignore[arg-type]
+        .where(Submission.submission_uploaded_date < quarter_start_date)
+        .order_by(Submission.submission_uploaded_date)  # type: ignore[arg-type]
     )
     prior_donors = session.exec(query_prior_donors).all()
 
     prior_consent_state_by_donor: dict[tuple[str, str, str, str], bool] = {}
     # iterate over donors from earliest submission to latest, later overriding earlier
-    for data_node_id, submitter_id, index_pseudonym, donor in prior_donors:
-        pseudonym = index_pseudonym if donor.relation == Relation.index_ else donor.pseudonym
+    for data_node_id, submitter_id, index_local_case_id, donor in prior_donors:
+        pseudonym = index_local_case_id if donor.relation == Relation.index_ else donor.pseudonym
         # skip over donors that don't show up in current quarter
         if (data_node_id, submitter_id, pseudonym, "mv") in quarter_consent_states_by_donor:
             prior_consent_state_by_donor[
@@ -230,11 +232,11 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
     node_submitter_id_combos: set[tuple[str | None, str | None]] = set()
-    with database._get_session() as session:
+    with database.transaction() as session:
         # number_of_end-to-end_tests
         stmt_number_of_end_to_end_tests = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .where(Submission.submission_type == SubmissionType.test)
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
         )
@@ -246,7 +248,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_passed_end-to-end_tests
         stmt_number_of_passed_end_to_end_tests = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .where(Submission.submission_type == SubmissionType.test)
             .filter(Submission.basic_qc_passed)  # type: ignore[arg-type]
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
@@ -260,7 +262,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_submissions_*
         stmt_number_of_submissions = (
             select(Submission.data_node_id, Submission.submitter_id, Submission.genomic_study_type, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .group_by(Submission.data_node_id, Submission.submitter_id, Submission.genomic_study_type)  # type: ignore[arg-type]
         )
         number_of_submissions_by_genomic_study_type = {
@@ -275,7 +277,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_failed_qcs
         stmt_number_of_failed_qcs = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
         )
@@ -292,7 +294,7 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         # number_of_deletions
         stmt_number_of_deletions = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
             .join(
                 select(ChangeRequestLog.submission_id)
                 .where(ChangeRequestLog.change == ChangeRequestEnum.DELETE)
@@ -370,12 +372,21 @@ class DetailedQCPassedReportState(StrEnum):
     NO = "no"
 
 
-def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, quarter: int) -> None:
+def _detailed_qc_passed_state(submission: Submission) -> DetailedQCPassedReportState:
+    """Report the stored detailed QC verdict, which is unset until detailed QC has run."""
+    if submission.detailed_qc_passed is None:
+        return DetailedQCPassedReportState.NOT_PERFORMED
+    return DetailedQCPassedReportState.YES if submission.detailed_qc_passed else DetailedQCPassedReportState.NO
+
+
+def _dump_dataset_report(
+    output_path: Path, database: SubmissionDb, year: int, quarter: int, with_submission_ids: bool = False
+) -> None:
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
-    with database._get_session() as session:
+    with database.transaction() as session:
         query_quarter_submissions = (
-            select(Submission).where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            select(Submission).where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
         )
         submissions = session.exec(query_quarter_submissions).all()
 
@@ -437,13 +448,10 @@ def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, q
                 "relation",
                 "sequenceSubtype",
             ]
+            + (["submission_id"] if with_submission_ids else [])
         )
         for submission in submissions:
-            detailed_qc_passed = DetailedQCPassedReportState.NOT_PERFORMED
-            if submission.detailed_qc_passed is not None:
-                detailed_qc_passed = (
-                    DetailedQCPassedReportState.YES if submission.detailed_qc_passed else DetailedQCPassedReportState.NO
-                )
+            detailed_qc_passed = _detailed_qc_passed_state(submission)
             if submission.id in id2mv_consented:
                 mv_consented = "yes" if id2mv_consented[submission.id] else "no"
             else:
@@ -475,40 +483,61 @@ def _dump_dataset_report(output_path: Path, database: SubmissionDb, year: int, q
                     "index",
                     id2sequence_subtypes_index.get(submission.id, "NA"),
                 ]
+                + ([submission.id] if with_submission_ids else [])
             )
 
 
-def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarter: int) -> None:
+def _dump_qc_report(
+    output_path: Path, database: SubmissionDb, year: int, quarter: int, with_submission_ids: bool = False
+) -> None:
     quarter_start_date, quarter_end_date = quarter_date_bounds(year=year, quarter=quarter)
 
-    with database._get_session() as session:
-        query_submissions_that_failed_detailed_qc = (
+    with database.transaction() as session:
+        # The quarterly QC report lists submissions that failed the detailed QC (a computed
+        # metric below the required threshold) as well as submissions that passed but carry a
+        # deviation of more than PCT_DEV_CUTOFF percent between the computed and provided values
+        # on any metric. BfArM requires both to be reported; the latter does not count as a
+        # failure. The detailed_qc_passed and deviation_exceeds_tolerance columns tell the two
+        # reasons apart per row.
+        submission_ids_with_deviation = select(DetailedQCResult.submission_id).where(
+            sa.or_(
+                sa.not_(DetailedQCResult.percent_bases_above_quality_threshold_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.mean_depth_of_coverage_passed_qc),  # type: ignore[call-overload]
+                sa.not_(DetailedQCResult.targeted_regions_above_min_coverage_passed_qc),  # type: ignore[call-overload]
+            )
+        )
+        query_submissions_to_report = (
             select(Submission)
-            .where(Submission.submission_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
-            .filter(sa.not_(Submission.detailed_qc_passed))  # type: ignore[call-overload]
+            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
+            .filter(
+                sa.or_(
+                    sa.not_(Submission.detailed_qc_passed),  # type: ignore[call-overload]
+                    Submission.id.in_(submission_ids_with_deviation),  # type: ignore[attr-defined]
+                )
+            )
         )
-        submissions_that_failed_detailed_qc = session.exec(query_submissions_that_failed_detailed_qc).all()
+        submissions_to_report = session.exec(query_submissions_to_report).all()
 
-        subquery_submissions_that_failed_detailed_qc = query_submissions_that_failed_detailed_qc.subquery()
-        query_reports_of_failed_submissions = select(DetailedQCResult).join(
-            subquery_submissions_that_failed_detailed_qc,
-            subquery_submissions_that_failed_detailed_qc.c.id == DetailedQCResult.submission_id,
+        subquery_submissions_to_report = query_submissions_to_report.subquery()
+        query_reports_to_include = select(DetailedQCResult).join(
+            subquery_submissions_to_report,
+            subquery_submissions_to_report.c.id == DetailedQCResult.submission_id,
         )
-        reports_of_failed_submissions = session.exec(query_reports_of_failed_submissions).all()
+        reports_to_include = session.exec(query_reports_to_include).all()
 
-        subquery_reports_of_failed_submissions = query_reports_of_failed_submissions.subquery()
+        subquery_reports_to_include = query_reports_to_include.subquery()
         query_relevant_donors = select(Donor).join(
-            subquery_reports_of_failed_submissions,
-            (subquery_reports_of_failed_submissions.c.submission_id == Donor.submission_id)  # type: ignore[arg-type]
-            & (subquery_reports_of_failed_submissions.c.pseudonym == Donor.pseudonym),
+            subquery_reports_to_include,
+            (subquery_reports_to_include.c.submission_id == Donor.submission_id)  # type: ignore[arg-type]
+            & (subquery_reports_to_include.c.pseudonym == Donor.pseudonym),
         )
         relevant_donors = session.exec(query_relevant_donors).all()
 
     # Note: for future, this join only works because *both* DetailedQCResult
-    # and Donor store index pseudonym as "index", since the submission table
-    # has the index pseudonym
+    # and Donor store the index donor's pseudonym as "index"; the identifier the
+    # submitter uses for the index donor is submissions.local_case_id
     idpseudo2relation = {(donor.submission_id, donor.pseudonym): donor.relation for donor in relevant_donors}
-    id2submission = {submission.id: submission for submission in submissions_that_failed_detailed_qc}
+    id2submission = {submission.id: submission for submission in submissions_to_report}
     with open(output_path, mode="w", encoding="utf-8", newline="") as output_file:
         writer = csv.writer(output_file, delimiter="\t")
         # header
@@ -538,19 +567,30 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
                 "targetedRegionsAboveMinCoverage",
                 "targetedRegionsAboveMinCoverage_detailedQC_passed",
                 "targetedRegionsAboveMinCoverage_detailedQC_deviation%",
+                "detailed_qc_passed",
+                "deviation_exceeds_tolerance",
             ]
+            + (["submission_id"] if with_submission_ids else [])
         )
 
-        for report in reports_of_failed_submissions:
+        for report in reports_to_include:
             submission = id2submission[report.submission_id]
             relation = Relation(idpseudo2relation[(report.submission_id, report.pseudonym)])
+            deviation_exceeds_tolerance = any(
+                abs(deviation) > PCT_DEV_CUTOFF
+                for deviation in (
+                    report.percent_bases_above_quality_threshold_percent_deviation,
+                    report.mean_depth_of_coverage_percent_deviation,
+                    report.targeted_regions_above_min_coverage_percent_deviation,
+                )
+            )
             writer.writerow(
                 [
                     submission.data_node_id,
                     quarter,
                     year,
                     submission.submitter_id,
-                    submission.submission_date,
+                    submission.submission_uploaded_date,
                     submission.submission_type,
                     submission.disease_type,
                     submission.genomic_study_type,
@@ -570,7 +610,10 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
                     report.targeted_regions_above_min_coverage,
                     "yes" if report.targeted_regions_above_min_coverage_passed_qc else "no",
                     report.targeted_regions_above_min_coverage_percent_deviation,
+                    _detailed_qc_passed_state(submission),
+                    "yes" if deviation_exceeds_tolerance else "no",
                 ]
+                + ([report.submission_id] if with_submission_ids else [])
             )
 
 
@@ -595,8 +638,17 @@ def _dump_qc_report(output_path: Path, database: SubmissionDb, year: int, quarte
     ),
     help="Directory to output TSV files. Defaults to current directory.",
 )
+@click.option(
+    "--with-submission-ids",
+    "with_submission_ids",
+    is_flag=True,
+    default=False,
+    help="Append a 'submission_id' column to per-submission tables (dataset and detailed QC).",
+)
 @click.pass_context
-def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_directory: Path | None):
+def quarterly(
+    ctx: click.Context, year: int | None, quarter: int | None, output_directory: Path | None, with_submission_ids: bool
+):
     """
     Generate the tables for the quarterly report.
     """
@@ -625,7 +677,234 @@ def quarterly(ctx: click.Context, year: int | None, quarter: int | None, output_
     _dump_overview_report(overview_output_path, submission_db, year, quarter)
 
     dataset_output_path = output_directory / f"2-Infos_zu_Datensätzen_{grz_id}_{quarter}_{year}.tsv"
-    _dump_dataset_report(dataset_output_path, submission_db, year, quarter)
+    _dump_dataset_report(dataset_output_path, submission_db, year, quarter, with_submission_ids=with_submission_ids)
 
     qc_output_path = output_directory / f"3-Detailprüfung_{grz_id}_{quarter}_{year}.tsv"
-    _dump_qc_report(qc_output_path, submission_db, year, quarter)
+    _dump_qc_report(qc_output_path, submission_db, year, quarter, with_submission_ids=with_submission_ids)
+
+
+def _monitoring_payload(
+    session: Session, grz_id: str, month: datetime.date, submitter_ids: typing.Iterable[str]
+) -> dict[str, typing.Any]:
+    """Per-LE numbers for the GRZ monitoring sheet, as of the end of the month of *month*.
+
+    Every LE in *submitter_ids* gets a row, also without submissions, so the sheet sees the month as
+    complete, and every row has the same keys: a count that has nothing to count is ``0``, a statistic
+    without values ``None``. Sizes are in bytes; the sheet scales them. Months end at midnight UTC, as
+    the database timestamps are in UTC. Only the state and change-request logs are read as of the
+    month's end; QC result, size and consent are the submissions' current values.
+
+    Cumulative, so the sheet derives monthly increments from them, and something recorded late shows up
+    in a later increment instead of getting lost:
+
+    - ``submissions``: non-test submissions uploaded by then. An LE was active in a month if this grew.
+    - ``cases``: initial submissions that passed basic QC and had their Prüfbericht submitted (state
+      Reported) by then. An unset QC flag counts if the submission was archived, since ``grzctl validate``
+      has only set it from 2026-07 on and a failed submission is not archived. Follow-up, addition and
+      correction submissions belong to a case already counted, and a rejected initial submission is no
+      case. The database allows a case only one initial submission with the flag set, so this counts
+      cases, not submissions; for an unset flag, which that index does not cover, it assumes that a case
+      has no second archived initial submission.
+    - ``cases_with_size`` and ``case_bytes``: how many of those initial submissions have a known size,
+      and their total size. The sheet divides the one by the other.
+    - ``archived`` and ``archived_with_size``: the LE's archived submissions that were neither deleted
+      nor transferred to another GRZ, and how many of them have a known size. A missing size is no size
+      of 0, so the sheet can tell the volume below is incomplete.
+    - ``archived_bytes_consented``, ``archived_bytes_non_consented`` and
+      ``archived_bytes_consent_unknown``: their total known size by research consent. Metadata without
+      a research consent is stored as ``False``, so it is non-consented, as in ``grzctl archive``.
+      Unknown means the database holds no value.
+    - ``timed_uploads``, ``timed_upload_bytes`` and ``timed_upload_seconds``: number, total size and
+      total duration of the LE's non-test uploads with a known duration that finished by then, as
+      ``grzctl download`` recorded them (:attr:`Submission.upload_started_at`). A resumed upload and an
+      upload without the uploader's ``version`` marker have none: the first took longer than its last
+      run, and for the second a resumption cannot be detected (``upload_resumed`` is NULL). The sheet
+      divides the increments of the bytes by those of the seconds to get the mean upload speed.
+
+    Of the month alone, because they cannot be accumulated:
+
+    - ``upload_speed_{median,min,max,sd}_mb_per_s``: median, minimum, maximum and population standard
+      deviation of the upload speed of those timed uploads that finished during the month.
+    """
+    first, last = month_date_bounds(month.year, month.month)
+    start = datetime.datetime.combine(first, datetime.time(), datetime.UTC)
+    cutoff = datetime.datetime.combine(last + datetime.timedelta(days=1), datetime.time(), datetime.UTC)
+    real = sa.and_(
+        Submission.submitter_id.is_not(None),  # type: ignore[union-attr]
+        Submission.submission_type != SubmissionType.test,  # type: ignore[arg-type]
+    )
+
+    def logged(log: typing.Any, column: typing.Any, kind: str) -> sa.ColumnElement[bool]:
+        """A log entry of *kind* for the submission before the cutoff."""
+        return sa.exists().where(log.submission_id == Submission.id, column == kind, log.timestamp < cutoff)
+
+    reported = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.REPORTED)
+    archived = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.ARCHIVED)
+    # a deleted submission is gone, a transferred one is held by another GRZ: neither is archived here anymore
+    gone = sa.or_(
+        logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.DELETE),
+        logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.TRANSFER),
+    )
+    with_size = sqlfn.count(Submission.submission_size)  # type: ignore[arg-type]
+    total_size = sqlfn.coalesce(sqlfn.sum(Submission.submission_size), 0)
+
+    submissions: dict[str, int] = dict(
+        session.execute(
+            select(Submission.submitter_id, sqlfn.count(1))
+            .where(real, Submission.submission_uploaded_date <= last)  # type: ignore[operator]
+            .group_by(Submission.submitter_id)
+        )
+        .tuples()
+        .all()
+    )
+    cases = {
+        submitter_id: (count, sized, int(total))
+        for submitter_id, count, sized, total in session.execute(
+            select(Submission.submitter_id, sqlfn.count(1), with_size, total_size)
+            .where(
+                real,
+                Submission.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
+                # an unset flag (set by ``grzctl validate`` only from 2026-07 on) counts once archived:
+                # a submission that failed QC is not archived
+                sa.or_(Submission.basic_qc_passed.is_(True), sa.and_(Submission.basic_qc_passed.is_(None), archived)),  # type: ignore[union-attr]
+                reported,
+            )
+            .group_by(Submission.submitter_id)
+        ).all()
+    }
+    archived_count: defaultdict[str, int] = defaultdict(int)
+    archived_sized: defaultdict[str, int] = defaultdict(int)
+    archived_bytes: defaultdict[tuple[str, bool | None], int] = defaultdict(int)
+    for submitter_id, consented, count, sized, total in session.execute(
+        select(Submission.submitter_id, Submission.consented, sqlfn.count(1), with_size, total_size)  # type: ignore[call-overload]
+        .where(real, archived, sa.not_(gone))
+        .group_by(Submission.submitter_id, Submission.consented)  # type: ignore[arg-type]
+    ).all():
+        archived_count[submitter_id] += count
+        archived_sized[submitter_id] += sized
+        archived_bytes[submitter_id, consented] = int(total)
+
+    timed_uploads: defaultdict[str, int] = defaultdict(int)
+    timed_bytes: defaultdict[str, int] = defaultdict(int)
+    timed_seconds: defaultdict[str, float] = defaultdict(float)
+    speeds: defaultdict[str, list[float]] = defaultdict(list)
+    for submitter_id, size, started, finished, in_month in session.execute(
+        select(  # type: ignore[call-overload]
+            Submission.submitter_id,
+            Submission.submission_size,
+            Submission.upload_started_at,
+            Submission.upload_finished_at,
+            Submission.upload_finished_at >= start,  # type: ignore[operator]
+        ).where(
+            real,
+            Submission.submission_size > 0,  # type: ignore[operator]
+            Submission.upload_resumed.is_(False),  # type: ignore[union-attr]
+            Submission.upload_started_at.is_not(None),  # type: ignore[union-attr]
+            Submission.upload_finished_at < cutoff,  # type: ignore[operator]
+        )
+    ).all():
+        seconds = UploadTiming(started, finished, upload_resumed=False).duration.total_seconds()
+        if seconds > 0:
+            timed_uploads[submitter_id] += 1
+            timed_bytes[submitter_id] += size
+            timed_seconds[submitter_id] += seconds
+            if in_month:
+                speeds[submitter_id].append(size / 1e6 / seconds)
+
+    statistic: dict[str, typing.Callable[[list[float]], float]] = {
+        "median": statistics.median,
+        "min": min,
+        "max": max,
+        "sd": statistics.pstdev,
+    }
+    rows = []
+    for submitter_id in sorted(
+        set(submitter_ids) | set(submissions) | set(cases) | set(archived_count) | set(timed_uploads)
+    ):
+        count, sized, total = cases.get(submitter_id, (0, 0, 0))
+        mb_per_s = speeds.get(submitter_id, [])
+        rows.append(
+            {
+                "submitter_id": submitter_id,
+                "submissions": submissions.get(submitter_id, 0),
+                "cases": count,
+                "cases_with_size": sized,
+                "case_bytes": total,
+                "archived": archived_count[submitter_id],
+                "archived_with_size": archived_sized[submitter_id],
+                "archived_bytes_consented": archived_bytes[submitter_id, True],
+                "archived_bytes_non_consented": archived_bytes[submitter_id, False],
+                "archived_bytes_consent_unknown": archived_bytes[submitter_id, None],
+                "timed_uploads": timed_uploads[submitter_id],
+                "timed_upload_bytes": timed_bytes[submitter_id],
+                "timed_upload_seconds": round(timed_seconds[submitter_id]),
+                **{
+                    f"upload_speed_{name}_mb_per_s": round(f(mb_per_s), 2) if mb_per_s else None
+                    for name, f in statistic.items()
+                },
+            }
+        )
+    return {
+        "grz": grz_id,
+        "month": month.strftime("%Y-%m"),
+        "reported_by": f"grzctl {__version__} report monitoring",
+        "rows": rows,
+    }
+
+
+@report.command()
+@click.option(
+    "--month",
+    type=click.DateTime(formats=["%Y-%m"]),
+    show_default="the running month and the one before",
+    help="Report the state at the end of this month (YYYY-MM).",
+)
+@click.option(
+    "--url",
+    envvar="GRZ_MONITORING_URL",
+    help="Intake URL of the GRZ monitoring sheet (env GRZ_MONITORING_URL). Without it, the report is only printed.",
+)
+@click.option(
+    "--token",
+    envvar="GRZ_MONITORING_TOKEN",
+    help="This GRZ's intake token. Prefer the environment variable GRZ_MONITORING_TOKEN.",
+)
+@click.option("--dry-run", is_flag=True, help="Let the intake check the report without storing it.")
+@click.pass_context
+def monitoring(ctx: click.Context, month: datetime.datetime | None, url: str | None, token: str | None, dry_run: bool):
+    """
+    Send per-LE numbers to the GRZ monitoring sheet, one report per month.
+
+    Meant for a daily cron job. Sending a month again replaces its numbers in the sheet. Without
+    --month, each run sends the running month and the one before: the month before gets its final
+    figures, and its upload speed statistics still collect uploads downloaded late.
+    """
+    today = datetime.datetime.now(datetime.UTC).date()  # the month ends of the report are in UTC
+    if month and month.date() > today:
+        raise click.BadParameter(f"{month:%Y-%m} has not begun yet.", param_hint="--month")
+    months = [month.date()] if month else [today.replace(day=1) - datetime.timedelta(days=1), today]
+    submission_db = get_submission_db_instance(ctx.obj["db_url"])
+    with submission_db.transaction() as session:
+        payloads = [_monitoring_payload(session, ctx.obj["grz_id"], m, ctx.obj["submitter_ids"]) for m in months]
+
+    if url is None:
+        click.echo(json.dumps(payloads, indent=2))
+        return
+    if not token:
+        raise click.UsageError("--url needs --token or GRZ_MONITORING_TOKEN.")
+
+    for payload in payloads:
+        # Apps Script answers with a redirect; requests follows it as GET, which is what the intake expects.
+        try:
+            response = requests.post(url, json={**payload, "token": token, "dry_run": dry_run}, timeout=60)
+            response.raise_for_status()
+            result = response.json()
+        except requests.RequestException as e:
+            raise click.ClickException(f"intake not reachable: {e}") from e
+        click.echo(json.dumps(result))
+        if not isinstance(result, dict):
+            raise click.ClickException(f"intake answered the report of {payload['month']} with no JSON object")
+        if result.get("status") != 200:
+            raise click.ClickException(
+                f"intake rejected the report of {payload['month']}: {result.get('error', result)}"
+            )

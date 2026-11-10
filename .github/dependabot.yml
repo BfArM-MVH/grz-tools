@@ -1,0 +1,63 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # Actions are pinned to commit SHAs, so Dependabot is what keeps them
+    # current. `include: scope` appends the scope Dependabot picks, always
+    # "deps" here since github-actions reports every dependency as runtime, so
+    # titles read "ci(deps): bump ..." and satisfy the requireScope rule in
+    # check-pr.yml.
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Security updates already open uv PRs here without a config entry (see #521),
+  # but they arrive with Dependabot's default title, which fails the requireScope
+  # rule and has to be retitled by hand. This entry fixes the title and adds
+  # scheduled version updates. Unlike the other two ecosystems, uv reports
+  # `[dependency-groups]` packages as development ones, so a lock bump that only
+  # moves those is scoped "deps-dev"; check-pr.yml accepts both.
+  #
+  # lockfile-only: only `uv.lock` moves, never the ranges in a package's
+  # `dependencies`. Those ranges are a support claim for a published package, so
+  # widening or raising one is a human call, not a scheduled one. It also avoids
+  # dependabot-core#15786, where a grouped update in a uv workspace rewrites
+  # unrelated pins in a member manifest without locking them.
+  #
+  # Note this cannot keep uv itself current: Dependabot does not parse
+  # `[tool.uv]`, so `required-version` and `constraint-dependencies` stay in
+  # sync with environment-dev.yml by hand (dependabot-core#14581, #14376).
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    versioning-strategy: lockfile-only
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      python:
+        patterns:
+          - "*"
+
+  # grz-check is a separate Cargo project with its own manifest and lockfile, so
+  # it needs its own entry rather than the workspace root.
+  - package-ecosystem: cargo
+    directory: /packages/grz-check
+    schedule:
+      interval: monthly
+    versioning-strategy: lockfile-only
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      rust:
+        patterns:
+          - "*"

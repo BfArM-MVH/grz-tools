@@ -2,45 +2,88 @@
 Tests for grzctl db subcommand
 """
 
+import datetime
 import hashlib
-import importlib.resources
 import json
+import os
 import random
+from datetime import date
 from operator import attrgetter
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 
 import click.testing
 import grzctl.cli
+import grzctl.commands.db.cli
 import pytest
+import rich.console
 import sqlalchemy
 import yaml
-from grz_db.models.submission import Submission, SubmissionDb
+from grz_db.models.submission import (
+    RETIRED_FAILURE_REASONS,
+    FailureReasonEnum,
+    SubmissionBase,
+    SubmissionDb,
+    SubmissionStateEnum,
+)
 from grz_pydantic_models.submission.metadata import REDACTED_TAN, GrzSubmissionMetadata
-from grzctl.models.config import DbConfig
+from grzctl.models.config import GrzctlConfig
 
-from .. import resources as test_resources
+UPLOAD_DATE = "2026-01-01"
+"""The upload date that populate records. Without --submission-date, populate reads it from an inbox."""
 
 
-def test_all_migrations(blank_initial_database_config_path):
+def test_init_brings_an_empty_database_to_the_latest_schema(empty_database_config_path):
+    """``db init`` is the only way an operator creates a schema, so it must reach head unaided."""
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    args_common = ["--config", str(empty_database_config_path), "db"]
+
+    result_init = runner.invoke(cli, [*args_common, "init"])
+    assert result_init.exit_code == 0, result_init.stderr
+
+    # 'list' refuses to run against anything short of the latest schema
+    result_list = runner.invoke(cli, [*args_common, "list"])
+    assert result_list.exit_code == 0, result_list.stderr
+
+
+def test_all_migrations(initial_revision_database_config_path):
     """Database migrations should work all the way from the oldest supported to the latest version."""
     # add some test data
-    config = DbConfig.from_path(blank_initial_database_config_path)
+    config = GrzctlConfig.from_path(initial_revision_database_config_path)
     tan_g = "a2b6c3d9e8f7123456789abcdef0123456789abcdef0123456789abcdef01234"
     pseudonym = "CASE12345"
     submission_id = "123456789_2024-11-08_d0f805c5"
     engine = sqlalchemy.create_engine(config.db.database_url)
+    # the column is still called "pseudonym" at this revision; the cases migration renames it.
+    submissions = sqlalchemy.Table("submissions", sqlalchemy.MetaData(), autoload_with=engine)
     with engine.connect() as connection:
         connection.execute(
-            sqlalchemy.insert(Submission),
+            submissions.insert(),
             {"tan_g": tan_g, "pseudonym": pseudonym, "id": submission_id},
+        )
+        connection.execute(
+            sqlalchemy.text(
+                """
+                INSERT INTO submission_states (state, data, timestamp, submission_id, author_name, signature)
+                VALUES (:state, NULL, :timestamp, :submission_id, :author_name, :signature)
+                """
+            ),
+            {
+                "state": "QCING",
+                "timestamp": datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+                "submission_id": submission_id,
+                "author_name": "alice",
+                "signature": "dummy",
+            },
         )
         connection.commit()
 
     # ensure db command raises appropriate error before migration
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    args_common = ["db", "--config-file", blank_initial_database_config_path]
+    args_common = ["--config", initial_revision_database_config_path, "db"]
     result_premature_list = runner.invoke(cli, [*args_common, "list"])
     assert result_premature_list.exit_code != 0
     assert "Database not at latest schema" in result_premature_list.stderr
@@ -55,22 +98,54 @@ def test_all_migrations(blank_initial_database_config_path):
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert pseudonym in result_show.stdout, result_show.stdout
 
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submission = db.get_submission(submission_id)
+    assert submission is not None
+    assert submission.selected_for_qc is True
 
-def test_populate(blank_database_config_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    # Test failure reason functionality
+    result_failure_test = runner.invoke(
+        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", "decryption_error"]
     )
+    assert result_failure_test.exit_code == 0, result_failure_test.stderr
+
+    # Verify the failure reason was stored
+    result_show_after_error = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
+    assert result_show_after_error.exit_code == 0, result_show_after_error.stderr
+    assert "decryption_err" in result_show_after_error.stdout
+
+    # Also test via database API
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submission = db.get_submission(submission_id)
+    assert submission is not None
+    latest_state = submission.get_latest_state()
+    assert latest_state is not None
+    assert latest_state.state == SubmissionStateEnum.ERROR
+    assert latest_state.failure_reason == FailureReasonEnum.DECRYPTION_ERROR
+
+
+def test_populate(migrated_database_config_path: Path, test_metadata_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
     result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
     assert result_add.exit_code == 0, result_add.stderr
 
-    with importlib.resources.as_file(importlib.resources.files(test_resources) / "metadata.json") as metadata_path:
-        result_populate = runner.invoke(
-            cli, [*args_common, "submission", "populate", metadata.submission_id, str(metadata_path), "--no-confirm"]
-        )
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
     assert result_populate.exit_code == 0, result_populate.stderr
 
     result_show = runner.invoke(cli, [*args_common, "submission", "show", metadata.submission_id])
@@ -78,12 +153,12 @@ def test_populate(blank_database_config_path: Path):
     # shorter than tanG and less likely to be truncated in various terminal widths
     assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
 
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
-    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
 
     submission = db.get_submission(metadata.submission_id)
-    assert submission.pseudonym == metadata.submission.local_case_id
+    assert submission.local_case_id == metadata.submission.local_case_id
+    assert submission.consented == metadata.consents_to_research(metadata.submission.submission_date)
 
     # check that the consent records were populated
     meta_father = metadata.donors[1]
@@ -92,12 +167,52 @@ def test_populate(blank_database_config_path: Path):
         consent.no_scope_justification for consent in meta_father.research_consents
     } == db_father.research_consent_missing_justifications
 
+    assert submission.submission_metadata is not None
+    assert submission.submission_metadata == metadata.to_redacted_dict()
 
-def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+    assert submission.submission_size == metadata.get_submission_size()
+
+
+def test_populate_date(migrated_database_config_path: Path, test_metadata_path: Path):
+    db_args = ["--config", migrated_database_config_path, "db"]
+    changed_date = date(2026, 1, 1)
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*db_args, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *db_args,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            changed_date.strftime("%Y-%m-%d"),
+        ],
     )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    result_show = runner.invoke(cli, [*db_args, "submission", "show", metadata.submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+    # shorter than tanG and less likely to be truncated in various terminal widths
+    assert metadata.submission.local_case_id in result_show.stdout, result_show.stdout
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+
+    submission = db.get_submission(metadata.submission_id)
+    assert submission.submission_uploaded_date == changed_date
+
+
+def test_populate_redacted(tmp_path: Path, migrated_database_config_path: Path, test_metadata_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     # compute submission ID _before_ tanG is redacted (changing the property return value)
     submission_id = metadata.submission_id
@@ -113,7 +228,7 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
     with open(metadata_path, "w") as metadata_file:
         metadata_file.write(metadata.model_dump_json(by_alias=True))
 
-    with pytest.raises(ValueError, match="Refusing to populate a seemingly-redacted TAN"):
+    with pytest.raises(ValueError, match="Refusing to populate a seemingly-redacted submission"):
         _ = runner.invoke(
             cli,
             [*args_common, "submission", "populate", submission_id, str(metadata_path), "--no-confirm"],
@@ -121,7 +236,7 @@ def test_populate_redacted(tmp_path: Path, blank_database_config_path: Path):
         )
 
 
-def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
+def test_repopulate(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
     """
     Repopulating a database should work, including when:
     - two donors from different submitters have the same pseudonym.
@@ -129,12 +244,13 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
     """
     rng = random.Random()
     rng.seed(42)
+    changed_date = date(2026, 1, 1)
 
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", migrated_database_config_path, "db"]
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
 
-    metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    metadata_raw = json.loads(test_metadata_path.read_text())
 
     # first submission
     metadata_raw["submission"]["submitterId"] = "123456789"
@@ -150,11 +266,20 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
 
     result_populate_s1 = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata_s1.submission_id, str(metadata_s1_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata_s1.submission_id,
+            str(metadata_s1_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            changed_date.strftime("%Y-%m-%d"),
+        ],
     )
     assert result_populate_s1.exit_code == 0, result_populate_s1.stderr
 
-    # second submission with same pseudonym from different submitter
+    # second submission with same local case ID from different submitter
     metadata_raw["submission"]["submitterId"] = "987654321"
     metadata_raw["submission"]["tanG"] = hashlib.sha256(rng.randbytes(128)).hexdigest()
     metadata_s2 = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
@@ -168,7 +293,16 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
 
     result_populate_s2 = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata_s2.submission_id, str(metadata_s2_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata_s2.submission_id,
+            str(metadata_s2_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            changed_date.strftime("%Y-%m-%d"),
+        ],
     )
     assert result_populate_s2.exit_code == 0, result_populate_s2.stderr
 
@@ -196,14 +330,21 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
             "--ignore-field",
             "tan_g",
             "--ignore-field",
-            "pseudonym",
+            "local_case_id",
+            # the revoked consent replaces what the donor row and the stored dump already hold
+            "--allow-overwrite",
+            "donors",
+            "--allow-overwrite",
+            "submission_metadata",
+            "--submission-date",
+            changed_date.strftime("%Y-%m-%d"),
         ],
     )
     assert result_repopulate_s1.exit_code == 0, result_repopulate_s1.stderr
 
     # sanity check the database
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
     db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
 
     submissions = db.list_submissions(limit=None)
@@ -216,15 +357,16 @@ def test_repopulate(blank_database_config_path: Path, tmp_path: Path):
     assert not donors_s1[1].research_consented
     assert donors_s1[1].research_consent_missing_justifications == {"other patient-related reason"}
 
+    submission_s1 = db.get_submission(metadata_s1.submission_id)
+    assert submission_s1.submission_uploaded_date == changed_date
+
     donors_s2 = sorted(db.get_donors(metadata_s2.submission_id), key=attrgetter("pseudonym"))
     assert len(donors_s2) == 2, "Expected two donors in submission 2"
 
 
-def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
-    args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
-    )
+def test_populate_qc(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner(catch_exceptions=False)
     cli = grzctl.cli.build_cli()
@@ -232,7 +374,7 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
     assert result_add.exit_code == 0, result_add.stderr
 
     # populate submission + donors first to satisfy foreign key constraints
-    metadata_raw = json.loads((importlib.resources.files(test_resources) / "metadata.json").read_text())
+    metadata_raw = json.loads(test_metadata_path.read_text())
 
     metadata_dump_path = tmp_path / "metadata.json"
     with open(metadata_dump_path, "w") as metadata_file:
@@ -241,7 +383,16 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
     metadata = GrzSubmissionMetadata.model_validate_json(json.dumps(metadata_raw))
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate", metadata.submission_id, str(metadata_dump_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
@@ -250,7 +401,7 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
         report_csv_file.write(
             dedent("""\
             sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
-            father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,wes,germline,tumor+germline,FAIL,19.94,30.0,30.0,-33.53333333333333,TOO LOW,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
+            father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,wes,germline,tumor+germline,FAIL,19.94,30.0,30.0,-33.53333333333333,THRESHOLD NOT MET,90.67913315460233,30,88.0,85,3.0444694938662797,PASS,1.0,20,1.0,0.8,0.0,PASS
             index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
             index0_somatic0,index,Blut DNA Tumor,wes,somatic,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
             """)
@@ -258,24 +409,548 @@ def test_populate_qc(blank_database_config_path: Path, tmp_path: Path):
 
     result_populate = runner.invoke(
         cli,
-        [*args_common, "submission", "populate-qc", metadata.submission_id, str(report_csv_path), "--no-confirm"],
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
     )
     assert result_populate.exit_code == 0, result_populate.stderr
 
-    with open(blank_database_config_path, encoding="utf-8") as blank_database_config_file:
-        config = yaml.load(blank_database_config_file, Loader=yaml.Loader)
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
     db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
 
     results = db.get_detailed_qc_results(metadata.submission_id)
     assert len(results) == 3
+    father_result = next(r for r in results if r.lab_datum_id == "father1_germline0")
+    assert not father_result.mean_depth_of_coverage_passed_qc
 
 
-def test_update_error_confirm(blank_database_config_path: Path):
-    """Database should confirm before updating a submission from an Error state."""
-    args_common = ["db", "--config-file", blank_database_config_path]
-    metadata = GrzSubmissionMetadata.model_validate_json(
-        (importlib.resources.files(test_resources) / "metadata.json").read_text()
+def test_populate_qc_is_atomic(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    """A partial populate-qc failure rolls everything back instead of leaving rows behind."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
     )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_header = (
+        "sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,"
+        "meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,"
+        "meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,"
+        "percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,"
+        "percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,"
+        "targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,"
+        "targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus"
+    )
+    indexed_row = (
+        "index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,"
+        "-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS"
+    )
+    father_row = (
+        "father1_germline0,bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111,Blut DNA normal,"
+        "wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,"
+        "3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS"
+    )
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent(f"""\
+            {report_header}
+            {indexed_row}
+            """)
+        )
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # Re-run against a report that repeats an already-stored row before a brand-new one:
+    # the unique primary key must reject the rerun, and the new row must not survive it.
+    # Reuse the first report's mtime so the duplicate row hits the same primary key,
+    # which includes the timestamp.
+    first_report_mtime = Path(report_csv_path).stat().st_mtime
+    rerun_report_csv_path = tmp_path / "rerun-report.csv"
+    with open(rerun_report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent(f"""\
+            {report_header}
+            {father_row}
+            {indexed_row}
+            """)
+        )
+    os.utime(rerun_report_csv_path, (first_report_mtime, first_report_mtime))
+
+    with pytest.raises(sqlalchemy.exc.IntegrityError):
+        runner.invoke(
+            cli,
+            [
+                *args_common,
+                "submission",
+                "populate-qc",
+                metadata.submission_id,
+                str(rerun_report_csv_path),
+                "--no-confirm",
+                "--qc-workflow-version",
+                "v1.0.0",
+            ],
+        )
+
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert {result.lab_datum_id for result in results} == {"index0_germline0"}
+
+
+def test_populate_qc_empty_report(migrated_database_config_path: Path, tmp_path: Path):
+    """populate-qc rejects an empty report file instead of crashing on a bare StopIteration."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+
+    empty_report_csv_path = tmp_path / "empty-report.csv"
+    empty_report_csv_path.write_text("", encoding="utf-8")
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            "some-submission-id",
+            str(empty_report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
+    )
+    assert result_populate.exit_code != 0
+    assert "is empty" in result_populate.output
+
+
+def test_populate_qc_with_bom_header(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    """populate-qc tolerates a UTF-8 BOM in front of the report header."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_header = (
+        "sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,"
+        "meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,"
+        "meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,"
+        "percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,"
+        "percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,"
+        "targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,"
+        "targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus"
+    )
+    indexed_row = (
+        "index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,"
+        "-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS"
+    )
+
+    report_csv_path = tmp_path / "bom-report.csv"
+    with open(report_csv_path, "w", encoding="utf-8") as report_csv_file:
+        report_csv_file.write(f"\ufeff{report_header}\n{indexed_row}\n")
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert {result.lab_datum_id for result in results} == {"index0_germline0"}
+
+
+def test_populate_qc_with_qc_workflow_version_flag(
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
+    """Test populate-qc with --qc-workflow-version flag."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test with --qc-workflow-version flag
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v1.0.0",
+        ],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "v1.0.0"
+
+
+def test_populate_qc_with_qc_workflow_version_env_var(
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path, monkeypatch
+):
+    """Test populate-qc with GRZCTL_QC_WORKFLOW_VERSION environment variable."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    # Set the environment variable
+    monkeypatch.setenv("GRZCTL_QC_WORKFLOW_VERSION", "v2.1.0")
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # Test without --qc-workflow-version flag (should use env var)
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+        ],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "v2.1.0"
+
+
+def test_populate_qc_missing_qc_workflow_version(
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
+    """Test populate-qc fails when qc_workflow_version is not provided."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission + donors first
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS
+            """)
+        )
+
+    # No --qc-workflow-version flag/env var and no grzQcWorkflowVersion column in the report → fail
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+        ],
+    )
+    assert result_populate_qc.exit_code != 0
+    assert "No QC workflow version found" in result_populate_qc.output
+
+
+def test_populate_qc_version_from_report(migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path):
+    """populate-qc takes the version from the report's grzQcWorkflowVersion column when no flag is given."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus,grzQcWorkflowVersion
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS,2.1.0+nonredundant
+            """)
+        )
+
+    result_populate_qc = runner.invoke(
+        cli,
+        [*args_common, "submission", "populate-qc", metadata.submission_id, str(report_csv_path), "--no-confirm"],
+    )
+    assert result_populate_qc.exit_code == 0, result_populate_qc.stderr
+
+    with open(migrated_database_config_path, encoding="utf-8") as migrated_database_config_file:
+        config = yaml.load(migrated_database_config_file, Loader=yaml.Loader)
+    db = SubmissionDb(db_url=config["db"]["database_url"], author=None)
+
+    results = db.get_detailed_qc_results(metadata.submission_id)
+    assert len(results) == 1
+    assert results[0].qc_workflow_version == "2.1.0+nonredundant"
+
+
+def test_populate_qc_flag_report_mismatch(
+    migrated_database_config_path: Path, tmp_path: Path, test_metadata_path: Path
+):
+    """populate-qc errors when --qc-workflow-version disagrees with the report's grzQcWorkflowVersion."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner(catch_exceptions=False)
+    cli = grzctl.cli.build_cli()
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    metadata_raw = json.loads(test_metadata_path.read_text())
+    metadata_dump_path = tmp_path / "metadata.json"
+    with open(metadata_dump_path, "w") as metadata_file:
+        json.dump(metadata_raw, metadata_file)
+
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(metadata_dump_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    report_csv_path = tmp_path / "report.csv"
+    with open(report_csv_path, "w") as report_csv_file:
+        report_csv_file.write(
+            dedent("""\
+            sampleId,donorPseudonym,labDataName,libraryType,sequenceSubtype,genomicStudySubtype,qualityControlStatus,meanDepthOfCoverage,meanDepthOfCoverageProvided,meanDepthOfCoverageRequired,meanDepthOfCoverageDeviation,meanDepthOfCoverageQCStatus,percentBasesAboveQualityThreshold,qualityThreshold,percentBasesAboveQualityThresholdProvided,percentBasesAboveQualityThresholdRequired,percentBasesAboveQualityThresholdDeviation,percentBasesAboveQualityThresholdQCStatus,targetedRegionsAboveMinCoverage,minCoverage,targetedRegionsAboveMinCoverageProvided,targetedRegionsAboveMinCoverageRequired,targetedRegionsAboveMinCoverageDeviation,targetedRegionsAboveMinCoverageQCStatus,grzQcWorkflowVersion
+            index0_germline0,index,Blut DNA normal,wes,germline,tumor+germline,PASS,49.84,50.0,30.0,-0.3199999999999932,PASS,90.65953529937444,30,88.0,85,3.022199203834591,PASS,1.0,20,1.0,0.8,0.0,PASS,2.1.0+nonredundant
+            """)
+        )
+
+    result_populate_qc = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate-qc",
+            metadata.submission_id,
+            str(report_csv_path),
+            "--no-confirm",
+            "--qc-workflow-version",
+            "v9.9.9",
+        ],
+    )
+    assert result_populate_qc.exit_code != 0
+    assert "disagrees" in result_populate_qc.output
+
+
+def test_update_error_confirm(migrated_database_config_path: Path, test_metadata_path: Path):
+    """Database should confirm before updating a submission from an Error state."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
@@ -298,13 +973,13 @@ def test_update_error_confirm(blank_database_config_path: Path):
     assert result_update3.exit_code == 0, result_update3.output
 
 
-def test_list_sort(blank_database_config_path: Path):
+def test_list_sort(migrated_database_config_path: Path):
     """
     List command should sort in the expected order:
     0. null latest state timestamp and null submission date
     1. latest state timestamp if not null, otherwise submission date
     """
-    args_common = ["db", "--config-file", blank_database_config_path]
+    args_common = ["--config", migrated_database_config_path, "db"]
 
     expected_ordering = [
         {"id": "123456789_2025-07-01_a1b2c3d4"},
@@ -320,7 +995,8 @@ def test_list_sort(blank_database_config_path: Path):
 
         if (submission_date := submission.get("date", None)) is not None:
             result_modify = runner.invoke(
-                cli, [*args_common, "submission", "modify", submission["id"], "submission_date", submission_date]
+                cli,
+                [*args_common, "submission", "modify", submission["id"], "submission_uploaded_date", submission_date],
             )
             assert result_modify.exit_code == 0, result_modify.stderr
 
@@ -334,3 +1010,1099 @@ def test_list_sort(blank_database_config_path: Path):
     result_list_parsed = json.loads(result_list.stdout)
     for i, submission in enumerate(expected_ordering):
         assert submission["id"] == result_list_parsed[i]["id"]
+
+
+def test_submission_show_json(migrated_database_config_path: Path, test_metadata_path: Path):
+    """
+    `grzctl db submission show --json` should return machine-readable JSON
+    with submission metadata and state history.
+    """
+    args_common = ["--config", migrated_database_config_path, "db"]
+
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    # add submission
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            metadata.submission.submission_date.isoformat(),
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # show submission as JSON
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+
+    parsed = json.loads(result_show_json.stdout)
+
+    # structure checks
+    assert parsed == {
+        "id": metadata.submission_id,
+        "tan_g": metadata.submission.tan_g,
+        "pseudonym": None,
+        "local_case_id": metadata.submission.local_case_id,
+        "submission_uploaded_date": metadata.submission.submission_date.isoformat()
+        if metadata.submission.submission_date
+        else None,
+        "submission_size": metadata.get_submission_size(),
+        "submission_type": metadata.submission.submission_type,
+        "submission_metadata": metadata.to_redacted_dict(),
+        "submitter_id": metadata.submission.submitter_id,
+        "case_id": None,  # the example is a test submission, which is never case-tracked
+        "data_node_id": metadata.submission.genomic_data_center_id,
+        "coverage_type": metadata.submission.coverage_type,
+        "disease_type": metadata.submission.disease_type,
+        "basic_qc_passed": None,
+        "consented": metadata.consents_to_research(date=metadata.submission.submission_date),
+        "research_consented_now": metadata.consents_to_research(date=date.today()),
+        "selected_for_qc": None,
+        "detailed_qc_passed": None,
+        "genomic_study_type": metadata.submission.genomic_study_type,
+        "genomic_study_subtype": metadata.submission.genomic_study_subtype,
+        "inbox": None,  # populated via download / sync-from-inbox / populate --inbox
+        "upload_started_at": None,  # recorded by download --populate while the inbox lists the objects
+        "upload_finished_at": None,
+        "upload_resumed": None,
+        "states": [],
+    }
+
+
+def test_list_and_show_expose_the_case_psn_and_the_local_case_id(migrated_database_config_path: Path):
+    """The linked case's psn (``pseudonym``) and the submitter's own ``local_case_id`` are
+    distinct fields, and both ``list --json`` and ``submission show`` must expose them.
+    """
+    args_common = ["--config", migrated_database_config_path, "db"]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    submission_id = "123456789_2025-01-01_0000000a"
+    local_case_id = "case-with-psn"
+    psn = "RKI-000999"
+
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+    for key, value in (("submission_type", "initial"), ("local_case_id", local_case_id)):
+        result_modify = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, key, value])
+        assert result_modify.exit_code == 0, result_modify.stderr
+
+    result_create = runner.invoke(cli, [*args_common, "case", "create", "123456789", local_case_id, "--psn", psn])
+    assert result_create.exit_code == 0, result_create.stderr
+    result_case_list = runner.invoke(cli, [*args_common, "case", "list", "--json"])
+    assert result_case_list.exit_code == 0, result_case_list.stderr
+    case_id = json.loads(result_case_list.stdout)[0]["id"]
+
+    result_relink = runner.invoke(cli, [*args_common, "case", "relink", submission_id, str(case_id)])
+    assert result_relink.exit_code == 0, result_relink.stderr
+
+    result_list = runner.invoke(cli, [*args_common, "list", "--json"])
+    assert result_list.exit_code == 0, result_list.stderr
+    listed = next(row for row in json.loads(result_list.stdout) if row["id"] == submission_id)
+    assert listed["pseudonym"] == psn
+    assert listed["local_case_id"] == local_case_id
+
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+    assert psn in result_show.stdout
+    assert local_case_id in result_show.stdout
+
+
+def _seed_state_histories(cli, args_common: list) -> SimpleNamespace:
+    """Register five submissions covering every state-filter case and return their IDs."""
+    ids = SimpleNamespace(
+        latest_error="123456789_2025-07-01_b1b2c3d1",
+        latest_qced="123456789_2025-07-01_b1b2c3d2",
+        latest_downloaded="123456789_2025-07-01_b1b2c3d3",
+        history_error_latest_uploaded="123456789_2025-07-01_b1b2c3d4",
+        no_state="123456789_2025-07-01_b1b2c3d5",
+    )
+    runner = click.testing.CliRunner()
+
+    for submission_id in vars(ids).values():
+        result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+        assert result_add.exit_code == 0, result_add.stderr
+
+    for invoke_args in (
+        [*args_common, "submission", "update", ids.latest_error, "Error"],
+        [*args_common, "submission", "update", ids.latest_qced, "QCed"],
+        [*args_common, "submission", "update", ids.latest_downloaded, "Downloaded"],
+        [*args_common, "submission", "update", ids.history_error_latest_uploaded, "Uploaded"],
+        [*args_common, "submission", "update", ids.history_error_latest_uploaded, "Error"],
+    ):
+        result_update = runner.invoke(cli, invoke_args)
+        assert result_update.exit_code == 0, result_update.stderr
+
+    # leaves an Error in history while the latest state is Uploaded
+    result_ignore_error = runner.invoke(
+        cli,
+        [*args_common, "submission", "update", "--ignore-error-state", ids.history_error_latest_uploaded, "Uploaded"],
+    )
+    assert result_ignore_error.exit_code == 0, result_ignore_error.stderr
+
+    return ids
+
+
+def _listed_ids(cli, args_common: list, *filter_args: str) -> set:
+    runner = click.testing.CliRunner()
+    result = runner.invoke(cli, [*args_common, "list", "--json", *filter_args])
+    assert result.exit_code == 0, result.stderr
+    return {item["id"] for item in json.loads(result.stdout)}
+
+
+@pytest.fixture
+def seeded_state_histories(migrated_database_config_path: Path):
+    """The CLI, its common arguments, and the IDs of submissions covering every state-filter case."""
+    cli = grzctl.cli.build_cli()
+    args_common = ["--config", migrated_database_config_path, "db"]
+    return cli, args_common, _seed_state_histories(cli, args_common)
+
+
+def test_list_filters_on_the_latest_state_by_default(seeded_state_histories):
+    """Without --filter-mode only the current state counts, so an Error in history does not match."""
+    cli, args_common, ids = seeded_state_histories
+
+    assert _listed_ids(cli, args_common) == set(vars(ids).values()), "an unfiltered list must return every submission"
+    assert _listed_ids(cli, args_common, "--state", "error") == {ids.latest_error}
+    assert _listed_ids(cli, args_common, "--state", "downloaded") == {ids.latest_downloaded}
+
+
+def test_list_any_mode_matches_states_anywhere_in_history(seeded_state_histories):
+    """--filter-mode any is what finds submissions that recovered from a state."""
+    cli, args_common, ids = seeded_state_histories
+
+    runner = click.testing.CliRunner()
+    result = runner.invoke(cli, [*args_common, "list", "--json", "--state", "error", "--filter-mode", "any"])
+    assert result.exit_code == 0, result.stderr
+    parsed = json.loads(result.stdout)
+
+    assert {item["id"] for item in parsed} == {ids.latest_error, ids.history_error_latest_uploaded}
+    recovered = next(item for item in parsed if item["id"] == ids.history_error_latest_uploaded)
+    assert recovered["latest_state"]["state"] == "Uploaded", "matching on history must not alter the reported state"
+
+
+def test_list_ors_repeated_state_filters(seeded_state_histories):
+    """Repeated --state values are OR-ed, in either filter mode."""
+    cli, args_common, ids = seeded_state_histories
+
+    assert _listed_ids(cli, args_common, "--state", "error", "--state", "qced") == {ids.latest_error, ids.latest_qced}
+    assert _listed_ids(cli, args_common, "--state", "error", "--state", "qced", "--filter-mode", "any") == {
+        ids.latest_error,
+        ids.latest_qced,
+        ids.history_error_latest_uploaded,
+    }
+
+
+_DELETE_CHANGE_REQUEST_DATA = {
+    "requester_name": "Erika Mustermann",
+    "requester_email": "demo.requester@example.org",
+    "requested_at": "2026-03-27",
+    "request_email_content": "Liebe Kolleginnen,\nbitte löschen.\nVielen Dank,\nErika",
+}
+
+
+def _assert_audit_columns_match(change_log, expected: dict) -> None:
+    """Check the audit columns on a ChangeRequestLog row match the expected input dict."""
+    assert change_log.requester_name == expected["requester_name"]
+    assert change_log.requester_email == expected["requester_email"]
+    assert change_log.requested_at.isoformat() == expected["requested_at"]
+    assert change_log.request_email_content == expected["request_email_content"]
+
+
+def _add_submission(runner: click.testing.CliRunner, cli, args_common: list, submission_id: str) -> None:
+    result = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result.exit_code == 0, result.stderr
+
+
+def test_change_request_delete_succeeds_with_yaml_data_file(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "has undergone a change request" in result.stderr.replace("\n", " ")
+    assert "Delete" in result.stderr
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
+    assert len(submissions_with_changes) == 1
+    changes = submissions_with_changes[0].changes
+    assert len(changes) == 1
+    _assert_audit_columns_match(changes[0], _DELETE_CHANGE_REQUEST_DATA)
+    assert changes[0].data is None
+
+
+def test_change_request_delete_succeeds_with_inline_data(migrated_database_config_path: Path):
+    """`--data` accepts valid Delete data and stores it the same way `--data-file` does."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(_DELETE_CHANGE_REQUEST_DATA),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
+    _assert_audit_columns_match(submissions_with_changes[0].changes[0], _DELETE_CHANGE_REQUEST_DATA)
+
+
+def test_change_request_delete_inline_data_rejects_placeholder(migrated_database_config_path: Path):
+    """`--data` is subject to the same placeholder rejection as `--data-file`."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    bad = {**_DELETE_CHANGE_REQUEST_DATA, "requester_name": "<FILL IN requester name>"}
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(bad),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "FILL IN" in result.stderr or "placeholder" in result.stderr
+
+
+def test_change_request_delete_inline_data_rejects_missing_field(migrated_database_config_path: Path):
+    """`--data` is subject to the same required-field check as `--data-file`."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(incomplete),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_delete_fails_without_data(migrated_database_config_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    result = runner.invoke(cli, [*args_common, "submission", "change-request", submission_id, "Delete"])
+    assert result.exit_code != 0
+    assert "requires audit data" in result.stderr
+    assert "requester_name" in result.stderr
+    assert "request_email_content" in result.stderr
+
+
+def test_change_request_delete_fails_with_missing_field(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(incomplete, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_delete_accepts_and_persists_extra_field(migrated_database_config_path: Path, tmp_path: Path):
+    """Extras are allowed alongside the required schema fields and stored verbatim."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_with_extra = {**_DELETE_CHANGE_REQUEST_DATA, "internal_note": "received fax 2026-04-30"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(data_with_extra, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = [s for s in db.list_change_requests() if s.id == submission_id]
+    persisted = submissions_with_changes[0].changes[0]
+    _assert_audit_columns_match(persisted, _DELETE_CHANGE_REQUEST_DATA)
+    assert persisted.data == {"internal_note": "received fax 2026-04-30"}
+
+
+def test_change_request_data_and_data_file_mutually_exclusive(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data",
+            json.dumps(_DELETE_CHANGE_REQUEST_DATA),
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.stderr
+
+
+def test_change_request_template_subcommand_prints_template():
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-template", "Delete"])
+    assert result.exit_code == 0, result.stderr
+    expected_audit_fields = {
+        "requester_name",
+        "requester_email",
+        "requested_at",
+        "request_email_content",
+    }
+    for field_name in expected_audit_fields:
+        assert field_name in result.stdout
+    # template should be valid YAML and include the optional `data` extras section
+    parsed = yaml.safe_load(result.stdout)
+    assert isinstance(parsed, dict)
+    assert expected_audit_fields <= set(parsed.keys())
+    assert "data" in parsed
+
+
+def test_unmodified_template_fails_validation(migrated_database_config_path: Path, tmp_path: Path):
+    """A user who saves the template and submits it unchanged must not pass validation."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    template_result = runner.invoke(cli, ["change-request-template", "Delete"])
+    assert template_result.exit_code == 0, template_result.stderr
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(template_result.stdout)
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    # `requested_at: YYYY-MM-DD` fails date coercion before the model validator runs.
+    assert "requested_at" in result.stderr
+
+
+def test_template_with_only_date_filled_in_still_fails(migrated_database_config_path: Path, tmp_path: Path):
+    """If the user fills in only the date but leaves text placeholders, validation must still fail."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    template_result = runner.invoke(cli, ["change-request-template", "Delete"])
+    partially_filled = template_result.stdout.replace("YYYY-MM-DD", "2026-03-27")
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(partially_filled)
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "FILL IN" in result.stderr or "placeholder" in result.stderr
+
+
+def test_change_request_template_for_other_change_types_includes_audit_fields():
+    """Audit fields are universal: every change type prints the same scaffold (with type-specific guidance)."""
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-template", "Modify"])
+    assert result.exit_code == 0, result.stderr
+    for field_name in ("requester_name", "requester_email", "requested_at", "request_email_content"):
+        assert field_name in result.stdout
+    assert "describe the field/value to modify" in result.stdout
+
+
+def test_change_request_validate_accepts_valid_input_without_config(tmp_path: Path):
+    """The offline validator accepts a well-formed data file with no DB config at all."""
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    # Note: no `db --config-file ...`; the command must work standalone.
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code == 0, result.stderr
+    assert "valid" in result.stderr.lower()
+
+
+def test_change_request_validate_rejects_unedited_template(tmp_path: Path):
+    """Saving the template and validating it unchanged must fail: the safety net still applies offline."""
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    template = runner.invoke(cli, ["change-request-template", "Delete"]).stdout
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(template)
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code != 0
+    assert "requested_at" in result.stderr
+
+
+def test_change_request_validate_reports_missing_field(tmp_path: Path):
+    """A data file missing a required audit field is rejected with that field named."""
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(incomplete, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_validate_gives_friendly_date_error(tmp_path: Path):
+    """A malformed `requested_at` yields a clear message, not pydantic's raw coercion error."""
+    bad = {**_DELETE_CHANGE_REQUEST_DATA, "requested_at": "27-03-2026"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(bad, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code != 0
+    assert "invalid date format" in result.stderr.lower()
+    assert "requested_at" in result.stderr
+
+
+def test_change_request_validate_accepts_mislabeled_extension(tmp_path: Path):
+    """YAML content saved with a .json extension still loads (YAML is a superset of JSON)."""
+    data_file = tmp_path / "delete.json"  # deliberately wrong extension for YAML content
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    result = runner.invoke(cli, ["change-request-validate", "Delete", "--data-file", str(data_file)])
+    assert result.exit_code == 0, result.stderr
+    assert "valid" in result.stderr.lower()
+
+
+def test_change_request_dry_run_does_not_write(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "Dry run" in result.stderr
+    assert "would register change request" in result.stderr.replace("\n", " ")
+    assert "Validated fields" in result.stderr
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submissions_with_changes = list(db.list_change_requests())
+    assert submissions_with_changes == []
+
+
+def test_change_request_dry_run_aborts_when_submission_missing(migrated_database_config_path: Path, tmp_path: Path):
+    args_common = ["--config", migrated_database_config_path, "db"]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            "DOES_NOT_EXIST",
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not found" in result.stderr
+
+
+def test_change_request_dry_run_validates_before_db_check(migrated_database_config_path: Path, tmp_path: Path):
+    """Schema validation runs first; missing fields fail even with --dry-run."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    incomplete = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "requester_email"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(incomplete, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            "DOES_NOT_EXIST",
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "requester_email" in result.stderr
+
+
+def test_change_request_modify_requires_audit_fields_too(migrated_database_config_path: Path, tmp_path: Path):
+    """Audit fields are universal: Modify also requires them via --data/--data-file."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    bare = runner.invoke(cli, [*args_common, "submission", "change-request", submission_id, "Modify"])
+    assert bare.exit_code != 0
+    assert "requires audit data" in bare.stderr
+
+    data_file = tmp_path / "modify.yaml"
+    data_file.write_text(
+        yaml.safe_dump(
+            {**_DELETE_CHANGE_REQUEST_DATA, "request_email_content": "please modify field X to Y"},
+            allow_unicode=True,
+        )
+    )
+    ok = runner.invoke(
+        cli,
+        [*args_common, "submission", "change-request", submission_id, "Modify", "--data-file", str(data_file)],
+    )
+    assert ok.exit_code == 0, ok.stderr
+    assert "Modify" in ok.stderr
+
+
+def test_change_request_with_raw_content_pdf(migrated_database_config_path: Path, tmp_path: Path):
+    """--raw-content provides the binary blob; type is identified from the content's magic bytes."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    pdf_bytes = b"%PDF-1.4 fake pdf body \xde\xad\xbe\xef"
+    pdf_path = tmp_path / "request.pdf"
+    pdf_path.write_bytes(pdf_bytes)
+
+    audit_only = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "request_email_content"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(audit_only, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--raw-content",
+            str(pdf_path),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    persisted = next(s for s in db.list_change_requests() if s.id == submission_id).changes[0]
+    assert persisted.request_email_content is None
+    assert persisted.request_raw_content == pdf_bytes
+    assert persisted.request_raw_content_type.value == "PDF"
+
+
+def test_change_request_raw_content_unrecognized_bytes_fail(migrated_database_config_path: Path, tmp_path: Path):
+    """Content matching no supported type is rejected, regardless of the file's name."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    # Bytes match neither PDF nor PNG magic; even a .pdf name must not save it.
+    fake_pdf = tmp_path / "request.pdf"
+    fake_pdf.write_bytes(b"not a pdf at all")
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(_DELETE_CHANGE_REQUEST_DATA, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--raw-content",
+            str(fake_pdf),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not a recognized attachment" in result.stderr
+
+
+def test_change_request_raw_content_type_from_content_not_extension(
+    migrated_database_config_path: Path, tmp_path: Path
+):
+    """The attachment type follows the magic bytes, not the extension: PNG bytes in a .pdf file store as PNG."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    submission_id = "260840108_2025-12-16_cc9973f0"
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    _add_submission(runner, cli, args_common, submission_id)
+
+    png_bytes = b"\x89PNG\r\n\x1a\n fake png body"
+    misnamed = tmp_path / "request.pdf"  # deliberately the wrong extension for PNG content
+    misnamed.write_bytes(png_bytes)
+    audit_only = {k: v for k, v in _DELETE_CHANGE_REQUEST_DATA.items() if k != "request_email_content"}
+    data_file = tmp_path / "delete.yaml"
+    data_file.write_text(yaml.safe_dump(audit_only, allow_unicode=True))
+
+    result = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "change-request",
+            submission_id,
+            "Delete",
+            "--data-file",
+            str(data_file),
+            "--raw-content",
+            str(misnamed),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    persisted = next(s for s in db.list_change_requests() if s.id == submission_id).changes[0]
+    assert persisted.request_raw_content == png_bytes
+    assert persisted.request_raw_content_type.value == "PNG"
+
+
+def test_submission_grzctl_versions_logging(migrated_database_config_path: Path, test_metadata_path: Path, monkeypatch):
+    """
+    Test that grzctl_versions is correctly logged on state transitions and appears in CLI output.
+
+    Verifies:
+    - grzctl_versions is recorded for each state log entry
+    - grzctl_versions appears in JSON output
+    - grzctl_versions appears in human-readable table output
+    - Versions are preserved across multiple state transitions
+    """
+    args_common = ["--config", migrated_database_config_path, "db"]
+
+    # Mock the version to a known test value for reproducibility
+    test_version = "0.1.2-test"
+    test_versions_dict = {
+        "grzctl": test_version,
+        "grz-common": "1.0.0",
+        "grz-db": "1.0.0",
+        "grz-pydantic-models": "1.0.0",
+        "grz-check": "1.0.0",
+    }
+    # Patch the binding the writer actually calls: the db.cli module imported the name, so patching
+    # it on the grzctl package would leave the real versions being recorded.
+    monkeypatch.setattr("grzctl.commands.db.cli.get_versions", lambda: test_versions_dict)
+
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    # add submission
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # populate submission (triggers first state transition)
+    result_populate = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "populate",
+            metadata.submission_id,
+            str(test_metadata_path),
+            "--no-confirm",
+            "--submission-date",
+            UPLOAD_DATE,
+        ],
+    )
+    assert result_populate.exit_code == 0, result_populate.stderr
+
+    # perform multiple state transitions
+    state_transitions = ["Downloading", "Downloaded", "QCing"]
+    for state in state_transitions:
+        result_update = runner.invoke(
+            cli,
+            [*args_common, "submission", "update", metadata.submission_id, state],
+        )
+        assert result_update.exit_code == 0, result_update.stderr
+
+    # Test 1: Verify grzctl_versions in JSON output
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+
+    parsed_json = json.loads(result_show_json.stdout)
+    assert "states" in parsed_json
+    assert len(parsed_json["states"]) > 0, "No state logs found"
+
+    # Verify each state has grzctl_versions field with correct structure
+    for i, state in enumerate(parsed_json["states"]):
+        assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
+        assert isinstance(state["grzctl_versions"], dict), f"grzctl_versions should be dict in state {i}"
+        # Verify all expected keys are present
+        expected_keys = {"grzctl", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
+        assert set(state["grzctl_versions"].keys()) == expected_keys, (
+            f"grzctl_versions has unexpected keys in state {i}: {state['grzctl_versions'].keys()}"
+        )
+        # Verify all values are non-empty strings
+        for key, value in state["grzctl_versions"].items():
+            assert isinstance(value, str) and len(value) > 0, (
+                f"grzctl_versions['{key}'] should be non-empty string in state {i}"
+            )
+        # Verify other expected fields are present
+        assert "id" in state
+        assert "timestamp" in state
+        assert "state" in state
+        assert "data_steward" in state
+        assert "data_steward_signature" in state
+
+    # Test 2: Verify grzctl_versions reaches the human-readable table too. The column is rendered
+    # wide enough to read only on a wide console, and at the default width Rich truncates it away.
+    # Rich fixes the console width at import time if COLUMNS is set then, and a CliRunner env
+    # cannot change it afterwards. So the test swaps in a console with a fixed width.
+    monkeypatch.setattr(grzctl.commands.db.cli, "console", rich.console.Console(width=500))
+    result_show_table = click.testing.CliRunner().invoke(
+        cli, [*args_common, "submission", "show", metadata.submission_id]
+    )
+    assert result_show_table.exit_code == 0, result_show_table.stderr
+    # the cell holds a JSON blob that Rich wraps, so compare with the layout whitespace removed
+    rendered = "".join(result_show_table.stdout.split())
+    assert test_version in rendered, "the Dependency Versions column should carry the versions"
+
+    # Test 3: Verify database records have the version
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=None)
+    submission = db.get_submission(metadata.submission_id)
+
+    # Verify all state logs have the version
+    for state_log in submission.states:
+        assert state_log.grzctl_versions is not None, (
+            f"grzctl_versions is None for state {state_log.state} at {state_log.timestamp}"
+        )
+        assert isinstance(state_log.grzctl_versions, dict), (
+            f"grzctl_versions should be dict, got {type(state_log.grzctl_versions)}"
+        )
+        # Verify all expected keys are present
+        expected_keys = {"grzctl", "grz-common", "grz-db", "grz-pydantic-models", "grz-check"}
+        assert set(state_log.grzctl_versions.keys()) == expected_keys, (
+            f"grzctl_versions has unexpected keys: {state_log.grzctl_versions.keys()}"
+        )
+        # Verify all values are non-empty strings
+        for key, value in state_log.grzctl_versions.items():
+            assert isinstance(value, str) and len(value) > 0, f"grzctl_versions['{key}'] should be non-empty string"
+
+
+def test_submission_grzctl_version_different_versions(
+    migrated_database_config_path: Path, test_metadata_path: Path, monkeypatch
+):
+    """
+    Verify that state logs show their logged version, not the current runtime version.
+    """
+    args_common = ["--config", migrated_database_config_path, "db"]
+    metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
+
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    # Setup only (does not create state logs)
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", metadata.submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    # State update #1 with version 0.1.0
+    monkeypatch.setattr(
+        "grzctl.commands.db.cli.get_versions",
+        lambda: {
+            "grzctl": "0.1.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
+    result_update_1 = runner.invoke(
+        cli,
+        [*args_common, "submission", "update", metadata.submission_id, "Downloading"],
+    )
+    assert result_update_1.exit_code == 0, result_update_1.stderr
+
+    # State update #2 with version 0.1.1
+    monkeypatch.setattr(
+        "grzctl.commands.db.cli.get_versions",
+        lambda: {
+            "grzctl": "0.1.1",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
+    result_update_2 = runner.invoke(
+        cli,
+        [*args_common, "submission", "update", metadata.submission_id, "Downloaded"],
+    )
+    assert result_update_2.exit_code == 0, result_update_2.stderr
+
+    # State update #3 with version 0.2.0
+    monkeypatch.setattr(
+        "grzctl.commands.db.cli.get_versions",
+        lambda: {
+            "grzctl": "0.2.0",
+            "grz-common": "1.0.0",
+            "grz-db": "1.0.0",
+            "grz-pydantic-models": "1.0.0",
+        },
+    )
+    result_update_3 = runner.invoke(
+        cli,
+        [*args_common, "submission", "update", metadata.submission_id, "QCing"],
+    )
+    assert result_update_3.exit_code == 0, result_update_3.stderr
+
+    # Verify JSON output
+    result_show_json = runner.invoke(cli, [*args_common, "submission", "show", "--json", metadata.submission_id])
+    assert result_show_json.exit_code == 0, result_show_json.stderr
+    parsed_json = json.loads(result_show_json.stdout)
+
+    # Verify each state has grzctl_versions recorded
+    assert len(parsed_json["states"]) == 3, "Expected 3 state transitions"
+    expected_states = ["Downloading", "Downloaded", "QCing"]
+    expected_versions = ["0.1.0", "0.1.1", "0.2.0"]
+    for i, state in enumerate(parsed_json["states"]):
+        assert "grzctl_versions" in state, f"grzctl_versions missing in state {i}"
+        assert state["state"] == expected_states[i], (
+            f"Expected state {expected_states[i]}, got {state['state']} at index {i}"
+        )
+        assert state["grzctl_versions"]["grzctl"] == expected_versions[i], (
+            f"state {i} should carry the version recorded at write time, not the current one"
+        )
+
+
+def test_submission_show_json_includes_failure_reason(migrated_database_config_path: Path):
+    """Submission show --json should include failure_reason in state history."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+
+    submission_id = "123456789_2025-01-01_00000000"
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_update = runner.invoke(
+        cli,
+        [
+            *args_common,
+            "submission",
+            "update",
+            submission_id,
+            "Error",
+            "--failure-reason",
+            "decryption_error",
+        ],
+    )
+    assert result_update.exit_code == 0, result_update.stderr
+
+    result_show = runner.invoke(cli, [*args_common, "submission", "show", "--json", submission_id])
+    assert result_show.exit_code == 0, result_show.stderr
+
+    parsed = json.loads(result_show.stdout)
+    error_state = next(s for s in parsed["states"] if s["state"] == "Error")
+    assert error_state["failure_reason"] == "decryption_error"
+    # No metadata stored for this submission -> current research consent cannot be evaluated.
+    assert parsed["research_consented_now"] is None
+
+
+@pytest.mark.parametrize("retired", sorted(RETIRED_FAILURE_REASONS))
+def test_submission_update_refuses_a_retired_failure_reason(migrated_database_config_path: Path, retired: str):
+    """Older states keep a retired reason, but no new state records one."""
+    args_common = ["--config", migrated_database_config_path, "db"]
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    submission_id = "123456789_2025-01-01_00000000"
+    result_add = runner.invoke(cli, [*args_common, "submission", "add", submission_id])
+    assert result_add.exit_code == 0, result_add.stderr
+
+    result_update = runner.invoke(
+        cli, [*args_common, "submission", "update", submission_id, "Error", "--failure-reason", retired]
+    )
+
+    assert result_update.exit_code == click.UsageError.exit_code, result_update.output
+
+
+def test_modify_offers_exactly_the_keys_it_accepts():
+    """A key the command lists must be one it can honour."""
+    from grzctl.commands.db.cli import _MODIFIABLE_SUBMISSION_KEYS
+
+    assert set(_MODIFIABLE_SUBMISSION_KEYS) == SubmissionBase.model_fields.keys() - SubmissionBase.immutable_fields
+
+
+@pytest.mark.parametrize("key", ["case_id", "id"])
+def test_modify_refuses_an_unofferable_key_with_a_usage_error(migrated_database_config_path, key: str):
+    runner = click.testing.CliRunner()
+    cli = grzctl.cli.build_cli()
+    args_common = ["--config", str(migrated_database_config_path), "db"]
+    submission_id = "111111111_2025-01-01_0000000a"
+    assert runner.invoke(cli, [*args_common, "submission", "add", submission_id]).exit_code == 0
+
+    result = runner.invoke(cli, [*args_common, "submission", "modify", submission_id, key, "1"])
+
+    assert result.exit_code == 2, result.output
+    assert "An unexpected error occurred" not in result.output
+    assert "Traceback" not in result.output
+
+
+def test_list_flags_a_resumed_upload():
+    """A resumed upload's duration covers only its last run, so the table says so."""
+    from grzctl.commands.list_submissions import _format_upload_duration
+
+    duration = datetime.timedelta(minutes=11)
+    assert _format_upload_duration(duration).plain == "11M0S"
+    assert _format_upload_duration(duration, resumed=True).plain == "11M0S (resumed)"
+    assert _format_upload_duration(None, resumed=True).plain == "-"

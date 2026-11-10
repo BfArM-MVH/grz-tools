@@ -11,6 +11,7 @@ class State(TypedDict, total=False):
     """
 
     errors: list[str]
+    submission_id: str
 
 
 class ValidationState(State):

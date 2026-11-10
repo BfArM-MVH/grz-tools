@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import logging
-import shutil
+from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
+
+import grz_common.exceptions as grzexc
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
-from ..validation import UserInterruptException
+from ..transfer import s3_errors
 from .download import S3BotoDownloadWorker
-from .submission import EncryptedSubmission, Submission, SubmissionValidationError
+from .submission import EncryptedSubmission, Submission
 from .upload import S3BotoUploadWorker
 
 log = logging.getLogger(__name__)
@@ -91,13 +94,13 @@ class Worker:
         )
         return encrypted_submission
 
-    def validate(self, identifiers: IdentifiersModel, force=False, with_grz_check=True):
+    def validate(self, identifiers: IdentifiersModel, force: bool = False, no_mmap: bool = False):
         """
         Validate this submission
 
         :param identifiers: IdentifiersModel containing GRZ and LE identifiers.
         :param force: Force validation of already validated files
-        :param with_grz_check: If True, use the grz-check tool for validation.
+        :param no_mmap: If True, use the streaming python reader instead of zero-copy mmap.
         :raises SubmissionValidationError: if the validation fails
         """
         submission = self.parse_submission()
@@ -107,7 +110,7 @@ class Worker:
             error_msg = "\n".join(["Metadata validation failed! Errors:", *errors])
             self.__log.error(error_msg)
 
-            raise SubmissionValidationError(error_msg)
+            raise grzexc.SubmissionValidationError(error_msg)
         else:
             self.__log.info("Metadata validation successful!")
 
@@ -116,63 +119,41 @@ class Worker:
             self.progress_file_checksum_validation.unlink(missing_ok=True)
             self.progress_file_sequencing_data_validation.unlink(missing_ok=True)
 
-        have_grz_check = shutil.which("grz-check") is not None
-        if with_grz_check and have_grz_check:
-            try:
-                self.__log.info("Starting file validation with `grz-check`...")
-                errors = list(
-                    submission.validate_files_with_grz_check(
-                        checksum_progress_file=self.progress_file_checksum_validation,
-                        seq_data_progress_file=self.progress_file_sequencing_data_validation,
-                        threads=self._threads,
-                    )
+        try:
+            self.__log.info("Starting file validation with `grz-check`...")
+            errors = list(
+                submission.validate_files(
+                    checksum_progress_file=self.progress_file_checksum_validation,
+                    seq_data_progress_file=self.progress_file_sequencing_data_validation,
+                    threads=self._threads,
+                    no_mmap=no_mmap,
                 )
-                if errors:
-                    error_msg = "\n".join(["File validation failed! Errors:", *errors])
-                    self.__log.error(error_msg)
-                    raise SubmissionValidationError(error_msg)
-                else:
-                    self.__log.info("File validation successful!")
-                return
-            except UserInterruptException as e:
-                error_msg = "Validation was cancelled by the user and is incomplete."
-                self.__log.error(error_msg)
-                raise SubmissionValidationError(error_msg) from e
-
-        # Fallback validation
-        self.__log.info("Starting checksum validation (fallback)...")
-        if errors := list(
-            submission._validate_checksums_fallback(progress_log_file=self.progress_file_checksum_validation)
-        ):
-            error_msg = "\n".join(["Checksum validation failed! Errors:", *errors])
-            self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
-        else:
-            self.__log.info("Checksum validation successful!")
-
-        self.__log.info("Starting sequencing data validation (fallback)...")
-        if errors := list(
-            submission._validate_sequencing_data_fallback(
-                progress_log_file=self.progress_file_sequencing_data_validation
             )
-        ):
-            error_msg = "\n".join(["Sequencing data validation failed! Errors:", *errors])
+            if errors:
+                error_msg = "\n".join(["File validation failed! Errors:", *errors])
+                self.__log.error(error_msg)
+                raise grzexc.SubmissionValidationError(error_msg)
+            else:
+                self.__log.info("File validation successful!")
+        except grzexc.GrzError:
+            # already logged and typed above, so wrapping it again would log and double-report it
+            raise
+        except Exception as e:
+            error_msg = f"Validation failed due to an error: {e}"
             self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
-        else:
-            self.__log.info("Sequencing data validation successful!")
+            raise grzexc.SubmissionValidationError(error_msg) from e
 
     def encrypt(
         self,
-        recipient_public_key_path: str | PathLike,
-        submitter_private_key_path: str | PathLike | None = None,
+        recipient_public_key: X25519PublicKey,
+        submitter_private_key: X25519PrivateKey | None = None,
         force: bool = False,
         check_validation_logs: bool = True,
     ) -> EncryptedSubmission:
         """
         Encrypt this submission with a public key using Crypt4Gh.
-        :param recipient_public_key_path: Path to the public key file of the recipient.
-        :param submitter_private_key_path: Path to the private key file of the submitter.
+        :param recipient_public_key: The public key of the recipient.
+        :param submitter_private_key: The private key of the submitter, which signs the encryption.
         :param force: Force encryption of already encrypted files
         :param check_validation_logs: Check validation logs before encrypting.
         :return: EncryptedSubmission instance
@@ -207,7 +188,7 @@ class Worker:
                     "Please re-run the 'validate' command and try again."
                 )
                 self.__log.error(error_msg)
-                raise SubmissionValidationError(error_msg)
+                raise grzexc.IncompleteSubmissionError(error_msg)
 
             self.__log.info("All files verified as successfully validated.")
 
@@ -215,22 +196,28 @@ class Worker:
             # delete the log file if it exists
             self.progress_file_encrypt.unlink(missing_ok=True)
 
-        encrypted_submission = submission.encrypt(
-            encrypted_files_dir=str(self.encrypted_files_dir),
-            progress_log_file=self.progress_file_encrypt,
-            recipient_public_key_path=recipient_public_key_path,
-            submitter_private_key_path=submitter_private_key_path,
-            force=force,
-        )
+        try:
+            encrypted_submission = submission.encrypt(
+                encrypted_files_dir=str(self.encrypted_files_dir),
+                progress_log_file=self.progress_file_encrypt,
+                recipient_public_key=recipient_public_key,
+                submitter_private_key=submitter_private_key,
+                force=force,
+            )
+        except grzexc.GrzError:
+            raise
+        except Exception as e:
+            raise grzexc.EncryptionError(str(e)) from e
 
         return encrypted_submission
 
-    def decrypt(self, recipient_private_key_path: str | PathLike, force: bool = False) -> Submission:
+    def decrypt(self, recipient_private_key: X25519PrivateKey, force: bool = False) -> Submission:
         """
-        Encrypt this submission with a public key using Crypt4Gh.
-        :param recipient_private_key_path: Path to the private key file of the recipient.
+        Decrypt this submission with a private key using Crypt4Gh.
+
+        :param recipient_private_key: The private key of the recipient.
         :param force: Force decryption of already decrypted files
-        :return: EncryptedSubmission instance
+        :return: Submission instance
         """
         encrypted_submission = self.parse_encrypted_submission()
 
@@ -241,7 +228,7 @@ class Worker:
         submission = encrypted_submission.decrypt(
             files_dir=self.files_dir,
             progress_log_file=self.progress_file_decrypt,
-            recipient_private_key_path=recipient_private_key_path,
+            recipient_private_key=recipient_private_key,
         )
 
         return submission
@@ -271,7 +258,7 @@ class Worker:
                 "Please re-run the 'encrypt' command and try again."
             )
             self.__log.error(error_msg)
-            raise SubmissionValidationError(error_msg)
+            raise grzexc.IncompleteSubmissionError(error_msg)
 
         self.__log.info("All files verified as successfully encrypted.")
 
@@ -281,7 +268,8 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        upload_worker.upload(encrypted_submission)
+        with s3_errors(f"Upload of {encrypted_submission.submission_id}", grzexc.UploadError):
+            upload_worker.upload(encrypted_submission)
 
         return encrypted_submission.submission_id
 
@@ -295,9 +283,16 @@ class Worker:
 
         encrypted_submission = self.parse_encrypted_submission()
 
-        upload_worker.archive(encrypted_submission)
+        with s3_errors(f"Archiving {encrypted_submission.submission_id}", grzexc.UploadError):
+            upload_worker.archive(encrypted_submission)
 
-    def download(self, s3_options: S3Options, submission_id: str, force: bool = False):
+    def download(
+        self,
+        s3_options: S3Options,
+        submission_id: str,
+        force: bool = False,
+        metadata_version_check: Callable[[str], None] | None = None,
+    ):
         """
         Download an encrypted submission
         """
@@ -315,5 +310,10 @@ class Worker:
         self.__log.info("Downloading metadata...")
         download_worker.download_metadata(submission_id, self.metadata_dir, metadata_file_name="metadata.json")
 
+        encrypted_submission = EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir)
+        if metadata_version_check is not None:
+            metadata_schema_version = encrypted_submission.metadata.content.get_schema_version()
+            metadata_version_check(metadata_schema_version)
+
         self.__log.info("Downloading encrypted files...")
-        download_worker.download(submission_id, EncryptedSubmission(self.metadata_dir, self.encrypted_files_dir))
+        download_worker.download(submission_id, encrypted_submission)

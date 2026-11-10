@@ -6,7 +6,7 @@ import grzctl.cli
 from click.testing import CliRunner
 
 
-def test_report_processed(temp_db_config_file_path):
+def test_report_processed(temp_migrated_db_config_file_path):
     env = {
         "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
         "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
@@ -17,9 +17,7 @@ def test_report_processed(temp_db_config_file_path):
     cli = grzctl.cli.build_cli()
     execute = lambda args: runner.invoke(cli, args, catch_exceptions=False)
 
-    args_prefix = ["db", "--config-file", temp_db_config_file_path]
-    result = execute([*args_prefix, "init"])
-    assert result.exit_code == 0, result.output
+    args_prefix = ["--config", temp_migrated_db_config_file_path, "db"]
 
     submission_id = "123456789_1970-01-01_a0b1c2d3"
     result = execute([*args_prefix, "submission", "add", submission_id])
@@ -50,9 +48,9 @@ def test_report_processed(temp_db_config_file_path):
 
     today = datetime.date.today()
     report_args = [
+        "--config",
+        temp_migrated_db_config_file_path,
         "report",
-        "--config-file",
-        temp_db_config_file_path,
         "processed",
         "--since",
         (today - datetime.timedelta(days=1)).isoformat(),

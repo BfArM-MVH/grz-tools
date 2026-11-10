@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
 import re
-from datetime import date, datetime, time
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, tzinfo
 from enum import StrEnum
 from functools import cache
 from importlib.resources import files
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Self
+from typing import Annotated, Any, Self, cast
 
 from pydantic import (
     AfterValidator,
@@ -19,18 +21,64 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
 
-from ...common import StrictBaseModel
-from ...mii.consent import Consent, ProvisionType
+from ...common import StrictBaseModel, as_aware_datetime
+from ...mii.consent import (
+    BroadConsentVersion,
+    Consent,
+    Period,
+    ProvisionType,
+    Status,
+)
 from .. import thresholds as thresholds_model
 from .versioning import Version
 
 SCHEMA_URL_PATTERN = r"https://raw\.githubusercontent\.com/BfArM-MVH/MVGenomseq/refs/tags/v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?/GRZ/grz-schema\.json"
 REDACTED_TAN = "0" * 64
+REDACTED_LOCAL_CASE_ID = "REDACTED_LOCAL_CASE_ID"
+# The archive contains both an empty string and REDACTED_LOCAL_CASE_ID as redaction
+# placeholders; neither spelling identifies a patient.
+LOCAL_CASE_ID_PLACEHOLDERS = ("", REDACTED_LOCAL_CASE_ID)
+
+
+def is_redacted_local_case_id(local_case_id: str | None) -> bool:
+    """Whether *local_case_id* is a redaction placeholder rather than a submitter's value.
+
+    A placeholder identifies no patient, so it must never be stored as one, keyed on, or
+    treated as a case identifier.
+    """
+    return local_case_id is None or local_case_id in LOCAL_CASE_ID_PLACEHOLDERS
+
+
+def redact_metadata_dict(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Redact a metadata document's sensitive fields in a copy, leaving the argument untouched.
+
+    Replaces ``tanG`` with :data:`REDACTED_TAN`, ``localCaseId`` with
+    :data:`REDACTED_LOCAL_CASE_ID`, and the index donor's pseudonym with ``"index"``.
+    v1.1.7 and earlier (still supported) told submitters to put the tanG in ``donorPseudonym``;
+    v1.2.1 onward says ``"index"``. So that overwrite can be removing a real tanG.
+
+    Takes a plain dict so archival can apply it to the raw metadata.json it read from disk,
+    keeping the archived record faithful to what the submitter sent, while
+    :meth:`GrzSubmissionMetadata.to_redacted_dict` applies the same rule to a model dump.
+    One list of sensitive fields, two carriers.
+
+    :param metadata: Parsed metadata JSON. Not modified.
+    :returns: A deep copy of ``metadata`` with the sensitive fields redacted.
+    """
+    redacted = copy.deepcopy(metadata)
+    redacted["submission"]["tanG"] = REDACTED_TAN
+    redacted["submission"]["localCaseId"] = REDACTED_LOCAL_CASE_ID
+    for donor in redacted.get("donors", []):
+        if donor.get("relation") == "index":
+            donor["donorPseudonym"] = "index"
+    return redacted
+
 
 log = logging.getLogger(__name__)
 
@@ -42,10 +90,22 @@ ClinicalDataNodeId = Annotated[str, StringConstraints(pattern=r"^KDK[A-Z0-9]{3}[
 
 
 def is_supported_version(version: str) -> bool:
-    return Version("1.1.1") <= Version(version) <= Version("1.3")
+    return Version("1.1.1") <= Version(version) <= Version("1.3.1")
 
 
 class ResearchConsentCodes(StrEnum):
+    """
+    Permissions consent to research is derived from. Neither has been retired by the MII.
+
+    Research use needs MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU, which the MII policy
+    CodeSystem places inside the PATDAT_ERHEBEN_SPEICHERN_NUTZEN module, so permitting the module
+    grants it as well. Either permit therefore suffices, while a deny on either revokes; see
+    ``ResearchConsent.consents_to_research``.
+
+    Matched on the OID alone: OIDs are globally unique, while the policy system is stated
+    inconsistently, with and without its 'urn:oid:' prefix.
+    """
+
     PATDAT_ERHEBEN_SPEICHERN_NUTZEN = "2.16.840.1.113883.3.1937.777.24.5.3.1"
     MDAT_WISSENSCHAFTLICH_NUTZEN_EU_DSGVO_NIVEAU = "2.16.840.1.113883.3.1937.777.24.5.3.8"
 
@@ -181,6 +241,13 @@ class Submission(StrictBaseModel):
     Name of the sequencing lab.
     """
 
+    @field_validator("submission_date", mode="before")
+    @classmethod
+    def _coerce_datetime_to_date(cls, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.date()
+        return value
+
 
 class Gender(StrEnum):
     """
@@ -267,8 +334,83 @@ class MvConsent(StrictBaseModel):
     """
 
 
-class ResearchConsentSchemaVersion(StrEnum):
-    v_2025_0_1 = "2025.0.1"
+@dataclass(frozen=True)
+class ResearchConsentPackage:
+    """
+    The rules in which one MII "Modul Consent" package, named by ``researchConsents[].schemaVersion``, differs.
+
+    ``docs/mii-consent.md`` lists every difference between the packages, with its source.
+    """
+
+    profile: str
+    """Version of MII_PR_Consent_Einwilligung that the package ships."""
+
+    requires_period_end: bool
+    """
+    Whether the profile pins the end of both provision periods to 1..1. ``test_model_matches_the_profile`` checks it
+    against the vendored profiles.
+    """
+
+    requires_patient_reference_or_identifier: bool
+    """
+    Whether the IG text requires ``Consent.patient.reference`` or ``.identifier``. The profile requires neither, so no
+    test can check this against an artefact. From 2026.0.0 on, the IG text of
+    https://simplifier.net/guide/mii-ig-modul-consent-2026/MII-IG-Modul-Consent/TechnischeImplementierung/FHIRProfile/Consent
+    requires it, and the IG text of the 2025 packages calls both optional.
+    """
+
+
+# MII "Modul Consent" package versions the Consent model is checked against, in publication order. A package
+# cannot be accepted without deciding every rule. GRZ metadata schema 1.3.1 also lists 2026.0.1, which the MII has
+# not released; add it here once it is, together with its artefacts in example_terminology.
+RESEARCH_CONSENT_PACKAGES = {
+    "2025.0.1": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2025.0.2": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2025.0.3": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2025.0.4": ResearchConsentPackage(
+        profile="1.0.8", requires_period_end=True, requires_patient_reference_or_identifier=False
+    ),
+    "2026.0.0": ResearchConsentPackage(
+        profile="1.0.9", requires_period_end=False, requires_patient_reference_or_identifier=True
+    ),
+}
+
+RESEARCH_CONSENT_PACKAGE_PROFILES = {version: package.profile for version, package in RESEARCH_CONSENT_PACKAGES.items()}
+
+RESEARCH_CONSENT_SCHEMA_VERSIONS = tuple(RESEARCH_CONSENT_PACKAGES)
+
+PROFILES_REQUIRING_PERIOD_END = frozenset(
+    package.profile for package in RESEARCH_CONSENT_PACKAGES.values() if package.requires_period_end
+)
+
+
+def _validate_research_consent_schema_version(value: str) -> str:
+    if value not in RESEARCH_CONSENT_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"Unsupported researchConsent schemaVersion {value!r}; "
+            f"accepted versions are {', '.join(RESEARCH_CONSENT_SCHEMA_VERSIONS)}"
+        )
+    return value
+
+
+# Restated for JSON Schema, which cannot express a validator and would export a bare string.
+ResearchConsentSchemaVersion = Annotated[
+    str,
+    AfterValidator(_validate_research_consent_schema_version),
+    WithJsonSchema(
+        {
+            "type": "string",
+            "description": "Schema version of de.medizininformatikinitiative.kerndatensatz.consent",
+            "enum": list(RESEARCH_CONSENT_SCHEMA_VERSIONS),
+        }
+    ),
+]
 
 
 class ResearchConsentNoScopeJustification(StrEnum):
@@ -298,8 +440,9 @@ class ResearchConsent(StrictBaseModel):
     # try Consent model first, falling back to dict
     scope: Annotated[Consent | dict | None, Field(union_mode="left_to_right")] = None
     """
-    Scope of the research consent in JSON format following the MII IG Consent v2025 FHIR schema. 
-    See 'https://www.medizininformatik-initiative.de/Kerndatensatz/KDS_Consent_V2025/MII-IG-Modul-Consent.html' and 
+    Scope of the research consent in JSON format following the MII IG Consent FHIR schema
+    (schemaVersion 2025.0.1 or newer).
+    See 'https://simplifier.net/guide/mii-ig-modul-consent-2026' and
     'https://packages2.fhir.org/packages/de.medizininformatikinitiative.kerndatensatz.consent'.
     """
 
@@ -340,22 +483,100 @@ class ResearchConsent(StrictBaseModel):
 
         return self
 
-    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
-        if isinstance(dt, date) and not isinstance(dt, datetime):
-            dt = datetime.combine(dt, time.min)
+    @model_validator(mode="after")
+    def warn_when_not_in_force(self):
+        """
+        A status other than active is easy to state by mistake, and otherwise surfaces only as a
+        consented flag reading False.
+        """
+        if isinstance(self.scope, Consent) and not self.scope.is_in_force:
+            log.warning(
+                f"Research consent has status '{self.scope.status}' rather than '{Status.ACTIVE}', "
+                "so it grants nothing regardless of its provisions."
+            )
+        return self
 
+    @model_validator(mode="after")
+    def ensure_period_end_where_the_profile_requires_it(self):
+        """
+        Reject an open-ended period under a package whose profile pins the period end to 1..1.
+
+        A period without an end never expires, so honouring one where the profile demands an end
+        would grant indefinitely a permission that was written to run out.
+
+        A submission declaring no schemaVersion, which metadata 1.3 permits, names no package and
+        therefore no profile, so nothing is enforced here.
+        """
+        if self.schema_version is None or not isinstance(self.scope, Consent):
+            return self
+
+        package = RESEARCH_CONSENT_PACKAGES[self.schema_version]
+        if not package.requires_period_end or self.scope.provision is None:
+            return self
+
+        root = self.scope.provision
+        periods = [("provision.period", root.period)] if root.period is not None else []
+        periods += [
+            (f"provision.provision[{index}].period", nested.period) for index, nested in enumerate(root.provision)
+        ]
+        if open_ended := [name for name, period in periods if period.end is None]:
+            raise ValueError(
+                f"researchConsent schemaVersion {self.schema_version} ships MII consent profile {package.profile}, "
+                f"which requires an end on every provision period; missing on {', '.join(open_ended)}"
+            )
+        return self
+
+    @staticmethod
+    def _as_utc_datetime(value: date | datetime, zone_default: tzinfo = UTC) -> datetime:
+        """Coerce a date or datetime to a timezone-aware datetime.
+
+        :param value: date or datetime to coerce.
+        :param zone_default: tzinfo to attach when ``value`` is naive (no tzinfo).
+        :returns: timezone-aware datetime.
+        """
+        if isinstance(value, datetime):
+            return as_aware_datetime(value, zone_default)
+        return datetime.combine(value, time.min, tzinfo=zone_default)
+
+    @property
+    def broad_consent_versions(self) -> frozenset[BroadConsentVersion]:
+        """
+        Versions of the MII broad consent document this consent declares, derived from its policy OIDs.
+
+        Empty if the scope did not parse as a FHIR Consent or states no recognized OID. The declared
+        ``schemaVersion`` names the KDS package instead and says nothing about the document version.
+        """
+        return self.scope.broad_consent_versions if isinstance(self.scope, Consent) else frozenset()
+
+    def consent_by_code(self, dt: date | datetime) -> dict[str, bool]:
+        dt = self._as_utc_datetime(dt)
         code2consent: dict[str, bool] = {}
-        if isinstance(self.scope, Consent) and (self.scope.provision is not None):
-            for provision in self.scope.provision.provision:
-                start = provision.period.start
-                end = provision.period.end
-                if start <= dt <= end:
-                    for codeable_concept in provision.code:
-                        for coding in codeable_concept.coding:
-                            if provision.type == ProvisionType.PERMIT:
-                                code2consent[coding.code] = code2consent.get(coding.code, True)
-                            else:
-                                code2consent[coding.code] = False
+
+        if not isinstance(self.scope, Consent):
+            # the scope fell back to dict, so nothing can be read from it
+            return code2consent
+
+        # Consent.status is a modifier element: a consent that is not in force grants nothing,
+        # no matter what its provisions say.
+        if not self.scope.is_in_force or self.scope.provision is None:
+            return code2consent
+
+        # the root provision frames every nested rule: outside its period, none of them applies.
+        # Before schema v1.3 the root period may be missing. Then only the nested periods count.
+        root_period = self.scope.provision.period
+        if root_period is not None and not root_period.contains(dt):
+            return code2consent
+
+        for provision in self.scope.provision.provision:
+            if not provision.period.contains(dt):
+                continue
+            for codeable_concept in provision.code:
+                for coding in codeable_concept.coding:
+                    if provision.type == ProvisionType.PERMIT:
+                        code2consent[coding.code] = code2consent.get(coding.code, True)
+                    else:
+                        code2consent[coding.code] = False
+
         return code2consent
 
     @staticmethod
@@ -372,6 +593,16 @@ class ResearchConsent(StrictBaseModel):
 
     @staticmethod
     def consents_to_research(consents: list[ResearchConsent], date: date) -> bool:
+        """
+        Whether ``consents`` grant consent to research at ``date``.
+
+        True if at least one of the ``ResearchConsentCodes`` is stated across ``consents`` and every
+        stated one is permitted; a single deny, or no stated research permission at all, refuses.
+
+        :param consents: research consents to evaluate together.
+        :param date: date the consent state is evaluated at.
+        :returns: True if research consent is granted at ``date``.
+        """
         all_consented = None
         code2consent = ResearchConsent.merged_consent_by_code(consents, date)
 
@@ -380,6 +611,90 @@ class ResearchConsent(StrictBaseModel):
                 all_consented = consented if all_consented is None else consented and all_consented
 
         return False if all_consented is None else all_consented
+
+    def explain_no_research_consent(self, dt: date | datetime) -> str | None:
+        """
+        Why this consent permits no research at ``dt``.
+
+        The checks follow the order in which ``consent_by_code`` reads the scope.
+        The reason is phrased to follow the name of the consent, such as ``researchConsents[0]``.
+        It leaves out ``dt``, so that a caller can state it once for several consents.
+
+        :param dt: date or datetime the consent state is evaluated at.
+        :returns: the reason, or ``None`` if this consent permits research at ``dt``.
+        """
+        if self.scope is None:
+            # ensure_scope_xor_justification guarantees a noScopeJustification here
+            return f"has no scope, noScopeJustification '{self.no_scope_justification}'"
+        if not isinstance(self.scope, Consent):
+            return f"has a scope that is not a valid FHIR Consent: {_why_not_a_consent(self.scope)}"
+
+        research = {
+            code: permitted for code, permitted in self.consent_by_code(dt).items() if code in ResearchConsentCodes
+        }
+        if denied := [ResearchConsentCodes(code).name for code, permitted in research.items() if not permitted]:
+            return f"denies {', '.join(denied)}"
+        if research:
+            return None
+        return _why_no_research_code(self.scope, self._as_utc_datetime(dt))
+
+
+def _why_not_a_consent(scope: dict) -> str:
+    """
+    Why *scope* does not parse as a :class:`Consent`.
+
+    :param scope: a research consent scope that the model kept as a dict.
+    :returns: the location and message of each validation error, separated by ``; ``.
+    """
+    try:
+        Consent.model_validate(scope)
+    except ValidationError as e:
+        return "; ".join(
+            f"{'.'.join(map(str, error['loc']))}: {error['msg']}" if error["loc"] else error["msg"]
+            for error in e.errors()
+        )
+    raise RuntimeError("The scope parses as a Consent, but the model kept it as a dict.")
+
+
+def _why_no_research_code(scope: Consent, moment: datetime) -> str:
+    """
+    Why ``ResearchConsent.consent_by_code`` states no research code for *scope* at *moment*.
+
+    The checks follow the order in which ``consent_by_code`` skips the scope or a provision.
+
+    :param scope: the consent that states no research code at *moment*.
+    :param moment: the moment the consent state is evaluated at.
+    :returns: the reason, phrased to follow the name of the consent.
+    """
+    if not scope.is_in_force:
+        return f"is not in force, status '{scope.status}'"
+    if scope.provision is None:
+        return "has no provision"
+    root_period = scope.provision.period
+    if root_period is not None and not root_period.contains(moment):
+        return f"is outside the root provision period {_period_text(root_period)}"
+    research_periods = [
+        provision.period
+        for provision in scope.provision.provision
+        if any(coding.code in ResearchConsentCodes for concept in provision.code for coding in concept.coding)
+    ]
+    if not research_periods:
+        return "has no provision for a research code"
+    return "is outside every research provision period: " + ", ".join(
+        _period_text(period) for period in research_periods
+    )
+
+
+def _period_text(period: Period) -> str:
+    """
+    A period as a report states it, such as ``2020-09-01 to 2050-08-31``.
+
+    :param period: the period to state.
+    :returns: the bounds as submitted.
+    """
+    if period.end is None:
+        return f"{period.start} without end"
+    return f"{period.start} to {period.end}"
 
 
 class TissueOntology(StrictBaseModel):
@@ -924,12 +1239,14 @@ class LabDatum(StrictBaseModel):
 
 
 class Donor(StrictBaseModel):
+    # v1.1.7 and earlier (still supported) said "For Index patient use TanG", so a document in
+    # that range may carry the tanG here. v1.2.1 onward says "index", as the description below.
     donor_pseudonym: str
     """
-    A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing; 
-    the donorPseudonym needs to be identifiable by the Leistungserbringer 
-    in case of changes to the consents by one of the donors. 
-    For Index patient use TanG.
+    A unique identifier given by the Leistungserbringer for each donor of a single, duo or trio sequencing;
+    the donorPseudonym needs to be identifiable by the Leistungserbringer
+    in case of changes to the consents by one of the donors.
+    For Index patient use index.
     """
 
     gender: Gender
@@ -1007,6 +1324,27 @@ class Donor(StrictBaseModel):
     def consents_to_research(self, date: date) -> bool:
         return ResearchConsent.consents_to_research(self.research_consents, date)
 
+    def explain_no_research_consent(self, date: date) -> str | None:
+        """
+        Why this donor gives no research consent at ``date``.
+
+        Names every research consent that permits no research, each with its own reason.
+        A consent that permits research is never named: it cannot be the cause,
+        because a single deny in another consent refuses for the donor.
+
+        :param date: date the consent state is evaluated at.
+        :returns: the reasons as one line, or ``None`` if the donor consents to research at ``date``.
+        """
+        if self.consents_to_research(date):
+            return None
+        if not self.research_consents:
+            return "no researchConsents"
+        return ", ".join(
+            f"researchConsents[{index}] {reason}"
+            for index, consent in enumerate(self.research_consents)
+            if (reason := consent.explain_no_research_consent(date)) is not None
+        )
+
     def consents_to_mv(self) -> bool:
         if self.mv_consent.scope:
             return any(
@@ -1055,6 +1393,39 @@ class Donor(StrictBaseModel):
         return self
 
 
+def _lacks_root_provision_period(consent: ResearchConsent) -> bool:
+    """
+    Whether the scope is a Consent whose root provision is set but has no period.
+
+    :param consent: The research consent to check.
+    :returns: ``True`` if the root provision period is missing.
+    """
+    return (
+        isinstance(consent.scope, Consent)
+        and consent.scope.provision is not None
+        and consent.scope.provision.period is None
+    )
+
+
+def _lacks_patient_reference_and_identifier(consent: ResearchConsent) -> bool:
+    """
+    Whether the scope is a Consent whose package requires a patient reference or identifier, and whose patient has
+    neither.
+
+    A consent declaring no schemaVersion, which metadata 1.3 permits, names no package, so nothing is required.
+
+    :param consent: The research consent to check.
+    :returns: ``True`` if the patient has neither.
+    """
+    return (
+        isinstance(consent.scope, Consent)
+        and consent.schema_version is not None
+        and RESEARCH_CONSENT_PACKAGES[consent.schema_version].requires_patient_reference_or_identifier
+        and consent.scope.patient.reference is None
+        and consent.scope.patient.identifier is None
+    )
+
+
 class GrzSubmissionMetadata(StrictBaseModel):
     """
     General metadata schema for submissions to the GRZ
@@ -1091,6 +1462,97 @@ class GrzSubmissionMetadata(StrictBaseModel):
     def consents_to_research(self, date: date) -> bool:
         return all(donor.consents_to_research(date) for donor in self.donors)
 
+    def explain_no_research_consent(self, date: date) -> str | None:
+        """
+        Why this submission gives no research consent at ``date``.
+
+        The submission consents to research only if every donor does.
+        So every donor without research consent is named, by its position and relation, such as
+        ``donors[1] (father)``. The donorPseudonym is left out, because it can be a long hash.
+
+        :param date: date the consent state is evaluated at.
+        :returns: the reasons as one line, or ``None`` if every donor consents to research at ``date``.
+        """
+        reasons = [
+            f"donors[{index}] ({donor.relation}): {reason}"
+            for index, donor in enumerate(self.donors)
+            if (reason := donor.explain_no_research_consent(date)) is not None
+        ]
+        return "; ".join(reasons) or None
+
+    def create_redaction_patterns(self) -> list[tuple[str, str]]:
+        """
+        Create redaction patterns for tanG and localCaseId from this metadata.
+
+        Returns patterns for sensitive information that should be redacted
+        before archiving logs.
+
+        :returns: List of (pattern, replacement) tuples for log redaction
+        """
+        patterns: list[tuple[str, str]] = []
+        # only add tanG if it's not already redacted (all zeros)
+        if self.submission.tan_g and self.submission.tan_g != REDACTED_TAN:
+            patterns.append((self.submission.tan_g, "REDACTED_TAN_G"))
+        if self.submission.local_case_id:
+            patterns.append((self.submission.local_case_id, REDACTED_LOCAL_CASE_ID))
+        return patterns
+
+    def get_raw_dict(self) -> dict[str, Any]:
+        """
+        Return this metadata as the submitter sent it: keys and all.
+
+        Uses the schema's aliases and includes only the keys the submitter actually set,
+        so this is the parsed document reproduced, not a canonicalized re-serialization.
+
+        :returns: The submitted metadata document as a dictionary.
+        """
+        return self.model_dump(mode="json", by_alias=True, exclude_unset=True)
+
+    def to_redacted_dict(self) -> dict[str, Any]:
+        """
+        Create a redacted dictionary representation suitable for archiving.
+
+        Redacts the fields listed in :func:`redact_metadata_dict`.
+
+        :returns: Redacted metadata dictionary
+        """
+        return redact_metadata_dict(self.get_raw_dict())
+
+    def restore_redacted_fields(self, *, tan_g: str | None, local_case_id: str | None) -> frozenset[str]:
+        """Put authoritative values back into the fields redaction replaced, in place.
+
+        The partial inverse of :meth:`to_redacted_dict`, for a caller that kept the
+        submitter's values elsewhere: a metadata.json read back from an archive carries
+        placeholders, not what was submitted.
+
+        Redaction replaces a third field, the index donor's pseudonym, which this
+        deliberately leaves alone. Nothing that keeps a copy of a submission stores anything
+        but ``"index"`` for the index donor, so there is no authoritative value to restore
+        it from.
+
+        A field holding something other than a placeholder is left alone and stays
+        authoritative, so an unredacted copy is never overwritten.
+
+        :param tan_g: Value to restore ``tanG`` to, or ``None`` if unknown.
+        :param local_case_id: Value to restore ``localCaseId`` to, or ``None`` if unknown.
+        :returns: The names of the fields still redacted because no value was supplied.
+        """
+        unrestored = set()
+
+        if self.submission.tan_g == REDACTED_TAN:
+            if tan_g:
+                self.submission.tan_g = tan_g
+            else:
+                unrestored.add("tan_g")
+
+        if is_redacted_local_case_id(self.submission.local_case_id):
+            if not is_redacted_local_case_id(local_case_id):
+                self.submission.local_case_id = cast(str, local_case_id)
+            else:
+                unrestored.add("local_case_id")
+
+        return frozenset(unrestored)
+
     @field_validator("donors", mode="after")
     @classmethod
     def ensure_single_index_patient(cls, value: list[Donor]) -> list[Donor]:
@@ -1125,7 +1587,7 @@ class GrzSubmissionMetadata(StrictBaseModel):
         return schema_version
 
     @model_validator(mode="after")
-    def validate_research_consent_after_minor_version_3(self):  # noqa: C901
+    def validate_research_consent_after_minor_version_3(self):  # noqa: C901, PLR0912
         if Version(self.get_schema_version()) >= Version("1.3"):
             for donor in self.donors:
                 if len(donor.research_consents) < 1:
@@ -1136,12 +1598,34 @@ class GrzSubmissionMetadata(StrictBaseModel):
                     if consent.no_scope_justification is None and not consent.scope:
                         raise ValueError("Either a non-empty scope must be provided or a noScopeJustification")
                     if (consent.scope is not None) and (not isinstance(consent.scope, Consent)):
-                        raise ValueError("scope must be a valid MII Broad Consent as of metadata v1.3")
+                        raise ValueError(
+                            "scope must be a valid MII Broad Consent as of metadata v1.3: "
+                            f"{_why_not_a_consent(consent.scope)}"
+                        )
+                    if _lacks_root_provision_period(consent):
+                        raise ValueError("scope.provision.period is required as of metadata v1.3")
+                    if _lacks_patient_reference_and_identifier(consent):
+                        raise ValueError(
+                            "scope.patient needs a reference or an identifier under researchConsent schemaVersion "
+                            f"{consent.schema_version} as of metadata v1.3"
+                        )
         else:
             for donor in self.donors:
                 for consent in donor.research_consents:
                     if consent.schema_version is None:
                         raise ValueError("schemaVersion is required in researchConsent before metadata schema v1.3")
+                    if _lacks_root_provision_period(consent):
+                        log.warning(
+                            "researchConsents[].scope.provision has no period, which the MII consent profile "
+                            "requires. Before metadata schema v1.3 it is read as grz-pydantic-models 2.7.1 read it: "
+                            "only the nested provision periods count."
+                        )
+                    if _lacks_patient_reference_and_identifier(consent):
+                        log.warning(
+                            "researchConsents[].scope.patient has neither a reference nor an identifier, which the MII "
+                            f"consent IG of schemaVersion {consent.schema_version} requires. Before metadata schema v1.3 "
+                            "it is accepted, as grz-pydantic-models 2.7.1 accepted it."
+                        )
         return self
 
     @model_validator(mode="after")
@@ -1215,12 +1699,36 @@ class GrzSubmissionMetadata(StrictBaseModel):
             missing_subtypes = required_sequencing_subtypes - donor_sequence_subtypes
 
             if missing_subtypes:
-                raise ValueError(
+                message = (
                     f"Index donor is missing sequence subtypes for submission type '{self.submission.genomic_study_subtype}': "
-                    f"{', '.join(missing_subtypes)}."
+                    f"{', '.join(missing_subtypes)}, starting 04.12.2025."
                 )
+                # This check was published in grz-pydantic-models v2.5.0 (2025-12-04); submissions
+                # predating that release were not subject to it, so only warn for them.
+                if self.submission.submission_date >= date(2025, 12, 4):
+                    raise ValueError(message)
+                else:
+                    log.warning(message)
 
             return self
+
+    @model_validator(mode="after")
+    def ensure_disease_type_rare_has_matching_library_types(self):
+        if self.submission.disease_type == DiseaseType.rare:
+            mandatory_index_types: set[LibraryType] = {LibraryType.wgs, LibraryType.wgs_lr}
+            index_library_types = {datum.library_type for datum in self.index_donor.lab_data}
+
+            if not (index_library_types & mandatory_index_types):
+                message = (
+                    f"For diseaseType '{DiseaseType.rare}', the index donor must have at least one lab datum with "
+                    f"libraryType 'wgs' or 'wgs_lr', starting 01.06.2026."
+                )
+                if self.submission.submission_date >= date(2026, 6, 1):
+                    raise ValueError(message)
+                else:
+                    log.warning(message)
+
+        return self
 
     @model_validator(mode="after")
     def check_for_tumor_cell_count(self):
@@ -1347,6 +1855,15 @@ class GrzSubmissionMetadata(StrictBaseModel):
 
         return thresholds
 
+    def get_submission_size(self) -> int:
+        submission_size: int = 0
+        for donor in self.donors:
+            for lab_datum in donor.lab_data:
+                if sequence_data := lab_datum.sequence_data:
+                    for datafile in sequence_data.files:
+                        submission_size += datafile.file_size_in_bytes
+        return submission_size
+
     def get_thresholds(self) -> dict[tuple[str, str], thresholds_model.Thresholds | None]:
         """
         Get the thresholds for all lab data in the submission.
@@ -1399,6 +1916,21 @@ class GrzSubmissionMetadata(StrictBaseModel):
                 f"Reference genomes: {reference_genomes}"
             )
 
+        return self
+
+    @model_validator(mode="after")
+    def ensure_no_scope_justification_is_not_technical_or_organizational(self):
+        for donor in self.donors:
+            for consent in donor.research_consents:
+                if consent.no_scope_justification in {
+                    ResearchConsentNoScopeJustification.LE_TECH,
+                    ResearchConsentNoScopeJustification.LE_ORG,
+                }:
+                    message = f"Setting noScopeJustification to {consent.no_scope_justification} is no longer allowed starting 01.06.2026."
+                    if self.submission.submission_date >= date(2026, 6, 1):
+                        raise ValueError(message)
+                    else:
+                        log.warning(message)
         return self
 
 

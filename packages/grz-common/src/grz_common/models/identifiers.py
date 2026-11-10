@@ -7,7 +7,7 @@ class IdentifiersModel(IgnoringBaseModel):
     grz: GenomicDataCenterId
     """Id of the GRZ."""
 
-    le: SubmitterId
+    le: SubmitterId | None = None
     """Id of the Leistungserbringer."""
 
 

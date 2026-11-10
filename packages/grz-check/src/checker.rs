@@ -215,7 +215,7 @@ fn process_job(
                         };
 
                     let finalize = |hasher: Arc<Mutex<Sha256>>| match Arc::try_unwrap(hasher) {
-                        Ok(mutex) => Some(format!("{:x}", mutex.into_inner().unwrap().finalize())),
+                        Ok(mutex) => Some(hex::encode(mutex.into_inner().unwrap().finalize())),
                         Err(_) => None,
                     };
                     let cs1 = finalize(hasher1);

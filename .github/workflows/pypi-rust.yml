@@ -1,0 +1,78 @@
+name: Publish Rust Package to PyPI
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'grz-check-v[0-9]+.[0-9]+.[0-9]+*'
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      # actions/checkout v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # actions/setup-python v6.2.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Build wheels
+        # PyO3/maturin-action v1.51.0
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter
+          sccache: 'true'
+          manylinux: auto
+          working-directory: packages/grz-check
+      - name: Upload wheels
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: packages/grz-check/dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build sdist
+        # PyO3/maturin-action v1.51.0
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: packages/grz-check
+      - name: Upload sdist
+      # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: wheels-sdist
+          path: packages/grz-check/dist
+
+  release:
+    name: Release to PyPI
+    runs-on: ubuntu-latest
+    needs: [linux, sdist]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/grz-check
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # actions/download-artifact v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Publish to PyPI
+        # pypa/gh-action-pypi-publish release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist

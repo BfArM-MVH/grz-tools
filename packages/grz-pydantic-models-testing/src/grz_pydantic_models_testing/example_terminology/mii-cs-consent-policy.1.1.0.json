@@ -1,0 +1,1179 @@
+{
+  "resourceType": "CodeSystem",
+  "id": "2.16.840.1.113883.3.1937.777.24.5.3--20251211153003",
+  "meta": {
+    "profile": [
+      "http://hl7.org/fhir/StructureDefinition/shareablecodesystem"
+    ]
+  },
+  "url": "urn:oid:2.16.840.1.113883.3.1937.777.24.5.3",
+  "version": "1.1.0",
+  "name": "MII CS Consent Policy",
+  "title": "MII Consent: Policy CodeSystem",
+  "status": "active",
+  "experimental": false,
+  "date": "2025-12-11",
+  "publisher": "MII Task Force Consent Umsetzung",
+  "contact": [
+    {
+      "name": "MII Task Force Consent Umsetzung",
+      "telecom": [
+        {
+          "system": "email",
+          "value": "office@medizininformatik-initiative.de"
+        }
+      ]
+    }
+  ],
+  "description": "Codesystem mit Consent-Policy-Codes zur interoperablen Operationalisierung bzw. Durchsetzung (Enforcement) von Consent Informationen des MII Broad Consent",
+  "caseSensitive": true,
+  "valueSet": "https://www.medizininformatik-initiative.de/fhir/modul-consent/ValueSet/mii-vs-consent-policy",
+  "hierarchyMeaning": "part-of",
+  "content": "complete",
+  "count": 101,
+  "property": [
+    {
+      "code": "period-of-validity",
+      "description": "A property that indicates the duration of validity of a concept. The string is a duration as ISO 8601:2004 string, ref. to http://hl7.org/fhir/iso-8601-date.",
+      "type": "string"
+    }
+  ],
+  "concept": [
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.1",
+      "display": "Patientendaten erheben, speichern, nutzen",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.2",
+          "display": "IDAT erheben",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.3",
+          "display": "IDAT speichern, verarbeiten",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.4",
+          "display": "IDAT zusammenfuehren Dritte",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.5",
+          "display": "IDAT bereitstellen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.6",
+          "display": "MDAT erheben",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.7",
+          "display": "MDAT speichern, verarbeiten",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.8",
+          "display": "MDAT wissenschaftlich nutzen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.9",
+          "display": "MDAT zusammenfuehren Dritte",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.37",
+          "display": "Rekontaktierung Ergebnisse erheblicher Bedeutung",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.44",
+      "display": "Patientendaten retrospektiv verarbeiten, nutzen",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.45",
+          "display": "MDAT retrospektiv speichern verarbeiten",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.46",
+          "display": "MDAT retrospektiv wissenschaftlich nutzen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            },
+            {
+              "code": "status",
+              "valueCode": "deprecated"
+            },
+            {
+              "code": "inactive",
+              "valueBoolean": true
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.47",
+          "display": "MDAT retrospektiv zusammenfuehren Dritte",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            },
+            {
+              "code": "status",
+              "valueCode": "deprecated"
+            },
+            {
+              "code": "inactive",
+              "valueBoolean": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.48",
+      "display": "Patientendaten Weitergabe non DSGVO NIVEAU",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.49",
+          "display": "MDAT wissenschaftlich nutzen ohne EU DSGVO NIVEAU",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.10",
+      "display": "Krankenkassendaten retrospektiv uebertragen, speichern, nutzen",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.11",
+          "display": "KKDAT 5J retrospektiv uebertragen"
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.12",
+          "display": "KKDAT 5J retrospektiv speichern verarbeiten",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.13",
+          "display": "KKDAT 5J retrospektiv wissenschaftlich nutzen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.38",
+          "display": "KKDAT 5J retrospektiv uebertragen KVNR"
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.14",
+      "display": "KKDAT prospektiv uebertragen speichern nutzen",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.15",
+          "display": "KKDAT 5J prospektiv uebertragen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.16",
+          "display": "KKDAT 5J prospektiv speichern verarbeiten",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            },
+            {
+              "code": "status",
+              "valueCode": "deprecated"
+            },
+            {
+              "code": "inactive",
+              "valueBoolean": true
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.17",
+          "display": "KKDAT 5J prospektiv wissenschaftlich nutzen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            },
+            {
+              "code": "status",
+              "valueCode": "deprecated"
+            },
+            {
+              "code": "inactive",
+              "valueBoolean": true
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.39",
+          "display": "KKDAT 5J prospektiv uebertragen KVNR",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.18",
+      "display": "Biomaterial erheben, lagern, nutzen",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.19",
+          "display": "BIOMAT erheben",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.20",
+          "display": "BIOMAT lagern verarbeiten",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.21",
+          "display": "BIOMAT Eigentum übertragen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.22",
+          "display": "BIOMAT wissenschaftlich nutzen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.23",
+          "display": "BIOMAT Analysedaten zusammenfuehren Dritte",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.24",
+      "display": "Biomaterial Zusatzentnahme",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.25",
+          "display": "BIOMAT Zusatzmengen entnehmen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.50",
+      "display": "Biomaterial retrospektiv speichern, nutzen",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.51",
+          "display": "BIOMAT retrospektiv lagern verarbeiten",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.52",
+          "display": "BIOMAT retrospektiv wissenschaftlich nutzen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.53",
+          "display": "BIOMAT retrospektiv Analysedaten zusammenfuehren Dritte",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.54",
+      "display": "Biomaterial Weitergabe non EU DSGVO NIVEAU",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.55",
+          "display": "BIOMAT bereitstellen ohne EU DSGVO NIVEAU",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.26",
+      "display": "Rekontaktierung Ergänzungen",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.27",
+          "display": "Rekontaktierung Verknüpfung Datenbanken",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.28",
+          "display": "Rekontaktierung weitere Erhebung",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.29",
+          "display": "Rekontaktierung weitere Studien",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.30",
+      "display": "Rekontaktierung Zusatzbefund",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.31",
+          "display": "Rekontaktierung Zusatzbefund",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.32",
+      "display": "Z1 GECCO83 Nutzung NUM/CODEX",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.40",
+          "display": "MDAT GECCO83 komplettieren einmalig"
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.43",
+          "display": "MDAT GECCO83 erheben",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.33",
+          "display": "MDAT GECCO83 bereitstellen NUM/CODEX"
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.34",
+          "display": "MDAT GECCO83 speichern verarbeiten NUM/CODEX",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.41",
+          "display": "MDAT GECCO83 wissenschaftlich nutzen COVID 19 Forschung",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            },
+            {
+              "code": "status",
+              "valueCode": "deprecated"
+            },
+            {
+              "code": "inactive",
+              "valueBoolean": true
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.42",
+          "display": "MDAT GECCO83 wissenschaftlich nutzen Pandemie Forschung",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            },
+            {
+              "code": "status",
+              "valueCode": "deprecated"
+            },
+            {
+              "code": "inactive",
+              "valueBoolean": true
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.56",
+          "display": "MDAT GECCO83 wissenschaftlich nutzen NUM/CODEX",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.35",
+      "display": "Z1 GECCO83 Weitergabe NUM/CODEX non EU DSGVO NIVEAU",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.36",
+          "display": "MDAT GECCO83 bereitstellen NUM/CODEX ohne EU DSGVO NIVEAU",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.57",
+      "display": "Z2 Patientendaten erheben, nutzen, Kontaktierung im acribis-Projekt",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.58",
+          "display": "PATDAT erheben, nutzen, Kontaktierung im acribis-Projekt",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.59",
+      "display": "Z2 IDAT Melderegister abfragen, speichern, verarbeiten im acribis-Projekt",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.60",
+          "display": "Anschrift und Vitalstatus Melderegister abfragen, speichern, verarbeiten im acribis-Projekt",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.61",
+      "display": "Z2 MDAT Hausarzt erheben, speichern, verarbeiten, nutzen im acribis-Projekt",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.62",
+          "display": "MDAT Hausarzt erheben, speichern, verarbeiten, nutzen im acribis-Projekt",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.63",
+      "display": "Z3 PROMDAT Patientenbefragung",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.64",
+          "display": "PROMDAT Patientenbefragung erheben",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.65",
+          "display": "PROMDAT wissenschaftlich nutzen",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.66",
+          "display": "Rekontaktierung PROM Studien",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.67",
+      "display": "Z4 Datenschutzerklärung (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.68",
+          "display": "IDAT speichern, verabeiten (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.69",
+          "display": "CONSENT speichern, verarbeiten (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.70",
+          "display": "IDAT Einsicht Monitoring (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.71",
+          "display": "MDAT erheben (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.72",
+          "display": "MDAT speichern, verarbeiten (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.73",
+          "display": "MDAT bereitstellen (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.74",
+          "display": "MDAT Einsicht Monitoring (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.75",
+          "display": "BIOMAT Eigentum übertragen_NUM (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.76",
+          "display": "CONSENT BC bereitstellen (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.77",
+          "display": "CONSENT BC speichern, verarbeiten (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.78",
+      "display": "Z4 Einsicht ePa (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.79",
+          "display": "IDAT ePA bereitstellen (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.80",
+          "display": "MDAT ePA erheben (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.81",
+          "display": "MDAT ePA speichern, verarbeiten (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.82",
+      "display": "Z4 Krebsregister (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.83",
+          "display": "MDAT KReg speichern, verarbeiten (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.84",
+          "display": "IDAT KReg KVNR speichern, verarbeiten (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.85",
+      "display": "Z4 KRegDAT retrospektiv (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.86",
+          "display": "IDAT KVNR KReg bereitstellen retrospektiv (SNID)"
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.87",
+          "display": "MDAT KReg erheben retrospektiv (SNID)"
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.88",
+      "display": "Z4 KRegDAT (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.89",
+          "display": "IDAT KVNR KReg bereitstellen prospektiv (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.90",
+          "display": "MDAT KReg erheben prospektiv (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.91",
+      "display": "Z4 Weitergabe Dritte (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.92",
+          "display": "MDAT SNID bereitstellen Dritte",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.93",
+          "display": "BIOMAT SNID bereitstellen Dritte",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.94",
+      "display": "Z4 Rekontaktierung Patient (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.95",
+          "display": "Rekontaktierung Gesundheitszustand nach Studienabschluss (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.96",
+      "display": "Z4_Rekontaktierung_FU",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.97",
+          "display": "Rekontaktierung weitere Studien (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.98",
+          "display": "IDAT SNID bereitstellen OE",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.99",
+      "display": "Z4 Erhebung Hausarzt (SNID)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.100",
+          "display": "MDAT Hausarzt erheben, speichern, verarbeiten, nutzen (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.101",
+          "display": "IDAT bereitstellen Hausarzt (SNID)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.102",
+      "display": "Z5 PATDAT, BIOMAT, PHENO erheben, speichern, gewinnen, lagern, zusätzlich nutzen (DZPG)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.103",
+          "display": "MDAT Zusatzdaten PHAENO erheben (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.104",
+          "display": "MDAT speichern verarbeiten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.105",
+          "display": "MDAT wissenschaftlich nutzen (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.106",
+          "display": "MDAT zusammenführen mit Dritten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.107",
+          "display": "BIOMAT Zusatzmaterial entnehmen (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.108",
+          "display": "BIOMAT Zusatzmaterial lagern verarbeiten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.109",
+          "display": "BIOMAT wissenschaftlich nutzen (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.110",
+          "display": "BIOMAT zusammenführen mit Dritten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.111",
+      "display": "Z5 NEURODAT, IMGDAT erheben, speichern, zusätzlich nutzen (DZPG)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.112",
+          "display": "IMGDAT erheben (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.113",
+          "display": "IMGDAT speichern, verarbeiten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.114",
+          "display": "IMGDAT wissenschaftlich nutzen (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.115",
+          "display": "IMGDAT zusammenführen mit Dritten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.116",
+          "display": "NEURODAT erheben (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.117",
+          "display": "NEURODAT speichern, verarbeiten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.118",
+          "display": "NEURODAT wissenschaftlich nutzen (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.119",
+          "display": "NEURODAT zusammenführen mit Dritten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "2.16.840.1.113883.3.1937.777.24.5.3.120",
+      "display": "Z5 IPSC Verbunddaten gewinnen, speichern, nutzen (DZPG)",
+      "concept": [
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.121",
+          "display": "IPSC Verbunddaten gewinnen (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P5Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.122",
+          "display": "IPSC Verbunddaten speichern, verarbeiten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.123",
+          "display": "IPSC Verbunddaten wissenschaftlich nutzen (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        },
+        {
+          "code": "2.16.840.1.113883.3.1937.777.24.5.3.124",
+          "display": "IPSC Verbunddaten zusammenführen mit Dritten (DZPG)",
+          "property": [
+            {
+              "code": "period-of-validity",
+              "valueString": "P30Y"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

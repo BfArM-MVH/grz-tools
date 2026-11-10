@@ -2,7 +2,6 @@
 
 A command-line tool for validating, encrypting, and uploading submissions to a genomDE Model Project GDC (Genome Data Center).
 
-
 ## Table of Contents
 
 - [Installation](#installation)
@@ -19,7 +18,6 @@ A command-line tool for validating, encrypting, and uploading submissions to a g
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
 
-
 ## Installation
 
 ### Requirements
@@ -33,7 +31,6 @@ For example:
 - Virtual machine running Linux
 - Docker container
 - Windows Subsystem for Linux
-
 
 ### Using [Conda](https://conda.io) (recommended)
 
@@ -60,7 +57,6 @@ Use the following command to update the tool:
 conda update -n grz-tools -c conda-forge -c bioconda grz-cli
 ```
 
-
 ### Using pip (not recommended)
 
 While installation via `pip` is possible, it is not recommended because users should create/manage a Python virtual environment and must ensure that the correct Python version is being used.
@@ -76,7 +72,6 @@ Use the following command to update the tool:
 ```bash
 pip upgrade grz-cli
 ```
-
 
 ### Using Docker
 
@@ -95,13 +90,17 @@ The tool requires a configuration file in YAML format to specify the S3 API para
 
 This file may be placed at `~/.config/grz-cli/config.yaml` or provided each time to `grz-cli` using the `--config-file` option on the command line.
 
-The S3 secrets can either be directly within the config file or as defined with the usual AWS environment variables: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+The S3 secrets can either be directly within the config file or in the environment variables `grz_s3__access_key` and `grz_s3__secret`.
+If both places leave out both secrets, the usual AWS environment variables apply: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+If they leave out only one of the secrets, the upload fails, even if the AWS environment variables are set.
+
+The [example config](https://github.com/BfArM-MVH/grz-tools/blob/main/packages/grz-cli/docs/example-config.yaml) shows the structure of this file with placeholder values.
 
 ### Submission Layout
 
 It is recommended to have the following folder structure for a single submission:
 
-```
+```text
 EXAMPLE_SUBMISSION
 ├── files
 │   ├── aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz
@@ -118,7 +117,6 @@ EXAMPLE_SUBMISSION
 The only requirements are that `metadata/metadata.json` exists and the `files/` directory contains all of the other files.
 Data files may be nested under subfolders inside `files/` for better organization.
 For example, each donor could have their own folder for files.
-
 
 ### Example submission procedure
 
@@ -147,7 +145,6 @@ It combines the `validate`, `encrypt`, and `upload` commands (see below).
 ```bash
 grz-cli submit --submission-dir foo
 ```
-
 
 ### validate
 
@@ -209,7 +206,7 @@ We recommend using Conda or [Pixi](https://pixi.sh/latest).
 
 After cloning the desired branch of the `grz-tools` repo locally, you can run `grz-cli` directly from the repo using:
 
-```
+```text
 uv run --project path/to/cloned/grz-tools grz-cli --help
 ```
 

@@ -2,9 +2,15 @@
 
 from pathlib import Path
 
+import botocore.client
+import grz_common.exceptions as grzexc
 import pytest
+from boto3.exceptions import RetriesExceededError
+from grz_common.progress.progress_logging import FileProgressLogger
+from grz_common.progress.states import DownloadState
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.download import S3BotoDownloadWorker
+from grz_common.workers.worker import Worker
 
 
 @pytest.fixture(scope="module")
@@ -67,3 +73,260 @@ def test_boto_download(
     assert calculate_sha256(files_dir / "small_test_file.txt") == temp_small_file_sha256sum, (
         "Text file SHA256 mismatch."
     )
+
+
+def test_download_skips_file_already_downloaded_for_same_submission(
+    s3_config_model,
+    remote_bucket,
+    temp_download_log_file_path,
+    encrypted_submission,
+    mocker,
+):
+    """Files with download_successful=True and matching submission_id should be skipped."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_download_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=DownloadState(download_successful=True, submission_id=encrypted_submission.submission_id),
+        )
+
+    download_spy = mocker.spy(download_worker, "download_file")
+    download_worker.download(encrypted_submission.submission_id, encrypted_submission)
+
+    assert download_spy.call_count == 0, (
+        f"Expected all files to be skipped, but {download_spy.call_count} were downloaded"
+    )
+
+
+def test_download_redownloads_file_with_different_submission_id(
+    s3_config_model,
+    remote_bucket,
+    temp_download_log_file_path,
+    encrypted_submission,
+    mocker,
+):
+    """Files logged as download_successful=True for a different submission_id must be re-downloaded."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_download_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=DownloadState(download_successful=True, submission_id="different-submission-id-9999"),
+        )
+
+    mock_download = mocker.patch.object(download_worker, "download_file")
+    download_worker.download(encrypted_submission.submission_id, encrypted_submission)
+
+    expected = len(encrypted_submission.encrypted_files)
+    assert mock_download.call_count == expected, (
+        f"Expected {expected} files to be re-downloaded for a different submission_id, "
+        f"but only {mock_download.call_count} were downloaded"
+    )
+
+
+def test_download_redownloads_file_after_failed_download(
+    s3_config_model,
+    remote_bucket,
+    temp_download_log_file_path,
+    encrypted_submission,
+    mocker,
+):
+    """Files logged as download_successful=False must be retried even with matching submission_id."""
+    from grz_common.progress.progress_logging import FileProgressLogger
+    from grz_common.progress.states import DownloadState
+
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=temp_download_log_file_path,
+    )
+
+    progress_logger = FileProgressLogger[DownloadState](temp_download_log_file_path)
+    for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+        progress_logger.set_state(
+            file_path,
+            file_metadata,
+            state=DownloadState(download_successful=False, submission_id=encrypted_submission.submission_id),
+        )
+
+    mock_download = mocker.patch.object(download_worker, "download_file")
+    download_worker.download(encrypted_submission.submission_id, encrypted_submission)
+
+    expected = len(encrypted_submission.encrypted_files)
+    assert mock_download.call_count == expected, (
+        f"Expected {expected} failed files to be retried, but only {mock_download.call_count} were downloaded"
+    )
+
+
+def test_worker_download_checks_metadata_version_before_files(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    tmp_path,
+):
+    """A failing metadata version check aborts before encrypted files are downloaded."""
+    metadata_path, metadata_key = encrypted_submission.get_metadata_file_path_and_object_id()
+    upload_file(remote_bucket, metadata_path, metadata_key)
+    for local_file_path, s3_key in encrypted_submission.get_encrypted_files_and_object_id().items():
+        upload_file(remote_bucket, local_file_path, s3_key)
+
+    worker = Worker(
+        metadata_dir=tmp_path / "metadata",
+        files_dir=tmp_path / "files",
+        log_dir=tmp_path / "logs",
+        encrypted_files_dir=tmp_path / "encrypted_files",
+    )
+
+    checked_versions = []
+
+    def fail_metadata_version_check(metadata_schema_version: str) -> None:
+        checked_versions.append(metadata_schema_version)
+        raise SystemExit(1)
+
+    with pytest.raises(SystemExit):
+        worker.download(
+            s3_config_model.s3,
+            encrypted_submission.submission_id,
+            metadata_version_check=fail_metadata_version_check,
+        )
+
+    assert checked_versions == [encrypted_submission.metadata.content.get_schema_version()]
+    assert (tmp_path / "metadata" / "metadata.json").exists()
+    assert not list((tmp_path / "encrypted_files").rglob("*.c4gh"))
+
+
+def test_download_file_fails_for_missing_key(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    tmp_path,
+):
+    """A key that is not in the bucket fails as the submitter's missing file."""
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.MissingSubmissionFileError):
+        download_worker.download_file(
+            tmp_path / "files" / file_path.name,
+            f"{encrypted_submission.submission_id}/files/missing.c4gh",
+            progress_logger,
+            file_metadata,
+            encrypted_submission.submission_id,
+        )
+
+
+def test_download_metadata_fails_for_missing_metadata(s3_config_model, remote_bucket, tmp_path):
+    """A submission without metadata.json in the bucket fails as the submitter's missing file."""
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=tmp_path / "progress_download.cjson",
+    )
+
+    with pytest.raises(grzexc.MissingSubmissionFileError):
+        download_worker.download_metadata("missing_submission", tmp_path / "metadata")
+
+
+def test_download_metadata_refuses_a_cleaned_submission(s3_config_model, remote_bucket, tmp_path):
+    """``grzctl clean`` empties metadata.json, which would otherwise fail its parsing as the submitter's fault."""
+    remote_bucket.put_object(Key="cleaned_submission/metadata/metadata.json", Body=b"")
+    remote_bucket.put_object(Key="cleaned_submission/cleaned", Body=b"")
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=tmp_path / "progress_download.cjson",
+    )
+
+    with pytest.raises(grzexc.SubmissionCleanedError):
+        download_worker.download_metadata("cleaned_submission", tmp_path / "metadata")
+
+
+def test_download_file_reports_a_connection_that_keeps_breaking_as_a_failed_download(
+    s3_config_model,
+    remote_bucket,
+    encrypted_submission,
+    temp_small_file_path,
+    monkeypatch,
+    tmp_path,
+):
+    """S3Transfer gives up with its own RetriesExceededError, which is a failed download."""
+    s3_object_id = f"{encrypted_submission.submission_id}/files/small_test_file.txt"
+    upload_file(remote_bucket, temp_small_file_path, s3_object_id)
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def break_the_connection(self, operation_name, kwargs):
+        if operation_name == "GetObject":
+            raise ConnectionError("connection reset by peer")
+        return original_call(self, operation_name, kwargs)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", break_the_connection)
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.DownloadError) as excinfo:
+        download_worker.download_file(
+            tmp_path / "files" / file_path.name,
+            s3_object_id,
+            progress_logger,
+            file_metadata,
+            encrypted_submission.submission_id,
+        )
+
+    assert isinstance(excinfo.value.__cause__, RetriesExceededError)
+
+
+def test_download_metadata_reports_a_faulty_setup_as_a_configuration_error(s3_config_model, faulty_s3_setup, tmp_path):
+    """A faulty setup does not look like a missing metadata.json, which would blame the submitter."""
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=tmp_path / "progress_download.cjson",
+    )
+
+    with pytest.raises(grzexc.ConfigurationError):
+        download_worker.download_metadata("submission", tmp_path / "metadata")
+
+
+def test_download_file_reports_a_faulty_setup_as_a_configuration_error(
+    s3_config_model, faulty_s3_setup, encrypted_submission, tmp_path
+):
+    """A faulty setup does not look like a missing file, which would blame the submitter."""
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    file_path, file_metadata = next(iter(encrypted_submission.encrypted_files.items()))
+
+    with pytest.raises(grzexc.ConfigurationError):
+        download_worker.download_file(
+            tmp_path / "files" / file_path.name,
+            f"{encrypted_submission.submission_id}/files/{file_path.name}",
+            progress_logger,
+            file_metadata,
+            encrypted_submission.submission_id,
+        )

@@ -1,4 +1,3 @@
-import calendar
 import datetime
 import itertools
 import logging
@@ -11,6 +10,7 @@ import sqlalchemy.orm
 import textual
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from grz_db.models.submission import Submission, SubmissionDb, SubmissionStateLog
+from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import SubmissionType
 from sqlalchemy import func as sqlfn
 from sqlalchemy.orm import selectinload
@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SEARCH_LIMIT = 20
 
 
+def _resolve_quarter_year(today: datetime.date, quarter: int | None, year: int | None) -> tuple[int, int]:
+    default_quarter, default_year = date_to_quarter_year(today)
+    resolved_quarter = quarter if quarter is not None else default_quarter
+    resolved_year = year if year is not None else default_year
+    return resolved_quarter, resolved_year
+
+
 class SubmissionCountByStateTable(Static):
     def on_mount(self) -> None:
         self.loading = True
@@ -37,7 +44,7 @@ class SubmissionCountByStateTable(Static):
     @textual.work
     async def load(self, database: SubmissionDb) -> None:
         self.loading = True
-        with database._get_session() as session:
+        with database.transaction() as session:
             # credit: https://stackoverflow.com/a/28090544
             log1 = sqlalchemy.orm.aliased(SubmissionStateLog, name="log1")
             log2 = sqlalchemy.orm.aliased(SubmissionStateLog, name="log2")
@@ -80,7 +87,7 @@ class SubmissionCountByConsentTable(Static):
     @textual.work
     async def load(self, database: SubmissionDb) -> None:
         self.loading = True
-        with database._get_session() as session:
+        with database.transaction() as session:
             statement = select(Submission.consented, sqlfn.count(Submission.consented)).group_by(Submission.consented)  # type: ignore[arg-type]
             counts_by_consent = session.exec(statement).all()
 
@@ -108,26 +115,21 @@ class SubmissionCountByDetailedQCByLETable(Static):
         self.styles.border = ("round", self.app.theme_variables["foreground"])
 
     @textual.work
-    async def load(self, database: SubmissionDb) -> None:
+    async def load(self, database: SubmissionDb, quarter: int | None = None, year: int | None = None) -> None:
         self.loading = True
-        with database._get_session() as session:
+        with database.transaction() as session:
             statement = (
                 select(  # type: ignore[type-var]
-                    Submission.submitter_id, Submission.submission_date, Submission.detailed_qc_passed
+                    Submission.submitter_id, Submission.submission_uploaded_date, Submission.detailed_qc_passed
                 )
-                .where(Submission.submission_type != SubmissionType.test)
+                .where(Submission.submission_type == SubmissionType.initial)
                 .where(Submission.basic_qc_passed)  # type: ignore[arg-type]
             )
             submission_qc_states = session.exec(statement).all()
 
         today = datetime.date.today()
-        quarter = ((today.month - 1) // 3) + 1
-        quarter_start_date = datetime.date(year=today.year, month=((quarter - 1) * 3) + 1, day=1)
-        quarter_end_month = quarter_start_date.month + 2
-        _quarter_end_month_first_weekday, days_in_quarter_end_month = calendar.monthrange(
-            quarter_start_date.year, quarter_end_month
-        )
-        quarter_end_date = quarter_start_date.replace(month=quarter_end_month, day=days_in_quarter_end_month)
+        resolved_quarter, resolved_year = _resolve_quarter_year(today, quarter, year)
+        quarter_start_date, quarter_end_date = quarter_date_bounds(year=resolved_year, quarter=resolved_quarter)
         logger.debug("Quarter: %s to %s", quarter_start_date, quarter_end_date)
         rows = []
         for submitter_id, group in itertools.groupby(
@@ -142,10 +144,10 @@ class SubmissionCountByDetailedQCByLETable(Static):
             for _, submission_date, detailed_qc_passed in group:
                 if detailed_qc_passed is not None:
                     qced += 1
-                # current quarter
+                # resolved quarter
                 if (
                     (submission_date is not None)
-                    and (submission_date.year == today.year)
+                    and (submission_date.year == resolved_year)
                     and (quarter_start_date <= submission_date <= quarter_end_date)
                 ):
                     if detailed_qc_passed is not None:
@@ -162,7 +164,7 @@ class SubmissionCountByDetailedQCByLETable(Static):
         table = rich.table.Table(
             rich.table.Column(header="Submitter", justify="center"),
             rich.table.Column(header="Total", justify="center"),
-            rich.table.Column(header=f"Q{quarter} {today.year}", justify="center"),
+            rich.table.Column(header=f"Q{resolved_quarter} {resolved_year}", justify="center"),
             rich.table.Column(header=today.strftime("%B"), justify="center"),
         )
         for submitter_id, qced, total, qced_quarter, total_quarter, qced_month, total_month in rows:
@@ -200,20 +202,21 @@ class SearchResultsDataTable(DataTable):
     def on_mount(self) -> None:
         self.loading = True
         self.cursor_type = "row"
-        self.add_columns("Submission ID", "Pseudonym", "Latest State", "State Timestamp (UTC)")
+        self.add_columns("Submission ID", "Pseudonym", "Local Case ID", "Latest State", "State Timestamp (UTC)")
 
     @textual.work
-    async def search(
+    async def search(  # noqa: PLR0913, PLR0917
         self,
         database: SubmissionDb,
         submission_id: str | None = None,
         pseudonym: str | None = None,
+        local_case_id: str | None = None,
         submitter_id: str | None = None,
         limit: int | None = None,
     ) -> None:
         self.loading = True
         self.clear()
-        with database._get_session() as session:
+        with database.transaction() as session:
             latest_state_per_submission = (
                 select(
                     SubmissionStateLog.submission_id.label("submission_id"),  # type: ignore[attr-defined]
@@ -229,6 +232,8 @@ class SearchResultsDataTable(DataTable):
                 statement = statement.where(Submission.id == submission_id)
             if pseudonym:
                 statement = statement.where(Submission.pseudonym == pseudonym)
+            if local_case_id:
+                statement = statement.where(Submission.local_case_id == local_case_id)
             if submitter_id:
                 statement = statement.where(Submission.submitter_id == submitter_id)
             statement = statement.join(
@@ -236,7 +241,9 @@ class SearchResultsDataTable(DataTable):
                 Submission.id == latest_state_per_submission.c.submission_id,  # type: ignore[arg-type]
                 isouter=True,
             ).order_by(
-                sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_date).desc().nulls_first()
+                sqlfn.coalesce(latest_state_per_submission.c.timestamp, Submission.submission_uploaded_date)
+                .desc()
+                .nulls_first()
             )
             if isinstance(limit, int) and limit >= 0:
                 statement = statement.limit(limit)
@@ -249,6 +256,7 @@ class SearchResultsDataTable(DataTable):
             self.add_row(
                 submission.id,
                 submission.pseudonym,
+                submission.local_case_id,
                 latest_state.state if latest_state else rich.text.Text("missing", style="italic yellow"),
                 latest_state.timestamp if latest_state else rich.text.Text("missing", style="italic yellow"),
             )
@@ -265,10 +273,19 @@ class DatabaseBrowser(App):
     ]
     CSS_PATH = "tui.css"
 
-    def __init__(self, database: SubmissionDb, public_keys: dict[str, Ed25519PublicKey], **kwargs) -> None:
+    def __init__(
+        self,
+        database: SubmissionDb,
+        public_keys: dict[str, list[Ed25519PublicKey]],
+        quarter: int | None = None,
+        year: int | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._database = database
         self._public_keys = public_keys
+        self._quarter = quarter
+        self._year = year
 
     def compose(self) -> ComposeResult:
         with TabbedContent():
@@ -289,10 +306,14 @@ class DatabaseBrowser(App):
                     # explicitly validate here because is_valid initializes to True and validation only automatically runs on change events
                     input_id.validate(input_id.value)
                     yield input_id
-                    input_pseudonym = Input(id="search-input-pseudonym", placeholder="CASE12345")
+                    input_pseudonym = Input(id="search-input-pseudonym", placeholder="RKI-000123")
                     input_pseudonym.border_title = "Pseudonym"
                     input_pseudonym.validate(input_pseudonym.value)
                     yield input_pseudonym
+                    input_local_case_id = Input(id="search-input-local-case-id", placeholder="CASE12345")
+                    input_local_case_id.border_title = "Local Case ID"
+                    input_local_case_id.validate(input_local_case_id.value)
+                    yield input_local_case_id
                     input_submitter = Input(
                         id="search-input-submitter", placeholder="123456789", validators=[Regex(r"^[0-9]{9}$")]
                     )
@@ -320,10 +341,12 @@ class DatabaseBrowser(App):
     async def _refresh_overview(self) -> None:
         self.query_exactly_one(SubmissionCountByStateTable).load(self._database)
         self.query_exactly_one(SubmissionCountByConsentTable).load(self._database)
-        self.query_exactly_one(SubmissionCountByDetailedQCByLETable).load(self._database)
+        self.query_exactly_one(SubmissionCountByDetailedQCByLETable).load(
+            self._database, quarter=self._quarter, year=self._year
+        )
         table_states_latest = self.query_exactly_one("#table-states-latest", DataTable)
         table_states_latest.loading = True
-        with self._database._get_session() as session:
+        with self._database.transaction() as session:
             statement = (
                 select(SubmissionStateLog).order_by(SubmissionStateLog.timestamp.desc()).limit(_DEFAULT_SEARCH_LIMIT)  # type: ignore[attr-defined]
             )
@@ -352,6 +375,9 @@ class DatabaseBrowser(App):
         input_pseudonym = self.query_exactly_one("#search-input-pseudonym", Input)
         pseudonym = input_pseudonym.value if input_pseudonym.is_valid else None
 
+        input_local_case_id = self.query_exactly_one("#search-input-local-case-id", Input)
+        local_case_id = input_local_case_id.value if input_local_case_id.is_valid else None
+
         input_submitter = self.query_exactly_one("#search-input-submitter", Input)
         submitter = input_submitter.value if input_submitter.is_valid else None
 
@@ -364,6 +390,7 @@ class DatabaseBrowser(App):
             database=self._database,
             submission_id=submission_id,
             pseudonym=pseudonym,
+            local_case_id=local_case_id,
             submitter_id=submitter,
             limit=limit,
         )

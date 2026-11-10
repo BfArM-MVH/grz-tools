@@ -2,33 +2,34 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import click
+import grz_common.cli as grzcli
 from grz_common.workers.worker import Worker
+from grz_db.models.submission import SubmissionStateEnum
 
-from ..models.config import ArchiveConfig
+from ..commands import grzctl_configuration
+from ..dbcontext import DbContext
+from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
 
-import grz_common.cli as grzcli
-
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.submission_dir
 @grzcli.threads
+@grzcli.update_db
 def archive(
-    configuration: dict[str, Any],
+    configuration: GrzctlConfig,
     submission_dir,
     threads,
+    update_db,
     **kwargs,
 ):
     """
     Archive a submission within a GRZ/GDC.
     """
-    config = ArchiveConfig.model_validate(configuration)
-
     log.info("Starting archival...")
 
     submission_dir = Path(submission_dir)
@@ -40,6 +41,27 @@ def archive(
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
     )
-    worker_inst.archive(config.s3)
+    encrypted_submission = worker_inst.parse_encrypted_submission()
+    submission_id = encrypted_submission.submission_id
+
+    submission_date = encrypted_submission.metadata.content.submission.submission_date
+    consented = encrypted_submission.metadata.content.consents_to_research(submission_date)
+    if not consented:
+        log.info(
+            f"Submission {submission_id} gives no research consent on its submission date ({submission_date}), "
+            "so it goes to the non-consented archive: "
+            f"{encrypted_submission.metadata.content.explain_no_research_consent(submission_date)}"
+        )
+
+    archive_s3 = configuration.archives.consented.s3 if consented else configuration.archives.non_consented.s3
+
+    with DbContext(
+        configuration=configuration,
+        submission_id=submission_id,
+        start_state=SubmissionStateEnum.ARCHIVING,
+        end_state=SubmissionStateEnum.ARCHIVED,
+        enabled=update_db,
+    ):
+        worker_inst.archive(archive_s3)
 
     log.info("Archival finished!")

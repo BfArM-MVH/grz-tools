@@ -2,20 +2,35 @@
 
 import json
 import os
+from datetime import datetime
+from importlib.metadata import version
 from os import PathLike
 from pathlib import Path
-from shutil import copyfile, which
+from shutil import copyfile
 
 import boto3
+import botocore.client
 import grz_cli.models.config
 import grz_common.models.s3
 import grzctl.models.config
-import numpy as np
-import psycopg
 import pytest
+from botocore.exceptions import ClientError
 from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.submission import EncryptedSubmission, SubmissionMetadata
+from grz_db import testing as grz_db_testing
+from grz_db.models.submission import SubmissionDb
 from moto import mock_aws
+
+# These names are bound by assignment rather than imported directly, because fixtures below take
+# ``db_test_connection`` as a parameter name, which ruff would otherwise read as redefining an
+# imported name.
+db_backend = grz_db_testing.db_backend
+db_test_connection = grz_db_testing.db_test_connection
+migrated_db_connection = grz_db_testing.migrated_db_connection
+postgresql_proc = grz_db_testing.postgresql_proc
+_migrated_postgresql_template = grz_db_testing._migrated_postgresql_template
+_migrated_sqlite_template = grz_db_testing._migrated_sqlite_template
+_pg_test_dbnames = grz_db_testing._pg_test_dbnames
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -39,6 +54,8 @@ crypt4gh_grz_public_key_file = "tests/mock_files/grz_mock_public_key.pub"
 crypt4gh_submitter_private_key_file = "tests/mock_files/submitter_mock_private_key.sec"
 crypt4gh_submitter_public_key_file = "tests/mock_files/submitter_mock_public_key.pub"
 db_alice_private_key_file = "tests/mock_files/db/alice_mock_private_key.sec"
+_GRZ_PRIVATE_KEY_PATH = str(Path(crypt4gh_grz_private_key_file).resolve())
+"""An existing key file for the key path fields of the grzctl config, which need an existing file."""
 db_known_keys_file = "tests/mock_files/db/known_keys"
 
 
@@ -72,24 +89,16 @@ def db_known_keys_file_path():
     return Path(db_known_keys_file)
 
 
-@pytest.fixture(
-    params=[
-        "sqlite",
-        pytest.param(
-            "postgresql",
-            marks=pytest.mark.skipif(condition=which("pg_config") is None, reason="postgresql not detected"),
-        ),
-    ]
-)
-def db_test_connection(request: pytest.FixtureRequest):
-    if request.param == "sqlite":
-        tmpdir_factory: pytest.TempdirFactory = request.getfixturevalue("tmpdir_factory")
-        db_dir = tmpdir_factory.mktemp("db")
-        db_file = db_dir / "test.db"
-        yield f"sqlite:///{str(db_file)}"
-    elif request.param == "postgresql":
-        postgresql: psycopg.Connection = request.getfixturevalue("postgresql")
-        yield f"postgresql+psycopg://{postgresql.info.user}:@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
+@pytest.fixture()
+def initiated_db_test_connection(db_test_connection):
+    """The database behind :func:`db_config_content`, brought to the latest schema.
+
+    This is not the shared ``migrated_db_connection`` fixture: that one hands back a separate
+    database, whereas the tests here need the specific database their config file already points at.
+    """
+    submission_db = SubmissionDb(db_test_connection, author=None)
+    submission_db.initialize_schema()
+    return db_test_connection
 
 
 @pytest.fixture(scope="session")
@@ -128,64 +137,64 @@ def temp_small_file_sha256sum():
     return "78858035d88f0c66d27984789ddd8fa8a8fc633cf7689ac2b4b1e2e7b37ee3be"
 
 
-def create_large_file(content: str | bytes, output_file: str | PathLike, target_size: int) -> int:
-    """
-    Write some content repeatedly to a file until some target size is reached.
-
-    :param content: Content of the file. Will be repeatedly written to output_file until `target_size` is reached.
-    :param output_file: Path to the output file.
-    :param target_size: target size in bytes.
-    :return: Actual bytes written
-    """
-    # Initialize the size of the new file and open it for writing
-    current_size = 0
-    with open(output_file, "w") as outfile:
-        while current_size < target_size:
-            bytes_written = outfile.write(content)
-            current_size += bytes_written
-    return current_size
-
-
 @pytest.fixture
-def temp_large_file_path(temp_data_dir_path) -> Path:
-    temp_large_file_path = temp_data_dir_path / "temp_large_input_file.bed"
-    target_size = 1024 * 1024 * 6  # create 5MB file, multiupload limit is 5MB
+def remote_bucket_with_version(remote_bucket):
+    """Mock S3 bucket with version.json file at root."""
+    # Create additional buckets needed by archive/list/clean tests
+    s3_client = boto3.client("s3")
+    for bucket_name in ["consented", "non-consented"]:
+        try:
+            s3_client.create_bucket(Bucket=bucket_name)
+        except Exception:
+            pass  # already exists
 
-    with open(small_file_input_path) as fd:
-        content = fd.read()
+    current_version = version("grz-cli")
 
-    create_large_file(content, temp_large_file_path, target_size)
+    version_content = {
+        "schema_version": 1,
+        "grzcli_version": [
+            {
+                "minimal_version": current_version,
+                "recommended_version": current_version,
+                "max_version": current_version,
+                "enforced_from": datetime.now().isoformat(),
+            }
+        ],
+        "metadata_version": [
+            {
+                "minimal_version": "1.3.0",
+                "recommended_version": "1.3.0",
+                "max_version": None,
+                "enforced_from": datetime.now().isoformat(),
+            }
+        ],
+    }
 
-    return temp_large_file_path
+    remote_bucket.put_object(
+        Key="version.json",
+        Body=json.dumps(version_content),
+    )
+
+    return remote_bucket
 
 
-def generate_random_fastq(file_path: str | PathLike, target_size: int) -> int:
-    """
-    Create a random FASTQ file.
+def generate_fastq(file_path: str | PathLike, target_size: int) -> int:
+    """Create a FASTQ file of at least *target_size* bytes.
+
+    The reads repeat rather than being sampled per base: the tests using this only round-trip the
+    file through S3 and compare checksums, so the content never has to look like real sequencing
+    data. The size does matter: it is what pushes the transfer over the multipart threshold.
 
     :param file_path: Path to the FASTQ file.
     :param target_size: Target size in bytes.
     :return: Actual bytes written
     """
-    nucleotides = np.array(["A", "T", "C", "G"])
-    quality_scores = np.array(list("!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHI"))
-    bases_per_read = 100  # Length of each read
+    bases_per_read = 100
+    record = f"@SEQ_ID\n{'ACGT' * (bases_per_read // 4)}\n+\n{'I' * bases_per_read}\n"
+    repeats = -(-target_size // len(record))  # ceiling division
 
     with open(file_path, "w") as fastq_file:
-        total_bytes_written = 0
-
-        while total_bytes_written < target_size:
-            # Generate a random sequence of nucleotides using numpy
-            seq = "".join(np.random.choice(nucleotides, bases_per_read))
-            qual = "".join(np.random.choice(quality_scores, bases_per_read))
-
-            # FASTQ entry format
-            entry = f"@SEQ_ID_{np.random.randint(1, 10**6)}\n{seq}\n+\n{qual}\n"
-
-            actual_bytes_written = fastq_file.write(entry)
-            total_bytes_written += actual_bytes_written
-
-    return total_bytes_written
+        return fastq_file.write(record * repeats)
 
 
 @pytest.fixture
@@ -194,7 +203,7 @@ def temp_fastq_file_path(temp_data_dir_path) -> Path:
     temp_fastq_gz_path = temp_data_dir_path / file_name
     target_size = 1024 * 1024 * 6  # create 5MB file, multiupload limit is 5MB
 
-    generate_random_fastq(temp_fastq_gz_path, target_size)
+    generate_fastq(temp_fastq_gz_path, target_size)
 
     return temp_fastq_gz_path
 
@@ -234,12 +243,12 @@ def temp_fastq_file_sha256sum(temp_fastq_file_path):
 
 
 @pytest.fixture
-def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
+def temp_metadata_file_path(temp_data_dir_path) -> Path:
+    """Metadata naming a file that is never created: validation reads paths; it does not open them."""
     with open(metadata_path) as fd:
         metadata = json.load(fd)
 
-    # insert large file
-    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = temp_large_file_path.name
+    metadata["donors"][0]["labData"][0]["sequenceData"]["files"][0]["filePath"] = "temp_large_input_file.bed"
 
     metadata_file_path = temp_data_dir_path / "metadata.json"
     with open(metadata_file_path, "w") as fd:
@@ -251,13 +260,11 @@ def temp_metadata_file_path(temp_data_dir_path, temp_large_file_path) -> Path:
 @pytest.fixture
 def keys_config_content(
     crypt4gh_grz_public_key_file_path,
-    crypt4gh_grz_private_key_file_path,
     crypt4gh_submitter_private_key_file_path,
 ):
     return {
         "keys": {
             "grz_public_key_path": str(crypt4gh_grz_public_key_file_path),
-            "grz_private_key_path": str(crypt4gh_grz_private_key_file_path),
             "submitter_private_key_path": str(crypt4gh_submitter_private_key_file_path),
         }
     }
@@ -275,19 +282,34 @@ def s3_config_content():
     }
 
 
+def _db_config_content(private_key_path, known_keys_path, database_url):
+    return {
+        "db": {
+            "database_url": database_url,
+            "author": {"name": "Alice", "private_key_path": str(private_key_path)},
+            "known_public_keys_file": str(known_keys_path),
+        }
+    }
+
+
 @pytest.fixture
 def db_config_content(
     db_alice_private_key_file_path,
     db_known_keys_file_path,
     db_test_connection,
 ):
-    return {
-        "db": {
-            "database_url": db_test_connection,
-            "author": {"name": "Alice", "private_key_path": str(db_alice_private_key_file_path)},
-            "known_public_keys": str(db_known_keys_file_path),
-        }
-    }
+    """Config for a database with no schema, for tests that run ``db init`` themselves."""
+    return _db_config_content(db_alice_private_key_file_path, db_known_keys_file_path, db_test_connection)
+
+
+@pytest.fixture
+def migrated_db_config_content(
+    db_alice_private_key_file_path,
+    db_known_keys_file_path,
+    migrated_db_connection,
+):
+    """Config for a database already on the latest schema."""
+    return _db_config_content(db_alice_private_key_file_path, db_known_keys_file_path, migrated_db_connection)
 
 
 @pytest.fixture
@@ -295,6 +317,9 @@ def pruefbericht_config_content():
     return {
         "pruefbericht": {
             "authorization_url": "https://bfarm.localhost/token",
+            "api_base_url": "https://bfarm.localhost/api/",
+            "client_id": "pytest",
+            "client_secret": "pysecret",
         }
     }
 
@@ -320,8 +345,25 @@ def encrypt_config_model(keys_config_content):
 
 
 @pytest.fixture
-def db_config_model(db_config_content):
-    return grzctl.models.config.DbConfig(**db_config_content)
+def db_config_model(db_config_content, grzctl_identifiers_config):
+    return grzctl.models.config.GrzctlConfig(
+        **db_config_content,
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
+        archives=_grzctl_archives(),
+        pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
+        identifiers=grzctl_identifiers_config,
+    )
+
+
+@pytest.fixture
+def migrated_db_config_model(migrated_db_config_content, grzctl_identifiers_config):
+    return grzctl.models.config.GrzctlConfig(
+        **migrated_db_config_content,
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
+        archives=_grzctl_archives(),
+        pruefbericht=_GRZCTL_PRUEFBERICHT_DUMMY,
+        identifiers=grzctl_identifiers_config,
+    )
 
 
 @pytest.fixture
@@ -344,6 +386,7 @@ def temp_s3_config_file_path(temp_data_dir_path, s3_config_model) -> Path:
 
 @pytest.fixture
 def temp_db_config_file_path(temp_data_dir_path, db_config_model) -> Path:
+    """Config file for a database with no schema, for tests that run ``db init`` themselves."""
     config_file = temp_data_dir_path / "config.db.yaml"
     with open(config_file, "w") as fd:
         db_config_model.to_yaml(fd)
@@ -351,10 +394,20 @@ def temp_db_config_file_path(temp_data_dir_path, db_config_model) -> Path:
 
 
 @pytest.fixture
-def temp_keys_config_file_path(temp_data_dir_path, encrypt_config_model) -> Path:
-    config_file = temp_data_dir_path / "config.keys.yaml"
+def temp_migrated_db_config_file_path(temp_data_dir_path, migrated_db_config_model) -> Path:
+    """Config file for a database already on the latest schema."""
+    config_file = temp_data_dir_path / "config.migrated_db.yaml"
     with open(config_file, "w") as fd:
-        encrypt_config_model.to_yaml(fd)
+        migrated_db_config_model.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_keys_config_file_path(temp_data_dir_path, keys_config_content) -> Path:
+    config_file = temp_data_dir_path / "config.keys.yaml"
+    config = grz_cli.models.config.EncryptConfig(**keys_config_content)
+    with open(config_file, "w") as fd:
+        config.to_yaml(fd)
     return config_file
 
 
@@ -367,18 +420,128 @@ def temp_identifiers_config_file_path(temp_data_dir_path, identifiers_config_mod
 
 
 @pytest.fixture
-def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_model) -> Path:
+def temp_pruefbericht_config_file_path(temp_data_dir_path, pruefbericht_config_content) -> Path:
     config_file = temp_data_dir_path / "config.pruefbericht.yaml"
+    config = _grzctl_model(
+        leistungserbringer={"000000000": {"inbox_buckets": {"inbox": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
+        db=_GRZCTL_DB_DUMMY,
+        pruefbericht=pruefbericht_config_content["pruefbericht"],
+    )
     with open(config_file, "w") as fd:
-        pruefbericht_config_model.to_yaml(fd)
+        config.to_yaml(fd)
+    return config_file
+
+
+# Shared building blocks for GrzctlConfig test fixtures
+_GRZCTL_DB_DUMMY = {"database_url": "sqlite:///dummy.db", "author": {"name": "test"}}
+_GRZCTL_PRUEFBERICHT_DUMMY = {
+    "authorization_url": "https://auth.example.org",
+    "client_id": "example-client",
+    "client_secret": "example-secret",
+    "api_base_url": "https://api.example.org",
+}
+
+
+@pytest.fixture()
+def grzctl_identifiers_config():
+    """Identifiers section for GrzctlConfig."""
+    return {"grz": "GRZK00007"}
+
+
+def _grzctl_archives(endpoint_url: str | None = None, public_key_path: str | None = None) -> dict:
+    """Build archives config dict. Pass *endpoint_url* for moto-backed tests.
+
+    *public_key_path* defaults to the GRZ mock public key.
+    """
+    if public_key_path is None:
+        public_key_path = str(Path(crypt4gh_grz_public_key_file).resolve())
+
+    def _s3(bucket):
+        d = {"bucket": bucket, "public_key_path": public_key_path}
+        if endpoint_url:
+            d["endpoint_url"] = endpoint_url
+        return d
+
+    return {
+        "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
+        "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+    }
+
+
+def _grzctl_config_dict(*, leistungserbringer, db=None, pruefbericht=None, identifiers=None, endpoint_url=None) -> dict:
+    """Build a GrzctlConfig dict from the given sections, filling in shared defaults.
+
+    *identifiers* defaults to a valid placeholder for tests that don't exercise that section.
+    """
+    return {
+        "leistungserbringer": leistungserbringer,
+        "archives": _grzctl_archives(endpoint_url=endpoint_url),
+        "db": db if db is not None else _GRZCTL_DB_DUMMY,
+        "pruefbericht": pruefbericht if pruefbericht is not None else _GRZCTL_PRUEFBERICHT_DUMMY,
+        "identifiers": identifiers if identifiers is not None else {"grz": "GRZK00007"},
+    }
+
+
+def _grzctl_model(
+    *,
+    leistungserbringer,
+    db=None,
+    pruefbericht=None,
+    identifiers=None,
+    endpoint_url=None,
+) -> grzctl.models.config.GrzctlConfig:
+    """Build a GrzctlConfig model from the given sections."""
+    return grzctl.models.config.GrzctlConfig(
+        **_grzctl_config_dict(
+            leistungserbringer=leistungserbringer,
+            db=db,
+            pruefbericht=pruefbericht,
+            identifiers=identifiers,
+            endpoint_url=endpoint_url,
+        )
+    )
+
+
+@pytest.fixture
+def temp_grzctl_s3_config_file_path(temp_data_dir_path) -> Path:
+    """GrzctlConfig-format S3-only config for grzctl CLI tests."""
+    config_file = temp_data_dir_path / "config.grzctl_s3.yaml"
+    config = _grzctl_model(
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": _GRZ_PRIVATE_KEY_PATH}}}},
+    )
+    with open(config_file, "w") as fd:
+        config.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_grzctl_keys_config_file_path(temp_data_dir_path) -> Path:
+    """GrzctlConfig-format config for grzctl CLI tests, whose inbox key decrypts the example submission."""
+    config_file = temp_data_dir_path / "config.grzctl_keys.yaml"
+    grz_private_key_path = str(Path(crypt4gh_grz_private_key_file).resolve())
+    config = _grzctl_model(
+        leistungserbringer={"260914050": {"inbox_buckets": {"testing": {"private_key_path": grz_private_key_path}}}},
+        db=_GRZCTL_DB_DUMMY,
+    )
+    with open(config_file, "w") as fd:
+        config.to_yaml(fd)
+    return config_file
+
+
+@pytest.fixture
+def temp_grzctl_s3_db_config_file_path(temp_data_dir_path, db_config_model) -> Path:
+    """GrzctlConfig-format S3+DB config for grzctl CLI tests."""
+    config_file = temp_data_dir_path / "config.grzctl_db_s3.yaml"
+    with open(config_file, "w") as fd:
+        db_config_model.to_yaml(fd)
     return config_file
 
 
 @pytest.fixture
 def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitter_private_key_file_path):
     keys = Crypt4GH.prepare_c4gh_keys(
-        recipient_key_file_path=crypt4gh_grz_public_key_file_path,
-        sender_private_key=crypt4gh_submitter_private_key_file_path,
+        recipient_public_key=Crypt4GH.retrieve_public_key(crypt4gh_grz_public_key_file_path),
+        sender_private_key=Crypt4GH.retrieve_private_key(crypt4gh_submitter_private_key_file_path),
     )
     return keys
 
@@ -386,8 +549,10 @@ def crypt4gh_grz_public_keys(crypt4gh_grz_public_key_file_path, crypt4gh_submitt
 @pytest.fixture
 def aws_credentials(s3_config_model):
     """Mocked AWS Credentials for moto."""
+    from grz_common.models.base import get_secret_value
+
     os.environ["AWS_ACCESS_KEY_ID"] = s3_config_model.s3.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = s3_config_model.s3.secret
+    os.environ["AWS_SECRET_ACCESS_KEY"] = get_secret_value(s3_config_model.s3.secret)
     os.environ["MOTO_ALLOW_NONEXISTENT_REGION"] = "1"
     with mock_aws():
         yield
@@ -405,6 +570,33 @@ def remote_bucket(boto_s3_client, s3_config_model):
     boto_s3_client.create_bucket(Bucket=s3_config_model.s3.bucket)
 
     return boto3.resource("s3").Bucket(s3_config_model.s3.bucket)
+
+
+@pytest.fixture(params=["missing-bucket", "rejected-credentials"])
+def faulty_s3_setup(request, aws_credentials, monkeypatch):
+    """Answer S3 requests as S3 does for a faulty setup: the bucket is missing, or S3 rejects the credentials.
+
+    S3 answers a HEAD request without a body, so botocore sets the HTTP status as the error code.
+    moto sends a body with some HEAD errors, such as ``NoSuchBucket``, so the fixture drops their code.
+    """
+    original_call = botocore.client.BaseClient._make_api_call
+
+    def call(self, operation_name, kwargs):
+        try:
+            if request.param == "rejected-credentials":
+                error = {"Code": "InvalidAccessKeyId", "Message": "The AWS Access Key Id does not exist."}
+                raise ClientError({"Error": error, "ResponseMetadata": {"HTTPStatusCode": 403}}, operation_name)
+            return original_call(self, operation_name, kwargs)
+        except ClientError as e:
+            if operation_name != "HeadObject":
+                raise
+            status = e.response["ResponseMetadata"]["HTTPStatusCode"]
+            error = {"Code": str(status), "Message": ""}
+            raise ClientError(
+                {"Error": error, "ResponseMetadata": {"HTTPStatusCode": status}}, operation_name
+            ) from None
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", call)
 
 
 @pytest.fixture

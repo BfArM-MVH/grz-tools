@@ -1,26 +1,80 @@
-import shutil
+import importlib.resources
 from pathlib import Path
 
 import click.testing
 import cryptography.hazmat.primitives.serialization as cryptser
 import grzctl.cli
-import psycopg
 import pytest
-import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from grzctl.models.config import DbConfig
+from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
+from grzctl.models.config import GrzctlConfig
 
 
-@pytest.fixture(
-    params=[
-        "sqlite",
-        pytest.param(
-            "postgresql",
-            marks=pytest.mark.skipif(condition=shutil.which("pg_config") is None, reason="postgresql not detected"),
-        ),
-    ]
-)
-def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbConfig:
+def _grzctl_archives(public_key_path: str, endpoint_url: str | None = None) -> dict:
+    def _s3(bucket):
+        d = {"bucket": bucket, "public_key_path": public_key_path}
+        if endpoint_url:
+            d["endpoint_url"] = endpoint_url
+        return d
+
+    return {
+        "consented": {"s3": _s3("consented"), "public_key_path": public_key_path},
+        "non_consented": {"s3": _s3("non_consented"), "public_key_path": public_key_path},
+    }
+
+
+INITIAL_REVISION = "1a9bd994df1b"
+"""The revision the schema-upgrade tests start from."""
+
+PRUEFBERICHT = {
+    "authorization_url": "https://auth.example.org",
+    "client_id": "example-client",
+    "client_secret": "example-secret",
+    "api_base_url": "https://api.example.org",
+}
+"""A ``pruefbericht`` config section with fake values, for tests that never reach BfArM."""
+
+
+@pytest.fixture
+def unread_file() -> str:
+    """An existing file for the key path fields of tests that never read it.
+
+    The key path fields need an existing file, and this conftest module serves as one.
+    """
+    return str(Path(__file__).resolve())
+
+
+@pytest.fixture
+def no_prompt(monkeypatch):
+    """Fail the test if the passphrase prompt opens, and set a wrong ``C4GH_PASSPHRASE``.
+
+    The configured passphrase comes first, so the wrong one in the environment must not matter.
+    """
+    monkeypatch.setenv("C4GH_PASSPHRASE", "wrong-passphrase")
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("the passphrase prompt must not open")
+
+    monkeypatch.setattr("grz_common.utils.crypt.getpass", _fail)
+
+
+@pytest.fixture
+def crypt4gh_public_key() -> str:
+    """A crypt4gh public key as text.
+
+    ``Crypt4GHPublicKey`` only checks for the markers, but ``grzctl encrypt`` loads the key,
+    so its payload decodes to the 32 bytes of an X25519 public key.
+    """
+    return "-----BEGIN CRYPT4GH PUBLIC KEY-----\n7JZ9eRjhOo1zB8HfoQK1ULCR3Wpnl91hF2K8FtpmeQ8=\n-----END CRYPT4GH PUBLIC KEY-----\n"
+
+
+@pytest.fixture
+def test_metadata_path():
+    return importlib.resources.files(grzctl_metadata).joinpath("metadata.json")
+
+
+def _database_config(tmp_path: Path, database_url: str) -> GrzctlConfig:
+    """Build a config for *database_url*, signed by a throwaway key pair written under *tmp_path*."""
     private_key = Ed25519PrivateKey.generate()
     private_key_path = tmp_path / "alice.sec"
     with open(private_key_path, "wb") as private_key_file:
@@ -41,12 +95,17 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
         # add the comment too
         public_key_file.write(b" alice")
 
-    database_url = "sqlite:///" + str((tmp_path / "submission.db.sqlite").resolve())
-    if request.param == "postgresql":
-        postgresql: psycopg.Connection = request.getfixturevalue("postgresql")
-        database_url = f"postgresql+psycopg://{postgresql.info.user}:@{postgresql.info.host}:{postgresql.info.port}/{postgresql.info.dbname}"
-
-    return DbConfig(
+    return GrzctlConfig(
+        leistungserbringer={
+            "000000000": {
+                "inbox_buckets": {
+                    "inbox": {
+                        "private_key_path": str(private_key_path.resolve()),
+                    }
+                },
+            }
+        },
+        archives=_grzctl_archives(public_key_path=str(public_key_path.resolve())),
         db={
             "database_url": database_url,
             "author": {
@@ -54,32 +113,55 @@ def blank_database_config(request: pytest.FixtureRequest, tmp_path: Path) -> DbC
                 "private_key_path": str(private_key_path.resolve()),
                 "private_key_passphrase": "",
             },
-            "known_public_keys": str(public_key_path.resolve()),
-        }
+            "known_public_keys_file": str(public_key_path.resolve()),
+        },
+        pruefbericht=PRUEFBERICHT,
+        identifiers={"grz": "GRZK00007"},
     )
 
 
-@pytest.fixture
-def blank_initial_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
+def _write_config(tmp_path: Path, config: GrzctlConfig) -> Path:
     config_path = tmp_path / "config.db.yaml"
     with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
-
-    runner = click.testing.CliRunner()
-    cli = grzctl.cli.build_cli()
-    _ = runner.invoke(cli, ["db", "--config-file", str(config_path), "upgrade", "--revision", "1a9bd994df1b"])
-
+        config.to_yaml(config_file)
     return config_path
 
 
 @pytest.fixture
-def blank_database_config_path(tmp_path: Path, blank_database_config: DbConfig) -> Path:
-    config_path = tmp_path / "config.db.yaml"
-    with open(config_path, "w") as config_file:
-        config_file.write(yaml.dump(blank_database_config.model_dump(mode="json")))
+def offline_config(tmp_path: Path) -> GrzctlConfig:
+    """Config for tests that never open the database."""
+    return _database_config(tmp_path, f"sqlite:///{tmp_path / 'unused.sqlite'}")
 
+
+@pytest.fixture
+def migrated_database_config(tmp_path: Path, migrated_db_connection: str) -> GrzctlConfig:
+    """Config for a database already on the latest schema, one per supported backend."""
+    return _database_config(tmp_path, migrated_db_connection)
+
+
+@pytest.fixture
+def migrated_database_config_path(tmp_path: Path, migrated_database_config: GrzctlConfig) -> Path:
+    """Path to a config file for a database on the latest schema."""
+    return _write_config(tmp_path, migrated_database_config)
+
+
+@pytest.fixture
+def empty_database_config_path(tmp_path: Path, db_test_connection: str) -> Path:
+    """Path to a config file for a database with no schema at all.
+
+    For tests that drive ``db init`` or ``db upgrade`` themselves.
+    """
+    return _write_config(tmp_path, _database_config(tmp_path, db_test_connection))
+
+
+@pytest.fixture
+def initial_revision_database_config_path(empty_database_config_path: Path) -> Path:
+    """Path to a config file for a database at :data:`INITIAL_REVISION`, ready to be upgraded."""
     runner = click.testing.CliRunner()
     cli = grzctl.cli.build_cli()
-    _ = runner.invoke(cli, ["db", "--config-file", str(config_path), "init"])
+    result = runner.invoke(
+        cli, ["--config", str(empty_database_config_path), "db", "upgrade", "--revision", INITIAL_REVISION]
+    )
+    assert result.exit_code == 0, result.stderr
 
-    return config_path
+    return empty_database_config_path

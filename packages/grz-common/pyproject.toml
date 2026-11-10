@@ -14,18 +14,22 @@ authors = [
 dynamic = ["version"]
 dependencies = [
     "boto3 >=1.36,<2",
+    "botocore >=1.36,<2",
+    # botocore verifies TLS against certifi's CA bundle when it is installed, else its own outdated copy
+    "certifi >=2026.10.19",
+    # older urllib3 can apply the target's TLS settings to an HTTPS proxy (GHSA-8988-9cw3-xx77)
+    "urllib3 >=2.8.0,<3",
     "click >=8.2,<9",
-    "crypt4gh >=1.7,<2",
-    "jsonschema >=4.23.0,<5",
+    "crypt4gh >=1.8.6,<2",
+    "cryptography ~=50.0.1",
+    "packaging >=23,<27",
     "pyyaml >=6.0.2,<7",
     "tqdm >=4.66.5,<5",
     "pydantic >=2.12,<3",
     "pydantic-settings >=2.11.0,<3",
     "platformdirs >=4.3.6,<5",
-    "grz-pydantic-models >=2.2.0",
-    "pysam ==0.23.*",
-    "rich ==13.*",
-    "requests >=2.32.3,<3",
+    "grz-pydantic-models >=4,<5",
+    "grz-check >=0.3.1",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -40,8 +44,15 @@ dev = [
     "tox-uv",
     "boto3-stubs",
 ]
-
-
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-sugar",
+    "pytest-xdist",
+    "moto[s3]",
+    "grz-pydantic-models-testing",
+]
 
 [project.urls]
 Homepage = "https://github.com/BfArM-MVH/grz-tools"

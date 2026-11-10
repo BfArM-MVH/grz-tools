@@ -26,6 +26,9 @@ class DataCategory(enum.StrEnum):
     genomic = "genomic"
 
 
+import enum
+
+
 class LibraryType(enum.StrEnum):
     """Sequencing method, if applicable."""
 
@@ -34,6 +37,42 @@ class LibraryType(enum.StrEnum):
     wgs = "wgs"
     wgs_lr = "wgs_lr"
     none = "none"
+
+    @property
+    def reimbursement_priority(self) -> int:
+        """Reimbursement priority — higher value = more expensive."""
+        priorities = {
+            LibraryType.none: 0,
+            LibraryType.panel: 1,
+            LibraryType.wes: 2,
+            LibraryType.wgs: 3,
+            LibraryType.wgs_lr: 4,
+        }
+        return priorities[self]
+
+    @classmethod
+    def most_expensive(cls, library_types: set[str]) -> "LibraryType":
+        """
+        Return the LibraryType with the highest reimbursement value from a set of strings.
+
+        Args:
+            library_types: Set of library type strings.
+
+        Returns:
+            The LibraryType with the highest reimbursement priority.
+
+        Raises:
+            ValueError: If no valid LibraryType values are found in the input set.
+        """
+        valid_types = {cls(lt) for lt in library_types if lt in cls._value2member_map_}
+
+        if not valid_types:
+            raise ValueError(
+                f"Submission contained ONLY library types ({', '.join(library_types)}) that cannot be "
+                f"submitted in the Prüfbericht. Valid types are: {', '.join(cls._value2member_map_)}."
+            )
+
+        return max(valid_types, key=lambda lt: lt.reimbursement_priority)
 
 
 class SubmittedCase(StrictBaseModel):

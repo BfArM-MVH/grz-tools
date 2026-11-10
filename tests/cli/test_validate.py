@@ -1,31 +1,23 @@
 import json
 import logging
-import shutil
-from pathlib import Path
 
 import grz_cli.cli
+import grz_common.exceptions as grzexc
 import pytest
 from click.testing import CliRunner
-from grz_common.workers.submission import SubmissionValidationError
+from grz_common.workers.submission import Submission
+
+from .common import copy_submission
 
 
-@pytest.mark.parametrize("grz_check_flag", ["--with-grz-check", "--no-grz-check"])
+@pytest.mark.parametrize("grz_check_mmap", ["--mmap", "--no-mmap"])
 def test_validate_submission(
     temp_identifiers_config_file_path,
     working_dir_path,
-    grz_check_flag,
+    grz_check_mmap,
     caplog,
 ):
-    have_grz_check = shutil.which("grz-check") is not None
-
-    if (grz_check_flag == "--with-grz-check") and not have_grz_check:
-        # explicitly note when skipping this when grz-check not available instead of silently falling back
-        pytest.skip(reason="grz-check not installed")
-
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
 
     testargs = [
         "validate",
@@ -33,7 +25,7 @@ def test_validate_submission(
         temp_identifiers_config_file_path,
         "--submission-dir",
         str(working_dir_path),
-        grz_check_flag,
+        grz_check_mmap,
     ]
 
     runner = CliRunner()
@@ -41,25 +33,14 @@ def test_validate_submission(
     with caplog.at_level(logging.INFO):
         result = runner.invoke(cli, testargs, catch_exceptions=False)
         assert result.exit_code == 0, result.output
-
-        if grz_check_flag == "--no-grz-check":
-            assert "Starting checksum validation (fallback)..." in caplog.text
-        else:
-            assert "Starting file validation with `grz-check`..." in caplog.text
+        assert "Starting file validation with `grz-check`..." in caplog.text
     caplog.clear()
 
-    # check if re-validation is skipped
+    # The recorded progress must be reused rather than the files being re-checked. Asserting on the
+    # "Starting file validation" line would prove nothing: it is logged before that decision.
     with caplog.at_level(logging.INFO):
         result = runner.invoke(cli, testargs, catch_exceptions=False)
-
-        if grz_check_flag == "--no-grz-check":
-            assert "Starting checksum validation (fallback)..." in caplog.text
-        else:
-            assert "Starting file validation with `grz-check`..." in caplog.text
-
-    # test if command has correctly checked for:
-    # - mismatched md5sums
-    # - all files existing
+        assert "All files are already validated. Skipping `grz-check`." in caplog.text
 
     assert result.exit_code == 0, result.output
 
@@ -68,10 +49,7 @@ def test_validate_submission_incorrect_grz_id(
     temp_identifiers_config_file_path,
     working_dir_path,
 ):
-    submission_dir = Path("tests/mock_files/submissions/valid_submission")
-
-    shutil.copytree(submission_dir / "files", working_dir_path / "files", dirs_exist_ok=True)
-    shutil.copytree(submission_dir / "metadata", working_dir_path / "metadata", dirs_exist_ok=True)
+    copy_submission(working_dir_path, "files", "metadata")
 
     with open(working_dir_path / "metadata" / "metadata.json", mode="r+") as metadata_file:
         metadata = json.load(metadata_file)
@@ -96,7 +74,56 @@ def test_validate_submission_incorrect_grz_id(
     # set catch_exceptions to True because we expect this to fail
     result = runner.invoke(cli, testargs, catch_exceptions=True)
     exc_type, exc, *_ = result.exc_info
-    assert exc_type == SubmissionValidationError
+    assert exc_type == grzexc.SubmissionValidationError
     assert "does not match genomic data center identifier" in str(exc)
 
     assert result.exit_code == 1, result.output
+
+
+def test_validate_reports_invalid_metadata_without_traceback(
+    temp_identifiers_config_file_path, working_dir_path, monkeypatch, caplog
+):
+    """Submitters see this whenever their metadata.json is invalid, so ``main`` ends with the message, not a traceback."""
+    copy_submission(working_dir_path, "files", "metadata")
+    (working_dir_path / "metadata" / "metadata.json").write_text("{}")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "grz-cli",
+            "validate",
+            "--config-file",
+            str(temp_identifiers_config_file_path),
+            "--submission-dir",
+            str(working_dir_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        grz_cli.cli.main()
+
+    assert exit_info.value.code == 1
+    assert "Invalid metadata in" in caplog.text
+
+
+def test_an_interrupted_validation_stops_as_an_interruption(
+    temp_identifiers_config_file_path, working_dir_path, monkeypatch
+):
+    """Ctrl-C during validation is an interruption, not a submission that failed validation."""
+    copy_submission(working_dir_path, "files", "metadata")
+
+    def interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Submission, "validate_files", interrupt)
+    testargs = [
+        "validate",
+        "--config-file",
+        temp_identifiers_config_file_path,
+        "--submission-dir",
+        str(working_dir_path),
+    ]
+
+    result = CliRunner().invoke(grz_cli.cli.build_cli(), testargs, catch_exceptions=False)
+
+    assert result.exit_code == 1
+    assert "Aborted!" in result.output, "click reports an interruption as aborted"

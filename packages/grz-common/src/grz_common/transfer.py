@@ -2,11 +2,28 @@
 Common methods for transferring data to and from GRZ buckets.
 """
 
-from typing import TYPE_CHECKING
+import datetime
+import logging
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any, NamedTuple
 
-import boto3
+import boto3  # type: ignore[import-untyped]
+import grz_common.exceptions as grzexc
 from boto3 import client as boto3_client  # type: ignore[import-untyped]
+from boto3.exceptions import Boto3Error  # type: ignore[import-untyped]
 from botocore.config import Config as Boto3Config
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    ParamValidationError,
+    PartialCredentialsError,
+)
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -16,6 +33,7 @@ else:
     S3Client = object
     S3ServiceResource = object
 
+from .models.base import get_secret_value
 from .models.s3 import S3Options
 
 
@@ -44,10 +62,10 @@ def init_s3_client(s3_options: S3Options) -> S3Client:
         region_name=_empty_str_to_none(s3_options.region_name),
         api_version=_empty_str_to_none(s3_options.api_version),
         use_ssl=s3_options.use_ssl,
-        endpoint_url=_empty_str_to_none(str(s3_options.endpoint_url)),
+        endpoint_url=_empty_str_to_none(str(s3_options.endpoint_url)) if s3_options.endpoint_url else None,
         aws_access_key_id=_empty_str_to_none(s3_options.access_key),
-        aws_secret_access_key=_empty_str_to_none(s3_options.secret),
-        aws_session_token=_empty_str_to_none(s3_options.session_token),
+        aws_secret_access_key=_empty_str_to_none(get_secret_value(s3_options.secret)),
+        aws_session_token=_empty_str_to_none(get_secret_value(s3_options.session_token)),
         config=s3_config,
     )
 
@@ -68,11 +86,193 @@ def init_s3_resource(s3_options: S3Options) -> S3ServiceResource:
         region_name=_empty_str_to_none(s3_options.region_name),
         api_version=_empty_str_to_none(s3_options.api_version),
         use_ssl=s3_options.use_ssl,
-        endpoint_url=_empty_str_to_none(str(s3_options.endpoint_url)),
+        endpoint_url=_empty_str_to_none(str(s3_options.endpoint_url)) if s3_options.endpoint_url else None,
         aws_access_key_id=_empty_str_to_none(s3_options.access_key),
-        aws_secret_access_key=_empty_str_to_none(s3_options.secret),
-        aws_session_token=_empty_str_to_none(s3_options.session_token),
+        aws_secret_access_key=_empty_str_to_none(get_secret_value(s3_options.secret)),
+        aws_session_token=_empty_str_to_none(get_secret_value(s3_options.session_token)),
         config=s3_config,
     )
 
     return s3_resource
+
+
+_SETUP_ERROR_CODES = frozenset({"InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket"})
+"""S3 error codes that only a faulty setup causes.
+
+``AccessDenied`` is not among them: S3 also answers it for a missing object if the credentials
+may not list the bucket.
+"""
+
+
+@contextmanager
+def s3_errors(action: str, transfer_error: type[grzexc.TransferError] = grzexc.TransferError) -> Iterator[None]:
+    """Raise an error of the S3 client in the body as the failure it stands for.
+
+    :param action: What the body does, such as ``"Upload to s3://bucket/key"``.
+    :param transfer_error: The class for a failed transfer.
+    :raises ConfigurationError: If only a faulty setup causes the error, such as rejected credentials.
+    :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
+    """
+    try:
+        yield
+    except ClientError as e:
+        error_class = grzexc.ConfigurationError if e.response["Error"]["Code"] in _SETUP_ERROR_CODES else transfer_error
+        raise error_class(f"{action} failed: {e}") from e
+    except (NoCredentialsError, PartialCredentialsError, ParamValidationError) as e:
+        # botocore raises ParamValidationError for a bucket name from the config before it sends a request
+        raise grzexc.ConfigurationError(f"{action} failed: {e}") from e
+    except (BotoCoreError, Boto3Error) as e:
+        raise transfer_error(f"{action} failed: {e}") from e
+
+
+def head_object(
+    s3_client: Any,
+    bucket: str,
+    key: str,
+    transfer_error: type[grzexc.TransferError] = grzexc.DownloadError,
+    missing_error: type[grzexc.GrzError] = grzexc.MissingObjectError,
+) -> dict[str, Any]:
+    """Return the ``head_object`` response of an S3 object, or raise the error that its failure stands for.
+
+    :param s3_client: boto3 S3 client.
+    :param bucket: Name of the bucket.
+    :param key: Key of the object.
+    :param transfer_error: The class for a failed transfer.
+    :param missing_error: The class for a missing object.
+    :returns: The ``head_object`` response.
+    :raises MissingObjectError: As ``missing_error``, if the object does not exist.
+    :raises ConfigurationError: If only a faulty setup causes the error, see :func:`s3_errors`.
+    :raises TransferError: As ``transfer_error``, for any other error of the S3 client.
+    """
+    with s3_errors(f"Reading s3://{bucket}/{key}", transfer_error):
+        try:
+            return s3_client.head_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if e.response["ResponseMetadata"]["HTTPStatusCode"] not in {HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND}:
+                raise
+            head_error = e
+        try:
+            # A HEAD answer has no body, so its error code is only the HTTP status. A GET answers with the real code.
+            # The GET sends no Range header: a submitter got SignatureDoesNotMatch on this request, most likely
+            # because a proxy dropped that header.
+            s3_client.get_object(Bucket=bucket, Key=key)["Body"].close()
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                raise missing_error(f"s3://{bucket}/{key} does not exist") from e
+            raise
+        raise head_error
+
+
+def raise_if_cleaned(s3_client: Any, bucket: str, submission_id: str) -> None:
+    """Raise if ``grzctl clean`` has started on the submission in the inbox.
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :raises SubmissionCleanedError: If a marker of ``grzctl clean`` exists.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    for key in (f"{submission_id}/cleaning", f"{submission_id}/cleaned"):
+        with s3_errors(f"Reading s3://{bucket}/{key}", grzexc.DownloadError):
+            try:
+                s3_client.head_object(Bucket=bucket, Key=key)
+            except ClientError as e:
+                # the caller has read the metadata.json, so the bucket exists and a 404 means a missing marker
+                if e.response["ResponseMetadata"]["HTTPStatusCode"] != HTTPStatus.NOT_FOUND:
+                    raise
+            else:
+                raise grzexc.SubmissionCleanedError(
+                    f"grzctl clean has started on {submission_id}: s3://{bucket} holds {key}"
+                )
+
+
+def get_metadata_upload_timestamp(s3_client: S3Client, bucket: str, submission_id: str) -> datetime.datetime:
+    """Return the S3 last-modified timestamp of a submission's ``metadata/metadata.json`` object.
+
+    This is the authoritative "received at the inbox" timestamp: it cannot be forged by
+    the submitter (unlike ``submission.submissionDate`` inside the JSON itself) and is
+    only meaningful while the object still lives in the inbox bucket. Do **not** call
+    this against the archive bucket: the archive's ``LastModified`` reflects the time
+    of archival, not the time of submission.
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :returns: ``LastModified`` (timezone-aware ``datetime``) for
+        ``<submission_id>/metadata/metadata.json``. Callers that only need the date
+        portion should call ``.date()`` themselves.
+    :raises MissingSubmissionFileError: If the inbox lacks the metadata.
+    :raises SubmissionCleanedError: If ``grzctl clean`` has started on the submission, see :func:`raise_if_cleaned`.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    key = f"{submission_id}/metadata/metadata.json"
+    response = head_object(s3_client, bucket, key, missing_error=grzexc.MissingSubmissionFileError)
+    # Check if the submission is (being) cleaned from the inbox. If yes, the metadata.json's timestamp is invalid.
+    raise_if_cleaned(s3_client, bucket, submission_id)
+    return response["LastModified"]
+
+
+class UploadTiming(NamedTuple):
+    """When an inbox received the first and the last object of an upload, see :func:`upload_timing`.
+
+    The fields are named after the submission columns that store them.
+    """
+
+    upload_started_at: datetime.datetime
+    upload_finished_at: datetime.datetime
+    upload_resumed: bool | None
+    """Whether the upload was resumed after an interruption; ``None`` if the uploader wrote no ``version`` marker."""
+
+    @property
+    def duration(self) -> datetime.timedelta:
+        """How long the upload took. For a resumed upload this is only the last run."""
+        return self.upload_finished_at - self.upload_started_at
+
+
+def upload_timing(submission_id: str, last_modified: Mapping[str, datetime.datetime]) -> UploadTiming | None:
+    """Derive the upload timing of a submission from the ``LastModified`` times of its inbox objects.
+
+    The uploader writes ``<submission_id>/version`` before the first file and ``metadata/metadata.json``
+    after the last one, so the marker's time is the start and the newest object's time is the end of the
+    upload. A resumed upload rewrites the marker and skips the files an earlier run completed, so an
+    object older than the marker means the upload was interrupted and resumed: its span then covers only
+    the last run and does not measure the transfer speed. Without the marker (older grz-cli versions) the
+    oldest object is the start and a resumption cannot be detected.
+
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :param last_modified: ``LastModified`` of each object of the submission, by key.
+    :returns: The timing, or ``None`` if *last_modified* holds no object besides the marker, or none newer
+        than it: a restarted upload has rewritten the marker but not finished a file yet.
+    """
+    marker_key = f"{submission_id}/version"
+    marker = last_modified.get(marker_key)
+    times = [modified for key, modified in last_modified.items() if key != marker_key]
+    if not times or (marker is not None and max(times) < marker):
+        return None
+    return UploadTiming(
+        upload_started_at=marker or min(times),
+        upload_finished_at=max(times),
+        upload_resumed=None if marker is None else any(modified < marker for modified in times),
+    )
+
+
+def get_upload_timing(s3_client: S3Client, bucket: str, submission_id: str) -> UploadTiming | None:
+    """Return the upload timing of a submission in the inbox, see :func:`upload_timing`.
+
+    Only meaningful before ``grzctl clean`` runs: cleaning deletes the objects and writes markers of
+    its own. Check with :func:`raise_if_cleaned` (or :func:`get_metadata_upload_timestamp`) first.
+
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier (the top-level S3 prefix).
+    :returns: The timing, or ``None`` if the inbox holds no object of the submission.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
+    :raises DownloadError: For any other error of the S3 client.
+    """
+    prefix = f"{submission_id}/"
+    with s3_errors(f"Listing s3://{bucket}/{prefix}", grzexc.DownloadError):
+        pages = s3_client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
+        last_modified = {obj["Key"]: obj["LastModified"] for page in pages for obj in page.get("Contents", [])}
+    return upload_timing(submission_id, last_modified)

@@ -7,13 +7,65 @@ This module provides functions for setting up logging configuration.
 from __future__ import annotations
 
 import logging
+import socket
 from os import PathLike
 from pathlib import Path
 
+from tqdm.auto import tqdm
+
 log = logging.getLogger(__name__)
 
-LOGGING_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+def get_hostname() -> str | None:
+    """
+    Return the current host name, or ``None`` if it cannot be determined.
+
+    :return: The host name, or ``None`` if :func:`socket.gethostname` fails.
+    """
+    try:
+        return socket.gethostname()
+    except OSError:
+        return None
+
+
+def build_logging_format(hostname: str | None) -> str:
+    """
+    Build the logging format string, including the host name when available.
+
+    :param hostname: The host name to embed, or ``None`` to omit it.
+    :return: A :mod:`logging` format string.
+    """
+    hostname_part = f"{hostname} " if hostname is not None else ""
+    return f"%(asctime)s [%(levelname)s] {hostname_part}%(name)s: %(message)s"
+
+
+HOSTNAME: str | None = get_hostname()
+LOGGING_FORMAT = build_logging_format(HOSTNAME)
 LOGGING_DATEFMT = "%Y-%m-%d %I:%M %p"
+
+
+class AlembicInfoNoiseFilter(logging.Filter):
+    """Filter out repetitive initialization messages from Alembic."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == "alembic.runtime.migration":
+            msg = record.getMessage()
+            if "Context impl" in msg or "transactional DDL" in msg:  # "non-transactional" on SQLite
+                return False
+        return True
+
+
+class TqdmAwareStreamHandler(logging.StreamHandler):
+    """A stream handler that writes each record on its own line, apart from tqdm progress bars.
+
+    A bar redraws its line in place, so a record written next to it would continue that line.
+    The handler clears every bar that shares the terminal with its stream, writes the record and redraws the bars.
+    Without a bar, it only takes the tqdm lock.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        with tqdm.external_write_mode(file=self.stream):
+            super().emit(record)
 
 
 def add_filelogger(file_path: str | PathLike, level: str = "INFO", logger_name: str | None = None) -> None:
@@ -53,7 +105,12 @@ def setup_cli_logging(log_file: str | None, log_level: str):
     # set the root log level since this is the CLI
     logging.getLogger().setLevel(log_level.upper())
 
-    logging.basicConfig(level=log_level.upper(), format=LOGGING_FORMAT, datefmt=LOGGING_DATEFMT)
+    logging.basicConfig(
+        level=log_level.upper(),
+        format=LOGGING_FORMAT,
+        datefmt=LOGGING_DATEFMT,
+        handlers=[TqdmAwareStreamHandler()],
+    )
 
     if log_file:
         # add file handler to root logger
@@ -61,5 +118,8 @@ def setup_cli_logging(log_file: str | None, log_level: str):
             log_file,
             log_level.upper(),
         )
+    logging.getLogger("alembic.runtime.migration").addFilter(AlembicInfoNoiseFilter())
+    # crypt4gh logs private keys in hex at DEBUG
+    logging.getLogger("crypt4gh").setLevel(max(logging.INFO, logging.getLogger().level))
 
     log.debug("Logging setup complete.")

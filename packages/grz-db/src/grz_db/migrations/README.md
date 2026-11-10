@@ -4,7 +4,7 @@
 
 From `packages/grz-db`:
 
-```
+```text
 uv run alembic revision -m "description of migration"
 ```
 
@@ -22,12 +22,13 @@ To easily find the appropriate SQLAlchemy column type for a migration operation,
 ```py
 import sqlmodel.main
 from grz_db.models.submission import SubmissionBase
+
 sqlmodel.main.get_column_from_field(SubmissionBase.model_fields["new_column_name"])
 ```
 
 One can also look at the generated schema for a newly initialized database:
 
-```
+```text
 sqlite3 submission.db.sqlite .schema
 ```
 

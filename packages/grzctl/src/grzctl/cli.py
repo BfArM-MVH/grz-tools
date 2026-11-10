@@ -2,33 +2,38 @@
 CLI module for handling command-line interface operations for GRZ administrators.
 """
 
-import logging.config
-import shutil
-import subprocess
-from importlib.metadata import version
+import logging
+import signal
+import sys
 from pathlib import Path
-from textwrap import dedent
 
 import click
-import grz_common.cli as grzcli
-from grz_cli.commands.encrypt import encrypt
-from grz_cli.commands.submit import submit
-from grz_cli.commands.upload import upload
-from grz_cli.commands.validate import validate
-from grz_common.cli.dump_config import dump_config
+import grz_common.exceptions as grzexc
+import platformdirs
+import yaml
+from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
 
+from . import get_versions
 from .commands.archive import archive
+from .commands.change_request import change_request_validate
+from .commands.change_request_template import change_request_template
 from .commands.clean import clean
 from .commands.consent import consent
 from .commands.db.cli import db
 from .commands.decrypt import decrypt
 from .commands.download import download
+from .commands.encrypt import encrypt
+from .commands.inbox import inbox
 from .commands.list_submissions import list_submissions
 from .commands.pruefbericht import pruefbericht
 from .commands.report import report
+from .commands.validate import validate
+from .models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
+
+DEFAULT_CONFIG_PATH = Path(platformdirs.user_config_dir("grzctl")) / "config.yaml"
 
 
 class OrderedGroup(click.Group):
@@ -45,26 +50,16 @@ def build_cli():
     """
     Factory for building the CLI application.
     """
+    versions = get_versions()
 
     @click.group(
         cls=OrderedGroup,
         help="GRZ Control CLI for GRZ administrators.",
     )
     @click.version_option(
-        version=version("grzctl"),
+        version=versions["grzctl"],
         prog_name="grzctl",
-        message=dedent(f"""\
-        %(prog)s v%(version)s
-        grz-cli v{version("grz-cli")}
-        grz-common v{version("grz-common")}
-        grz-db v{version("grz-db")}
-        grz-pydantic-models v{version("grz-pydantic-models")}
-        """)
-        + (
-            subprocess.run(["grz-check", "--version"], capture_output=True, text=True).stdout.strip()  # noqa: S607
-            if shutil.which("grz-check") is not None
-            else ""
-        ),
+        message="\n".join(f"{k} {'v' + v if v else 'unknown'}" for k, v in versions.items()),
     )
     @click.option("--log-file", metavar="FILE", type=str, help="Path to log file")
     @click.option(
@@ -73,22 +68,34 @@ def build_cli():
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
         help="Set the log level (default: INFO)",
     )
-    @grzcli.config_file
-    def cli(config_file: tuple[Path], log_file: str | None = None, log_level: str = "INFO"):
+    @click.option(
+        "--config",
+        "config_path",
+        metavar="PATH",
+        type=FILE_R_E,
+        default=None,
+        help="Path to the grzctl configuration file. Defaults to ~/.config/grzctl/config.yaml",
+    )
+    @click.pass_context
+    def cli(ctx: click.Context, config_path: Path | None = None, log_file: str | None = None, log_level: str = "INFO"):
         """
         Command-line interface function for setting up logging.
 
+        :param config_path: Path to the unified grzctl configuration file.
         :param log_file: Path to the log file. If provided, a file logger will be added.
         :param log_level: Log level for the logger. It should be one of the following:
                            DEBUG, INFO, WARNING, ERROR, CRITICAL.
         """
         setup_cli_logging(log_file, log_level)
+        ctx.ensure_object(dict)
+        if config_path is None and DEFAULT_CONFIG_PATH.is_file():
+            config_path = DEFAULT_CONFIG_PATH
+        if config_path is not None:
+            config = GrzctlConfig.from_path(config_path)
+            ctx.obj["configuration"] = config
 
-    # For convenience, include grz-cli commands as well.
     cli.add_command(validate)
     cli.add_command(encrypt)
-    cli.add_command(upload)
-    cli.add_command(submit)
 
     cli.add_command(list_submissions, name="list")
     cli.add_command(download)
@@ -98,18 +105,46 @@ def build_cli():
     cli.add_command(consent)
     cli.add_command(pruefbericht)
     cli.add_command(db)
+    cli.add_command(inbox)
+    cli.add_command(change_request_template)
+    cli.add_command(change_request_validate)
     cli.add_command(report)
     cli.add_command(dump_config)
 
     return cli
 
 
+@click.command()
+@click.option(
+    "--reveal-secrets",
+    is_flag=True,
+    help="Print secret values in plain text instead of '**********', so the output loads back as a config file.",
+)
+@click.pass_context
+def dump_config(ctx: click.Context, reveal_secrets: bool):
+    """Dump the loaded grzctl configuration as YAML."""
+    config: GrzctlConfig = ctx.obj["configuration"]
+    data = config.model_dump(mode="json", exclude_none=True, context={"reveal_secrets": reveal_secrets})
+    click.echo(yaml.safe_dump(data, sort_keys=False), nl=False)
+
+
+def _stop_on_sigterm() -> None:
+    """Let SIGTERM stop a run the way Ctrl-C does, so the running step records ``interrupted``."""
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+
+
 def main():
     """
     Main entry point for the CLI application.
     """
+    _stop_on_sigterm()
     cli = build_cli()
-    cli()
+    try:
+        cli()
+    except grzexc.GrzError as e:
+        # an expected failure, such as an invalid metadata.json: log its message, not a traceback
+        log.error(e)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

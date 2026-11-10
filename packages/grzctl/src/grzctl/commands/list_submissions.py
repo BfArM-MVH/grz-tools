@@ -4,7 +4,6 @@ import datetime
 import json
 import logging
 import sys
-from typing import Any
 
 import click
 import grz_common.cli as grzcli
@@ -15,10 +14,11 @@ from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSum
 from grz_db.models.submission import SubmissionDb
 from pydantic_core import to_jsonable_python
 
-from ..models.config import ListConfig
-from ..models.db import DbModel
+from ..commands import grzctl_configuration, inbox_options
+from ..models.config import GrzctlConfig
 from . import limit
 from .db.cli import get_submission_db_instance
+from .inbox_resolution import require_inbox
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,12 @@ def _get_latest_state_txt(latest_state: str | None) -> rich.text.Text:
     return latest_state_txt
 
 
-def _format_upload_duration(duration: datetime.timedelta) -> rich.text.Text:
+def _format_upload_duration(duration: datetime.timedelta | None, resumed: bool | None = None) -> rich.text.Text:
+    if duration is None:
+        return rich.text.Text("-")
+    if resumed:  # the duration covers only the last run of the upload
+        return _format_upload_duration(duration) + rich.text.Text(" (resumed)", style="yellow")
+
     upload_hours_remainder = duration.seconds // 3600
     upload_minutes_remainder, upload_seconds_remainder = divmod(duration.seconds - (upload_hours_remainder * 3600), 60)
 
@@ -105,7 +110,7 @@ def _prepare_table(
         row: list[rich.console.RenderableType] = [
             summary.submission_id,
             status_text,
-            _format_upload_duration(summary.newest_upload - summary.oldest_upload),
+            _format_upload_duration(summary.upload_duration, summary.upload_resumed),
             summary.newest_upload.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
             f"{summary.total_size_bytes / BYTES_PER_GIGABYTE:.1f}",
         ]
@@ -117,34 +122,37 @@ def _prepare_table(
 
 
 @click.command()
-@grzcli.configuration
+@grzctl_configuration
 @grzcli.output_json
 @click.option("--show-cleaned/--hide-cleaned", help="Show cleaned submissions.")
+@inbox_options
 @limit
-def list_submissions(
-    configuration: dict[str, Any],
+def list_submissions(  # noqa: PLR0913, PLR0917
+    configuration: GrzctlConfig,
     output_json: bool,
     show_cleaned: bool,
+    submitter_id: str,
+    inbox_name: str,
     limit: int,
     **kwargs,
 ):
-    """
-    List submissions within an inbox from oldest to newest, up to the requested limit.
-    """
-    config = ListConfig.model_validate(configuration)
+    """List submissions within an inbox from oldest to newest, up to the requested limit."""
+    resolved_inbox = require_inbox(
+        configuration, submitter_id=submitter_id, inbox_name=inbox_name, hint="Pass --inbox to list one of them."
+    )
+    s3_options = configuration.inbox_target(submitter_id=submitter_id, inbox_name=resolved_inbox).s3
 
-    submissions = query_submissions(config.s3, show_cleaned)
+    submissions = query_submissions(s3_options, show_cleaned)
 
     database_states: dict[str, str | None] | None = None
-    if isinstance(config.db, DbModel):
+    try:
+        submission_db = get_submission_db_instance(db_url=configuration.db.database_url)
         database_states = {}
-        submission_db = get_submission_db_instance(db_url=config.db.database_url)
-        # query latest database state for submissions
         for submission in submissions:
             database_states[submission.submission_id] = _get_latest_state_str(submission_db, submission.submission_id)
-    elif isinstance(config.db, dict):
-        # this can happen if environment variables partially populate DbModel but it's missing from the passed config file
-        log.debug("Ignoring partial/invalid database configuration.")
+    except Exception:
+        database_states = None
+        log.warning("Could not query database for submission states. Run 'grzctl db upgrade' to initialize.")
 
     if output_json:
         submissions_jsonable = to_jsonable_python(submissions[:limit])
