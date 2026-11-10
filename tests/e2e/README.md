@@ -39,7 +39,9 @@ They do check that no multipart upload is left open.
   `expected_states` derives the state history of each flow from that.
   A new scenario is a new entry in `SCENARIOS`, and runs in both flows.
 - `test_scenarios.py`: runs a scenario and checks its outcome.
-  For every scenario it also checks that the interrogation bucket keeps nothing, that the archive decrypts to the checksums in `metadata.json` (with the upstream crypt4gh library), that no decrypted copy is left unless the submission was selected for QC, and that grzctl logs no unexpected state transition.
+  For every scenario it also checks that the interrogation bucket keeps nothing, that the archive decrypts to the checksums in `metadata.json` (with the upstream crypt4gh library), and that grzctl logs no unexpected state transition.
+  In the process flow it checks that no decrypted copy is left unless the submission was selected for QC.
+  The single commands keep their decrypted files under `steps/<id>` by design.
 - `harness.py`: the LE's and the GRZ's side, with their configs and commands.
 - `services.py`: SeaweedFS with the permissions of each set of credentials, and the BfArM mock.
 - `test_permissions_doc.py`: checks that the grzctl README lists the permissions that `services.py` grants; it runs without containers.

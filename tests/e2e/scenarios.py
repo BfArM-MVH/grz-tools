@@ -174,6 +174,8 @@ class Outcome:
     """Failure reason of the last state, for a submission that ends in ``Error``."""
     archive: Literal["consented", "non_consented"] | None = None
     """Archive that holds the submission; ``None`` if neither does."""
+    archived_in_parts: bool = False
+    """Whether at least one archived file is stored in parts, so its ETag ends in ``-N``."""
     inbox_cleaned: bool = False
     pruefberichte: int = 0
     """Prüfberichte that BfArM accepted."""
@@ -303,7 +305,7 @@ SCENARIOS = (
         id="files-in-parts",
         description="FASTQs larger than one part go through multipart uploads, and a multipart copy into the archive.",
         submission=Submission("panel", files=(grow_beyond_parts("tumor_1.fq.gz", "tumor_2.fq.gz"),)),
-        outcome=Outcome(archive="non_consented", inbox_cleaned=True, pruefberichte=1),
+        outcome=Outcome(archive="non_consented", archived_in_parts=True, inbox_cleaned=True, pruefberichte=1),
     ),
     Scenario(
         id="file-in-parts-cut-mid-record",

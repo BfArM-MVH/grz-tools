@@ -40,10 +40,13 @@ def test_scenario(scenario: Scenario, flow: Flow, grz: Grz):
             assert not archived, f"{name} archive holds {archived}"
             continue
         assert set(file_keys) | {f"{submission_id}/metadata/metadata.json"} <= archived
+        in_parts = False
         for key in file_keys:
             head = grz.s3().meta.client.head_object(Bucket=bucket, Key=key)
+            in_parts |= "-" in head["ETag"]
             if head["ContentLength"] > PART_SIZE:
                 assert "-" in head["ETag"], f"{key} is larger than a part but was not stored in parts"
+        assert in_parts or not outcome.archived_in_parts, "no archived file was stored in parts"
         secret_key = crypt4gh.keys.get_private_key(MOCK_FILES / f"archive_{name}.sec", lambda: None)
         for key, file in file_keys.items():
             assert _decrypted_sha256(grz, bucket, key, secret_key) == file.file_checksum, key
