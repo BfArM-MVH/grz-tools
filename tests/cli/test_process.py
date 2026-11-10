@@ -35,6 +35,7 @@ import requests
 import responses
 import yaml
 from grz_common.models.version import VERSION_FILE_KEY, VersionFile
+from grz_common.transfer import get_upload_timing
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from grzctl.commands import inbox_resolution
@@ -267,6 +268,32 @@ class TestGrzctlProcess:
         consented_keys = {o.key for o in s3_buckets["consented"].objects.all()}
         assert f"{submission_id}/metadata/metadata.json" in consented_keys
         _assert_archived(s3_buckets["consented"], submission_id, crypt4gh_grz_private_key_file_path)
+
+    def test_process_records_the_upload_timing(
+        self, s3_buckets, process_config_content, temp_process_config_file_path, working_dir_path
+    ):
+        """``process`` records the upload timing from the inbox's object listing, as ``grzctl download`` does."""
+        submission_id = "260914050_2024-07-15_c64603a7"
+        # grz-cli writes this marker before the first file, so the upload can be told from a resumed one
+        s3_buckets["inbox"].put_object(Key=f"{submission_id}/version", Body=b"grz-cli")
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+        expected = get_upload_timing(boto3.client("s3"), "inbox", submission_id)
+        assert expected is not None
+        assert expected.upload_resumed is False
+
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+
+        assert result.exit_code == 0, result.output
+        submission = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None).get_submission(
+            submission_id
+        )
+        assert submission is not None
+        assert submission.upload_started_at is not None
+        assert submission.upload_finished_at is not None
+        assert (submission.upload_finished_at - submission.upload_started_at, submission.upload_resumed) == (
+            expected.upload_finished_at - expected.upload_started_at,
+            False,
+        )
 
     def test_process_archives_redacted_logs(
         self,

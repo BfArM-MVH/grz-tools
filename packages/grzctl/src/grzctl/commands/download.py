@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 import grz_common.cli as grzcli
@@ -14,7 +15,7 @@ from grz_common.transfer import (
 )
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
-from grz_db.models.submission import SubmissionStateEnum
+from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import STEP_TRANSITIONS, DbContext
@@ -22,7 +23,35 @@ from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
 
+if TYPE_CHECKING:
+    from types_boto3_s3.client import S3Client
+else:
+    S3Client = Any
+
 log = logging.getLogger(__name__)
+
+
+def _record_upload_timing(db: SubmissionDb, s3_client: S3Client, bucket: str, submission_id: str) -> None:
+    """Record the upload timing of a submission from the inbox's object listing.
+
+    The timing lives only in that listing, which ``grzctl clean`` erases. It is auxiliary, so no error
+    in getting or storing it fails the command: it is logged as a warning.
+
+    :param db: Database that holds the submission.
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier.
+    """
+    try:
+        timing = get_upload_timing(s3_client, bucket, submission_id)
+        if timing is None:
+            log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
+        else:
+            with db.transaction() as session:
+                for column, value in timing._asdict().items():
+                    db.modify_submission(submission_id, column, value, session=session)
+    except Exception as e:
+        log.warning(f"Upload timing of {submission_id} not recorded: {e}")
 
 
 @click.command()
@@ -129,18 +158,7 @@ def download(  # noqa: PLR0913, PLR0917
                     force=force,
                     on_missing="create",
                 )
-                # The timing lives only in the inbox's object listing, which ``grzctl clean`` erases.
-                # It is auxiliary, so no error in getting or storing it may fail the download.
-                try:
-                    timing = get_upload_timing(s3_client, s3_options.bucket, submission_id)
-                    if timing is None:
-                        log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
-                    else:
-                        with db.transaction() as session:
-                            for column, value in timing._asdict().items():
-                                db.modify_submission(submission_id, column, value, session=session)
-                except Exception as e:
-                    log.warning(f"Upload timing of {submission_id} not recorded: {e}")
+                _record_upload_timing(db, s3_client, s3_options.bucket, submission_id)
             # The download knows the inbox, so record it.
             # Commands and the decryption key lookup can then find the submission without
             # being told the inbox again.
