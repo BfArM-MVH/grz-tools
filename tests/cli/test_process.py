@@ -35,7 +35,7 @@ import requests
 import responses
 import yaml
 from grz_common.models.version import VERSION_FILE_KEY, VersionFile
-from grz_common.transfer import get_upload_timing
+from grz_common.transfer import MISSING_GRZ_CLI_VERSION, get_upload_timing
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 from grzctl.commands import inbox_resolution
@@ -294,6 +294,35 @@ class TestGrzctlProcess:
             expected.upload_finished_at - expected.upload_started_at,
             False,
         )
+
+    @pytest.mark.parametrize(
+        ("version_object", "expected"),
+        [(b"1.2.3", "1.2.3"), (None, MISSING_GRZ_CLI_VERSION)],
+        ids=["version-file", "no-version-file"],
+    )
+    def test_process_records_the_grzcli_version(
+        self,
+        s3_buckets,
+        process_config_content,
+        temp_process_config_file_path,
+        working_dir_path,
+        version_object,
+        expected,
+    ):
+        """``process`` records the grz-cli version from the inbox's version file, as ``grzctl download`` does."""
+        submission_id = "260914050_2024-07-15_c64603a7"
+        if version_object is not None:
+            s3_buckets["inbox"].put_object(Key=f"{submission_id}/version", Body=version_object)
+        upload_submission_to_inbox(s3_buckets["inbox"], submission_id)
+
+        result = _run_process(temp_process_config_file_path, submission_id, working_dir_path)
+
+        assert result.exit_code == 0, result.output
+        submission = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None).get_submission(
+            submission_id
+        )
+        assert submission is not None
+        assert submission.grz_cli_version == expected
 
     def test_process_archives_redacted_logs(
         self,

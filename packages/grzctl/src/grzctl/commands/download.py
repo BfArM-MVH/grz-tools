@@ -54,6 +54,28 @@ def _record_upload_timing(db: SubmissionDb, s3_client: S3Client, bucket: str, su
         log.warning(f"Upload timing of {submission_id} not recorded: {e}")
 
 
+def _record_grzcli_version(db: SubmissionDb, s3_client: S3Client, bucket: str, submission_id: str) -> None:
+    """Record the grz-cli version that uploaded a submission, as the inbox's version file names it.
+
+    Informational, so a failed read or write must not fail the command: it is logged as a warning and
+    ``ERROR_GRZ_CLI_VERSION`` is recorded where the write still works.
+
+    :param db: Database that holds the submission.
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier.
+    """
+    try:
+        try:
+            grz_cli_version = get_grzcli_version(s3_client, bucket, submission_id)
+        except Exception as e:
+            grz_cli_version = ERROR_GRZ_CLI_VERSION
+            log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
+        db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
+    except Exception as e:
+        log.warning(f"grz-cli version of {submission_id} not recorded: {e}")
+
+
 @click.command()
 @grzctl_configuration
 @grzcli.submission_id
@@ -141,13 +163,7 @@ def download(  # noqa: PLR0913, PLR0917
                 raise RuntimeError("A DbContext that update_db enables holds the database.")
             # Init S3 client
             s3_client = init_s3_client(s3_options)
-            # Add grz-cli version to db. Informational, so failed read must not fail the download.
-            try:
-                grz_cli_version = get_grzcli_version(s3_client, s3_options.bucket, submission_id)
-            except Exception as e:
-                grz_cli_version = ERROR_GRZ_CLI_VERSION
-                log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
-            db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
+            _record_grzcli_version(db, s3_client, s3_options.bucket, submission_id)
             if populate:
                 submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
                 metadata = worker_inst.parse_submission().metadata.content
