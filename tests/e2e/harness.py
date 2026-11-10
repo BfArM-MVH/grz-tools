@@ -210,7 +210,7 @@ class Grz:
     def run(self, command: str, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         """Run grz-cli or grzctl of this environment and keep its output for the test report."""
         result = subprocess.run(
-            [str(_BIN / command), *args], env=self._env, capture_output=True, text=True, check=False
+            [str(_BIN / command), *args], env=self._env, capture_output=True, text=True, check=False, timeout=600
         )
         self.outputs.append(f"$ {command} {' '.join(args)}\n[exit {result.returncode}]\n{result.stdout}{result.stderr}")
         print(self.outputs[-1])

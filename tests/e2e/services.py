@@ -88,13 +88,23 @@ def seaweedfs(work_dir: Path, engine_env: dict[str, str]) -> Iterator[str]:
     run = [engine, "run", "--rm", "--detach", "--publish", "127.0.0.1::8333"]
     run += ["--volume", f"{identities}:/etc/seaweedfs/s3.json:ro,z", SEAWEEDFS_IMAGE]
     run += ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json"]
-    container = subprocess.run(run, env=engine_env, check=True, capture_output=True, text=True).stdout.strip()
+    started = subprocess.run(run, env=engine_env, check=False, capture_output=True, text=True)
+    if started.returncode:
+        raise RuntimeError(f"{engine} run exited with {started.returncode}: {started.stderr}")
+    container = started.stdout.strip()
     try:
         port = subprocess.run(
             [engine, "port", container, "8333/tcp"], env=engine_env, check=True, capture_output=True, text=True
         ).stdout.split()[0]
         endpoint = f"http://{port}"
-        _create_buckets(endpoint)
+        try:
+            _create_buckets(endpoint)
+        except (botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError):
+            logs = subprocess.run(
+                [engine, "logs", container], env=engine_env, check=False, capture_output=True, text=True
+            )
+            print(f"$ {engine} logs {container}\n{logs.stdout}{logs.stderr}")
+            raise
         yield endpoint
     finally:
         # the image declares /data a volume, which rm keeps without --volumes
