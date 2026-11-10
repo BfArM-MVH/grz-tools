@@ -6,6 +6,7 @@ import datetime
 import enum
 import itertools
 import logging
+import os
 import re
 import threading
 from collections import OrderedDict
@@ -159,7 +160,9 @@ class S3BotoDownloadWorker:
         """
         Download a single file from S3 to local storage using streaming pipeline.
 
-        A failed download leaves no file behind.
+        The download writes to a temporary name in the same directory, and renames it to
+        ``local_file_path`` once it is complete. So even a killed download leaves no truncated
+        file there, and a failed one removes its temporary file.
 
         :param local_file_path: Path to the local target file.
         :param s3_object_id: The S3 object key to download.
@@ -168,6 +171,8 @@ class S3BotoDownloadWorker:
         :raises ConfigurationError: If only a faulty setup causes the error of the S3 client.
         :raises DownloadError: For any other error of the S3 client.
         """
+        target_path = Path(local_file_path)
+        partial_path = target_path.with_name(f"{target_path.name}.part")
         try:
             with (
                 tqdm(  # type: ignore[call-overload]
@@ -177,7 +182,7 @@ class S3BotoDownloadWorker:
                     leave=False,
                     **TQDM_DEFAULTS,
                 ) as pbar,
-                open(local_file_path, "wb") as f,
+                open(partial_path, "wb") as f,
             ):
                 source = S3Downloader(
                     self._s3_client,
@@ -189,10 +194,10 @@ class S3BotoDownloadWorker:
                 pbar.reset(total=source.length)
                 pipeline = source | Tee(TqdmObserver(pbar))
                 pipeline >> f
+            os.replace(partial_path, target_path)
         except Exception:
-            # a later step reads whatever lies in the target directory and would take an
-            # incomplete file for a downloaded one; a rerun starts the file over anyway
-            Path(local_file_path).unlink(missing_ok=True)
+            # a rerun starts the file over anyway
+            partial_path.unlink(missing_ok=True)
             raise
 
     def download_file(  # noqa: PLR0913, PLR0917

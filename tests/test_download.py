@@ -41,6 +41,22 @@ class _BreakingBody(io.RawIOBase):
         return chunk
 
 
+class _WatchedBody(io.RawIOBase):
+    """An S3 response body that calls ``on_read`` before each read of *body*."""
+
+    def __init__(self, body, on_read):
+        super().__init__()
+        self._body = body
+        self._on_read = on_read
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int | None = -1) -> bytes:
+        self._on_read()
+        return self._body.read(size)
+
+
 @pytest.fixture(scope="module")
 def temp_log_dir(tmpdir_factory: pytest.TempdirFactory):
     """Create temporary log folder for this pytest module"""
@@ -174,6 +190,44 @@ def test_download_file_leaves_no_partial_file_when_the_stream_breaks(
         )
 
     assert not local_file_path.exists(), "a broken download should leave no partial file behind"
+    assert not any(local_file_path.parent.iterdir()), "nor a temporary file"
+
+
+def test_download_file_writes_the_final_path_only_when_complete(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """A download killed part way through, such as by SIGKILL, leaves no truncated file at the final path."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+    original_call = botocore.client.BaseClient._make_api_call
+    final_path_seen = []
+
+    def watch_the_final_path(self, operation_name, kwargs):
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            response["Body"] = _WatchedBody(response["Body"], lambda: final_path_seen.append(local_file_path.exists()))
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", watch_the_final_path)
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(s3_options=s3_config_model.s3, status_file_path=download_log_path)
+
+    download_worker.download_file(
+        local_file_path,
+        f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+        FileProgressLogger[DownloadState](download_log_path),
+        file_metadata,
+        submission.submission_id,
+    )
+
+    assert final_path_seen, "the body should have been read"
+    assert not any(final_path_seen), "the final path should stay empty while the download runs"
+    assert list(local_file_path.parent.iterdir()) == [local_file_path], "no temporary file should stay behind"
+    assert local_file_path.read_bytes() == b"encrypted payload"
 
 
 def test_download_skips_file_already_downloaded_for_same_submission(

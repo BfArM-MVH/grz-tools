@@ -12,7 +12,7 @@ from io import BytesIO
 
 import grz_check
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ReadTimeoutError
 from grz_common.exceptions import MissingObjectError
 from grz_common.pipeline.components import (
     DataValidationError,
@@ -300,6 +300,40 @@ class TestS3Downloader:
 
         with pytest.raises(InterruptedError):
             downloader.read(2)
+
+    def test_read_does_not_resume_once_stop_is_set(self):
+        """A read that stalls until its timeout does not start another one after a stop, which could stall again."""
+        stop = threading.Event()
+
+        class _StalledBody(io.RawIOBase):
+            def readable(self) -> bool:
+                return True
+
+            def read(self, size: int = -1) -> bytes:
+                # the stop arrives while the read waits for its timeout
+                stop.set()
+                raise ReadTimeoutError(endpoint_url="https://s3.example")
+
+        class _Object:
+            requests = 0
+
+            def get_object(self, **_kwargs):
+                self.requests += 1
+                return {
+                    "Body": _StalledBody(),
+                    "ContentLength": 4,
+                    "ETag": '"etag"',
+                    "ContentRange": "bytes 0-3/4",
+                    "ResponseMetadata": {"HTTPStatusCode": 206},
+                }
+
+        s3_object = _Object()
+        downloader = S3Downloader(s3_object, "bucket", "key", stop=stop)
+
+        with pytest.raises(InterruptedError):
+            downloader.read(2)
+
+        assert s3_object.requests == 1
 
 
 class TestPushToPullAdapter:

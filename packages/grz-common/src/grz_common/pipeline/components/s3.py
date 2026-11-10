@@ -78,7 +78,8 @@ class S3Downloader(ReadStream):
         :param key: Key of the object.
         :param missing_error: The class for a missing object.
         :param max_resumes: How often the read may break in a row without data in between.
-        :param stop: Once it is set, the next read raises ``InterruptedError``.
+        :param stop: Once it is set, the next read raises ``InterruptedError``, and so does a broken read
+            instead of resuming.
         :raises MissingObjectError: As ``missing_error``, if the object does not exist.
         :raises ConfigurationError: If only a faulty setup causes the error, see :func:`~grz_common.transfer.s3_errors`.
         :raises DownloadError: For any other error of the S3 client.
@@ -117,6 +118,11 @@ class S3Downloader(ReadStream):
             try:
                 chunk = super().read(size)
             except _RESUMABLE_READ_ERRORS as e:
+                # a stalled read ends only with its timeout, so a stop may have come meanwhile
+                if self._stop is not None and self._stop.is_set():
+                    raise InterruptedError(
+                        f"Reading s3://{self._bucket}/{self._key} stopped at byte {self._offset}"
+                    ) from e
                 if self._resumes >= self._max_resumes:
                     raise NetworkError(f"S3 read error: {e}") from e
                 if self._etag is None:
