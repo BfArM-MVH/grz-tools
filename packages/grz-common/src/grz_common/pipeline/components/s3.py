@@ -7,6 +7,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import AbstractContextManager
 from typing import Any
 
+import urllib3.exceptions
 from botocore.exceptions import (
     ClientError,
     IncompleteReadError,
@@ -42,7 +43,14 @@ def calculate_s3_part_size(file_size: int | None, preferred_part_size: int = MUL
     return part_size
 
 
-_RESUMABLE_READ_ERRORS = (ReadTimeoutError, IncompleteReadError, ResponseStreamingError, OSError)
+_RESUMABLE_READ_ERRORS = (
+    ReadTimeoutError,
+    IncompleteReadError,
+    ResponseStreamingError,
+    # botocore does not wrap a TLS error, and urllib3's SSLError is no OSError
+    urllib3.exceptions.SSLError,
+    OSError,
+)
 """What reading the body of an S3 object raises when the connection breaks."""
 
 

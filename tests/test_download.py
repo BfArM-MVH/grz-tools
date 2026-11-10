@@ -1,6 +1,7 @@
 """Tests for the download module"""
 
 import io
+import ssl
 import threading
 import time
 from concurrent.futures import wait
@@ -11,27 +12,30 @@ import botocore.client
 import grz_common.exceptions as grzexc
 import pytest
 from botocore.exceptions import EndpointConnectionError
+from botocore.response import StreamingBody
 from grz_common.progress.progress_logging import FileProgressLogger
 from grz_common.progress.states import DownloadState
 from grz_common.utils.checksums import calculate_sha256
 from grz_common.workers.download import S3BotoDownloadWorker
 from grz_common.workers.submission import EncryptedSubmission
 from grz_common.workers.worker import Worker
+from urllib3.response import HTTPResponse
 
 
 class _BreakingBody(io.RawIOBase):
     """An S3 response body that hands out one chunk and then breaks, like a dropped connection."""
 
-    def __init__(self, first_chunk: bytes):
+    def __init__(self, first_chunk: bytes, error: Exception | None = None):
         super().__init__()
         self._first_chunk = first_chunk
+        self._error = error or ConnectionError("connection reset by peer")
 
     def readable(self) -> bool:
         return True
 
     def read(self, size: int | None = -1) -> bytes:
         if not self._first_chunk:
-            raise ConnectionError("connection reset by peer")
+            raise self._error
         chunk = self._first_chunk
         self._first_chunk = b""
         return chunk
@@ -459,6 +463,54 @@ def test_download_file_resumes_when_the_stream_breaks(
     )
 
     assert requested_ranges == [None, "bytes=10-"]
+    assert local_file_path.read_bytes() == b"encrypted payload"
+
+
+def test_download_file_resumes_when_tls_breaks(
+    s3_config_model,
+    remote_bucket,
+    submission_metadata_dir,
+    monkeypatch,
+    tmp_path,
+):
+    """A TLS error of the body reaches the read as urllib3's ``SSLError``, which botocore does not wrap, and resumes."""
+    submission = _submission_in_the_bucket(remote_bucket, submission_metadata_dir, tmp_path)
+    original_call = botocore.client.BaseClient._make_api_call
+    requested_ranges = []
+
+    def break_tls_in_the_first_body(self, operation_name, kwargs):
+        response = original_call(self, operation_name, kwargs)
+        if operation_name == "GetObject":
+            requested_ranges.append(kwargs.get("Range"))
+            if len(requested_ranges) == 1:
+                tls_error = ssl.SSLError(1, "[SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed")
+                # urllib3 turns the ssl error into its own, and botocore passes that on
+                raw = HTTPResponse(
+                    body=_BreakingBody(response["Body"].read(len(b"encrypted ")), tls_error), preload_content=False
+                )
+                response["Body"] = StreamingBody(raw, response["ContentLength"])
+        return response
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", break_tls_in_the_first_body)
+
+    download_log_path = tmp_path / "progress_download.cjson"
+    download_worker = S3BotoDownloadWorker(
+        s3_options=s3_config_model.s3,
+        status_file_path=download_log_path,
+    )
+    progress_logger = FileProgressLogger[DownloadState](download_log_path)
+    local_file_path, file_metadata = next(iter(submission.encrypted_files.items()))
+
+    download_worker.download_file(
+        local_file_path,
+        f"{submission.submission_id}/files/{file_metadata.encrypted_file_path()}",
+        progress_logger,
+        file_metadata,
+        submission.submission_id,
+    )
+
+    # urllib3 fills a read before it returns, so the bytes before the break never reached the downloader
+    assert requested_ranges == [None, "bytes=0-"]
     assert local_file_path.read_bytes() == b"encrypted payload"
 
 
