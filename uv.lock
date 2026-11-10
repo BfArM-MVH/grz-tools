@@ -2902,11 +2902,11 @@ wheels = [
 
 [[package]]
 name = "types-awscrt"
-version = "0.34.1"
+version = "0.37.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3e/59/44409a8fc06b444ab1a6f71dcb29d49a6e17e02424345eb51b051bebb345/types_awscrt-0.34.1.tar.gz", hash = "sha256:559aa04250f6a419a617dfb788f3e10903aaf74700ef23e521b64a411b83b803", size = 19062, upload-time = "2026-06-05T04:40:10.689Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/55/83325b10b3482e1b9525447546e0bb5cd2e1c7235d34cb87d04e2c9d454b/types_awscrt-0.37.0.tar.gz", hash = "sha256:41e251d39ad86e8c015cf40f0738d19377a413293717ca2202e63092a39535eb", size = 18671, upload-time = "2026-10-13T02:02:54.358Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/b1/214b12162b452ed6acd230065e6c587cde6b96871e3ce6d653f40888f8df/types_awscrt-0.34.1-py3-none-any.whl", hash = "sha256:20c752b6031544d8f694803c35174aee129f1be5ddf886ae46d22f7ffd9b7d75", size = 45688, upload-time = "2026-06-05T04:40:09.198Z" },
+    { url = "https://files.pythonhosted.org/packages/db/7c/181acf6ec51c9a89552e29d21d6472254c92a7eb53bf6d7649b7ac4cb8b2/types_awscrt-0.37.0-py3-none-any.whl", hash = "sha256:48305c4809732617cc9cfdd6f457fec448b3525bcd191212dbbb8b4f120be94b", size = 24887, upload-time = "2026-10-13T02:02:53.101Z" },
 ]
 
 [[package]]
