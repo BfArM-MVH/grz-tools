@@ -90,11 +90,13 @@ def _restate(files_dir: Path, metadata: dict, path: str) -> None:
 
 
 def cut_mid_record(path: str) -> FileChange:
-    """Cut a gzipped FASTQ in the middle of a record, as a broken copy would."""
+    """Cut a gzipped FASTQ after about half its reads and two lines into the next record, as a broken copy would."""
 
     def change(files_dir: Path, metadata: dict) -> None:
         lines = gzip.decompress((files_dir / path).read_bytes()).splitlines(keepends=True)
-        (files_dir / path).write_bytes(gzip.compress(b"".join(lines[: len(lines) // 2 + 2])))
+        kept = lines[: len(lines) // 8 * 4 + 2]
+        assert len(kept) % 4, f"the cut of {path} ends on a record boundary"
+        (files_dir / path).write_bytes(gzip.compress(b"".join(kept)))
         _restate(files_dir, metadata, path)
 
     change.__name__ = f"cut_mid_record({path})"
