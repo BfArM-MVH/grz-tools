@@ -14,6 +14,7 @@ from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
 from ..progress import EncryptionState, FileProgressLogger, ValidationState
 from ..transfer import s3_errors
+from ..utils.paths import ensure_directory_mode
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission
 from .upload import S3BotoUploadWorker
@@ -26,13 +27,15 @@ class Worker:
 
     __log = log.getChild("Worker")
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         metadata_dir: str | PathLike,
         files_dir: str | PathLike,
         log_dir: str | PathLike,
         encrypted_files_dir: str | PathLike,
         threads: int = 1,
+        *,
+        directory_mode: int | None = None,
     ):
         """
         Initialize the worker object.
@@ -42,9 +45,15 @@ class Worker:
         :param log_dir: Path to the log directory
         :param encrypted_files_dir: Path to the encrypted files directory
         :param threads: Number of threads to use
+        :param directory_mode: Permission bits, such as ``0o770``, for the directories that the worker creates
+            or writes into. The worker sets them with ``chmod``, so the umask does not change them.
+            It leaves the parents of the four directories above unchanged.
+            With ``None``, the umask filters the mode of each new directory, and existing directories keep their mode.
         """
         self._threads = threads
         self.__log.debug("Threads: %s", self._threads)
+
+        self._directory_mode = directory_mode
 
         # metadata dir
         self.metadata_dir = Path(metadata_dir)
@@ -64,9 +73,7 @@ class Worker:
         self.__log.info("Log directory: %s", self.log_dir)
 
         # create log dir if non-existent
-        if not self.log_dir.is_dir():
-            self.__log.debug("Creating log directory...")
-            self.log_dir.mkdir(mode=0o770, parents=False, exist_ok=False)
+        ensure_directory_mode(self.log_dir.parent, self.log_dir, self._directory_mode)
 
         self.progress_file_checksum_validation = self.log_dir / "progress_checksum_validation.cjson"
         self.progress_file_sequencing_data_validation = self.log_dir / "progress_sequencing_data_validation.cjson"
@@ -203,6 +210,7 @@ class Worker:
                 recipient_public_key=recipient_public_key,
                 submitter_private_key=submitter_private_key,
                 force=force,
+                directory_mode=self._directory_mode,
             )
         except grzexc.GrzError:
             raise
@@ -229,6 +237,7 @@ class Worker:
             files_dir=self.files_dir,
             progress_log_file=self.progress_file_decrypt,
             recipient_private_key=recipient_private_key,
+            directory_mode=self._directory_mode,
         )
 
         return submission
@@ -301,7 +310,10 @@ class Worker:
             self.progress_file_download.unlink(missing_ok=True)
 
         download_worker = S3BotoDownloadWorker(
-            s3_options, status_file_path=self.progress_file_download, threads=self._threads
+            s3_options,
+            status_file_path=self.progress_file_download,
+            threads=self._threads,
+            directory_mode=self._directory_mode,
         )
 
         self.__log.info("Preparing output directories...")

@@ -100,6 +100,7 @@ def validate(  # noqa: PLR0913, PLR0917
         log_dir=submission_dir / "logs",
         encrypted_files_dir=submission_dir / "encrypted_files",
         threads=threads,
+        directory_mode=configuration.local_storage_mode,
     )
     submission = worker_inst.parse_submission()
     submission_id = submission.metadata.content.submission_id
