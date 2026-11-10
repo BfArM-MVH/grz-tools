@@ -286,7 +286,7 @@ ERROR_GRZ_CLI_VERSION = "VERSION READ FAILED"
 
 def get_grzcli_version(s3_client: S3Client, bucket: str, submission_id: str) -> str:
     """Read and return the version number of grz-cli used to upload a given submission from the version file.
-    Will not run on a cleaned submission (no version file present)
+
 
     :param s3_client: boto3 S3 client pointed at the inbox bucket.
     :param bucket: Name of the inbox bucket.
