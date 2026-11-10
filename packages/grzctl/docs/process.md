@@ -240,7 +240,8 @@ If the database already records `REPORTED`, step 9 does not submit the Prüfberi
 If it records `QCED`, step 10 does not run the detailed QC workflow again.
 
 Once a cleaning has started, the inbox holds a `cleaning` or `cleaned` marker.
-A rerun of `process` then fails with `submission_cleaned`.
+A rerun of `process` then fails with a `SubmissionCleanedError` while it downloads the `metadata.json`, before it records anything.
+So the submission keeps its states, such as `CLEANED`.
 `grzctl clean` finishes the cleaning instead, also one that stopped after its deletes.
 
 ## CLI options
