@@ -16,7 +16,6 @@ import click
 import requests
 import sqlalchemy as sa
 from grz_common.transfer import UploadTiming
-from grz_db.models.author import Author
 from grz_db.models.submission import (
     ChangeRequestEnum,
     ChangeRequestLog,
@@ -36,13 +35,9 @@ from sqlmodel import Session, select
 from .. import __version__
 from ..commands import grzctl_configuration
 from ..models.config import GrzctlConfig
+from .db.cli import get_submission_db_instance
 
 log = logging.getLogger(__name__)
-
-
-def get_submission_db_instance(db_url: str, author: Author | None = None) -> SubmissionDb:
-    """Creates and returns an instance of SubmissionDb."""
-    return SubmissionDb(db_url=db_url, author=author)
 
 
 @click.group()

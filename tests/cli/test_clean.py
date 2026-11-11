@@ -127,9 +127,19 @@ def _fail_s3_operation(monkeypatch, operation: str, code: str):
 
 def test_clean_reports_rejected_credentials_as_a_configuration_error(s3_config_model, remote_bucket, monkeypatch):
     """Rejected credentials during clean's S3 calls must classify as a configuration error, not a raw ClientError."""
+    submission_id = "123_2025-01-01_00000000"
+    remote_bucket.put_object(Key=f"{submission_id}/metadata/metadata.json", Body=b"{}")
     _fail_s3_operation(monkeypatch, "PutObject", "InvalidAccessKeyId")
 
-    with pytest.raises(grzexc.ConfigurationError):
+    with pytest.raises(grzexc.ConfigurationError, match="InvalidAccessKeyId"):
+        _clean_submission_from_bucket(s3_config_model.s3.bucket, s3_config_model.s3, submission_id, "'testing'")
+
+
+def test_clean_refuses_an_inbox_that_holds_nothing_of_the_submission(s3_config_model, remote_bucket):
+    """A mistyped submission ID or a wrong ``--inbox`` must not count as a clean, nor leave markers behind."""
+    with pytest.raises(grzexc.ConfigurationError, match="holds nothing"):
         _clean_submission_from_bucket(
             s3_config_model.s3.bucket, s3_config_model.s3, "123_2025-01-01_00000000", "'testing'"
         )
+
+    assert not list(remote_bucket.objects.all())

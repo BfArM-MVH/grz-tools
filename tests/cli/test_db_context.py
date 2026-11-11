@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import logging
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -30,7 +31,7 @@ def full_config_path(
     migrated_db_config_content,
     pruefbericht_config_content,
 ):
-    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _grzctl_archives
+    from tests.conftest import _GRZ_PRIVATE_KEY_PATH, _GRZCTL_DETAILED_QC_DUMMY, _grzctl_archives
 
     archives = _grzctl_archives(endpoint_url="http://localhost:9000")
     # Use distinct public keys per archive so tests can assert that the consent
@@ -51,6 +52,7 @@ def full_config_path(
         },
         "archives": archives,
         "identifiers": {"grz": "GRZK00007"},
+        "detailed_qc": _GRZCTL_DETAILED_QC_DUMMY,
     }
     config_data.update(migrated_db_config_content)
     config_data.update(pruefbericht_config_content)
@@ -305,6 +307,7 @@ def test_db_wrappers(
     full_config_path,
     test_metadata,
     tmp_path,
+    caplog,
 ):
     runner = click.testing.CliRunner()
     cli = build_cli()
@@ -370,7 +373,8 @@ def test_db_wrappers(
         ):
             mock_init_s3.return_value = MagicMock()
             mock_get_ts.return_value.date.return_value = datetime.date.today()
-            result = runner.invoke(cli, args)
+            with caplog.at_level(logging.WARNING, logger="grzctl.dbcontext"):
+                result = runner.invoke(cli, args)
 
         assert result.exit_code == 0, f"Command failed: {result.output}"
 
@@ -401,6 +405,8 @@ def test_db_wrappers(
         assert history[-2] == command_spec["intermediate_state"]
         if command_spec["initial_state"]:
             assert history[-3] == command_spec["initial_state"]
+            # the step follows the state that the step-by-step flow expects before it
+            assert [record for record in caplog.records if record.name == "grzctl.dbcontext"] == []
         # a download stores the timing it got; a failed lookup and the other commands store none
         span = (timing.upload_finished_at - timing.upload_started_at, timing.upload_resumed) if timing else (None, None)
         assert get_upload_span(db_engine, submission_id) == span
@@ -526,6 +532,7 @@ def test_db_wrappers_wrong_initial_state(
     full_config_path,
     test_metadata,
     tmp_path,
+    caplog,
 ):
     """
     Test that commands still run (with a warning) when the submission is in an unexpected state.
@@ -572,12 +579,14 @@ def test_db_wrappers_wrong_initial_state(
             mock_submission_obj.metadata.content.submission.submission_date = datetime.date(2024, 7, 15)
             mock_submission_obj.metadata.content.consents_to_research.return_value = command_spec["consent_value"]
 
-        result = runner.invoke(cli, args)
+        with caplog.at_level(logging.WARNING, logger="grzctl.dbcontext"):
+            result = runner.invoke(cli, args)
 
         # The command should still succeed — wrong state is only a warning, not a hard failure
         assert result.exit_code == 0, (
             f"Command '{command_spec['cmd'][0]}' unexpectedly failed with wrong initial state. Output: {result.output}"
         )
+        assert "currently in state" in caplog.text
 
         history = get_state_history(db_engine, submission_id)
         assert history[-1] == command_spec["expected_state"], f"Unexpected final state: {history}"
