@@ -245,7 +245,7 @@ Finding the target archive takes the parsed metadata, so this rerun still fails 
 Write-only archive credentials cannot read the `metadata.json`.
 The run then counts the submission as archived if the database records `ARCHIVED` for it.
 If the database already records `REPORTED`, step 9 does not submit the Prüfbericht again, but still generates and saves it.
-If an earlier run stopped in `Reporting`, it may have sent the Prüfbericht: it was killed while it sent it, or could not record `Reported`.
+If an earlier run stopped in `Reporting`, it may have sent the Prüfbericht: it was killed or interrupted before it recorded `Reported`, or could not record it.
 Step 9 then does not submit it either, and records `transfer_error`, see [BfArM errors](error-handling.md#bfarm-errors).
 If it records `QCED`, step 10 does not run the detailed QC workflow again.
 

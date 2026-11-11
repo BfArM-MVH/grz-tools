@@ -43,7 +43,6 @@ failure streams each file only into the outputs that are not recorded or whose
 copy is gone, making the pipeline effectively idempotent.
 """
 
-import itertools
 import json
 import logging
 import time
@@ -57,7 +56,13 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
-from grz_db.models.submission import CASE_LINK_KEY, Submission, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import (
+    CASE_LINK_KEY,
+    FailureReasonEnum,
+    Submission,
+    SubmissionDb,
+    SubmissionStateEnum,
+)
 from grz_pydantic_models.pruefbericht.v0 import Pruefbericht
 from grz_pydantic_models.submission.metadata import REDACTED_TAN
 
@@ -337,13 +342,21 @@ def _stopped_while_reporting(submission: Submission | None) -> bool:
     """Whether the latest ``REPORTING`` of ``submission`` has no outcome, ``REPORTED`` or ``ERROR``, right after it.
 
     The run that recorded it was killed while it sent the Prüfbericht, or could not record ``REPORTED``.
+    An ``ERROR`` recorded as ``interrupted`` is no outcome either: Ctrl-C or SIGTERM can land after BfArM
+    answered and before ``REPORTED`` is written, so that run may have sent it as well.
     """
     if submission is None:
         return False
-    states = [entry.state for entry in sorted(submission.states, key=attrgetter("timestamp", "id"))]
-    # the state right after each REPORTING, None if nothing follows it
-    outcomes = [after for state, after in itertools.pairwise([*states, None]) if state == SubmissionStateEnum.REPORTING]
-    return bool(outcomes) and outcomes[-1] not in {SubmissionStateEnum.REPORTED, SubmissionStateEnum.ERROR}
+    entries = sorted(submission.states, key=attrgetter("timestamp", "id"))
+    latest = max((i for i, entry in enumerate(entries) if entry.state == SubmissionStateEnum.REPORTING), default=None)
+    if latest is None:
+        return False
+    if latest + 1 == len(entries):
+        return True
+    outcome = entries[latest + 1]
+    if outcome.state == SubmissionStateEnum.ERROR:
+        return outcome.failure_reason == FailureReasonEnum.INTERRUPTED
+    return outcome.state != SubmissionStateEnum.REPORTED
 
 
 def _save_pruefbericht(

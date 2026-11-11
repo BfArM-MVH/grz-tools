@@ -2217,6 +2217,46 @@ class TestProcessUnrecordedEndState:
         assert _states(process_config_content, sid)[-2:] == [SubmissionStateEnum.CLEANING, SubmissionStateEnum.CLEANED]
         assert waits == []
 
+    def test_a_rerun_does_not_send_a_pruefbericht_whose_run_was_interrupted_after_sending(
+        self,
+        s3_buckets,
+        bfarm_api,
+        waits,
+        monkeypatch,
+        temp_process_config_file_path,
+        process_config_content,
+        working_dir_path,
+    ):
+        """Ctrl-C lands after BfArM accepted the Prüfbericht and before ``REPORTED`` is recorded.
+
+        The run records ``interrupted``, which the rerun must not take for "never sent".
+        """
+        sid = self.SUBMISSION_ID
+        upload_submission_to_inbox(s3_buckets["inbox"], sid)
+        bfarm_api.post(BFARM_UPLOAD_URL, json={}, status=200)
+        submit = grzctl.commands.process._submit_pruefbericht_with_retries
+
+        def submit_then_interrupt(*args, **kwargs):
+            submit(*args, **kwargs)
+            raise KeyboardInterrupt
+
+        with monkeypatch.context() as patch:
+            patch.setattr(grzctl.commands.process, "_submit_pruefbericht_with_retries", submit_then_interrupt)
+            result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, "the run should be interrupted"
+        assert len(_submitted_tans(bfarm_api)) == 1
+        assert _latest_state(process_config_content, sid).failure_reason == FailureReasonEnum.INTERRUPTED
+
+        result = _run_process(temp_process_config_file_path, sid, working_dir_path, submit_pruefbericht=True)
+
+        assert result.exit_code != 0, f"Rerun should have failed but succeeded: {result.output}"
+        assert len(_submitted_tans(bfarm_api)) == 1, "the rerun must not send the Prüfbericht again"
+        state = _latest_state(process_config_content, sid)
+        assert state.failure_reason == FailureReasonEnum.TRANSFER_ERROR
+        assert ASK_BFARM in (state.data or {}).get("error", "")
+        assert waits == []
+
 
 def _config_with_distinct_archive_keys(tmp_path: Path, process_config_content: dict) -> Path:
     """Write a process config whose two archives have different keys, so their contents tell them apart."""

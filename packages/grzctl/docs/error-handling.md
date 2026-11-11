@@ -120,7 +120,7 @@ A `401` for the Prüfbericht first makes grzctl request a new token and send the
 `grzctl process` retries a `NetworkError` only, since BfArM has not received the Prüfbericht then.
 The other failures can come after BfArM got it, so their message says to ask BfArM before submitting it again.
 So can Ctrl-C or SIGTERM while the Prüfbericht is sent, which therefore raises a `TransferError` with the same message instead of recording `interrupted`.
-A run of `grzctl process` that stopped in `Reporting` may have sent it too: the run was killed while it sent the Prüfbericht, or could not record `Reported`.
+A run of `grzctl process` that stopped in `Reporting` may have sent it too: the run was killed or interrupted before it recorded `Reported`, or could not record it.
 So the next run does not send it, and records `transfer_error` with the same message.
 If BfArM did get it, `grzctl db submission update <submission_id> reported --ignore-error-state` records that.
 A rerun of `grzctl process` then cleans the inbox without sending the Prüfbericht again.
