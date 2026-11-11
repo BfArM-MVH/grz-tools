@@ -45,13 +45,10 @@ Key the inner map by the file-name prefix from the table above (`mii-cs-consent-
 Then run the consent tests.
 Anything the model does not yet cover fails by the file or the package version it concerns:
 
-- an OID added to the version and modules CodeSystem that `BROAD_CONSENT_DOCUMENT_OIDS` does not
-  classify
+- an OID added to the version and modules CodeSystem that `BROAD_CONSENT_DOCUMENT_OIDS` does not classify
 - either policy code research consent is derived from going missing, deprecated or inactive
-- a profile that pins a different category CodeSystem, relaxes or tightens a period bound, changes
-  the minimum number of categories, or stops forbidding what the model rejects
-- any disagreement between `packages.json` and `RESEARCH_CONSENT_PACKAGES`: a package one
-  names and the other does not, or a package the two map to different profiles
+- a profile that pins a different category CodeSystem, relaxes or tightens a period bound, changes the minimum number of categories, or stops forbidding what the model rejects
+- any disagreement between `packages.json` and `RESEARCH_CONSENT_PACKAGES`: a package one names and the other does not, or a package the two map to different profiles
 
 A failure is a prompt to update the model, not a reason to edit these files.
 

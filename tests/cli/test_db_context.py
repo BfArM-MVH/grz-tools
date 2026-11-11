@@ -9,6 +9,7 @@ import grz_common.exceptions as grzexc
 import pytest
 import sqlalchemy
 import yaml
+from grz_common.transfer import UploadTiming
 from grz_common.utils.crypt import Crypt4GH
 from grz_db.errors import SubmissionNotFoundError
 from grz_db.models.submission import FailureReasonEnum, Submission, SubmissionStateEnum
@@ -123,6 +124,14 @@ def get_state_history(engine, submission_id) -> list[SubmissionStateEnum]:
         return [log.state for log in sorted(submission.states, key=lambda x: x.id)]
 
 
+def get_upload_span(engine, submission_id) -> tuple[datetime.timedelta | None, bool | None]:
+    """The stored upload duration and resumed flag; ``(None, None)`` when nothing was recorded."""
+    with Session(engine) as session:
+        submission = session.get(Submission, submission_id)
+        started, finished = submission.upload_started_at, submission.upload_finished_at
+        return (finished - started if started and finished else None), submission.upload_resumed
+
+
 @contextlib.contextmanager
 def mock_command(command_spec, submission_id):
     """
@@ -157,7 +166,14 @@ def mock_command(command_spec, submission_id):
         if "extra_patch" in command_spec:
             # Some commands invoke a standalone callable (e.g. validate.callback,
             # _clean_submission_from_bucket) instead of a Worker method.
-            mock_extra = stack.enter_context(patch(command_spec["extra_patch"]))
+            # If the standalone callable has no expected return:
+            if "extra_return_value" in command_spec:
+                mock_extra = stack.enter_context(
+                    patch(command_spec["extra_patch"], return_value=command_spec["extra_return_value"])
+                )
+            # If it does:
+            else:
+                mock_extra = stack.enter_context(patch(command_spec["extra_patch"]))
 
         yield mock_worker, mock_extra
 
@@ -196,6 +212,8 @@ def build_args(
         {
             "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.download.Worker",
+            "extra_patch": "grzctl.commands.download.get_grzcli_version",
+            "extra_return_value": "3.0.0",
             "id_source": "arg",
             "initial_state": None,
             "intermediate_state": SubmissionStateEnum.DOWNLOADING,
@@ -205,11 +223,18 @@ def build_args(
         {
             "cmd": ["download", "--submission-id", "SUBMISSION_ID", "--output-dir", "OUTPUT_DIR", "--inbox", "inbox"],
             "worker_patch": "grzctl.commands.download.Worker",
+            "extra_patch": "grzctl.commands.download.get_grzcli_version",
+            "extra_return_value": "3.0.0",
             "id_source": "arg",
             "initial_state": SubmissionStateEnum.UPLOADED,
             "intermediate_state": SubmissionStateEnum.DOWNLOADING,
             "expected_state": SubmissionStateEnum.DOWNLOADED,
             "skip_populate": True,
+            "upload_timing": UploadTiming(
+                datetime.datetime(2025, 9, 15, 8, 0, tzinfo=datetime.UTC),
+                datetime.datetime(2025, 9, 15, 8, 30, tzinfo=datetime.UTC),
+                False,
+            ),
         },
         {
             "cmd": ["decrypt", "--submission-dir", "SUBMISSION_DIR", "--inbox", "inbox"],
@@ -336,9 +361,12 @@ def test_db_wrappers(
                 "consents_to_research",
                 MagicMock(return_value=command_spec["consent_value"]),
             )
+        # Download records the upload timing; it is auxiliary, so an error in getting it must not fail the download.
+        timing = command_spec.get("upload_timing")
         with (
             patch("grzctl.commands.download.init_s3_client") as mock_init_s3,
             patch("grzctl.commands.download.get_metadata_upload_timestamp") as mock_get_ts,
+            patch("grzctl.commands.download.get_upload_timing", side_effect=[timing or RuntimeError("listing failed")]),
         ):
             mock_init_s3.return_value = MagicMock()
             mock_get_ts.return_value.date.return_value = datetime.date.today()
@@ -373,6 +401,9 @@ def test_db_wrappers(
         assert history[-2] == command_spec["intermediate_state"]
         if command_spec["initial_state"]:
             assert history[-3] == command_spec["initial_state"]
+        # a download stores the timing it got; a failed lookup and the other commands store none
+        span = (timing.upload_finished_at - timing.upload_started_at, timing.upload_resumed) if timing else (None, None)
+        assert get_upload_span(db_engine, submission_id) == span
 
 
 @pytest.mark.parametrize(

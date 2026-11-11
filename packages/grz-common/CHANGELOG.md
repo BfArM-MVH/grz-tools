@@ -1,5 +1,42 @@
 # Changelog
 
+## [4.1.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.3...grz-common-v4.1.0) (2026-11-10)
+
+
+### Features
+
+* **grz-common:** derive the upload timing of a submission from its ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** add `Submission.is_qc_passed_initial` ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** record when a submission's upload started and finished ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-pydantic-models:** add `month_date_bounds` ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grzctl:** add `report monitoring` for the GDC monitoring dashboard ([#741](https://github.com/BfArM-MVH/grz-tools/issues/741)) ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+
+
+### Bug Fixes
+
+* **grz-common:** drop SQLite's DDL banner too, so cron runs stay silent ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** require grz-pydantic-models 4.2.0 ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grzctl:** show only the last run of a resumed upload in grzctl list ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+
+
+### Documentation
+
+* **grz-cli,grzctl:** add example config files ([#750](https://github.com/BfArM-MVH/grz-tools/issues/750)) ([3baa49a](https://github.com/BfArM-MVH/grz-tools/commit/3baa49a4d2a06defba315e7ccaa15fcda758fe30)), closes [#749](https://github.com/BfArM-MVH/grz-tools/issues/749)
+
+## [4.0.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.2...grz-common-v4.0.3) (2026-10-29)
+
+
+### Bug Fixes
+
+* **grz-common:** remove range header ([#739](https://github.com/BfArM-MVH/grz-tools/issues/739)) ([e71ac19](https://github.com/BfArM-MVH/grz-tools/commit/e71ac198644b9a1e7d8778e03215deeeb9673c30))
+
+## [4.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.1...grz-common-v4.0.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **grz-common:** require certifi &gt;=2026.10.19 and urllib3 &gt;=2.8.0 ([#734](https://github.com/BfArM-MVH/grz-tools/issues/734)) ([337183e](https://github.com/BfArM-MVH/grz-tools/commit/337183eb1337bfc5fe409210d3fcfde9ccdc46b2))
+
 ## [4.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-common-v4.0.0...grz-common-v4.0.1) (2026-10-02)
 
 

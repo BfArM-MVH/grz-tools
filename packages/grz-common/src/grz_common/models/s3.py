@@ -36,13 +36,17 @@ class S3ConnectionBase(IgnoringBaseModel):
     access_key: str | None = None
     """
     The access key for the S3 bucket.
-    If undefined, it is read from the AWS_ACCESS_KEY_ID environment variable.
+    If neither this field nor ``secret`` is set, boto3 looks for credentials itself,
+    for example in ``AWS_ACCESS_KEY_ID`` and ``AWS_SECRET_ACCESS_KEY``.
+    Setting only one of the two fails.
     """
 
     secret: SecretStr | None = None
     """
     The secret key for the S3 bucket.
-    If undefined, it is read from the AWS_SECRET_ACCESS_KEY environment variable.
+    If neither this field nor ``access_key`` is set, boto3 looks for credentials itself,
+    for example in ``AWS_ACCESS_KEY_ID`` and ``AWS_SECRET_ACCESS_KEY``.
+    Setting only one of the two fails.
     """
 
     session_token: SecretStr | None = None
