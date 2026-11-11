@@ -24,10 +24,18 @@ import rich.table
 import rich.text
 import textual.logging
 from grz_common.cli import output_json
-from grz_common.exceptions import MissingSubmissionFileError, SubmissionCleanedError
+from grz_common.exceptions import (
+    ConfigurationError,
+    DownloadError,
+    MissingObjectError,
+    MissingSubmissionFileError,
+    SubmissionCleanedError,
+)
 from grz_common.logging import LOGGING_DATEFMT, LOGGING_FORMAT
 from grz_common.models.base import get_secret_value
-from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client, s3_errors
+from grz_common.utils.checksums import calculate_sha256
+from grz_common.utils.crypt import Crypt4GH
 from grz_common.workers.download import query_submissions
 from grz_db.errors import (
     CaseHasLinkedSubmissionsError,
@@ -72,6 +80,7 @@ from grz_pydantic_models.submission.metadata import (
     SequenceData,
     SequenceSubtype,
     SequenceType,
+    SubmissionType,
 )
 from grz_pydantic_models.submission.thresholds import PCT_DEV_CUTOFF, Thresholds
 from pydantic import Field, ValidationError
@@ -85,6 +94,7 @@ from .. import limit
 from ..change_request import resolve_and_validate_change_request
 from ..inbox_resolution import require_inbox, scan_inbox
 from . import SignatureStatus, _verify_signature
+from .export import ArchivedMetadataError, ExportEntry, SkippedSubmission, build_export_entry, write_metadata_zip
 from .sync import sync_submissions
 from .tui import DatabaseBrowser
 
@@ -763,6 +773,142 @@ def should_qc(ctx: click.Context, submission_id: str, target_percentage: float, 
     except SubmissionError as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from e
+
+
+def _fetch_archived_metadata(submission_id: str, archive_targets: list[tuple[str, str, Any]]) -> tuple[str, str]:
+    """Read a submission's metadata.json from the one archive that holds it, as backfill does.
+
+    :returns: The name of that archive, and the raw document.
+    :raises MissingObjectError: If neither archive holds the metadata.json.
+    :raises ArchivedMetadataError: If both archives hold it.
+    :raises ConfigurationError: If only a faulty setup causes the error of the S3 client, see :func:`s3_errors`.
+    :raises DownloadError: If an archive cannot be read. An unread archive might hold a second copy.
+    """
+    found: dict[str, str] = {}
+    for label, bucket, client in archive_targets:
+        with s3_errors(f"Reading metadata.json from the {label} archive", DownloadError):
+            raw_json = _fetch_metadata_json(client, bucket, submission_id)
+        if raw_json is not None:
+            found[label] = raw_json
+    if not found:
+        raise MissingObjectError("metadata.json found in neither archive")
+    if len(found) > 1:
+        raise ArchivedMetadataError("metadata.json found in both consented and non_consented archives")
+    [(archive, raw_json)] = found.items()
+    return archive, raw_json
+
+
+@db.command("export-metadata")
+@click.option(
+    "--output",
+    "output",
+    type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    required=True,
+    help="Path of the encrypted file to create, such as grz-metadata.zip.c4gh. It must not exist yet.",
+)
+@click.option(
+    "--public-key",
+    "public_key_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Crypt4GH public key of the recipient. Only the holder of the matching private key can decrypt the export.",
+)
+@click.option(
+    "--include-test-submissions",
+    "include_test_submissions",
+    is_flag=True,
+    default=False,
+    help="Also export submissions of type 'test'. Without this flag, they are listed as skipped.",
+)
+@click.pass_context
+def export_metadata(ctx: click.Context, output: Path, public_key_path: Path, include_test_submissions: bool):  # noqa: C901
+    """Export every archived metadata.json, with tanG and localCaseId restored, as an encrypted zip file.
+
+    Reads each submission's metadata.json from the consented or non-consented archive, as backfill
+    does, so each document is what the submitter sent. Archiving redacted tanG and localCaseId;
+    this command puts back the values the database holds. It writes one metadata.json per
+    submission into a zip, and adds a manifest.json that lists each file with its archive and
+    SHA-256 checksum, the fields that could not be restored, and the submissions left out with the reason.
+
+    The zip is encrypted with Crypt4GH for the recipient's public key before it is written,
+    so its content never reaches the disk unencrypted.
+    """
+    # checked here as well, so that a taken name stops the command before it reads every archive
+    if output.exists():
+        _abort(FileExistsError(f"Refusing to overwrite existing export '{output}'."))
+    try:
+        recipient_public_key = Crypt4GH.retrieve_public_key(public_key_path)
+    except ConfigurationError as e:
+        _abort(e)
+
+    configuration = ctx.obj["configuration"]
+    archive_targets = [
+        ("consented", configuration.archives.consented.s3.bucket, init_s3_client(configuration.archives.consented.s3)),
+        (
+            "non_consented",
+            configuration.archives.non_consented.s3.bucket,
+            init_s3_client(configuration.archives.non_consented.s3),
+        ),
+    ]
+    db_service = get_submission_db_instance(ctx.obj["db_url"])
+    # sorted, so that the same database gives the same export
+    submissions = sorted(db_service.list_submissions(limit=None), key=lambda submission: submission.id)
+
+    entries: list[ExportEntry] = []
+    skipped: list[SkippedSubmission] = []
+    for submission in tqdm(submissions, desc="Reading archives", disable=None):
+        # test submissions are left out before their archives are read
+        if submission.submission_type == SubmissionType.test and not include_test_submissions:
+            skipped.append(SkippedSubmission(submission.id, "test submission"))
+            continue
+        try:
+            archive, raw_json = _fetch_archived_metadata(submission.id, archive_targets)
+            entries.append(build_export_entry(submission, archive, raw_json))
+        except ConfigurationError as e:
+            # a faulty setup, such as a missing bucket, fails every submission alike
+            _abort(e)
+        except (DownloadError, ArchivedMetadataError) as e:
+            # DownloadError includes MissingObjectError, for a metadata.json in neither archive
+            skipped.append(SkippedSubmission(submission.id, str(e)))
+
+    try:
+        write_metadata_zip(
+            entries,
+            skipped,
+            output,
+            include_test_submissions=include_test_submissions,
+            recipient_public_key=recipient_public_key,
+        )
+    except FileExistsError as e:
+        _abort(e)
+
+    # not wrapped, so that a redirected log keeps one line per warning; no markup, as S3 errors can hold [brackets]
+    for skip in skipped:
+        console_err.print(
+            f"Skipped {skip.submission_id}: {skip.reason}.",
+            style="yellow",
+            markup=False,
+            highlight=False,
+            soft_wrap=True,
+        )
+    for entry in entries:
+        if entry.unrestored:
+            console_err.print(
+                f"Exported {entry.submission_id} with {', '.join(sorted(entry.unrestored))} "
+                "still redacted: the database holds no value for it.",
+                style="yellow",
+                markup=False,
+                highlight=False,
+                soft_wrap=True,
+            )
+
+    incomplete = sum(1 for entry in entries if entry.unrestored)
+    output_sha256 = calculate_sha256(output, progress=False)
+    console.print(
+        f"Exported {len(entries)} metadata.json file(s) to '{output}' "
+        f"({incomplete} with redacted fields left), skipped {len(skipped)} submission(s)."
+    )
+    console.print(f"SHA-256 of '{output.name}': {output_sha256}")
 
 
 def _build_submission_dict_from(
