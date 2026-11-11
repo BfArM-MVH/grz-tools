@@ -73,3 +73,34 @@ def test_encrypted_submission():
         assert enc_path == Path(input_path + ".c4gh")
         enc_path = EncryptedSubmission.get_encryption_header_path(input_path)
         assert enc_path == Path(input_path + ".c4gh_header")
+
+
+@pytest.mark.parametrize(
+    ("metadata_path", "expected_error_string"),
+    [
+        ("tests/mock_files/submissions/valid_submission/metadata/metadata.json", None),
+        ("tests/mock_files/no_localCaseId_metadata.json", None),
+        ("tests/mock_files/invalid_localCaseId_in_other_field_metadata.json", "submission.localCaseId"),
+        ("tests/mock_files/invalid_localCaseId_in_filePath_metadata.json", "submission.localCaseId"),
+        ("tests/mock_files/invalid_tanG_in_other_field_metadata.json", "submission.tanG"),
+        ("tests/mock_files/invalid_tanG_in_filePath_metadata.json", "submission.tanG"),
+    ],
+    ids=[
+        "valid",
+        "no_local_case_id",
+        "local_case_id_in_other",
+        "local_case_id_in_filePath",
+        "tanG_in_other",
+        "tanG_in_filePath",
+    ],
+)
+def test_sensitive_values_in_metadata(metadata_path, expected_error_string, identifiers_config_model):
+    # Collect errors
+    errors = list(SubmissionMetadata(metadata_path).validate(identifiers_config_model.identifiers))
+
+    # Parse errors
+    if expected_error_string is None:
+        assert errors == [], errors
+    else:
+        assert errors, errors
+        assert all(f"contains the value of {expected_error_string}," in e for e in errors), errors

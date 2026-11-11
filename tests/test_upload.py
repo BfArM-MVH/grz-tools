@@ -78,40 +78,40 @@ def test__gather_files_to_upload(encrypted_submission):
             f"{submission_id}/files/target_regions.bed.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz.c4gh",
-            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_1_blood_normal.read1.fastq.gz.c4gh",
+            f"{submission_id}/files/donor_1_blood_normal.read1.fastq.gz.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz.c4gh",
-            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_1_blood_normal.read2.fastq.gz.c4gh",
+            f"{submission_id}/files/donor_1_blood_normal.read2.fastq.gz.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf.c4gh",
-            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_1_blood_normal.vcf.c4gh",
+            f"{submission_id}/files/donor_1_blood_normal.vcf.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz.c4gh",
-            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_1_blood_tumor.read1.fastq.gz.c4gh",
+            f"{submission_id}/files/donor_1_blood_tumor.read1.fastq.gz.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz.c4gh",
-            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_1_blood_tumor.read2.fastq.gz.c4gh",
+            f"{submission_id}/files/donor_1_blood_tumor.read2.fastq.gz.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf.c4gh",
-            f"{submission_id}/files/aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_1_blood_tumor.vcf.c4gh",
+            f"{submission_id}/files/donor_1_blood_tumor.vcf.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz.c4gh",
-            f"{submission_id}/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_2_blood_normal.read1.fastq.gz.c4gh",
+            f"{submission_id}/files/donor_2_blood_normal.read1.fastq.gz.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz.c4gh",
-            f"{submission_id}/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_2_blood_normal.read2.fastq.gz.c4gh",
+            f"{submission_id}/files/donor_2_blood_normal.read2.fastq.gz.c4gh",
         ),
         (
-            "tests/mock_files/submissions/valid_submission/encrypted_files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf.c4gh",
-            f"{submission_id}/files/bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf.c4gh",
+            "tests/mock_files/submissions/valid_submission/encrypted_files/donor_2_blood_normal.vcf.c4gh",
+            f"{submission_id}/files/donor_2_blood_normal.vcf.c4gh",
         ),
         (
             "tests/mock_files/submissions/valid_submission/metadata/metadata.json",
