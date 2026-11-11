@@ -1430,6 +1430,18 @@ class TestProcessRerun:
         assert not list(s3_buckets["interrogation"].objects.all())
         assert _states(process_config_content, sid)[-1] == SubmissionStateEnum.PROCESSED
 
+    @pytest.mark.parametrize(
+        "reject",
+        [
+            lambda monkeypatch, inbox: monkeypatch.setattr(
+                grz_common.workers.submission, "get_accepted_versions", lambda: []
+            ),
+            lambda monkeypatch, inbox: inbox.put_object(
+                Key=VERSION_FILE_KEY, Body=json.dumps(NEWER_METADATA_VERSION_POLICY).encode()
+            ),
+        ],
+        ids=["retired-schema-version", "newer-version-policy"],
+    )
     @pytest.mark.parametrize("processed", [True, False], ids=["processed-recorded", "processed-not-recorded"])
     def test_a_rerun_of_an_archived_submission_does_not_check_its_metadata_again(
         self,
@@ -1440,9 +1452,11 @@ class TestProcessRerun:
         process_config_content,
         working_dir_path,
         processed,
+        reject,
     ):
-        """An upgrade no longer accepts the schema version of the archived submission, and the rerun still succeeds.
+        """The schema version of the archived submission is rejected by now, and the rerun still succeeds.
 
+        An upgrade retired the version, or the inbox got a newer version policy.
         Without a recorded ``PROCESSED``, the rerun finds the submission in the archive.
         """
         sid = self.SUBMISSION_ID
@@ -1452,7 +1466,7 @@ class TestProcessRerun:
             assert result.exit_code == 0, f"Process failed: {result.output}"
         else:
             _archive_and_interrupt(monkeypatch, temp_process_config_file_path, sid, working_dir_path)
-        monkeypatch.setattr(grz_common.workers.submission, "get_accepted_versions", lambda: [])
+        reject(monkeypatch, s3_buckets["inbox"])
         s3_requests.requests.clear()
 
         result = _run_process(temp_process_config_file_path, sid, working_dir_path)

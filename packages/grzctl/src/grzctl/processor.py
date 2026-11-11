@@ -47,6 +47,7 @@ from grz_common.pipeline.context import ReadPairConsistencyValidator, Submission
 from grz_common.progress import FileProgressLogger, ProcessingState
 from grz_common.transfer import head_object, init_s3_client, s3_errors
 from grz_common.utils.redaction import redact_file
+from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
@@ -874,6 +875,8 @@ class SubmissionProcessor:
         :param identifiers: The GRZ and LE identifiers that the metadata must name.
         :raises DuplicateInitialSubmissionError: If the case already has an initial submission that passed basic QC.
         :raises SubmissionValidationError: If the metadata fails a check of ``grzctl validate``.
+        :raises SystemExit: If the metadata schema version falls outside the version policy of the inbox,
+            as ``grzctl download`` exits.
         :raises FilesFailedError: If processing a file fails, in the main pass or in the detailed QC pass.
             Its ``__cause__`` is the decisive file error.
         """
@@ -884,8 +887,11 @@ class SubmissionProcessor:
             self._delete_staged_copies(submission_run, self._get_expected_keys(submission_run))
             return
         try:
-            # An archived submission skips the checks: they can fail by now, after an upgrade or once a
-            # consent has lapsed, but they cannot undo the archival.
+            # An archived submission skips the checks: they can fail by now, after an upgrade, once a
+            # consent has lapsed or under a newer version policy, but they cannot undo the archival.
+            check_metadata_version_and_exit_if_needed(
+                self._source_s3_options, submission_metadata.content.get_schema_version()
+            )
             self._check_metadata(db, submission_metadata, identifiers)
             prefetch = self._predict_qc(db, submission_run.submission_id)
             if prefetch:
@@ -939,10 +945,10 @@ class SubmissionProcessor:
             self._commit_to_archive(submission_run)
 
             log.info(f"Submission {submission_run.submission_id} processed successfully.")
-        except Exception:
-            # Validation failed, or a step after the upload to the interrogation bucket did
-            # (copy to final archive, metadata upload). Either way, clean up the
-            # staged files so they don't linger.
+        except (Exception, SystemExit):
+            # Validation failed (SystemExit comes from the version policy check), or a step after the
+            # upload to the interrogation bucket did (copy to final archive, metadata upload).
+            # Either way, clean up the staged files so they don't linger.
             self._handle_interrogation_failure(submission_run)
             # Decrypted files stay only for a submission that is selected for detailed QC,
             # also when an earlier run selected it and this rerun failed before its decision.
