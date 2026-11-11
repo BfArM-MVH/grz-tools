@@ -38,6 +38,12 @@ Run `uv run tox` while inside a specific package directory to run that package's
 Tests run across all cores by default, through pytest-xdist.
 Pass `-n0` to run them in one process, which a debugger needs and which restores per-test output order.
 
+### End-to-end tests
+
+`uv run tox -e e2e` takes small submissions from the upload with `grz-cli` through `grzctl process`, against S3 in a container.
+It needs docker or podman, and the default `pytest` run skips it.
+[tests/e2e/README.md](tests/e2e/README.md) describes the scenarios and how to add one.
+
 ### Database tests
 
 Database tests should use the fixtures from `grz_db.testing` (`db` is the usual entry point) rather than constructing their own engine.
