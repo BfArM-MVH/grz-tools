@@ -42,7 +42,7 @@ $ grzctl --config $CONFIG_PATH process \
    add submission's DB row, and record its inbox;
    PROCESSED recorded by an earlier run?
    state = PROCESSED; go on with step 9 (see Recovery and reruns)
-   populate submission's DB row;
+   populate submission's DB row, and record its upload timing;
    a case link set by `db case relink` is kept;
    tanG already held by another submission?
    state = ERROR (duplicate_tang); STOP

@@ -636,10 +636,11 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
     followup_id = GrzSubmissionMetadata.model_validate(followup_raw).submission_id
     submission_id = metadata.submission_id
     assert len({rejected_id, followup_id, submission_id}) == 3
-    for name, raw, sid, qc in (
-        ("metadata", metadata_raw, submission_id, "yes"),
-        ("rejected", rejected_raw, rejected_id, "no"),
-        ("followup", followup_raw, followup_id, "yes"),
+    # the follow-up went through ``grzctl process``, which records Processed instead of Archived
+    for name, raw, sid, qc, archived in (
+        ("metadata", metadata_raw, submission_id, "yes", "Archived"),
+        ("rejected", rejected_raw, rejected_id, "no", None),
+        ("followup", followup_raw, followup_id, "yes", "Processed"),
     ):
         metadata_path = tmp_path / f"{name}.json"
         metadata_path.write_text(json.dumps(raw))
@@ -656,7 +657,7 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
                 str(metadata_path),
             ],
             ["db", "submission", "modify", sid, "basic_qc_passed", qc],
-            *([["db", "submission", "update", sid, "Archived"]] if qc == "yes" else []),
+            *([["db", "submission", "update", sid, archived]] if archived else []),
             ["db", "submission", "update", sid, "Reported"],
         ):
             result = runner.invoke(cli, [*common, *args])
@@ -713,7 +714,7 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
         1,
         size,
     )
-    # the case and its follow-up are archived, the rejected one is not
+    # the case and its follow-up are archived (by ``grzctl archive`` and by ``grzctl process``), the rejected one is not
     assert (present["archived"], present["archived_with_size"]) == (2, 2)
     assert present["archived_bytes_consented"] + present["archived_bytes_non_consented"] == 2 * size
     assert present["archived_bytes_consent_unknown"] == 0
