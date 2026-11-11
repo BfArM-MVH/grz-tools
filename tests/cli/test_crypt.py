@@ -100,15 +100,15 @@ def test_decrypt_submission(working_dir_path, temp_grzctl_keys_config_file_path)
 
     # compare if the files are equal
     for file in [
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.vcf",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.vcf",
-        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
-        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
-        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.vcf",
+        "donor_1_blood_normal.read1.fastq.gz",
+        "donor_1_blood_normal.read2.fastq.gz",
+        "donor_1_blood_normal.vcf",
+        "donor_1_blood_tumor.read1.fastq.gz",
+        "donor_1_blood_tumor.read2.fastq.gz",
+        "donor_1_blood_tumor.vcf",
+        "donor_2_blood_normal.read1.fastq.gz",
+        "donor_2_blood_normal.read2.fastq.gz",
+        "donor_2_blood_normal.vcf",
         "target_regions.bed",
     ]:
         expected_checksum = calculate_sha256(SUBMISSION_DIR / "files" / file)
@@ -188,12 +188,12 @@ def test_encrypt_decrypt_submission(
 
     # compare if the files are equal
     for file in [
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_normal.read2.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read1.fastq.gz",
-        "aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000aaaaaaaa00000000_blood_tumor.read2.fastq.gz",
-        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read1.fastq.gz",
-        "bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111bbbbbbbb11111111_blood_normal.read2.fastq.gz",
+        "donor_1_blood_normal.read1.fastq.gz",
+        "donor_1_blood_normal.read2.fastq.gz",
+        "donor_1_blood_tumor.read1.fastq.gz",
+        "donor_1_blood_tumor.read2.fastq.gz",
+        "donor_2_blood_normal.read1.fastq.gz",
+        "donor_2_blood_normal.read2.fastq.gz",
     ]:
         expected_checksum = calculate_sha256(SUBMISSION_DIR / "files" / file)
         observed_checksum = calculate_sha256(working_dir_path / "files" / file)

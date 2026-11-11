@@ -76,21 +76,31 @@ def test_encrypted_submission():
 
 
 @pytest.mark.parametrize(
-    ("metadata_path", "expected_valid"),
+    ("metadata_path", "expected_error_string"),
     [
-        ("tests/mock_files/submissions/valid_submission/metadata/metadata.json", True),
-        ("tests/mock_files/no_localCaseId_metadata.json", True),
-        ("tests/mock_files/invalid_localCaseId_in_other_field_metadata.json", False),
-        ("tests/mock_files/invalid_localCaseId_in_filePath_metadata.json", False),
+        ("tests/mock_files/submissions/valid_submission/metadata/metadata.json", None),
+        ("tests/mock_files/no_localCaseId_metadata.json", None),
+        ("tests/mock_files/invalid_localCaseId_in_other_field_metadata.json", "submission.localCaseId"),
+        ("tests/mock_files/invalid_localCaseId_in_filePath_metadata.json", "submission.localCaseId"),
+        ("tests/mock_files/invalid_tanG_in_other_field_metadata.json", "submission.tanG"),
+        ("tests/mock_files/invalid_tanG_in_filePath_metadata.json", "submission.tanG"),
     ],
-    ids=["valid", "no_local_case_id", "local_case_id_in_other", "local_case_id_in_filePath"],
+    ids=[
+        "valid",
+        "no_local_case_id",
+        "local_case_id_in_other",
+        "local_case_id_in_filePath",
+        "tanG_in_other",
+        "tanG_in_filePath",
+    ],
 )
-def test_local_case_id_in_metadata(metadata_path, expected_valid, identifiers_config_model):
+def test_sensitive_values_in_metadata(metadata_path, expected_error_string, identifiers_config_model):
     # Collect errors
     errors = list(SubmissionMetadata(metadata_path).validate(identifiers_config_model.identifiers))
 
     # Parse errors
-    if expected_valid:
-        assert [e for e in errors if "localCaseId" in e] == [], errors
+    if expected_error_string is None:
+        assert errors == [], errors
     else:
-        assert [e for e in errors if "[PrivacyViolation]" in e], errors
+        assert errors, errors
+        assert all(f"contains the value of {expected_error_string}," in e for e in errors), errors

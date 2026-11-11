@@ -185,7 +185,7 @@ class SubmissionMetadata:
                     if f.file_type == FileType.bam:
                         yield donor, lab_datum, f
 
-    # Iterate over metadata leafs and return all strings (for localCaseId check)
+    # Iterate over metadata leafs and return all strings (for sensitive info check)
     def _iter_metadata_values(self, node, path_to_node: str = "") -> Generator[tuple[str, str]]:
         if isinstance(node, dict):
             for k, v in node.items():
@@ -198,14 +198,13 @@ class SubmissionMetadata:
         else:
             return
 
-    # Check to see if localCaseId appears anywhere it should not
-    def _check_for_misplaced_local_case_id(self, raw_local_case_id: str) -> Generator[str]:
-        # If localCaseID is "", just skip
-        if raw_local_case_id == "":
-            return
+    # Check to see if localCaseId or tanG appear anywhere in metadata they should not
+    def _check_for_misplaced_sensitive_info_in_metadata(
+        self, sensitive_key: str, raw_sensitive_value: str
+    ) -> Generator[str]:
         for location_of_value, value in self._iter_metadata_values(self.content.get_raw_dict()):
-            if location_of_value != "submission.localCaseId" and raw_local_case_id in value:
-                yield f"[PrivacyViolation]: {location_of_value} contains localCaseId, which must not appear outside of submission.localCaseId"
+            if location_of_value != sensitive_key and raw_sensitive_value in value:
+                yield f"[PrivacyViolation]: {location_of_value} contains the value of {sensitive_key}, which must not appear outside of {sensitive_key}"
 
     def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """
@@ -231,8 +230,17 @@ class SubmissionMetadata:
                 f"does not match submitter (LE) identifier in config ({expected_le_id})"
             )
 
-        # Check to see if localCaseId appears in any unexpected fields in the metadata, and fail if so
-        yield from self._check_for_misplaced_local_case_id(self.content.submission.local_case_id)
+        # Check if localCaseId appears in any unexpected fields in metadata, and fail if so
+        # Skip if localCaseId == ""
+        if self.content.submission.local_case_id != "":
+            yield from self._check_for_misplaced_sensitive_info_in_metadata(
+                "submission.localCaseId", self.content.submission.local_case_id
+            )
+
+        # Check if tanG appears in any unexpected fields in metadata, and fail if so
+        yield from self._check_for_misplaced_sensitive_info_in_metadata(
+            "submission.tanG", self.content.submission.tan_g
+        )
 
         # The models keep a consent dateTime as submitted, so a document written before FHIR's
         # timezone requirement was enforced still parses and stays readable. Holding submitters to
