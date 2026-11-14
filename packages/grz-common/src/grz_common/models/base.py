@@ -10,7 +10,7 @@ from pydantic import (
     SecretStr,
     SerializationInfo,
     SerializerFunctionWrapHandler,
-    field_serializer,
+    model_serializer,
 )
 from pydantic.types import PathType
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,11 +56,16 @@ class _RevealableSecrets:
     ``model_dump(mode="json")`` and ``model_dump_json()`` return output that loads back into an equal model.
     """
 
-    @field_serializer("*", mode="wrap", when_used="json")
-    def _serialize_secret(self, value: Any, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
-        if isinstance(value, SecretStr) and (info.context or {}).get("reveal_secrets"):
-            return value.get_secret_value()
-        return handler(value)
+    # a field serializer for "*" would wrap every field, and pydantic then warns about each required URL field
+    @model_serializer(mode="wrap")
+    def _serialize_secrets(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
+        data = handler(self)
+        if info.mode_is_json() and (info.context or {}).get("reveal_secrets"):
+            for name in data:
+                value = getattr(self, name, None)
+                if isinstance(value, SecretStr):
+                    data[name] = value.get_secret_value()
+        return data
 
 
 class IgnoringBaseModel(_RevealableSecrets, BaseModel):

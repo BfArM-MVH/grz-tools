@@ -8,9 +8,9 @@ from click.testing import CliRunner
 
 def test_report_processed(temp_migrated_db_config_file_path):
     env = {
-        "GRZ_DB__AUTHOR__PRIVATE_KEY_PASSPHRASE": "test",
-        "GRZ_IDENTIFIERS__GRZ": "GRZX00000",
-        "GRZ_IDENTIFIERS__LE": "999999999",
+        "grz_db__author__private_key_passphrase": "test",
+        "grz_identifiers__grz": "GRZX00000",
+        "grz_identifiers__le": "999999999",
     }
 
     runner = CliRunner(env=env)
