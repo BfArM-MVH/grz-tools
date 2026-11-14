@@ -1,0 +1,2 @@
+process:
+  beforeScript: 'echo "Slowing down QC process for testing..."; sleep 15'
