@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X
 
 from ..models.identifiers import IdentifiersModel
 from ..models.s3 import S3Options
-from ..progress import EncryptionState, FileProgressLogger, ValidationState
+from ..progress import DownloadState, EncryptionState, FileProgressLogger, ValidationState
 from ..transfer import s3_errors
 from .download import S3BotoDownloadWorker
 from .submission import EncryptedSubmission, Submission
@@ -211,15 +211,52 @@ class Worker:
 
         return encrypted_submission
 
-    def decrypt(self, recipient_private_key: X25519PrivateKey, force: bool = False) -> Submission:
+    def decrypt(
+        self, recipient_private_key: X25519PrivateKey, force: bool = False, check_download_logs: bool = True
+    ) -> Submission:
         """
         Decrypt this submission with a private key using Crypt4Gh.
 
+        A file that the download did not complete would fail to decrypt as if the submitter had sent it broken.
+        So with ``check_download_logs``, the download log has to record each encrypted file as downloaded.
+        The log is keyed on the size and modification time of each file, so a file changed since has no record.
+
         :param recipient_private_key: The private key of the recipient.
         :param force: Force decryption of already decrypted files
+        :param check_download_logs: Check the download log before decrypting.
         :return: Submission instance
+        :raises IncompleteSubmissionError: If ``check_download_logs`` is set and the download log does not record
+            every encrypted file as downloaded.
         """
         encrypted_submission = self.parse_encrypted_submission()
+
+        if check_download_logs:
+            download_progress_logger = FileProgressLogger[DownloadState](self.progress_file_download)
+            undownloaded_files = []
+
+            self.__log.info("Verifying download status of all submission files…")
+            for file_path, file_metadata in encrypted_submission.encrypted_files.items():
+                state = download_progress_logger.get_state(file_path, file_metadata)
+                if (
+                    not state
+                    or not state.get("download_successful", False)
+                    or state.get("submission_id") != encrypted_submission.submission_id
+                ):
+                    undownloaded_files.append(str(file_path))
+
+            if undownloaded_files:
+                failed_files = "\n - ".join(undownloaded_files)
+                error_msg = (
+                    f"Will not decrypt, as the download log '{self.progress_file_download}' does not record "
+                    "the following files as downloaded, or they changed since:\n"
+                    f"{failed_files}\n"
+                    "Please re-run the 'download' command and try again. "
+                    "For files that the 'download' command did not fetch, pass --no-check-download-logs."
+                )
+                self.__log.error(error_msg)
+                raise grzexc.IncompleteSubmissionError(error_msg)
+
+            self.__log.info("All files verified as successfully downloaded.")
 
         if force:
             # delete the log file if it exists

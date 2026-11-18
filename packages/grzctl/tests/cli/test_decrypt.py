@@ -170,6 +170,20 @@ def test_private_key_path_decrypts_without_resolving_an_inbox(
 
 
 @pytest.mark.parametrize("option", ["--archive", "--private-key-path"])
+def test_option_skips_the_download_log_check(offline_config: GrzctlConfig, tmp_path: Path, no_prompt, option: str):
+    """The files of an archive do not come from ``grzctl download``, so no download log records them."""
+    key_path = _generate_key(tmp_path, "consented")
+    config_path = _config_path(offline_config, tmp_path, consented={"private_key_path": str(key_path)})
+    value = "consented" if option == "--archive" else str(key_path)
+    worker = _decrypt_worker()
+
+    result = _decrypt(config_path, tmp_path, worker, option, value, "--no-update-db")
+
+    assert result.exit_code == 0, result.stderr
+    assert worker.decrypt.call_args.kwargs["check_download_logs"] is False
+
+
+@pytest.mark.parametrize("option", ["--archive", "--private-key-path"])
 def test_option_with_inbox_fails_before_the_database_is_touched(
     offline_config: GrzctlConfig, tmp_path: Path, option: str
 ):

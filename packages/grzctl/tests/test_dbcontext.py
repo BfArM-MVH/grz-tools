@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import grz_common.exceptions as grzexc
 import pytest
+from grz_common.interrupt import TerminateInterrupt
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
@@ -56,6 +57,7 @@ class TestMapExceptionToFailureReason:
             (grzexc.PruefberichtGenerationError("failed"), FailureReasonEnum.PRUEFBERICHT_GENERATION_ERROR),
             (grzexc.PruefberichtRejectedError("failed"), FailureReasonEnum.PRUEFBERICHT_REJECTED),
             (KeyboardInterrupt(), FailureReasonEnum.INTERRUPTED),
+            (TerminateInterrupt(), FailureReasonEnum.INTERRUPTED),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
             (grzexc.IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
             (grzexc.SubmissionCleanedError("failed"), FailureReasonEnum.SUBMISSION_CLEANED),
