@@ -199,12 +199,17 @@ class SubmissionMetadata:
             return
 
     # Check to see if localCaseId or tanG appear anywhere in metadata they should not
+    # If you want this to throw an error, call using "yield from"
+    # For a warning, save outputs and loop over with self.__log.warning()
     def _check_for_misplaced_sensitive_info_in_metadata(
-        self, sensitive_key: str, raw_sensitive_value: str
+        self, sensitive_key: str, raw_sensitive_value: str, case_sensitive: bool
     ) -> Generator[str]:
         for location_of_value, value in self._iter_metadata_values(self.content.get_raw_dict()):
-            if location_of_value != sensitive_key and raw_sensitive_value in value:
-                yield f"[PrivacyViolation]: {location_of_value} contains the value of {sensitive_key}, which must not appear outside of {sensitive_key}"
+            if not case_sensitive:
+                if location_of_value != sensitive_key and raw_sensitive_value.lower() in value.lower():
+                    yield f"[PrivacyViolation]: {location_of_value} contains the value of {sensitive_key} (case-insensitive), which must not appear outside of {sensitive_key}"
+            elif location_of_value != sensitive_key and raw_sensitive_value in value:
+                yield f"[PrivacyViolation]: {location_of_value} contains the value of {sensitive_key} (case-sensitive), which must not appear outside of {sensitive_key}"
 
     def validate(self, identifiers: IdentifiersModel) -> Generator[str]:  # noqa: C901, PLR0912
         """
@@ -230,16 +235,19 @@ class SubmissionMetadata:
                 f"does not match submitter (LE) identifier in config ({expected_le_id})"
             )
 
-        # Check if localCaseId appears in any unexpected fields in metadata, and fail if so
+        # Check if localCaseId appears in any unexpected fields in metadata
+        # Warn if so
         # Skip if localCaseId == ""
         if self.content.submission.local_case_id != "":
-            yield from self._check_for_misplaced_sensitive_info_in_metadata(
-                "submission.localCaseId", self.content.submission.local_case_id
-            )
+            for warning in self._check_for_misplaced_sensitive_info_in_metadata(
+                "submission.localCaseId", self.content.submission.local_case_id, case_sensitive=True
+            ):
+                self.__log.warning(f"[Warning]{warning}")
 
-        # Check if tanG appears in any unexpected fields in metadata, and fail if so
+        # Check if tanG appears in any unexpected fields in metadata
+        # Error if so
         yield from self._check_for_misplaced_sensitive_info_in_metadata(
-            "submission.tanG", self.content.submission.tan_g
+            "submission.tanG", self.content.submission.tan_g, case_sensitive=False
         )
 
         # The models keep a consent dateTime as submitted, so a document written before FHIR's
