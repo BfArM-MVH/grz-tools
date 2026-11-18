@@ -49,6 +49,23 @@ def test_validate_fastq_stream_matches_path(fastq_file: Path) -> None:
     assert path_report.mean_read_length == stream_report.mean_read_length
 
 
+class _FailingFirstRead:
+    def read(self, size: int = -1) -> bytes:
+        raise OSError(5, "Input/output error")
+
+
+def test_validate_fastq_stream_keeps_the_cause_of_a_failed_first_read() -> None:
+    with pytest.raises(OSError, match="Failed to read from Python file-like object"):
+        grz_check.validate_fastq(_FailingFirstRead())
+
+
+def test_validate_fastq_paired_stream_keeps_the_cause_of_a_failed_first_read() -> None:
+    with pytest.raises(OSError, match="Failed to read from Python file-like object"):
+        grz_check.validate_fastq_paired(_FailingFirstRead(), io.BytesIO(FASTQ_BYTES))
+    with pytest.raises(OSError, match="Failed to read from Python file-like object"):
+        grz_check.validate_fastq_paired(io.BytesIO(FASTQ_BYTES), _FailingFirstRead())
+
+
 def test_validate_fastq_gzip_stream() -> None:
     gz_bytes = gzip.compress(FASTQ_BYTES)
     with gzip.GzipFile(fileobj=io.BytesIO(gz_bytes), mode="rb") as reader:
