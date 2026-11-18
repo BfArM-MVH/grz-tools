@@ -31,6 +31,16 @@ archives:
       access_key: YOUR_ACCESS_KEY
       secret: YOUR_SECRET_KEY
     public_key_path: /path/to/non_consented.pub # Crypt4GH public key of this archive
+  interrogation: # staging bucket of grzctl process, which then copies each file to an archive
+    s3:
+      endpoint_url: https://s3.example.org # same endpoint as both archives
+      bucket: grz-interrogation # must differ from the archive and inbox buckets
+      access_key: YOUR_ACCESS_KEY
+      secret: YOUR_SECRET_KEY
+
+detailed_qc:
+  local_storage: /path/to/detailed_qc # directory for the local copies of submissions selected for detailed QC
+  salt: YOUR_SALT # makes the detailed QC selection deterministic
 
 db:
   database_url: postgresql+psycopg://user:password@db.example.org/grzctl

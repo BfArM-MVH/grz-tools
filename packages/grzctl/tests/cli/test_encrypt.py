@@ -15,7 +15,7 @@ import yaml
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum, SubmissionStateLog
 from grzctl.models.config import GrzctlConfig
 
-from .conftest import PRUEFBERICHT
+from .conftest import DETAILED_QC, INTERROGATION, PRUEFBERICHT
 
 SUBMITTER_ID = "260914050"
 SUBMISSION_ID = "260914050_2025-09-15_c64603a7"
@@ -70,10 +70,12 @@ def _write_config(
         "archives": {
             "consented": {"s3": {"bucket": "consented"}, "public_key": public_key},
             "non_consented": {"s3": {"bucket": "non_consented"}, "public_key_path": unread_file},
+            "interrogation": INTERROGATION,
         },
         "db": db_section,
         "pruefbericht": PRUEFBERICHT,
         "identifiers": {"grz": "GRZT00000"},
+        "detailed_qc": DETAILED_QC,
     }
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config))

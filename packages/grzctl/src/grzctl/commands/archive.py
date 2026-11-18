@@ -9,7 +9,7 @@ from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..commands import grzctl_configuration
-from ..dbcontext import DbContext
+from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 
 log = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ def archive(
         submission_id=submission_id,
         start_state=SubmissionStateEnum.ARCHIVING,
         end_state=SubmissionStateEnum.ARCHIVED,
+        transitions=STEP_TRANSITIONS,
         enabled=update_db,
     ):
         worker_inst.archive(archive_s3)

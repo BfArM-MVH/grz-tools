@@ -1,13 +1,20 @@
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from functools import cached_property
+from operator import attrgetter
 from typing import Any
 
 import grz_common.exceptions as grzexc
 from grz_common.pipeline.context import FileError
 from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
 from grz_db.models.author import Author
-from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
+from grz_db.models.submission import (
+    FailureReasonEnum,
+    Submission,
+    SubmissionDb,
+    SubmissionStateEnum,
+    SubmissionStateLog,
+)
 
 from . import get_versions
 from .commands.db.cli import get_submission_db_instance
@@ -51,6 +58,55 @@ _RANKS: tuple[frozenset[FailureReasonEnum], ...] = (
 
 A rejected submission stays rejected after any rerun, so the reasons that reject it come first.
 """
+
+
+Transitions = Mapping[SubmissionStateEnum, frozenset[SubmissionStateEnum | None]]
+"""The states that a flow expects a submission to be in before each of its start states. ``None`` is no state yet."""
+
+PROCESS_TRANSITIONS: Transitions = {
+    # A new submission, or one that ``grzctl db sync`` found in the inbox.
+    # The others are reruns, after a failed run or one that left out steps, as with --no-clean-inbox.
+    SubmissionStateEnum.PROCESSING: frozenset(
+        {
+            None,
+            SubmissionStateEnum.UPLOADED,
+            SubmissionStateEnum.ERROR,
+            SubmissionStateEnum.PROCESSED,
+            SubmissionStateEnum.REPORTED,
+            SubmissionStateEnum.QCED,
+        }
+    ),
+    SubmissionStateEnum.REPORTING: frozenset({SubmissionStateEnum.PROCESSED}),
+    # PROCESSED: the run submits no Prüfbericht, with --no-submit-pruefbericht or once REPORTED is recorded
+    SubmissionStateEnum.QCING: frozenset({SubmissionStateEnum.PROCESSED, SubmissionStateEnum.REPORTED}),
+    # PROCESSED: an earlier run recorded REPORTED, and this run ran no detailed QC
+    SubmissionStateEnum.CLEANING: frozenset(
+        {SubmissionStateEnum.PROCESSED, SubmissionStateEnum.REPORTED, SubmissionStateEnum.QCED}
+    ),
+}
+"""The steps of ``grzctl process``: processing, then reporting, then detailed QC, then cleaning."""
+
+STEP_TRANSITIONS: Transitions = {
+    SubmissionStateEnum.UPLOADING: frozenset({None}),
+    SubmissionStateEnum.DOWNLOADING: frozenset({SubmissionStateEnum.UPLOADED}),
+    SubmissionStateEnum.DECRYPTING: frozenset({SubmissionStateEnum.DOWNLOADED}),
+    SubmissionStateEnum.VALIDATING: frozenset({SubmissionStateEnum.DECRYPTED}),
+    SubmissionStateEnum.ENCRYPTING: frozenset({SubmissionStateEnum.VALIDATED}),
+    SubmissionStateEnum.ARCHIVING: frozenset({SubmissionStateEnum.ENCRYPTED}),
+    # PROCESSED: after ``grzctl process --no-submit-pruefbericht``
+    # QCED: the same, where ``detailed_qc.auto_run`` ran the detailed QC workflow of a selected submission
+    SubmissionStateEnum.REPORTING: frozenset(
+        {SubmissionStateEnum.ARCHIVED, SubmissionStateEnum.PROCESSED, SubmissionStateEnum.QCED}
+    ),
+    # detailed QC is optional and runs apart from these commands
+    SubmissionStateEnum.CLEANING: frozenset({SubmissionStateEnum.REPORTED, SubmissionStateEnum.QCED}),
+}
+"""The step-by-step commands, such as ``download``, ``decrypt``, ``validate``, ``pruefbericht submit`` and ``clean``."""
+
+
+def has_state(submission: Submission | None, state: SubmissionStateEnum) -> bool:
+    """Whether the state history of ``submission`` holds ``state``, at any point."""
+    return submission is not None and submission.get_latest_state(filter_to_type=state) is not None
 
 
 def _causes(error: BaseException | None) -> Iterator[BaseException]:
@@ -114,14 +170,17 @@ class DbContext:
     1. *Enter*: connects to the DB, validates prerequisites (see below), then
        transitions the submission to ``start_state``.
     2. *Body*: the caller performs the actual work.
-    3. *Exit (success)*: transitions the submission to ``end_state``.
+    3. *Exit (success)*: transitions the submission to ``end_state``. If that write fails,
+       it raises ``RuntimeError``, and the log names the ``grzctl db submission update``
+       command that records ``end_state`` by hand.
        *Exit (exception)*: transitions the submission to ``ERROR`` and stores
-       ``{"error": "<message>"}`` in the state log; the exception is then re-raised.
+       ``{"error": "<message>"}`` in the state log; the exception is then re-raised,
+       also if that write fails.
 
     **Prerequisite validation:**
 
     Before setting ``start_state``, the current state of the submission is compared
-    against ``expected_prior_states``:
+    against the states that ``transitions`` expects before ``start_state``:
 
     - If the current state **matches** one of the expected prior states, the
       transition proceeds normally.
@@ -129,8 +188,8 @@ class DbContext:
       transition still proceeds (no hard failure).
     - If the submission **does not exist** in the DB:
 
-      - for the entry states, ``PROCESSING`` and ``UPLOADING``, the submission is
-        automatically created and the transition proceeds;
+      - for a start state that expects no state yet (``None``), such as ``PROCESSING``
+        and ``UPLOADING``, the submission is automatically created and the transition proceeds;
       - otherwise: ``SubmissionNotFoundError`` is raised immediately.
 
     Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError``) are
@@ -143,6 +202,7 @@ class DbContext:
             submission_id,
             start_state=SubmissionStateEnum.DOWNLOADING,
             end_state=SubmissionStateEnum.DOWNLOADED,
+            transitions=STEP_TRANSITIONS,
         ):
             do_work_here()
 
@@ -151,28 +211,26 @@ class DbContext:
     :param submission_id: Submission ID to operate on.
     :param start_state: State written to the DB when entering the context.
     :param end_state: State written to the DB when exiting the context successfully.
+    :param transitions: The flow that the step belongs to, :data:`PROCESS_TRANSITIONS` or
+        :data:`STEP_TRANSITIONS`. It must hold ``start_state``.
     :param enabled: Set to ``False`` to skip all DB interactions (useful when no DB
         is configured).
     """
 
-    _SUBMISSION_ENTRY_STATES = frozenset({SubmissionStateEnum.PROCESSING, SubmissionStateEnum.UPLOADING})
-    """States at which a brand-new submission may be created.
-
-    These are explicit because ``PROCESSING`` is not the enum member ``UPLOADING`` precedes.
-    """
-
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         configuration: dict[str, Any] | GrzctlConfig,
         submission_id: str,
         start_state: SubmissionStateEnum,
         end_state: SubmissionStateEnum,
+        transitions: Transitions,
         enabled: bool = True,
     ):
         self.configuration = configuration
         self.submission_id = submission_id
         self.start_state = start_state
         self.end_state = end_state
+        self.expected_prior_states = set(transitions[start_state])
         self.enabled = enabled
         self.db: SubmissionDb | None = None
 
@@ -188,20 +246,6 @@ class DbContext:
         """Get version information."""
         versions = get_versions()
         return {k: v or "unknown" for k, v in versions.items()}
-
-    @cached_property
-    def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
-        """Return the states the submission may be in before transitioning to ``start_state``.
-
-        The entry states start a new submission, so they expect no prior state at all.
-        Every other transition expects the previous ``SubmissionStateEnum`` member,
-        whose order mirrors the pipeline order.
-        """
-        if self.start_state in self._SUBMISSION_ENTRY_STATES:
-            return {None}
-        members = list(SubmissionStateEnum)
-        start_index = members.index(self.start_state)
-        return {members[start_index - 1]}
 
     def __enter__(self):
         """Initializes DB connection, checks prerequisites, and sets the initial state."""
@@ -234,9 +278,10 @@ class DbContext:
     ) -> bool:
         """Exit the database context.
 
-        Commits the transaction if no exception occurred, otherwise rolls back.
+        Records ``end_state`` if no exception occurred, otherwise ``ERROR`` with the failure reason of the exception.
 
         :returns: ``False``, so any exception is propagated.
+        :raises RuntimeError: If ``end_state`` cannot be recorded.
         """
         if not self.db:
             return False
@@ -277,7 +322,12 @@ class DbContext:
                     self.submission_id, self.end_state, grzctl_versions=self.grzctl_versions
                 )
             except Exception as db_exc:
-                log.error(f"Failed to write success state to DB: {db_exc}")
+                log.error(
+                    f"Failed to record state {self.end_state.name} for {self.submission_id}: {db_exc}. "
+                    f"The step itself succeeded, so record it with "
+                    f"`grzctl db submission update {self.submission_id} {self.end_state.value.lower()}`."
+                )
+                raise RuntimeError(f"Failed to record state {self.end_state.name} for {self.submission_id}") from db_exc
 
         return True
 
@@ -290,6 +340,15 @@ class DbContext:
     ) -> FailureReasonEnum:
         """Map an exception to its failure reason, see :func:`_classify`."""
         return _classify(exc_val)[0]
+
+    def _retries_failed_step(self, history: Iterable[SubmissionStateLog]) -> bool:
+        """Whether this transition starts the step again that failed last.
+
+        :param history: The state log of the submission.
+        :returns: True if the latest state is ``ERROR`` and the state before it is ``start_state``.
+        """
+        states = [entry.state for entry in sorted(history, key=attrgetter("timestamp", "id"))]
+        return states[-2:] == [self.start_state, SubmissionStateEnum.ERROR]
 
     def _check_prerequisites(self):
         """
@@ -306,7 +365,7 @@ class DbContext:
         latest_state_log = submission.get_latest_state()
         current_state = latest_state_log.state if latest_state_log else None
 
-        if current_state not in self.expected_prior_states:
+        if current_state not in self.expected_prior_states and not self._retries_failed_step(submission.states):
             log.warning(
                 f"Submission {self.submission_id} is currently in state '{current_state}'. "
                 f"Expected any of '{self.expected_prior_states}' before updating to '{self.start_state.name}'."
