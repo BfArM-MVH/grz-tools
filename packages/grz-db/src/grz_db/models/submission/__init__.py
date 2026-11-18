@@ -86,6 +86,10 @@ from .diff import (  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
+# Key of the PostgreSQL advisory lock that serializes QC selection. Any value works, as long as
+# nothing else uses it as an advisory lock key in the same database.
+_QC_SELECTION_LOCK_KEY = int.from_bytes(b"qcselect", "big")  # 8 bytes, so it fits a signed bigint
+
 
 class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[misc]
     """Submission state enum."""
@@ -2314,12 +2318,46 @@ class SubmissionDb:
             change_requests = session.exec(statement).all()
             return change_requests
 
-    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None) -> bool:  # noqa: C901
+    def should_qc(self, submission_id: str, target_percentage: float, salt: str | None, predict: bool = False) -> bool:
         """
         Determines whether or not a submission should go through detailed QC or not.
+
+        The decision reads the submitter's QC queue and stores ``selected_for_qc`` in one
+        transaction, and only one decision runs at a time. A decision therefore sees every
+        decision made before it, also those made by other processes.
+
+        A stored decision stands. Otherwise a ``target_percentage`` of 0 disables the selection:
+        the answer is ``False`` and nothing is stored.
+
+        :param predict: Answer before basic QC has passed, as if it had: skip that check and
+            store nothing. While the submission is not in the QC queue, the answer never
+            includes a random selection.
         """
-        target_proportion = target_percentage / 100.0
-        submission = self.get_submission(submission_id)
+        with self.transaction() as session:
+            if not predict:
+                self._lock_qc_selection(session)
+            return self._decide_qc(session, submission_id, target_percentage / 100.0, salt, predict)
+
+    def _lock_qc_selection(self, session: Session) -> None:
+        """Block other QC selections until the transaction of *session* ends.
+
+        Must be the first statement of the transaction, as it pins the isolation level.
+        """
+        dialect = self.engine.dialect.name
+        if dialect == "postgresql":
+            # Under REPEATABLE READ or SERIALIZABLE the snapshot is taken by the first statement, i.e. by
+            # the lock call itself before it waits, so the reads after it would miss the previous holder's
+            # decision. READ COMMITTED takes a new snapshot per statement, whatever the server default is.
+            connection = session.connection(execution_options={"isolation_level": "READ COMMITTED"})
+            connection.execute(sa.select(sqlfn.pg_advisory_xact_lock(_QC_SELECTION_LOCK_KEY)))
+        elif dialect == "sqlite":
+            # SQLite has no advisory locks; taking the database write lock right away has the same effect
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+    def _decide_qc(  # noqa: C901, PLR0912
+        self, session: Session, submission_id: str, target_proportion: float, salt: str | None, predict: bool
+    ) -> bool:
+        submission = self.get_submission(submission_id, session=session)
 
         if submission is None:
             raise SubmissionNotFoundError(submission_id)
@@ -2332,12 +2370,15 @@ class SubmissionDb:
         if submission_type != SubmissionType.initial:
             # only initial submissions matter for detailed QC selection
             return False
-        if submission.basic_qc_passed is not True:
+        if submission.basic_qc_passed is not True and not predict:
             # only submissions that passed basic QC are eligible for detailed QC
             raise SubmissionBasicQCNotPassedError(submission_id)
         if submission.selected_for_qc is True:
             return True
         if submission.selected_for_qc is False:
+            return False
+        if target_proportion <= 0:
+            # detailed QC selection is disabled: no new selection, and nothing is stored
             return False
 
         submission_month = submission_date.month
@@ -2353,6 +2394,7 @@ class SubmissionDb:
             submitter_id=submission.submitter_id,
             start_date=datetime.date(year=submission_year, month=submission_month, day=1),
             end_date=datetime.date(year=submission_year, month=submission_month, day=days_in_submission_month),
+            session=session,
         )
         if self._is_under_qc_target(submitter_submissions_month, target_proportion, period_label="month"):
             should_select = True
@@ -2363,6 +2405,7 @@ class SubmissionDb:
                 submitter_id=submission.submitter_id,
                 start_date=submission_quarter_start,
                 end_date=submission_quarter_end,
+                session=session,
             )
             if self._is_under_qc_target(
                 submitter_submissions_quarter,
@@ -2380,7 +2423,8 @@ class SubmissionDb:
                 salt=salt,
             )
 
-        self.set_selected_for_qc(submission_id, should_select)
+        if not predict:
+            self.set_selected_for_qc(submission_id, should_select, session=session)
         return should_select
 
     @staticmethod
