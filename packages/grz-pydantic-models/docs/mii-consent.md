@@ -86,8 +86,7 @@ Two facts that follow from the axes moving independently:
 
 - Most package releases only grow the terminology and leave the profile untouched, so a Consent that parses under one `schemaVersion` usually parses under all of them (`test_every_published_package_version_parses_the_same_consent` pins this for a fully bounded consent).
   Where the profile or the IG text changed, portability ends: see the next section.
-- The GRZ metadata schema sometimes lists a package version before the MII has released it; such
-  versions stay rejected until the release exists and its artefacts are vendored.
+- The GRZ metadata schema sometimes lists a package version before the MII has released it; such versions stay rejected until the release exists and its artefacts are vendored.
 
 ## How the consent packages differ
 
@@ -123,8 +122,7 @@ The sources contradict each other in places:
 
 - The 2026.0.0 IG page still calls both period ends "verpflichtend", while its profile and its release notes make them 0..1.
   The model follows the profile.
-- GRZ metadata schema 1.3.1 lists 2026.0.1, which the MII has released only as release candidates
-  (rc-1 to rc-4), so it stays rejected.
+- GRZ metadata schema 1.3.1 lists 2026.0.1, which the MII has released only as release candidates (rc-1 to rc-4), so it stays rejected.
 - The MII published some artefact versions twice with different contents: profile 1.0.9 in 2026.0.0 and in the 2026.0.1 release candidates, policy CodeSystem 1.0.7 in 2025.0.3 and 2025.0.4, and policy CodeSystem 1.1.0 in 2026.0.0 and in 2026.0.1-rc-4.
   The two CodeSystem variants differ only in display strings.
   `example_terminology/` holds the variant of the first package listed here.
@@ -149,9 +147,7 @@ The root-provision rule is enforced one level up, on `ResearchConsent`, and the 
 
 Two quirks worth knowing:
 
-- The MII renamed the category CodeSystem at one point but kept shipping examples in the old
-  spelling, so **both spellings are in the wild and both are accepted**
-  (`MII_CONSENT_CATEGORY_SYSTEMS`).
+- The MII renamed the category CodeSystem at one point but kept shipping examples in the old spelling, so **both spellings are in the wild and both are accepted** (`MII_CONSENT_CATEGORY_SYSTEMS`).
 - Profile 1.0.9, shipped by package 2026.0.0, relaxed both provision `period.end` elements from 1..1 to 0..1.
   FHIR reads a period with no `end` as still running, so such a permission never expires.
   Profile 1.0.8, shipped by every 2025 package, still requires an `end`, so an open-ended period is **rejected under those `schemaVersion`s** (`requires_period_end`).
@@ -199,13 +195,11 @@ That is why `ResearchConsentCodes` contains both.
    `status` is a FHIR modifier element, so a rejected, withdrawn (`inactive`), draft, proposed or erroneous consent grants nothing regardless of its provisions.
 2. A consent whose root provision period does not contain `date` contributes nothing, since the root deny frame bounds every nested rule.
    Same for each nested provision's own period.
-3. Codes are matched on the OID alone, because the surrounding `system` is written
-   inconsistently in the wild (with and without `urn:oid:`).
+3. Codes are matched on the OID alone, because the surrounding `system` is written inconsistently in the wild (with and without `urn:oid:`).
 4. **Deny wins.**
    A permit of either research code grants, but a deny on either revokes, also across multiple consents of the same donor.
    So a partial withdrawal that denies `…5.3.8` revokes research use even while the module permit still stands.
-5. Date-only period bounds cover the whole day (a start begins at midnight, an end expires at the
-   end of that day); datetimes without a timezone are read as UTC.
+5. Date-only period bounds cover the whole day (a start begins at midnight, an end expires at the end of that day); datetimes without a timezone are read as UTC.
 6. A consent that states neither research code grants nothing: silence is not consent.
 
 `explain_no_research_consent(date)` names the rule that refused, for each consent that permits no research.

@@ -8,7 +8,13 @@ import boto3
 import grz_common.exceptions as grzexc
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
-from grz_common.transfer import get_metadata_upload_timestamp, head_object, s3_errors
+from grz_common.transfer import (
+    MISSING_GRZ_CLI_VERSION,
+    get_grzcli_version,
+    get_metadata_upload_timestamp,
+    head_object,
+    s3_errors,
+)
 
 
 def _client_error(code: str, operation: str = "HeadObject") -> ClientError:
@@ -33,11 +39,13 @@ class _FailingClient:
         self.head_status = head_status
         self.get_code = get_code
         self.body = io.BytesIO(b"x")
+        self.get_kwargs: dict | None = None
 
     def head_object(self, **_kwargs):
         raise _head_error(self.head_status)
 
-    def get_object(self, **_kwargs):
+    def get_object(self, **kwargs):
+        self.get_kwargs = kwargs
         if self.get_code is None:
             return {"Body": self.body}
         raise _client_error(self.get_code, "GetObject")
@@ -115,6 +123,19 @@ def test_head_object_raises_the_given_class_for_a_failed_transfer():
         head_object(_FailingClient(HTTPStatus.FORBIDDEN, "AccessDenied"), "bucket", "key", grzexc.UploadError)
 
 
+def test_head_object_sends_the_get_request_without_a_range_header():
+    """A proxy at a submitter dropped the Range header, which broke the request signature (SignatureDoesNotMatch).
+
+    The code of the error is all that matters, so the request asks for the whole object and closes the body unread.
+    """
+    s3_client = _FailingClient(HTTPStatus.NOT_FOUND, "NoSuchKey")
+
+    with pytest.raises(grzexc.MissingObjectError):
+        head_object(s3_client, "bucket", "key")
+
+    assert "Range" not in s3_client.get_kwargs
+
+
 @pytest.mark.parametrize("head_status", [HTTPStatus.NOT_FOUND, HTTPStatus.FORBIDDEN])
 def test_head_object_reports_a_failed_read_if_the_get_request_succeeds(head_status: HTTPStatus):
     """The object may appear between the two requests. The GET response is then closed unread."""
@@ -165,6 +186,9 @@ class _InboxClient:
             return {"ContentLength": 0, "LastModified": UPLOADED}
         raise _head_error(self.missing_status)
 
+    def get_object(self, Bucket: str, Key: str):  # noqa: N803
+        raise _client_error("NoSuchKey", "GetObject")
+
 
 @pytest.mark.parametrize("key", ["submission/version", "submission/cleaner"], ids=["other-key", "similar-key"])
 def test_get_metadata_upload_timestamp_returns_the_time_of_upload(key: str):
@@ -195,3 +219,30 @@ def test_get_metadata_upload_timestamp_reports_a_failed_marker_check_as_a_failed
     """Only a 404 means that a marker is missing, so a refused HEAD request does not count as clean."""
     with pytest.raises(grzexc.DownloadError):
         get_metadata_upload_timestamp(_InboxClient(missing_status=HTTPStatus.FORBIDDEN), "bucket", "submission")
+
+
+def test_missing_get_grzcli_version_read():
+    """Test if a missing grz_cli version object reads as MISSING_GRZ_CLI_VERSION"""
+    client = _FailingClient(HTTPStatus.NOT_FOUND, get_code="NoSuchKey")
+    assert get_grzcli_version(client, "bucket", "submission") == MISSING_GRZ_CLI_VERSION
+
+
+def test_errored_get_grzcli_version_read():
+    """Test if an errored grz_cli version read raises a grzexc.DownloadError"""
+    client = _FailingClient(HTTPStatus.NOT_FOUND, get_code="InternalError")
+    with pytest.raises(grzexc.DownloadError):
+        get_grzcli_version(client, "bucket", "submission")
+
+
+def test_successful_get_grzcli_version_read():
+    """Test if a successful grz_cli version read actually returns the version number as a string"""
+    client = _FailingClient(HTTPStatus.NOT_FOUND)
+    client.body = io.BytesIO(b"3.0.0\n")
+    assert get_grzcli_version(client, "bucket", "submission") == "3.0.0"
+
+
+@pytest.mark.parametrize("db_status", ["submission/cleaning", "submission/cleaned"])
+def test_grzcli_version_read_on_cleaned_submission(db_status: str):
+    """Test if trying to read the grz_cli version file on a submission that is cleaning/cleaned returns the appropriate error"""
+    with pytest.raises(grzexc.SubmissionCleanedError):
+        get_grzcli_version(_InboxClient(keys=(db_status,)), "bucket", "submission")

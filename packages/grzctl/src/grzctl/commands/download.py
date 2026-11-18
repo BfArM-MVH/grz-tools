@@ -5,7 +5,13 @@ from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
-from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
+from grz_common.transfer import (
+    ERROR_GRZ_CLI_VERSION,
+    get_grzcli_version,
+    get_metadata_upload_timestamp,
+    get_upload_timing,
+    init_s3_client,
+)
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
@@ -50,7 +56,9 @@ def download(  # noqa: PLR0913, PLR0917
     Downloaded files are stored within the `encrypted_files` sub-folder of the submission output directory.
 
     With --update-db (the default), download records the inbox of the submission in the database.
-    With --populate (also the default), it also fills the submission metadata in the database.
+    With --populate (also the default), it also fills the submission metadata in the database and
+    records when the upload started and finished, which only the inbox knows until `grzctl clean` runs.
+    If that timing cannot be read or stored, download logs a warning and carries on.
     With --no-update-db, download touches no database, and --populate only logs a warning.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
@@ -101,8 +109,16 @@ def download(  # noqa: PLR0913, PLR0917
             db = db_context.db
             if db is None:
                 raise RuntimeError("A DbContext that update_db enables holds the database.")
+            # Init S3 client
+            s3_client = init_s3_client(s3_options)
+            # Add grz-cli version to db. Informational, so failed read must not fail the download.
+            try:
+                grz_cli_version = get_grzcli_version(s3_client, s3_options.bucket, submission_id)
+            except Exception as e:
+                grz_cli_version = ERROR_GRZ_CLI_VERSION
+                log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
+            db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
             if populate:
-                s3_client = init_s3_client(s3_options)
                 submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
                 metadata = worker_inst.parse_submission().metadata.content
                 db.populate(
@@ -112,6 +128,18 @@ def download(  # noqa: PLR0913, PLR0917
                     force=force,
                     on_missing="create",
                 )
+                # The timing lives only in the inbox's object listing, which ``grzctl clean`` erases.
+                # It is auxiliary, so no error in getting or storing it may fail the download.
+                try:
+                    timing = get_upload_timing(s3_client, s3_options.bucket, submission_id)
+                    if timing is None:
+                        log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
+                    else:
+                        with db.transaction() as session:
+                            for column, value in timing._asdict().items():
+                                db.modify_submission(submission_id, column, value, session=session)
+                except Exception as e:
+                    log.warning(f"Upload timing of {submission_id} not recorded: {e}")
             # The download knows the inbox, so record it.
             # Commands and the decryption key lookup can then find the submission without
             # being told the inbox again.

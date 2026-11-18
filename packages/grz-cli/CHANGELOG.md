@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.0.3](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v3.0.2...grz-cli-v3.0.3) (2026-11-10)
+
+
+### Documentation
+
+* **grz-cli,grzctl:** add example config files ([#750](https://github.com/BfArM-MVH/grz-tools/issues/750)) ([3baa49a](https://github.com/BfArM-MVH/grz-tools/commit/3baa49a4d2a06defba315e7ccaa15fcda758fe30)), closes [#749](https://github.com/BfArM-MVH/grz-tools/issues/749)
+
+## [3.0.2](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v3.0.1...grz-cli-v3.0.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** require grz-common 4.0.3 ([#742](https://github.com/BfArM-MVH/grz-tools/issues/742)) ([323dc9f](https://github.com/BfArM-MVH/grz-tools/commit/323dc9f1c1ec735e975c28ed5105acaa87329f6c))
+
+## [3.0.1](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v3.0.0...grz-cli-v3.0.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **grz-cli,grzctl:** require grz-common 4.0.2 ([#737](https://github.com/BfArM-MVH/grz-tools/issues/737)) ([6bc5d89](https://github.com/BfArM-MVH/grz-tools/commit/6bc5d8942bf3568ba1037a52f8fa0a97ace71b50))
+
 ## [3.0.0](https://github.com/BfArM-MVH/grz-tools/compare/grz-cli-v2.0.0...grz-cli-v3.0.0) (2026-09-26)
 
 

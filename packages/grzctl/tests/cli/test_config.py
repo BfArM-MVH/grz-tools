@@ -90,3 +90,27 @@ def test_a_config_without_a_pruefbericht_field_fails(configuration: dict, field:
 
     with pytest.raises(ValidationError, match=rf"pruefbericht\.{field}\n  Field required"):
         GrzctlConfig.from_configuration(configuration)
+
+
+def test_an_env_var_overrides_the_s3_credentials_of_an_inbox(monkeypatch, configuration: dict):
+    prefix = f"grz_leistungserbringer__{LE_ID}__inbox_buckets__{BUCKET_NAME}"
+    monkeypatch.setenv(f"{prefix}__access_key", "env-key")
+    monkeypatch.setenv(f"{prefix}__secret", "env-secret")
+
+    s3 = GrzctlConfig.from_configuration(configuration).inbox_target(LE_ID, BUCKET_NAME).s3
+
+    assert s3.access_key == "env-key"
+    assert get_secret_value(s3.secret) == "env-secret"
+
+
+@pytest.mark.parametrize("archive", ["consented", "non_consented"])
+def test_an_env_var_overrides_the_s3_credentials_of_an_archive(monkeypatch, configuration: dict, archive: str):
+    configuration["archives"][archive]["s3"] |= {"access_key": "file-key", "secret": "file-secret"}
+    monkeypatch.setenv(f"grz_archives__{archive}__s3__access_key", "env-key")
+    monkeypatch.setenv(f"grz_archives__{archive}__s3__secret", "env-secret")
+
+    config = GrzctlConfig.from_configuration(configuration)
+
+    s3 = getattr(config.archives, archive).s3
+    assert s3.access_key == "env-key"
+    assert get_secret_value(s3.secret) == "env-secret"
