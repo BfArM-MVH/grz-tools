@@ -702,19 +702,21 @@ def _monitoring_payload(
       has no second archived initial submission.
     - ``cases_with_size`` and ``case_bytes``: how many of those initial submissions have a known size,
       and their total size. The sheet divides the one by the other.
-    - ``archived`` and ``archived_with_size``: the LE's archived submissions that were neither deleted
-      nor transferred to another GRZ, and how many of them have a known size. A missing size is no size
-      of 0, so the sheet can tell the volume below is incomplete.
+    - ``archived`` and ``archived_with_size``: the LE's archived submissions (state Archived, or
+      Processed from ``grzctl process``) that were neither deleted nor transferred to another GRZ, and
+      how many of them have a known size. A missing size is no size of 0, so the sheet can tell the
+      volume below is incomplete.
     - ``archived_bytes_consented``, ``archived_bytes_non_consented`` and
       ``archived_bytes_consent_unknown``: their total known size by research consent. Metadata without
       a research consent is stored as ``False``, so it is non-consented, as in ``grzctl archive``.
       Unknown means the database holds no value.
     - ``timed_uploads``, ``timed_upload_bytes`` and ``timed_upload_seconds``: number, total size and
       total duration of the LE's non-test uploads with a known duration that finished by then, as
-      ``grzctl download`` recorded them (:attr:`Submission.upload_started_at`). A resumed upload and an
-      upload without the uploader's ``version`` marker have none: the first took longer than its last
-      run, and for the second a resumption cannot be detected (``upload_resumed`` is NULL). The sheet
-      divides the increments of the bytes by those of the seconds to get the mean upload speed.
+      ``grzctl download`` or ``grzctl process`` recorded them (:attr:`Submission.upload_started_at`).
+      A resumed upload and an upload without the uploader's ``version`` marker have none: the first
+      took longer than its last run, and for the second a resumption cannot be detected
+      (``upload_resumed`` is NULL). The sheet divides the increments of the bytes by those of the
+      seconds to get the mean upload speed.
 
     Of the month alone, because they cannot be accumulated:
 
@@ -734,7 +736,11 @@ def _monitoring_payload(
         return sa.exists().where(log.submission_id == Submission.id, column == kind, log.timestamp < cutoff)
 
     reported = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.REPORTED)
-    archived = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.ARCHIVED)
+    # ``grzctl process`` records Processed once it has archived a submission, instead of Archived
+    archived = sa.or_(
+        logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.ARCHIVED),
+        logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.PROCESSED),
+    )
     # a deleted submission is gone, a transferred one is held by another GRZ: neither is archived here anymore
     gone = sa.or_(
         logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.DELETE),

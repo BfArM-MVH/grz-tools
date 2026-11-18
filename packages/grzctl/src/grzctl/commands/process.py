@@ -72,6 +72,7 @@ from ..models.pruefbericht import PruefberichtModel
 from ..processor import SubmissionProcessor
 from .clean import _clean_submission_from_bucket
 from .db.cli import get_submission_db_instance
+from .download import _record_grzcli_version, _record_upload_timing
 from .inbox_resolution import require_inbox
 from .pruefbericht import ASK_BFARM, _generate_pruefbericht_from_database
 from .pruefbericht import _try_submit as _try_submit_pruefbericht
@@ -206,6 +207,7 @@ def process(  # noqa: PLR0913, PLR0917
                         f"Submission '{submission_id}' keeps its case link (case {stored_case_id}); "
                         "its metadata is not resolved to a case again."
                     )
+                _record_grzcli_version(dbcontext_inst.db, s3_client, inbox.s3.bucket, submission_id)
                 dbcontext_inst.db.populate(
                     submission_id,
                     submission_metadata.content,
@@ -214,6 +216,7 @@ def process(  # noqa: PLR0913, PLR0917
                     on_missing="create",
                     ignore_fields={CASE_LINK_KEY} if stored_case_id is not None else None,
                 )
+                _record_upload_timing(dbcontext_inst.db, s3_client, inbox.s3.bucket, submission_id)
                 identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
                 processor.run(submission_metadata, identifiers)
             except (Exception, SystemExit):

@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 import grz_common.cli as grzcli
@@ -14,7 +15,7 @@ from grz_common.transfer import (
 )
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
-from grz_db.models.submission import SubmissionStateEnum
+from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import STEP_TRANSITIONS, DbContext
@@ -22,7 +23,57 @@ from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
 
+if TYPE_CHECKING:
+    from types_boto3_s3.client import S3Client
+else:
+    S3Client = Any
+
 log = logging.getLogger(__name__)
+
+
+def _record_upload_timing(db: SubmissionDb, s3_client: S3Client, bucket: str, submission_id: str) -> None:
+    """Record the upload timing of a submission from the inbox's object listing.
+
+    The timing lives only in that listing, which ``grzctl clean`` erases. It is auxiliary, so no error
+    in getting or storing it fails the command: it is logged as a warning.
+
+    :param db: Database that holds the submission.
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier.
+    """
+    try:
+        timing = get_upload_timing(s3_client, bucket, submission_id)
+        if timing is None:
+            log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
+        else:
+            with db.transaction() as session:
+                for column, value in timing._asdict().items():
+                    db.modify_submission(submission_id, column, value, session=session)
+    except Exception as e:
+        log.warning(f"Upload timing of {submission_id} not recorded: {e}")
+
+
+def _record_grzcli_version(db: SubmissionDb, s3_client: S3Client, bucket: str, submission_id: str) -> None:
+    """Record the grz-cli version that uploaded a submission, as the inbox's version file names it.
+
+    Informational, so a failed read or write must not fail the command: it is logged as a warning and
+    ``ERROR_GRZ_CLI_VERSION`` is recorded where the write still works.
+
+    :param db: Database that holds the submission.
+    :param s3_client: boto3 S3 client pointed at the inbox bucket.
+    :param bucket: Name of the inbox bucket.
+    :param submission_id: Submission identifier.
+    """
+    try:
+        try:
+            grz_cli_version = get_grzcli_version(s3_client, bucket, submission_id)
+        except Exception as e:
+            grz_cli_version = ERROR_GRZ_CLI_VERSION
+            log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
+        db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
+    except Exception as e:
+        log.warning(f"grz-cli version of {submission_id} not recorded: {e}")
 
 
 @click.command()
@@ -112,13 +163,7 @@ def download(  # noqa: PLR0913, PLR0917
                 raise RuntimeError("A DbContext that update_db enables holds the database.")
             # Init S3 client
             s3_client = init_s3_client(s3_options)
-            # Add grz-cli version to db. Informational, so failed read must not fail the download.
-            try:
-                grz_cli_version = get_grzcli_version(s3_client, s3_options.bucket, submission_id)
-            except Exception as e:
-                grz_cli_version = ERROR_GRZ_CLI_VERSION
-                log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
-            db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
+            _record_grzcli_version(db, s3_client, s3_options.bucket, submission_id)
             if populate:
                 submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
                 metadata = worker_inst.parse_submission().metadata.content
@@ -129,18 +174,7 @@ def download(  # noqa: PLR0913, PLR0917
                     force=force,
                     on_missing="create",
                 )
-                # The timing lives only in the inbox's object listing, which ``grzctl clean`` erases.
-                # It is auxiliary, so no error in getting or storing it may fail the download.
-                try:
-                    timing = get_upload_timing(s3_client, s3_options.bucket, submission_id)
-                    if timing is None:
-                        log.warning(f"The inbox lists no object of {submission_id}; its upload timing is not recorded.")
-                    else:
-                        with db.transaction() as session:
-                            for column, value in timing._asdict().items():
-                                db.modify_submission(submission_id, column, value, session=session)
-                except Exception as e:
-                    log.warning(f"Upload timing of {submission_id} not recorded: {e}")
+                _record_upload_timing(db, s3_client, s3_options.bucket, submission_id)
             # The download knows the inbox, so record it.
             # Commands and the decryption key lookup can then find the submission without
             # being told the inbox again.
