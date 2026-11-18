@@ -160,7 +160,8 @@ Three rules differ from ordinary columns:
 - `--allow-overwrite` cannot name the case link, so replacing one takes `--force`.
   Undoing a deliberate `db case relink` should not ride along with a field overwrite.
 - `--ignore-field case_id` skips case resolution altogether.
-- `grzctl process` skips it by itself once a submission has a link, so a rerun after `db case relink` keeps the repair.
+- `grzctl download --populate` and `grzctl process` skip it by themselves once a submission has a link, so a rerun after `db case relink` keeps the repair.
+  This holds for `download --force` as well.
   The duplicate initial check then asks about the linked case, not about the metadata key.
 
 A case that cannot be resolved does not cost the submission the rest of its metadata.

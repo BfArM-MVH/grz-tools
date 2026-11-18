@@ -1157,6 +1157,35 @@ class TestProcessRerunAfterRelink:
         assert db.get_submission(sid).case_id == other_case_id
 
 
+class TestDownloadRerunAfterRelink:
+    """A rerun of ``grzctl download`` keeps the case link that ``grzctl db case relink`` set by hand."""
+
+    SUBMISSION_ID = "260914050_2024-07-15_c64603a7"
+
+    @pytest.mark.parametrize("force", ["--force", "--no-force"])
+    def test_rerun_keeps_the_relinked_case(
+        self, s3_buckets, temp_process_config_file_path, process_config_content, tmp_path, force
+    ):
+        """The rerun neither moves the submission back to the case of its metadata nor fails over the link."""
+        sid = self.SUBMISSION_ID
+        _upload_initial_submission_to_inbox(s3_buckets["inbox"], sid)
+        db = SubmissionDb(db_url=process_config_content["db"]["database_url"], author=None)
+        # download expects the submission in the database
+        db.add_submission(sid)
+        cli = grzctl.cli.build_cli()
+        runner = click.testing.CliRunner()
+        download_args = ["--config", str(temp_process_config_file_path), "download", "--submission-id", sid]
+        result = runner.invoke(cli, [*download_args, "--output-dir", str(tmp_path / "first")])
+        assert result.exit_code == 0, f"Download failed: {result.output}"
+        assert db.get_submission(sid).case_id is not None
+
+        other_case_id = _relink_to_new_case(temp_process_config_file_path, sid, "another-patient")
+        result = runner.invoke(cli, [*download_args, "--output-dir", str(tmp_path / "second"), force])
+
+        assert result.exit_code == 0, f"Download failed: {result.output}"
+        assert db.get_submission(sid).case_id == other_case_id
+
+
 class TestProcessDuplicateTanG:
     """A submission fails when another submission already holds its tanG."""
 

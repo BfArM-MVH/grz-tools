@@ -56,7 +56,6 @@ from grz_common.transfer import get_metadata_upload_timestamp, init_s3_client
 from grz_common.workers.download import download_metadata_file
 from grz_common.workers.submission import SubmissionMetadata
 from grz_db.models.submission import (
-    CASE_LINK_KEY,
     FailureReasonEnum,
     Submission,
     SubmissionDb,
@@ -198,21 +197,13 @@ def process(  # noqa: PLR0913, PLR0917
                 # so that downstream Prüfbericht generation can read the required fields.
                 # A rejected write, such as a duplicate tanG, then records the ERROR state.
                 submission_date = get_metadata_upload_timestamp(s3_client, inbox.s3.bucket, submission_id).date()
-                # A case link set by hand, with ``db case relink``, outlives a rerun. Resolving the case from
-                # the metadata key again would undo that repair, and populate refuses to without --force.
-                stored_case_id = stored.case_id if stored else None
-                if stored_case_id is not None:
-                    log.warning(
-                        f"Submission '{submission_id}' keeps its case link (case {stored_case_id}); "
-                        "its metadata is not resolved to a case again."
-                    )
                 dbcontext_inst.db.populate(
                     submission_id,
                     submission_metadata.content,
                     submission_date,
                     force=False,
                     on_missing="create",
-                    ignore_fields={CASE_LINK_KEY} if stored_case_id is not None else None,
+                    keep_case_link=True,
                 )
                 identifiers = configuration.identifiers.model_copy(update={"le": submitter_id})
                 processor.run(submission_metadata, identifiers)

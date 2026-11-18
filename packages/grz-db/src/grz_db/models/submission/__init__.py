@@ -2747,6 +2747,7 @@ class SubmissionDb:
         allow_overwrite: Container[str] = frozenset(),
         on_missing: Literal["create", "error"] = "error",
         ignore_fields: set[str] | None = None,
+        keep_case_link: bool = False,
         psn: str | None = None,
     ) -> None:
         """Reconcile DB state for ``submission_id`` with ``metadata``.
@@ -2777,6 +2778,10 @@ class SubmissionDb:
             so ``force`` does not need to be set.
         :param ignore_fields: Field keys to skip during diff and redaction
             validation. See :meth:`assert_metadata_not_redacted`.
+        :param keep_case_link: If ``True``, a submission that has a case link keeps it, even with
+            ``force``, and only a submission without one is resolved to a case. A case link set by hand
+            with :meth:`set_submission_case` then survives a rerun, while the metadata keys still find
+            the old case.
         :param psn: RKI pseudonym to resolve the case with; see :meth:`diff`.
         :raises SubmissionNotFoundError: if the submission row is absent and
             ``on_missing`` is ``"error"``.
@@ -2787,14 +2792,22 @@ class SubmissionDb:
         :raises SubmissionTypeAlreadySetError: if the stored type is set and *metadata* has a
             different one, whatever ``force`` says.
         """
-        ignore_fields = ignore_fields or set()
+        ignore_fields = set(ignore_fields or ())
 
-        if not self.get_submission(submission_id):
+        stored = self.get_submission(submission_id)
+        if not stored:
             if on_missing == "error":
                 raise SubmissionNotFoundError(submission_id)
             logger.warning("Submission %s does not exist. Creating ...", submission_id)
             self.add_submission(submission_id)
             logger.debug("Submission %s added to database.", submission_id)
+        elif keep_case_link and stored.case_id is not None:
+            logger.warning(
+                "Submission %s keeps its case link (case %s); its metadata is not resolved to a case again.",
+                submission_id,
+                stored.case_id,
+            )
+            ignore_fields.add(CASE_LINK_KEY)
 
         self.assert_metadata_not_redacted(metadata, submission_id, ignore_fields)
 
