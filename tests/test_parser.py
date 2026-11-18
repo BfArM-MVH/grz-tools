@@ -73,3 +73,44 @@ def test_encrypted_submission():
         assert enc_path == Path(input_path + ".c4gh")
         enc_path = EncryptedSubmission.get_encryption_header_path(input_path)
         assert enc_path == Path(input_path + ".c4gh_header")
+
+
+@pytest.mark.parametrize(
+    ("metadata_path", "is_warning", "expected_location"),
+    [
+        ("tests/mock_files/submissions/valid_submission/metadata/metadata.json", True, None),
+        ("tests/mock_files/no_localCaseId_metadata.json", True, None),
+        ("tests/mock_files/invalid_localCaseId_in_other_field_metadata.json", True, "submission.localCaseId"),
+        ("tests/mock_files/invalid_localCaseId_in_filePath_metadata.json", True, "submission.localCaseId"),
+        ("tests/mock_files/invalid_tanG_in_other_field_metadata.json", False, "submission.tanG"),
+        ("tests/mock_files/invalid_tanG_in_filePath_metadata.json", False, "submission.tanG"),
+        ("tests/mock_files/invalid_lowercase_tanG_in_filePath_metadata.json", False, "submission.tanG"),
+    ],
+    ids=[
+        "valid",
+        "no_local_case_id",
+        "local_case_id_in_other",
+        "local_case_id_in_filePath",
+        "tanG_in_other",
+        "tanG_in_filePath",
+        "lowercase_tanG_in_filePath",
+    ],
+)
+def test_sensitive_values_in_metadata(metadata_path, is_warning, expected_location, identifiers_config_model, caplog):
+    """Test whether sensitive information present in unrelated fields in metadata.json is processed as expected"""
+    # Run validation and collect errors
+    errors = list(SubmissionMetadata(metadata_path).validate(identifiers_config_model.identifiers))
+    if expected_location is None:
+        # Assert no errors or warnings
+        assert errors == [], errors
+        assert "contains the value of" not in caplog.text
+    else:
+        if is_warning:
+            assert f"contains the value of {expected_location}" in caplog.text
+            # Make sure no error
+            assert errors == [], errors
+        else:
+            assert errors, errors
+            assert all(f"contains the value of {expected_location}" in e for e in errors), errors
+            # Make sure no warning
+            assert f"contains the value of {expected_location}" not in caplog.text
