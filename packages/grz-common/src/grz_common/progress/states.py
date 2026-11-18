@@ -2,7 +2,7 @@
 This module contains the type definitions for the progress logging states.
 """
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class State(TypedDict, total=False):
@@ -52,3 +52,12 @@ class DownloadState(State):
     """
 
     download_successful: bool
+
+
+class ProcessingState(State, total=False):
+    """
+    State for streaming pipeline processing progress.
+    """
+
+    processing_successful: bool
+    stats: dict[str, Any]
