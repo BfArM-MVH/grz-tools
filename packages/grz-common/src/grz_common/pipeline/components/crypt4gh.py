@@ -1,4 +1,3 @@
-import io
 import os
 
 import crypt4gh.header
@@ -12,7 +11,31 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from grz_common.exceptions import DecryptionError, EncryptionError
 
-from . import StreamConfigurationError, Transformer
+from . import Readable, StreamConfigurationError, Transformer
+
+
+def _read_segment(source: Readable, size: int) -> bytes:
+    """Read one segment of ``size`` bytes, or fewer only at the end of the stream.
+
+    Crypt4GH requires every segment except the last one to be full.
+    A raw source may return fewer bytes than asked before its end, so this reads again for the missing bytes.
+    Only an empty read ends the stream.
+
+    :param source: Stream to read the segment from.
+    :param size: Length of a full segment.
+    :returns: The segment, or ``b""`` at the end of the stream.
+    """
+    segment = source.read(size)
+    if not 0 < len(segment) < size:
+        return segment
+    # a bytearray grows in place, while adding to bytes would copy the segment again on every short read
+    buffer = bytearray(segment)
+    while len(buffer) < size:
+        rest = source.read(size - len(buffer))
+        if not rest:
+            break
+        buffer += rest
+    return bytes(buffer)
 
 
 class Crypt4GHDecryptor(Transformer):
@@ -28,7 +51,7 @@ class Crypt4GHDecryptor(Transformer):
     CIPHER_DIFF = crypt4gh.lib.CIPHER_DIFF
     CIPHER_SEGMENT_SIZE = crypt4gh.lib.CIPHER_SEGMENT_SIZE
 
-    def __init__(self, source: io.BufferedIOBase | None = None, /, *, private_key: bytes):
+    def __init__(self, source: Readable | None = None, /, *, private_key: bytes):
         """
         :param source: Optional positional-only source stream.
         :param private_key: Required keyword-only private key for decryption.
@@ -37,7 +60,6 @@ class Crypt4GHDecryptor(Transformer):
         self._private_key = private_key
         self._ciphers: list[ChaCha20Poly1305] = []  # one per session key in the header
         self._header_parsed = False
-        self._buffer = bytearray()
 
     def _fill_buffer(self) -> bytes:
         if not self._header_parsed:
@@ -46,17 +68,9 @@ class Crypt4GHDecryptor(Transformer):
         if self.source is None:
             raise StreamConfigurationError("Stream source not set", stage=self.__class__.__name__)
 
-        while len(self._buffer) < self.CIPHER_SEGMENT_SIZE:
-            chunk = self.source.read(self.CIPHER_SEGMENT_SIZE)
-            if not chunk:
-                break
-            self._buffer.extend(chunk)
-
-        if not self._buffer:
+        ciphersegment = _read_segment(self.source, self.CIPHER_SEGMENT_SIZE)
+        if not ciphersegment:
             return b""
-
-        ciphersegment = bytes(self._buffer[: self.CIPHER_SEGMENT_SIZE])
-        del self._buffer[: self.CIPHER_SEGMENT_SIZE]
 
         if len(ciphersegment) <= self.CIPHER_DIFF:
             raise DecryptionError("Truncated cipher segment")
@@ -107,7 +121,7 @@ class Crypt4GHEncryptor(Transformer):
 
     def __init__(
         self,
-        source: io.BufferedIOBase | None = None,
+        source: Readable | None = None,
         /,
         *,
         recipient_pubkey: bytes,
@@ -130,7 +144,6 @@ class Crypt4GHEncryptor(Transformer):
         self._session_key = os.urandom(32)
         self._cipher = ChaCha20Poly1305(self._session_key)
         self._header_sent = False
-        self._buffer = bytearray()
 
     def _fill_buffer(self) -> bytes:
         if not self._header_sent:
@@ -140,19 +153,9 @@ class Crypt4GHEncryptor(Transformer):
         if self.source is None:
             raise StreamConfigurationError("Stream source not set", stage=self.__class__.__name__)
 
-        # ensure we always get SEGMENT_SIZE long segments to minimize crypt4gh overhead
-        while len(self._buffer) < self.SEGMENT_SIZE:
-            chunk = self.source.read(self.SEGMENT_SIZE)
-            if not chunk:
-                break
-            self._buffer.extend(chunk)
-
-        if not self._buffer:
+        segment = _read_segment(self.source, self.SEGMENT_SIZE)
+        if not segment:
             return b""
-
-        segment_len = min(self.SEGMENT_SIZE, len(self._buffer))
-        segment = bytes(self._buffer[:segment_len])
-        del self._buffer[:segment_len]
 
         nonce = os.urandom(self.NONCE_LENGTH)
         return nonce + self._cipher.encrypt(nonce, segment, None)

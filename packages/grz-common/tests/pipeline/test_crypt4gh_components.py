@@ -1,7 +1,7 @@
 """Tests for the Crypt4GH pipeline components."""
 
 import os
-from io import BytesIO
+from io import BytesIO, RawIOBase
 
 import crypt4gh.lib
 import pytest
@@ -25,6 +25,23 @@ def generate_keypair() -> tuple[bytes, bytes]:
         format=serialization.PublicFormat.Raw,
     )
     return private_bytes, public_bytes
+
+
+class _ShortReads(RawIOBase):
+    """Raw stream that returns at most ``step`` bytes per read before its end, as a pipe or a socket may.
+
+    The default ``step`` is shorter than a segment but longer than any read of the header.
+    """
+
+    def __init__(self, data: bytes, step: int = 40_000):
+        self._data = BytesIO(data)
+        self._step = step
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer) -> int:
+        return self._data.readinto(memoryview(buffer)[: self._step])
 
 
 class TestCrypt4GHEncryptor:
@@ -241,6 +258,40 @@ class TestCrypt4GHInterop:
 
         with (
             BytesIO(encrypted.getvalue()) as f,
+            Crypt4GHDecryptor(f, private_key=recipient_private) as decryptor,
+        ):
+            decrypted = decryptor.read(-1)
+
+        assert decrypted == plaintext
+
+    @pytest.mark.parametrize("size", [SEGMENT_SIZE, 2 * SEGMENT_SIZE + 12345])
+    def test_reference_decrypts_what_the_encryptor_writes_from_short_reads(self, size):
+        """A short segment before the last one would shift all later segments, so the reference could not decrypt."""
+        sender_private, _ = generate_keypair()
+        recipient_private, recipient_public = generate_keypair()
+        plaintext = os.urandom(size)
+
+        with (
+            _ShortReads(plaintext) as f,
+            Crypt4GHEncryptor(f, sender_privkey=sender_private, recipient_pubkey=recipient_public) as encryptor,
+        ):
+            encrypted = encryptor.read(-1)
+
+        decrypted = BytesIO()
+        crypt4gh.lib.decrypt([(0, recipient_private, None)], BytesIO(encrypted), decrypted)
+        assert decrypted.getvalue() == plaintext
+
+    @pytest.mark.parametrize("size", [SEGMENT_SIZE, 2 * SEGMENT_SIZE + 12345])
+    def test_decryptor_reads_what_the_reference_writes_from_short_reads(self, size):
+        """A cipher segment read in parts must be joined before its authentication, which covers the whole segment."""
+        sender_private, _ = generate_keypair()
+        recipient_private, recipient_public = generate_keypair()
+        plaintext = os.urandom(size)
+        encrypted = BytesIO()
+        crypt4gh.lib.encrypt([(0, sender_private, recipient_public)], BytesIO(plaintext), encrypted)
+
+        with (
+            _ShortReads(encrypted.getvalue()) as f,
             Crypt4GHDecryptor(f, private_key=recipient_private) as decryptor,
         ):
             decrypted = decryptor.read(-1)
