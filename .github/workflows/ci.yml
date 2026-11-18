@@ -285,6 +285,34 @@ jobs:
       - name: Test ${{ matrix.python-version }}
         run: uv run tox -e ${{ matrix.python-version }} -- tests/
 
+  run-e2e-tests:
+    name: Run end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PostgreSQL
+        run: sudo apt-get --update install postgresql
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version-file: "pyproject.toml"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install project dev dependencies
+        run: uv sync --all-extras --all-groups --all-packages
+
+      # SeaweedFS runs in docker, which the runner provides
+      - name: Run end-to-end tests
+        run: uv run tox -e e2e
+
   test-changed-packages-python:
     name: Test Changed Python Packages
     needs: [ determine-changes, quality-checks-python, build-grz-check-binary, test-changed-packages-rust ]
@@ -352,6 +380,7 @@ jobs:
       - build-grz-check-binary
       - test-changed-packages-rust
       - run-workspace-tests-python
+      - run-e2e-tests
       - test-changed-packages-python
     runs-on: ubuntu-latest
     if: always()
@@ -367,6 +396,7 @@ jobs:
             [build-grz-check-binary]="${{ needs.build-grz-check-binary.result }}"
             [test-changed-packages-rust]="${{ needs.test-changed-packages-rust.result }}"
             [run-workspace-tests-python]="${{ needs.run-workspace-tests-python.result }}"
+            [run-e2e-tests]="${{ needs.run-e2e-tests.result }}"
             [test-changed-packages-python]="${{ needs.test-changed-packages-python.result }}"
           )
           failed=0

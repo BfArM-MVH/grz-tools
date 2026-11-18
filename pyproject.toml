@@ -273,6 +273,12 @@ skip_install = false
 dependency_groups = ["lint"]
 commands = [["mypy"]]
 
+[tool.tox.env."e2e"]
+description = "run the end-to-end tests, see tests/e2e/README.md"
+commands = [["pytest", "tests/e2e", "-m", "e2e", { replace = "posargs", default = [], extend = true }]]
+# docker or podman, and rootless podman's storage under the real HOME
+pass_env = ["HOME", "XDG_RUNTIME_DIR", "DOCKER_HOST", "CONTAINER_HOST", "GRZ_E2E_CONTAINER_ENGINE"]
+
 [tool.mypy]
 python_version = "3.12"
 plugins = "pydantic.mypy"
@@ -292,4 +298,7 @@ addopts = [
     "--import-mode=importlib",
     # Pass -n0 to turn this off, which a debugger needs and which restores per-test output order.
     "-n", "auto",
+    # The end-to-end tests need docker or podman; `tox -e e2e` runs them.
+    "-m", "not e2e",
 ]
+markers = ["e2e: end-to-end tests of grz-cli and grzctl against SeaweedFS in a container (tests/e2e)"]
