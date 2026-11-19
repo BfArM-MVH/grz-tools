@@ -111,6 +111,8 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     CLEANED = "Cleaned"
     PROCESSED = "Processed"
     FINISHED = "Finished"
+    DELETING = "Deleting"
+    DELETED = "Deleted"
     ERROR = "Error"
 
 
