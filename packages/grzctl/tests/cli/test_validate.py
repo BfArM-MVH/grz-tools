@@ -9,6 +9,7 @@ import click.testing
 import grzctl.cli
 import pytest
 from grz_common.workers.worker import Worker
+from grz_db.errors import AmbiguousCaseError
 from grz_db.models.submission import SubmissionDb
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
@@ -183,6 +184,73 @@ def test_validate_rejects_duplicate_initial_before_validating(
     )
     assert result.exit_code != 0, "a failed basic QC must fail the validate step"
     _assert_duplicate_failed_basic_qc(competing)
+
+
+def _validate(competing: SimpleNamespace) -> click.testing.Result:
+    return competing.runner.invoke(
+        competing.cli,
+        [
+            "--config",
+            competing.config,
+            "validate",
+            "--submission-dir",
+            str(competing.submission_dir),
+            "--submitter-id",
+            SUBMITTER_ID,
+            "--update-db",
+        ],
+    )
+
+
+def _duplicate_error_state(competing: SimpleNamespace) -> dict:
+    result = competing.db("submission", "show", competing.duplicate_id, "--json")
+    assert result.exit_code == 0, result.output
+    return [s for s in json.loads(result.stdout)["states"] if s["state"] == "Error"][-1]
+
+
+def test_validate_keeps_the_duplicate_as_failure_reason_when_recording_the_failed_basic_qc_fails(
+    tmp_path, monkeypatch, migrated_database_config_path, test_metadata_path
+):
+    """An error while recording the failed basic QC must not replace the duplicate error.
+
+    The failure reason of the submission is taken from the duplicate error, and an error raised
+    while handling it would be recorded as ``unknown`` instead.
+    """
+    competing = _set_up_case_with_qc_passed_initial(tmp_path, migrated_database_config_path, test_metadata_path)
+    monkeypatch.setattr(Worker, "validate", lambda self, **kwargs: pytest.fail("validation must not run"))
+    modify_submission = SubmissionDb.modify_submission
+
+    def fail_recording_the_failed_basic_qc(self, submission_id, key, value, *args, **kwargs):
+        if (key, value) == ("basic_qc_passed", "false"):
+            raise RuntimeError("database is gone")
+        return modify_submission(self, submission_id, key, value, *args, **kwargs)
+
+    monkeypatch.setattr(SubmissionDb, "modify_submission", fail_recording_the_failed_basic_qc)
+
+    result = _validate(competing)
+
+    assert result.exit_code != 0
+    error = _duplicate_error_state(competing)
+    assert error["failure_reason"] == "duplicate_initial"
+    assert "database is gone" not in error["data"]["error"]
+
+
+def test_validate_records_an_ambiguous_case_as_such(
+    tmp_path, monkeypatch, migrated_database_config_path, test_metadata_path
+):
+    """A case key that matches several cases fails validation with the ``ambiguous_case`` failure reason."""
+    competing = _set_up_case_with_qc_passed_initial(tmp_path, migrated_database_config_path, test_metadata_path)
+    monkeypatch.setattr(Worker, "validate", lambda self, **kwargs: pytest.fail("validation must not run"))
+
+    def ambiguous(self, *args, **kwargs):
+        raise AmbiguousCaseError(SUBMITTER_ID, "valid_submission", [1, 2])
+
+    monkeypatch.setattr(SubmissionDb, "assert_no_duplicate_initial", ambiguous)
+
+    result = _validate(competing)
+
+    assert result.exit_code != 0
+    assert _duplicate_error_state(competing)["failure_reason"] == "ambiguous_case"
 
 
 def test_validate_records_duplicate_initial_detected_during_validation(

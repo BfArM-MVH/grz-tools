@@ -128,7 +128,7 @@ GrzError
 └── PruefberichtRejectedError        pruefbericht_rejected
 ```
 
-The errors of grz-db that reject a duplicate map to `duplicate_tang` and `duplicate_initial`.
+The errors of grz-db that reject a duplicate map to `duplicate_tang` and `duplicate_initial`, and the one that refuses to guess between cases maps to `ambiguous_case`.
 A `KeyboardInterrupt` maps to `interrupted`, and grzctl turns SIGTERM into one.
 Every other exception maps to `unknown`.
 

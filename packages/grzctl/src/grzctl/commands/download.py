@@ -1,10 +1,12 @@
 """Command for downloading a submission."""
 
 import logging
+from functools import partial
 from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
+from grz_common.models.s3 import S3Options
 from grz_common.transfer import (
     ERROR_GRZ_CLI_VERSION,
     get_grzcli_version,
@@ -14,7 +16,9 @@ from grz_common.transfer import (
 )
 from grz_common.utils.version_check import check_metadata_version_and_exit_if_needed
 from grz_common.workers.worker import Worker
-from grz_db.models.submission import SubmissionStateEnum
+from grz_db.errors import AmbiguousCaseError, DuplicateInitialSubmissionError
+from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
+from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
@@ -23,6 +27,69 @@ from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
 
 log = logging.getLogger(__name__)
+
+
+def _reject_duplicate_initial(db: SubmissionDb, submission_id: str, metadata: GrzSubmissionMetadata) -> None:
+    """Fail a submission whose case already has a QC-passed initial submission.
+
+    Asking now only spares the download of the files of a submission that validation would reject
+    anyway. Validation asks again, and the database indices stay the final authority: a competing
+    initial submission can still pass basic QC in between.
+
+    A duplicate is recorded as failing basic QC, as validation does. Recording that is best-effort,
+    so that a failure to do so cannot replace the duplicate error, which is what the failure reason of
+    the submission is taken from.
+
+    A case that cannot be resolved does not stop the download, as it does not stop populate: the
+    submission stays unlinked, and validation raises the error if it is still there.
+
+    :raises DuplicateInitialSubmissionError: if the case already has a QC-passed initial submission.
+    """
+    submission = metadata.submission
+    try:
+        db.assert_no_duplicate_initial(
+            submission_id,
+            submitter_id=submission.submitter_id,
+            local_case_id=submission.local_case_id,
+            submission_type=submission.submission_type,
+        )
+    except AmbiguousCaseError as e:
+        log.warning(f"{e} Could not check for a duplicate initial submission; continuing, validation asks again.")
+    except DuplicateInitialSubmissionError as e:
+        log.warning(f"{e} Failing basic QC for submission '{submission_id}' before downloading its files.")
+        try:
+            _ = db.modify_submission(submission_id, "basic_qc_passed", "false")
+        except Exception:
+            log.exception(f"Could not record the failed basic QC of submission '{submission_id}'.")
+        raise
+
+
+def _store_and_check_metadata(  # noqa: PLR0913
+    db: SubmissionDb,
+    submission_id: str,
+    s3_options: S3Options,
+    metadata: GrzSubmissionMetadata,
+    *,
+    populate: bool,
+    force: bool,
+) -> None:
+    """Store the metadata and check it against the database, before any file is downloaded.
+
+    Populating first stores what is known about the submission, so that a submission rejected
+    here keeps its metadata, donors and case. A tanG that another submission holds fails while
+    populating, because the database refuses it.
+    """
+    if populate:
+        s3_client = init_s3_client(s3_options)
+        submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
+        db.populate(
+            submission_id,
+            metadata,
+            submission_date,
+            force=force,
+            on_missing="create",
+        )
+    _reject_duplicate_initial(db, submission_id, metadata)
 
 
 @click.command()
@@ -60,6 +127,10 @@ def download(  # noqa: PLR0913, PLR0917
     records when the upload started and finished, which only the inbox knows until `grzctl clean` runs.
     If that timing cannot be read or stored, download logs a warning and carries on.
     With --no-update-db, download touches no database, and --populate only logs a warning.
+
+    With --update-db, the metadata is stored (--populate) and checked before any file is downloaded:
+    a submission whose tanG is already used, or whose case already has a QC-passed initial submission,
+    fails right away, as it would later in validation.
     """
     submitter_id = submission_id.split("_", maxsplit=1)[0]
     resolved_inbox = require_inbox(
@@ -96,6 +167,10 @@ def download(  # noqa: PLR0913, PLR0917
         end_state=SubmissionStateEnum.DOWNLOADED,
         enabled=update_db,
     ) as db_context:
+        db = db_context.db
+        if update_db and db is None:
+            raise RuntimeError("A DbContext that update_db enables holds the database.")
+
         worker_inst.download(
             s3_options,
             submission_id,
@@ -104,11 +179,13 @@ def download(  # noqa: PLR0913, PLR0917
                 s3_options,
                 metadata_schema_version,
             ),
+            on_metadata=(
+                partial(_store_and_check_metadata, db, submission_id, s3_options, populate=populate, force=force)
+                if db is not None
+                else None
+            ),
         )
-        if update_db:
-            db = db_context.db
-            if db is None:
-                raise RuntimeError("A DbContext that update_db enables holds the database.")
+        if db is not None:
             # Init S3 client
             s3_client = init_s3_client(s3_options)
             # Add grz-cli version to db. Informational, so failed read must not fail the download.
@@ -119,16 +196,8 @@ def download(  # noqa: PLR0913, PLR0917
                 log.warning(f"Could not read the grz-cli version of {submission_id}: {e}")
             db.modify_submission(submission_id, "grz_cli_version", grz_cli_version)
             if populate:
-                submission_date = get_metadata_upload_timestamp(s3_client, s3_options.bucket, submission_id).date()
-                metadata = worker_inst.parse_submission().metadata.content
-                db.populate(
-                    submission_id,
-                    metadata,
-                    submission_date,
-                    force=force,
-                    on_missing="create",
-                )
-                # The timing lives only in the inbox's object listing, which ``grzctl clean`` erases.
+                # The metadata was stored before the files were downloaded. The timing lives only in the
+                # inbox's object listing, which ``grzctl clean`` erases.
                 # It is auxiliary, so no error in getting or storing it may fail the download.
                 try:
                     timing = get_upload_timing(s3_client, s3_options.bucket, submission_id)

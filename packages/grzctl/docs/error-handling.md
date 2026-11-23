@@ -38,6 +38,7 @@ Every other step stops for a mistyped submission ID before its context is open, 
 | `decryption_error`              | LE       | A file cannot be decrypted with the GRZ private key. If every submission fails this way, check the configured private key. |
 | `duplicate_tang`                | LE       | Another submission already used the tanG. |
 | `duplicate_initial`             | LE       | The case already has an initial submission that passed basic QC. |
+| `ambiguous_case`                | GRZ      | The case key matches more than one case, so the database cannot tell which one is meant. Relink the submissions and delete the duplicate cases. |
 | `incomplete_submission`         | GRZ      | A command ran before an earlier step had passed for every file. |
 | `submission_cleaned`            | GRZ      | `grzctl clean` has started on the submission, so the inbox no longer holds it. |
 | `interrupted`                   | GRZ      | Ctrl-C or SIGTERM stopped the run. A rerun resumes it. |

@@ -672,6 +672,7 @@ class FailureReasonEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore[m
 
     DUPLICATE_TANG = "duplicate_tang"
     DUPLICATE_INITIAL = "duplicate_initial"
+    AMBIGUOUS_CASE = "ambiguous_case"
     INCOMPLETE_SUBMISSION = "incomplete_submission"
     DECRYPTION_ERROR = "decryption_error"
     NETWORK_ERROR = "network_error"
