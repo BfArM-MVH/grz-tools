@@ -4,7 +4,12 @@ from functools import cached_property
 from typing import Any
 
 import grz_common.exceptions as grzexc
-from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
+from grz_db.errors import (
+    AmbiguousCaseError,
+    DuplicateInitialSubmissionError,
+    DuplicateTanGError,
+    SubmissionNotFoundError,
+)
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 
@@ -21,6 +26,7 @@ _FAILURE_REASONS: dict[type[BaseException], FailureReasonEnum] = {
     grzexc.DuplicateUploadError: FailureReasonEnum.DUPLICATE_TANG,
     DuplicateTanGError: FailureReasonEnum.DUPLICATE_TANG,
     DuplicateInitialSubmissionError: FailureReasonEnum.DUPLICATE_INITIAL,
+    AmbiguousCaseError: FailureReasonEnum.AMBIGUOUS_CASE,
     grzexc.IncompleteSubmissionError: FailureReasonEnum.INCOMPLETE_SUBMISSION,
     grzexc.SubmissionCleanedError: FailureReasonEnum.SUBMISSION_CLEANED,
     KeyboardInterrupt: FailureReasonEnum.INTERRUPTED,

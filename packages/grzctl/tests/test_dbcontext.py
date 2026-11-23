@@ -6,7 +6,12 @@ from unittest.mock import MagicMock
 import grz_common.exceptions as grzexc
 import pytest
 from grz_common.workers.submission import SubmissionMetadata
-from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
+from grz_db.errors import (
+    AmbiguousCaseError,
+    DuplicateInitialSubmissionError,
+    DuplicateTanGError,
+    SubmissionNotFoundError,
+)
 from grz_db.models.submission import RETIRED_FAILURE_REASONS, FailureReasonEnum, SubmissionStateEnum
 from grzctl.dbcontext import DbContext
 from pydantic import ValidationError
@@ -57,6 +62,7 @@ class TestMapExceptionToFailureReason:
             (grzexc.PruefberichtRejectedError("failed"), FailureReasonEnum.PRUEFBERICHT_REJECTED),
             (KeyboardInterrupt(), FailureReasonEnum.INTERRUPTED),
             (DuplicateTanGError(), FailureReasonEnum.DUPLICATE_TANG),
+            (AmbiguousCaseError("260914050", "case", [1, 2]), FailureReasonEnum.AMBIGUOUS_CASE),
             (grzexc.IncompleteSubmissionError("failed"), FailureReasonEnum.INCOMPLETE_SUBMISSION),
             (grzexc.SubmissionCleanedError("failed"), FailureReasonEnum.SUBMISSION_CLEANED),
             (grzexc.DetailedQCError("failed"), FailureReasonEnum.DETAILED_QC_ERROR),
@@ -111,6 +117,7 @@ class TestMapExceptionToFailureReason:
                 KeyboardInterrupt(),
                 DuplicateTanGError(),
                 DuplicateInitialSubmissionError(1),
+                AmbiguousCaseError("260914050", "case", [1, 2]),
                 grzexc.IncompleteSubmissionError(),
                 grzexc.SubmissionCleanedError(),
                 grzexc.DetailedQCError(),
