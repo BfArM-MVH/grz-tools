@@ -12,7 +12,7 @@ from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
-from ..dbcontext import DbContext
+from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 from .inbox_resolution import require_inbox
 
@@ -110,6 +110,7 @@ def decrypt(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.DECRYPTING,
         end_state=SubmissionStateEnum.DECRYPTED,
+        transitions=STEP_TRANSITIONS,
         enabled=update_db,
     ) as db_context:
         # raise a ConfigurationError, so that the DbContext records the failure reason configuration_error

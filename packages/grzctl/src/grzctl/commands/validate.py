@@ -13,7 +13,7 @@ from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 
 from ..commands import grzctl_configuration
 from ..commands.db.cli import get_submission_db_instance
-from ..dbcontext import DbContext
+from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 
 if TYPE_CHECKING:
@@ -119,6 +119,7 @@ def validate(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.VALIDATING,
         end_state=SubmissionStateEnum.VALIDATED,
+        transitions=STEP_TRANSITIONS,
         enabled=update_db,
     ) as dbcontext_inst:
         if update_db:

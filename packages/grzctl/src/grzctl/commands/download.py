@@ -17,7 +17,7 @@ from grz_common.workers.worker import Worker
 from grz_db.models.submission import SubmissionStateEnum
 
 from ..commands import grzctl_configuration, inbox_option
-from ..dbcontext import DbContext
+from ..dbcontext import STEP_TRANSITIONS, DbContext
 from ..models.config import GrzctlConfig
 from .db.cli import get_submission_db_instance
 from .inbox_resolution import require_inbox
@@ -58,6 +58,7 @@ def download(  # noqa: PLR0913, PLR0917
     With --update-db (the default), download records the inbox of the submission in the database.
     With --populate (also the default), it also fills the submission metadata in the database and
     records when the upload started and finished, which only the inbox knows until `grzctl clean` runs.
+    It keeps a case link that exists, even with --force, so a link set with `db case relink` stays.
     If that timing cannot be read or stored, download logs a warning and carries on.
     With --no-update-db, download touches no database, and --populate only logs a warning.
     """
@@ -94,6 +95,7 @@ def download(  # noqa: PLR0913, PLR0917
         submission_id=submission_id,
         start_state=SubmissionStateEnum.DOWNLOADING,
         end_state=SubmissionStateEnum.DOWNLOADED,
+        transitions=STEP_TRANSITIONS,
         enabled=update_db,
     ) as db_context:
         worker_inst.download(
@@ -127,6 +129,7 @@ def download(  # noqa: PLR0913, PLR0917
                     submission_date,
                     force=force,
                     on_missing="create",
+                    keep_case_link=True,
                 )
                 # The timing lives only in the inbox's object listing, which ``grzctl clean`` erases.
                 # It is auxiliary, so no error in getting or storing it may fail the download.

@@ -764,6 +764,30 @@ def test_populate_does_not_revert_a_relink_without_force(db: SubmissionDb, metad
     assert db.get_submission(submission_id).case_id == original_case_id
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_populate_keep_case_link_keeps_a_relink(db: SubmissionDb, metadata: GrzSubmissionMetadata, force: bool):
+    """With ``keep_case_link``, populate neither refuses nor reverts a relink to another case."""
+    initial_metadata = _with_submission_type(metadata, "initial")
+    submission_id = initial_metadata.submission_id
+    db.add_submission(submission_id)
+    db.commit_changes(submission_id, db.diff(submission_id, initial_metadata, submission_uploaded_date=None))
+
+    other = db.create_case(initial_metadata.submission.submitter_id, "some-other-case")
+    db.set_submission_case(submission_id, other.id)
+
+    db.populate(submission_id, initial_metadata, submission_date=None, force=force, keep_case_link=True)
+    assert db.get_submission(submission_id).case_id == other.id
+
+
+def test_populate_keep_case_link_links_an_unlinked_submission(db: SubmissionDb, metadata: GrzSubmissionMetadata):
+    """``keep_case_link`` keeps only a link that exists, so an unlinked submission is still resolved to a case."""
+    initial_metadata = _with_submission_type(metadata, "initial")
+    submission_id = initial_metadata.submission_id
+
+    db.populate(submission_id, initial_metadata, submission_date=None, on_missing="create", keep_case_link=True)
+    assert db.get_submission(submission_id).case_id is not None
+
+
 def test_diff_records_a_duplicate_initial_against_its_case(db: SubmissionDb, metadata: GrzSubmissionMetadata):
     """A duplicate initial submission is recorded in full, linked to the case it duplicates,
     rather than nothing being written at all.
