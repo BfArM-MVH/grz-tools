@@ -59,6 +59,10 @@ The rejection lands when a second one tries to _pass_.
 When the case already has a QC-passed initial, validation stops, the submission's `basic_qc_passed` is set to false, and the state log records an `ERROR` with failure reason `duplicate_initial`.
 The same handling applies to a rival that passes while this submission is being validated.
 
+`grzctl download` asks it as well, as soon as the metadata is in, so that the files of a rejected submission are never transferred.
+The metadata is stored first (`--populate`), so a rejected submission keeps its metadata, donors and case, exactly as if validation had rejected it.
+A case key that matches several cases does not stop the download, as it does not stop populate: the submission stays unlinked, and validation raises the error, with failure reason `ambiguous_case`, if it is still there.
+
 With `--no-update-db`, nothing is written, so the check only logs a warning.
 
 ## Upgrading an existing database
