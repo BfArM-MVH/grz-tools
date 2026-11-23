@@ -43,6 +43,19 @@ def _check_duplicate_initial(db: "SubmissionDb", metadata: GrzSubmissionMetadata
     )
 
 
+def _record_failed_basic_qc(db: "SubmissionDb", submission_id: str) -> None:
+    """Record that the submission fails basic QC, best-effort.
+
+    Called while a :class:`DuplicateInitialSubmissionError` is being handled, and that error is
+    what the failure reason of the submission is taken from. An error raised here would replace it,
+    so a failure to record is logged instead.
+    """
+    try:
+        _ = db.modify_submission(submission_id, "basic_qc_passed", "false")
+    except Exception:
+        log.exception(f"Could not record the failed basic QC of submission '{submission_id}'.")
+
+
 def _warn_on_duplicate_initial(configuration: GrzctlConfig, metadata: GrzSubmissionMetadata) -> None:
     """Best-effort, read-only duplicate-initial check when DB updates are disabled.
 
@@ -129,7 +142,7 @@ def validate(  # noqa: PLR0913, PLR0917
                 # submission fails basic QC without spending any validation effort. Re-raising
                 # lets DbContext record the ERROR state with the duplicate_initial reason.
                 log.warning(f"{e} Failing basic QC for submission '{submission_id}' without validating.")
-                _ = dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", "false")
+                _record_failed_basic_qc(dbcontext_inst.db, submission_id)
                 raise
         else:
             _warn_on_duplicate_initial(configuration, submission.metadata.content)
@@ -146,5 +159,5 @@ def validate(  # noqa: PLR0913, PLR0917
                 log.warning(
                     f"Submission '{submission_id}' data validated, but {e} Failing basic QC for this submission."
                 )
-                _ = dbcontext_inst.db.modify_submission(submission_id, "basic_qc_passed", "false")
+                _record_failed_basic_qc(dbcontext_inst.db, submission_id)
                 raise
