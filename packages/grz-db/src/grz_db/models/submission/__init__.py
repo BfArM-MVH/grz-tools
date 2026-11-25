@@ -18,6 +18,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
+from grz_pydantic_models.common import as_aware_datetime
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
     LOCAL_CASE_ID_PLACEHOLDERS,
@@ -1140,6 +1141,18 @@ class PersonalDataPurge:
     qc_queue_entry_removed: bool
 
 
+@dataclass(frozen=True)
+class DeletionRecordsPurge:
+    """What :meth:`SubmissionDb.purge_deletion_records` removed from one deleted submission.
+
+    :param change_requests_deleted: How many change requests were deleted.
+    :param tan_g_cleared: Whether the submission still held its tanG, which was cleared.
+    """
+
+    change_requests_deleted: int
+    tan_g_cleared: bool
+
+
 class SubmissionDb:
     """
     API entrypoint for managing submissions.
@@ -2082,6 +2095,73 @@ class SubmissionDb:
                 case_deleted=case_deleted,
                 qc_queue_entry_removed=queue_entry is not None,
             )
+
+    def list_deletion_records(self, deleted_before: datetime.datetime) -> Sequence[Submission]:
+        """List deleted submissions that still keep records of their deletion.
+
+        The records are the submission's change requests and its tanG, which
+        :meth:`purge_personal_data` keeps for documentation until :meth:`purge_deletion_records`
+        removes them.
+
+        :param deleted_before: Only submissions whose deletion finished (:attr:`Submission.deleted_at`)
+            before this time are listed. A naive value is taken as UTC.
+        :returns: Those submissions, the earliest deleted first.
+        """
+        # SQLite stores timestamps as text in UTC and compares them as text, so the cutoff is
+        # compared in UTC too; another offset would shift it by that many hours
+        deleted_before = as_aware_datetime(deleted_before).astimezone(datetime.UTC)
+        with self.transaction() as session:
+            statement = (
+                select(Submission)
+                .where(
+                    Submission.is_deleted,
+                    Submission.deleted_at < deleted_before,  # type: ignore[operator]
+                    sa.or_(
+                        Submission.tan_g.is_not(None),  # type: ignore[union-attr]
+                        Submission.changes.any(),  # type: ignore[attr-defined]
+                    ),
+                )
+                .options(selectinload(Submission.states), selectinload(Submission.changes))  # type: ignore[arg-type]
+                .order_by(Submission.deleted_at, Submission.id)
+            )
+            return session.exec(statement).all()
+
+    def purge_deletion_records(self, submission_id: str) -> DeletionRecordsPurge:
+        """Remove the records kept of a deleted submission, as one transaction.
+
+        Deletes all of the submission's change requests, which hold the request and may name the
+        tanG or the local case ID, and clears its tanG. Deleting whole rows keeps the signatures of
+        the remaining log entries valid. The states, donors and detailed QC results stay.
+
+        Running it again changes nothing.
+
+        :param submission_id: ID of the submission.
+        :returns: What was removed.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        :raises ValueError: if the submission has no ``Deleted`` state.
+        """
+        with self.transaction() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            if not submission.is_deleted:
+                raise ValueError(
+                    f"Submission '{submission_id}' has no Deleted state; "
+                    "its records are purged only after its deletion finished."
+                )
+
+            change_requests = session.exec(
+                select(ChangeRequestLog).where(ChangeRequestLog.submission_id == submission_id)
+            ).all()
+            for change_request in change_requests:
+                session.delete(change_request)
+
+            tan_g_cleared = submission.tan_g is not None
+            submission.tan_g = None
+            session.add(submission)
+            session.flush()
+
+            return DeletionRecordsPurge(change_requests_deleted=len(change_requests), tan_g_cleared=tan_g_cleared)
 
     def set_submission_case(self, submission_id: str, case_id: int) -> Submission:
         """Link (or relink) a submission to an existing case.

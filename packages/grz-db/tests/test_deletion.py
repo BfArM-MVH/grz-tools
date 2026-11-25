@@ -6,6 +6,7 @@ import pytest
 from grz_db.errors import SubmissionDeletedError
 from grz_db.models.submission import (
     ChangeRequestEnum,
+    DeletionRecordsPurge,
     DetailedQCResult,
     Donor,
     PersonalDataPurge,
@@ -16,6 +17,7 @@ from grz_db.models.submission import (
     SubmissionStateLog,
     SubmissionType,
 )
+from grz_pydantic_models.common import as_aware_datetime
 from grz_pydantic_models.submission.metadata import (
     GrzSubmissionMetadata,
     LibraryType,
@@ -339,3 +341,102 @@ class TestPurgePersonalData:
         assert purge == PersonalDataPurge(donors_renamed=0, case_deleted=False, qc_queue_entry_removed=False)
         assert db.get_submission(populated_submission_id).model_dump() == first
         assert sorted(donor.pseudonym for donor in _donors(db, populated_submission_id)) == first_donors
+
+
+def _add_change_request(db: SubmissionDb, submission_id: str, change: ChangeRequestEnum) -> None:
+    db.add_change_request(
+        submission_id,
+        change,
+        requester_name="Erika Mustermann",
+        requester_email="erika.mustermann@example.org",
+        requested_at=datetime.date(2026, 11, 1),
+        request_email_content="Bitte ändern.",
+    )
+
+
+@pytest.fixture(scope="function")
+def deleted_submission_id(db: SubmissionDb, populated_submission_id: str) -> str:
+    """A deleted submission, purged of personal data, that keeps a Modify and a Delete change request."""
+    sid = populated_submission_id
+    _add_change_request(db, sid, ChangeRequestEnum.MODIFY)
+    _add_change_request(db, sid, ChangeRequestEnum.DELETE)
+    db.purge_personal_data(sid)
+    db.update_submission_state(sid, SubmissionStateEnum.DELETED)
+    return sid
+
+
+def _listed(db: SubmissionDb, deleted_before: datetime.datetime) -> list[str]:
+    return [submission.id for submission in db.list_deletion_records(deleted_before)]
+
+
+TOMORROW = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+
+
+class TestListDeletionRecords:
+    def test_lists_a_deleted_submission_deleted_before_the_cutoff(self, db: SubmissionDb, deleted_submission_id: str):
+        assert _listed(db, TOMORROW) == [deleted_submission_id]
+
+    def test_leaves_out_a_submission_deleted_after_the_cutoff(self, db: SubmissionDb, deleted_submission_id: str):
+        assert _listed(db, datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)) == []
+
+    @pytest.mark.parametrize("offset_hours", [0, 1, -5])
+    def test_cutoff_is_exact_in_any_time_zone(self, db: SubmissionDb, deleted_submission_id: str, offset_hours: int):
+        """The cutoff compares the same instant whatever its offset, also on SQLite, which compares text."""
+        deleted_at = as_aware_datetime(db.get_submission(deleted_submission_id).deleted_at)
+        zone = datetime.timezone(datetime.timedelta(hours=offset_hours))
+        second = datetime.timedelta(seconds=1)
+
+        assert _listed(db, (deleted_at + second).astimezone(zone)) == [deleted_submission_id]
+        assert _listed(db, deleted_at.astimezone(zone)) == []
+        assert _listed(db, (deleted_at - second).astimezone(zone)) == []
+
+    def test_leaves_out_submissions_not_deleted(self, db: SubmissionDb, populated_submission_id: str):
+        """A deletion only started, and a submission never deleted, are not listed even with records."""
+        never_deleted = f"{SUBMITTER_ID}_2025-01-01_11111111"
+        db.add_submission(never_deleted)
+        _add_change_request(db, never_deleted, ChangeRequestEnum.DELETE)
+        _add_change_request(db, populated_submission_id, ChangeRequestEnum.DELETE)
+
+        assert _listed(db, TOMORROW) == []
+
+    def test_leaves_out_a_submission_whose_records_are_purged(self, db: SubmissionDb, deleted_submission_id: str):
+        db.purge_deletion_records(deleted_submission_id)
+        assert _listed(db, TOMORROW) == []
+
+
+class TestPurgeDeletionRecords:
+    def test_removes_change_requests_and_tan_g(self, db: SubmissionDb, deleted_submission_id: str):
+        before = db.get_submission(deleted_submission_id)
+        assert before.tan_g is not None
+
+        purge = db.purge_deletion_records(deleted_submission_id)
+
+        after = db.get_submission(deleted_submission_id)
+        assert purge == DeletionRecordsPurge(change_requests_deleted=2, tan_g_cleared=True)
+        assert after.tan_g is None
+        assert db.list_change_requests() == []
+        assert after.model_dump(exclude={"tan_g"}) == before.model_dump(exclude={"tan_g"})
+        assert [state.state for state in after.states] == [SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED]
+        assert len(_donors(db, deleted_submission_id)) == 2
+        assert len(db.get_detailed_qc_results(deleted_submission_id)) == 2
+
+    def test_refuses_an_unfinished_deletion(self, db: SubmissionDb, populated_submission_id: str):
+        _add_change_request(db, populated_submission_id, ChangeRequestEnum.DELETE)
+
+        with pytest.raises(ValueError, match="no Deleted state"):
+            db.purge_deletion_records(populated_submission_id)
+        assert db.get_submission(populated_submission_id).tan_g is not None
+        assert len(db.list_change_requests()) == 1
+
+    def test_refuses_a_submission_never_deleted(self, db: SubmissionDb, submission_id: str):
+        with pytest.raises(ValueError, match="no Deleted state"):
+            db.purge_deletion_records(submission_id)
+
+    def test_running_it_again_changes_nothing(self, db: SubmissionDb, deleted_submission_id: str):
+        db.purge_deletion_records(deleted_submission_id)
+        first = db.get_submission(deleted_submission_id).model_dump()
+
+        purge = db.purge_deletion_records(deleted_submission_id)
+
+        assert purge == DeletionRecordsPurge(change_requests_deleted=0, tan_g_cleared=False)
+        assert db.get_submission(deleted_submission_id).model_dump() == first
