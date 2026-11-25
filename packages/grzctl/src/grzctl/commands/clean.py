@@ -62,10 +62,22 @@ def clean(
             end_state=SubmissionStateEnum.CLEANED,
             enabled=update_db,
         ):
-            _clean_submission_from_bucket(bucket_name, s3_options, submission_id, inbox_desc)
+            if not clean_submission_from_inbox(bucket_name, s3_options, submission_id, inbox_desc):
+                sys.exit(f"No objects with prefix '{submission_id}/' in inbox {inbox_desc} found for deletion.")
 
 
-def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submission_id: str, inbox_desc: str):
+def clean_submission_from_inbox(bucket_name: str, s3_options: S3Options, submission_id: str, inbox_desc: str) -> int:
+    """Remove all files of a submission from an inbox, leaving an empty ``metadata.json`` and a ``cleaned`` marker.
+
+    The empty ``metadata.json`` keeps the submission ID from being uploaded again. When the inbox
+    holds nothing of the submission, it returns without marking it cleaned.
+
+    :param bucket_name: Bucket of the inbox.
+    :param s3_options: S3 connection to the inbox.
+    :param submission_id: ID of the submission.
+    :param inbox_desc: How to name the inbox in messages.
+    :returns: How many objects were deleted.
+    """
     prefix = submission_id
     prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
@@ -86,7 +98,7 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submi
                 _ = obj.delete()
                 num_deleted += 1
         if not num_deleted:
-            sys.exit(f"No objects with prefix '{prefix}' in inbox {inbox_desc} found for deletion.")
+            return 0
 
         log.info(f"Successfully deleted {num_deleted} objects.")
 
@@ -98,3 +110,4 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submi
         bucket.Object(f"{submission_id}/cleaning").delete()
 
     log.info(f"Cleaned '{prefix}' from inbox {inbox_desc}.")
+    return num_deleted
