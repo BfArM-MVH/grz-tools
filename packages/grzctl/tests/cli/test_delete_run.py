@@ -1,17 +1,23 @@
 import datetime
+import json
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+import boto3
 import click.testing
 import grzctl.cli
 import pytest
 import yaml
-from grz_db.models.submission import SubmissionDb, SubmissionStateEnum, SubmissionType
+from grz_db.models.submission import RequestRawContentType, SubmissionDb, SubmissionStateEnum, SubmissionType
+from grzctl.commands.delete import execute
 from grzctl.commands.delete.resolve import (
     DeletionOutcome,
     DeletionRequestRefusedError,
     resolve_deletion_request,
 )
 from grzctl.models.deletion_request import DeletionRequest
+from moto import mock_aws
 
 GRZ_ID = "GRZK00007"
 SUBMITTER_ID = "000000000"
@@ -19,6 +25,25 @@ TAN_G_A = "3f9a" + "0" * 56 + "0c21"
 TAN_G_B = "8b1e" + "1" * 56 + "00d4"
 TAN_G_UNKNOWN = "c" * 64
 PDF = b"%PDF-1.7\n%%EOF\n"
+SUBMISSION_ID = f"{SUBMITTER_ID}_2025-01-01_00000000"
+
+
+@pytest.fixture
+def s3() -> Iterator[Any]:
+    """The test config's archives and inbox in a mocked S3, with the submission archived and uploaded."""
+    with mock_aws():
+        client = boto3.client("s3", region_name="us-east-1")
+        for bucket in ("consented", "non_consented", "inbox"):
+            client.create_bucket(Bucket=bucket)
+        for key in ("files/a.fastq.gz.c4gh", "metadata/metadata.json", "logs/progress_upload.cjson"):
+            client.put_object(Bucket="consented", Key=f"{SUBMISSION_ID}/{key}", Body=b"x" * 10)
+        for key in ("files/a.fastq.gz.c4gh", "metadata/metadata.json"):
+            client.put_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/{key}", Body=b"x" * 10)
+        yield client
+
+
+def _keys(s3: Any, bucket: str) -> set[str]:
+    return {o["Key"] for o in s3.list_objects_v2(Bucket=bucket).get("Contents", [])}
 
 
 def _request(**overrides) -> dict:
@@ -164,7 +189,7 @@ def _run(config_path: Path, tmp_path: Path, request: dict, *options: str) -> cli
 
 class TestRunCommand:
     def test_dry_run_shows_the_plan_without_writing_out_tan_gs(
-        self, db: SubmissionDb, migrated_database_config_path: Path, tmp_path: Path
+        self, s3: Any, db: SubmissionDb, migrated_database_config_path: Path, tmp_path: Path
     ):
         submission_id = _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
 
@@ -175,8 +200,11 @@ class TestRunCommand:
         assert "3f9a…0c21" in result.stdout
         assert "not present at GRZK00007" in result.stdout
         assert TAN_G_A not in result.output and TAN_G_UNKNOWN not in result.output
+        assert "consented archive" in result.stdout
+        assert "2 objects, 20 B" in result.stdout
         assert "Dry run: nothing was deleted." in result.stderr
         assert db.get_submission(submission_id).get_latest_state().state == SubmissionStateEnum.REPORTED
+        assert len(_keys(s3, "consented")) == 3
 
     def test_reports_every_problem_of_the_request(self, migrated_database_config_path: Path, tmp_path: Path):
         result = _run(
@@ -219,3 +247,116 @@ class TestRunCommand:
         )
 
         assert result.exit_code != 0
+
+
+def _states(db: SubmissionDb, submission_id: str) -> list[SubmissionStateEnum]:
+    return [state.state for state in sorted(db.get_submission(submission_id).states, key=lambda s: (s.timestamp, s.id))]
+
+
+class TestRunDeletes:
+    def test_deletes_the_submission_and_records_it(
+        self, s3: Any, db: SubmissionDb, migrated_database_config_path: Path, tmp_path: Path
+    ):
+        _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+        db.modify_submission(SUBMISSION_ID, "local_case_id", "patient-1")
+
+        result = _run(migrated_database_config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+        assert result.exit_code == 0, result.output
+        assert _keys(s3, "consented") == {f"{SUBMISSION_ID}/logs/progress_upload.cjson", f"{SUBMISSION_ID}/deleted"}
+        assert _keys(s3, "non_consented") == set()
+        assert _keys(s3, "inbox") == {f"{SUBMISSION_ID}/metadata/metadata.json", f"{SUBMISSION_ID}/cleaned"}
+
+        submission = db.get_submission(SUBMISSION_ID)
+        assert _states(db, SUBMISSION_ID)[-2:] == [SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED]
+        assert submission.local_case_id == f"deleted-{SUBMISSION_ID}"
+        assert submission.tan_g == TAN_G_A
+        deleted = submission.get_latest_state()
+        assert [entry["location"] for entry in deleted.data["storage"]] == ["consented archive", "inbox 'inbox'"]
+        assert deleted.data["storage"][0]["logs_kept"] == 1
+
+        (change_request,) = db.list_change_requests()[0].changes
+        assert change_request.request_raw_content == PDF
+        assert change_request.request_raw_content_type == RequestRawContentType.PDF
+        assert change_request.data["instructed_at"] == "2026-11-21"
+        assert TAN_G_A not in json.dumps(change_request.data) + json.dumps(deleted.data)
+
+    def test_stops_when_object_lock_keeps_objects(
+        self, s3: Any, db: SubmissionDb, migrated_database_config_path: Path, tmp_path: Path
+    ):
+        s3.delete_bucket(Bucket="non_consented")
+        s3.create_bucket(Bucket="non_consented", ObjectLockEnabledForBucket=True)
+        _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+
+        result = _run(migrated_database_config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+        assert result.exit_code != 0
+        assert "object lock" in result.stderr
+        assert len(_keys(s3, "consented")) == 3
+        assert _states(db, SUBMISSION_ID) == [SubmissionStateEnum.REPORTED]
+        assert db.list_change_requests() == []
+
+    def test_a_failed_deletion_stays_deleting_and_a_second_run_finishes_it(
+        self,
+        s3: Any,
+        db: SubmissionDb,
+        migrated_database_config_path: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+        with monkeypatch.context() as patch:
+            patch.setattr(execute, "delete_from_inbox", lambda *args: None)
+            first = _run(migrated_database_config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+        assert first.exit_code != 0
+        assert "the inbox 'inbox' still holds 2 objects" in first.output
+        assert "stays in state Deleting" in first.output
+        assert _states(db, SUBMISSION_ID)[-1] == SubmissionStateEnum.DELETING
+
+        second = _run(migrated_database_config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+        assert second.exit_code == 0, second.output
+        assert _states(db, SUBMISSION_ID)[-1] == SubmissionStateEnum.DELETED
+        assert len(db.list_change_requests()[0].changes) == 1
+
+    def test_leaves_submissions_already_deleted_or_not_present(
+        self, s3: Any, db: SubmissionDb, migrated_database_config_path: Path, tmp_path: Path
+    ):
+        _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED))
+
+        result = _run(
+            migrated_database_config_path, tmp_path, _request(tan_g=[TAN_G_A, TAN_G_UNKNOWN]), "--yes-i-really-mean-it"
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Nothing to delete." in result.stderr
+        assert len(_keys(s3, "consented")) == 3
+
+    def test_answering_no_deletes_nothing(
+        self, s3: Any, db: SubmissionDb, migrated_database_config_path: Path, tmp_path: Path
+    ):
+        _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+        data_file = tmp_path / "antrag.yaml"
+        data_file.write_text(yaml.safe_dump(_request(), allow_unicode=True))
+        pdf_file = tmp_path / "antrag.pdf"
+        pdf_file.write_bytes(PDF)
+
+        result = click.testing.CliRunner().invoke(
+            grzctl.cli.build_cli(),
+            [
+                "--config",
+                str(migrated_database_config_path),
+                "delete",
+                "run",
+                "--data-file",
+                str(data_file),
+                "--raw-content",
+                str(pdf_file),
+            ],
+            input="n\n",
+        )
+
+        assert result.exit_code != 0
+        assert len(_keys(s3, "consented")) == 3
+        assert _states(db, SUBMISSION_ID) == [SubmissionStateEnum.REPORTED]

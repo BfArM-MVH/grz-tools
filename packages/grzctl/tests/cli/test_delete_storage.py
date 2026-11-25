@@ -6,12 +6,13 @@ import pytest
 from grz_common.models.s3 import S3Options
 from grzctl.commands.delete import storage
 from grzctl.commands.delete.storage import (
+    Holdings,
     StorageDeletionError,
-    archive_leftovers,
+    archive_holdings,
     delete_from_archive,
     delete_from_inbox,
     has_object_lock,
-    inbox_leftovers,
+    inbox_holdings,
 )
 from moto import mock_aws
 
@@ -71,7 +72,7 @@ class TestDeleteFromArchive:
             f"{OTHER_SUBMISSION_ID}/files/a.c4gh",
         }
         assert (deletion.objects_deleted, deletion.bytes_deleted, deletion.logs_kept) == (3, 165, 2)
-        assert archive_leftovers(archive, SUBMISSION_ID) == 0
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 0
 
     def test_none_for_an_archive_that_never_held_the_submission(self, s3: Any):
         archive = _bucket(s3, "non-consented", {f"{OTHER_SUBMISSION_ID}/files/a.c4gh": b"z"})
@@ -87,7 +88,7 @@ class TestDeleteFromArchive:
         deletion = delete_from_archive(archive, "consented archive", SUBMISSION_ID)
 
         assert (deletion.objects_deleted, deletion.delete_markers_removed) == (4, 1)
-        assert archive_leftovers(archive, SUBMISSION_ID) == 0
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 0
         assert _versions(s3, "consented") == 3  # two logs and the tombstone
 
     def test_continues_an_interrupted_deletion(self, s3: Any):
@@ -96,7 +97,7 @@ class TestDeleteFromArchive:
         deletion = delete_from_archive(archive, "consented archive", SUBMISSION_ID)
 
         assert deletion.objects_deleted == 3
-        assert archive_leftovers(archive, SUBMISSION_ID) == 0
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 0
 
     def test_running_it_again_deletes_nothing_more(self, s3: Any):
         archive = _bucket(s3, "consented", ARCHIVED)
@@ -106,10 +107,10 @@ class TestDeleteFromArchive:
 
         assert (deletion.objects_deleted, deletion.logs_kept) == (0, 2)
 
-    def test_leftovers_count_what_is_still_there(self, s3: Any):
+    def test_holdings_count_what_deleting_removes(self, s3: Any):
         archive = _bucket(s3, "consented", ARCHIVED)
 
-        assert archive_leftovers(archive, SUBMISSION_ID) == 3
+        assert archive_holdings(archive, SUBMISSION_ID) == Holdings(objects=3, bytes=165)
 
     def test_refused_deletion_raises(self, s3: Any, monkeypatch: pytest.MonkeyPatch):
         archive = _bucket(s3, "consented", ARCHIVED)
@@ -147,7 +148,7 @@ class TestDeleteFromInbox:
         metadata = s3.get_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json")
         assert metadata["Body"].read() == b""
         assert deletion.objects_deleted == 3
-        assert inbox_leftovers(inbox, SUBMISSION_ID) == 0
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
 
     def test_a_cleaned_inbox_is_left_as_it_is(self, s3: Any):
         inbox = _bucket(s3, "inbox", {f"{SUBMISSION_ID}/metadata/metadata.json": b"", f"{SUBMISSION_ID}/cleaned": b""})
@@ -155,7 +156,7 @@ class TestDeleteFromInbox:
         deletion = delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
 
         assert deletion.objects_deleted == 0
-        assert inbox_leftovers(inbox, SUBMISSION_ID) == 0
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
 
     def test_none_for_an_inbox_without_the_submission(self, s3: Any):
         inbox = _bucket(s3, "inbox", {})
@@ -168,7 +169,7 @@ class TestDeleteFromInbox:
 
         delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
 
-        assert inbox_leftovers(inbox, SUBMISSION_ID) == 0
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
         assert _versions(s3, "inbox") == 2  # the empty metadata.json and the cleaned marker
         metadata = s3.get_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json")
         assert metadata["Body"].read() == b""
@@ -180,8 +181,8 @@ class TestDeleteFromInbox:
         s3.delete_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/files/sample_R1.fastq.gz.c4gh")
         s3.delete_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/version")
         s3.put_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/cleaned", Body=b"")
-        assert inbox_leftovers(inbox, SUBMISSION_ID) > 0
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects > 0
 
         delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
 
-        assert inbox_leftovers(inbox, SUBMISSION_ID) == 0
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0

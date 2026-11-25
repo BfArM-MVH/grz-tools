@@ -2,8 +2,8 @@
 
 A bucket that keeps old object versions would keep the data in them, so those are deleted too.
 Not every S3-compatible store answers the versioning and object lock queries; one that does not
-is taken to have neither. The check after deleting, :func:`archive_leftovers` and
-:func:`inbox_leftovers`, catches anything that is left all the same.
+is taken to have neither. The check after deleting, :func:`archive_holdings` and
+:func:`inbox_holdings`, catches anything that is left all the same.
 """
 
 from collections.abc import Iterator, Sequence
@@ -191,37 +191,61 @@ def delete_from_inbox(s3_options: S3Options, location: str, submission_id: str) 
     return _deletion(location, deleted, logs_kept=0)
 
 
-def archive_leftovers(s3_options: S3Options, submission_id: str) -> int:
-    """Count what an archive still holds of a submission besides its log files and the tombstone.
+@dataclass(frozen=True)
+class Holdings:
+    """What a bucket holds of a submission that deleting it removes.
+
+    :param objects: How many object versions and delete markers.
+    :param bytes: Their total size.
+    """
+
+    objects: int
+    bytes: int
+
+
+def _holdings(entries: Sequence[_Entry]) -> Holdings:
+    return Holdings(objects=len(entries), bytes=sum(e.size for e in entries))
+
+
+def archive_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
+    """What an archive holds of a submission besides its log files and the tombstone.
+
+    Before :func:`delete_from_archive`, this is what it will delete; after it, what it left.
 
     :param s3_options: S3 connection to the archive.
     :param submission_id: ID of the submission.
-    :returns: How many object versions and delete markers are left.
     """
     client = init_s3_client(s3_options)
     prefix = f"{submission_id}/"
     entries = _entries(client, s3_options.bucket, prefix, _is_versioned(client, s3_options.bucket))
-    return sum(
-        not e.key.startswith(f"{prefix}logs/") and not (e.key == f"{prefix}{TOMBSTONE}" and e.is_latest)
-        for e in entries
+    return _holdings(
+        [
+            e
+            for e in entries
+            if not e.key.startswith(f"{prefix}logs/") and not (e.key == f"{prefix}{TOMBSTONE}" and e.is_latest)
+        ]
     )
 
 
-def inbox_leftovers(s3_options: S3Options, submission_id: str) -> int:
-    """Count what an inbox still holds of a submission besides the empty ``metadata.json`` and the ``cleaned`` marker.
+def inbox_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
+    """What an inbox holds of a submission besides the empty ``metadata.json`` and the ``cleaned`` marker.
+
+    Before :func:`delete_from_inbox`, this is what it will delete; after it, what it left.
 
     :param s3_options: S3 connection to the inbox.
     :param submission_id: ID of the submission.
-    :returns: How many object versions and delete markers are left.
     """
     client = init_s3_client(s3_options)
     prefix = f"{submission_id}/"
     entries = _entries(client, s3_options.bucket, prefix, _is_versioned(client, s3_options.bucket))
-    return sum(
-        not (
-            e.is_latest
-            and not e.is_delete_marker
-            and (e.key == f"{prefix}cleaned" or (e.key == f"{prefix}metadata/metadata.json" and e.size == 0))
-        )
-        for e in entries
+    return _holdings(
+        [
+            e
+            for e in entries
+            if not (
+                e.is_latest
+                and not e.is_delete_marker
+                and (e.key == f"{prefix}cleaned" or (e.key == f"{prefix}metadata/metadata.json" and e.size == 0))
+            )
+        ]
     )
