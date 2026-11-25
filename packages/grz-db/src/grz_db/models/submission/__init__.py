@@ -64,6 +64,7 @@ from ...errors import (
     OutdatedDatabaseSchemaError,
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
+    SubmissionDeletedError,
     SubmissionNotFoundError,
     SubmissionTypeAlreadySetError,
     SubmissionTypeInvalidForCaseError,
@@ -1323,6 +1324,25 @@ class SubmissionDb:
         qc_passed_initial = self._qc_passed_initial_of(session, case_id) if case_id is not None else None
         return DuplicateInitialSubmissionError(case_id, qc_passed_initial.id if qc_passed_initial is not None else None)
 
+    @staticmethod
+    def _refuse_if_deletion_started(submission: Submission) -> None:
+        """Refuse a write to a submission whose deletion has started.
+
+        :raises SubmissionDeletedError: if *submission* has a ``Deleting`` or ``Deleted`` state.
+        """
+        if submission.deletion_started:
+            raise SubmissionDeletedError(submission.id)
+
+    def _refuse_qc_results_for_deleted(self, session: Session, results: Sequence["DetailedQCResult"]) -> None:
+        """Refuse detailed QC results for a submission whose deletion has started.
+
+        :raises SubmissionDeletedError: if any result belongs to such a submission.
+        """
+        for submission_id in {result.submission_id for result in results}:
+            submission = session.get(Submission, submission_id)
+            if submission is not None:
+                self._refuse_if_deletion_started(submission)
+
     def modify_submission(self, submission_id: str, key: str, value: Any, session: Session | None = None) -> Submission:
         """Set one column of a submission.
 
@@ -1339,6 +1359,7 @@ class SubmissionDb:
             submission = active_session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
 
             setattr(submission, key, value)
 
@@ -1376,6 +1397,7 @@ class SubmissionDb:
             db_submission = session.get(Submission, submission.id)
             if db_submission is None:
                 raise SubmissionNotFoundError(submission.id)
+            self._refuse_if_deletion_started(db_submission)
 
             for field in SubmissionBase.model_fields:
                 if field in SubmissionBase.immutable_fields:
@@ -1405,6 +1427,7 @@ class SubmissionDb:
             submission = active_session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
             previous_inbox = submission.inbox
             if previous_inbox is not None and previous_inbox != inbox_name:
                 logger.warning(
@@ -1514,6 +1537,8 @@ class SubmissionDb:
             submission = session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
+            if state not in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED):
+                self._refuse_if_deletion_started(submission)
             if not self._author:
                 raise ValueError("No author defined")
 
@@ -1606,6 +1631,7 @@ class SubmissionDb:
     def add_detailed_qc_result(self, result: DetailedQCResult) -> DetailedQCResult:
         """Add or update a detailed QC result to/in the database."""
         with self.transaction() as session:
+            self._refuse_qc_results_for_deleted(session, [result])
             session.add(result)
 
             session.flush()
@@ -1618,6 +1644,7 @@ class SubmissionDb:
         import behind; every row is only ever visible once the whole set is in.
         """
         with self.transaction() as session:
+            self._refuse_qc_results_for_deleted(session, results)
             session.add_all(results)
             session.flush()
         return tuple(results)
@@ -1983,6 +2010,7 @@ class SubmissionDb:
             submission = session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
             self._assert_case_trackable(submission_id, submission.submission_type)
             case = session.get(Case, case_id)
             if case is None:
@@ -2665,6 +2693,10 @@ class SubmissionDb:
         :param changes: Change set from :meth:`diff`.
         """
         with self.transaction() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
             if (link := changes.case_link) is not None:
                 self.assign_case(
                     submission_id,
