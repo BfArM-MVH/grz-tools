@@ -2017,6 +2017,7 @@ class _BackfillResult(StrEnum):
     WOULD_OVERWRITE = "would_overwrite"
     ERROR = "error"
     CONSENT_MISMATCH = "consent_mismatch"
+    DELETED = "deleted"
 
 
 @dataclass(frozen=True)
@@ -2272,6 +2273,11 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     inboxes_recorded = 0
 
     for submission in tqdm(candidates, disable=None):
+        if submission.deletion_started:
+            # grzctl delete removed its data and refuses writes to it
+            _report(f"  {submission.id}: skipped, it is deleted", "yellow")
+            counts[_BackfillResult.DELETED] += 1
+            continue
         with _logs_about(submission.id):
             # Read both archives before writing anything. A metadata.json in both is an error, and
             # committing the first copy found would already have changed the row.
@@ -2367,6 +2373,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
         f"  Case link unresolved: {links_unresolved} (also counted above)\n"
         f"  {inbox_verb}: {inboxes_recorded}\n"
+        f"  Deleted (skipped): {counts[_BackfillResult.DELETED]}\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}",
         "cyan",
     )

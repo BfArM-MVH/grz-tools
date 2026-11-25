@@ -4,7 +4,12 @@ from functools import cached_property
 from typing import Any
 
 import grz_common.exceptions as grzexc
-from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
+from grz_db.errors import (
+    DuplicateInitialSubmissionError,
+    DuplicateTanGError,
+    SubmissionDeletedError,
+    SubmissionNotFoundError,
+)
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 
@@ -86,8 +91,9 @@ class DbContext:
         automatically created and the transition proceeds;
       - otherwise: ``SubmissionNotFoundError`` is raised immediately.
 
-    Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError``) are
-    wrapped in ``RuntimeError`` so callers always receive a consistent exception type.
+    Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError`` and
+    ``SubmissionDeletedError``, which the database raises for a submission whose deletion has
+    started) are wrapped in ``RuntimeError`` so callers always receive a consistent exception type.
 
     Example::
 
@@ -172,7 +178,7 @@ class DbContext:
             log.debug(f"Updating submission {self.submission_id} state to {self.start_state.name}")
             self.db.update_submission_state(self.submission_id, self.start_state, grzctl_versions=self.grzctl_versions)
 
-        except SubmissionNotFoundError:
+        except (SubmissionNotFoundError, SubmissionDeletedError):
             raise
         except Exception as e:
             raise RuntimeError("Failed to connect to DB") from e

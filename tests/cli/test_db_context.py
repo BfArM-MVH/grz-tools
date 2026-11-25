@@ -165,7 +165,7 @@ def mock_command(command_spec, submission_id):
 
         if "extra_patch" in command_spec:
             # Some commands invoke a standalone callable (e.g. validate.callback,
-            # _clean_submission_from_bucket) instead of a Worker method.
+            # clean_submission_from_inbox) instead of a Worker method.
             # If the standalone callable has no expected return:
             if "extra_return_value" in command_spec:
                 mock_extra = stack.enter_context(
@@ -290,7 +290,7 @@ def build_args(
         },
         {
             "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it", "--inbox", "inbox"],
-            "extra_patch": "grzctl.commands.clean._clean_submission_from_bucket",
+            "extra_patch": "grzctl.commands.clean.clean_submission_from_inbox",
             "id_source": "arg",
             "initial_state": SubmissionStateEnum.QCED,
             "intermediate_state": SubmissionStateEnum.CLEANING,
@@ -433,7 +433,7 @@ def test_db_wrappers(
         },
         {
             "cmd": ["clean", "--submission-id", "SUBMISSION_ID", "--yes-i-really-mean-it", "--inbox", "inbox"],
-            "extra_patch": "grzctl.commands.clean._clean_submission_from_bucket",
+            "extra_patch": "grzctl.commands.clean.clean_submission_from_inbox",
             "id_source": "arg",
         },
     ],
@@ -639,7 +639,7 @@ def test_dbcontext_error_handling(db_engine, full_config_path, test_metadata, tm
 
     setup_db_state(runner, cli, full_config_path, submission_id, metadata_path, initial_state=SubmissionStateEnum.QCED)
 
-    with patch("grzctl.commands.clean._clean_submission_from_bucket") as mock_clean:
+    with patch("grzctl.commands.clean.clean_submission_from_inbox") as mock_clean:
         mock_clean.side_effect = RuntimeError("S3 Failure")
 
         args = [

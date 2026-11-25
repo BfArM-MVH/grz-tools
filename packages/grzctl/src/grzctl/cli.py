@@ -13,6 +13,7 @@ import platformdirs
 import yaml
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
+from grz_db.errors import SubmissionDeletedError
 
 from . import get_versions
 from .commands.archive import archive
@@ -143,8 +144,9 @@ def main():
     cli = build_cli()
     try:
         cli()
-    except grzexc.GrzError as e:
-        # an expected failure, such as an invalid metadata.json: log its message, not a traceback
+    except (grzexc.GrzError, SubmissionDeletedError) as e:
+        # an expected failure, such as an invalid metadata.json or a write to a deleted submission:
+        # log its message, not a traceback
         log.error(e)
         sys.exit(1)
 

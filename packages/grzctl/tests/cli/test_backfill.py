@@ -23,7 +23,7 @@ import click.testing
 import grzctl.cli
 import pytest
 import sqlalchemy
-from grz_db.models.submission import DONORS_KEY, Submission, SubmissionDb
+from grz_db.models.submission import DONORS_KEY, Submission, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.db.cli import (
@@ -741,6 +741,29 @@ def test_backfill_writes_the_metadata_from_the_one_archive_that_holds_it(
 
     assert result.exit_code == 0, result.output
     assert db.get_submission(submission_id).submission_metadata == metadata.to_redacted_dict()
+
+
+def test_backfill_skips_a_deleted_submission(
+    db: SubmissionDb,
+    s3_client_mock: Any,
+    migrated_database_config_path: Path,
+    metadata: GrzSubmissionMetadata,
+    submission_id: str,
+) -> None:
+    """A restore can bring a deleted submission's metadata.json back; backfill leaves it alone, without failing."""
+    db.add_submission(submission_id)
+    db.update_submission_state(submission_id, SubmissionStateEnum.DELETING)
+    db.update_submission_state(submission_id, SubmissionStateEnum.DELETED)
+    for bucket in ARCHIVE_BUCKETS:
+        s3_client_mock.create_bucket(Bucket=bucket)
+    _put_metadata(s3_client_mock, "consented", submission_id, metadata)
+
+    result = _invoke_backfill_command(migrated_database_config_path, submission_id)
+
+    assert result.exit_code == 0, result.output
+    assert f"{submission_id}: skipped, it is deleted" in result.stdout
+    assert "Deleted (skipped): 1" in result.stdout
+    assert db.get_submission(submission_id).submission_metadata is None
 
 
 def test_backfill_writes_nothing_when_both_archives_hold_the_metadata(
