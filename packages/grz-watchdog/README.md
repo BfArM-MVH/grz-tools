@@ -62,6 +62,9 @@ handlers:
 
 grzctl_config: "/path/to/grzctl.yaml"  # The grzctl config. grz-watchdog processes every inbox listed in it. Prefer an absolute path.
 
+monitoring:  # Optional. Without it, no monitoring report is sent.
+  url: "https://script.google.com/macros/s/<deployment>/exec"  # Intake URL of the GRZ monitoring sheet. grz-watchdog reports to it once a day, best effort. The token comes from GRZ_MONITORING_TOKEN.
+
 qc:
   revision: "v4.0.0"
   reference_directory: "/path/to/qc/references"
@@ -85,6 +88,7 @@ grzctl reads every field of its config from an environment variable as well.
 The variable's name follows the field's path, e.g. `GRZ_LEISTUNGSERBRINGER__<LE>__INBOX_BUCKETS__<INBOX>__SECRET` or `GRZ_PRUEFBERICHT__CLIENT_SECRET`.
 If the grzctl config leaves out the S3 credentials of an inbox or archive, or the Prüfbericht client secret, `grz-watchdog` requires the corresponding environment variable and refuses to start without it.
 Key passphrases can come from the config, from such a variable, or from `C4GH_PASSPHRASE`.
+With `monitoring.url` configured, the intake token of the GRZ monitoring sheet must come from `GRZ_MONITORING_TOKEN`.
 
 ### QC references
 
@@ -105,8 +109,7 @@ resources:
 
 ### Miscellaneous remarks
 
-- to control where pixi environments are stored, refer
-  to [detached-environments](https://pixi.sh/dev/reference/pixi_configuration/#detached-environments)
+- to control where pixi environments are stored, refer to [detached-environments](https://pixi.sh/dev/reference/pixi_configuration/#detached-environments)
 - to control where pixi packages caches are stored, refer to TODO
 - to control where nextflow's conda caches are stored, refer to TODO
 

@@ -77,6 +77,15 @@ properties:
   grzctl_config:
     type: string
     description: "Path to the unified grzctl configuration file."
+  monitoring:
+    type: object
+    description: "The GRZ monitoring sheet. Without this section, no report is sent."
+    properties:
+      url:
+        type: string
+        description: "Intake URL of the GRZ monitoring sheet. grz-watchdog reports to it once a day; the intake token comes from the environment variable GRZ_MONITORING_TOKEN."
+    required:
+      - url
   qc:
     type: object
     properties:

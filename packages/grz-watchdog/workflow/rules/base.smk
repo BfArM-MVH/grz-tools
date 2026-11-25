@@ -86,10 +86,37 @@ checkpoint select_submissions:
         "../scripts/select_submissions.py"
 
 
+rule report_monitoring:
+    """
+    Send the per-LE numbers of the running month and the one before to the GRZ monitoring sheet,
+    at most once a day. Sending a month again replaces its numbers in the sheet.
+    Best effort: an unreachable intake must not stop the processing, so a failed report only
+    logs a warning. The numbers are cumulative, so the next report carries them.
+    """
+    input:
+        grzctl_config_path=GRZCTL_CONFIG_PATH,
+    output:
+        marker=touch("<results>/monitoring/{date}.reported"),
+    log:
+        stdout="<logs>/monitoring/{date}.stdout.log",
+        stderr="<logs>/monitoring/{date}.stderr.log",
+    resources:
+        db_handles=1,
+    params:
+        url=MONITORING_URL,
+    shell:
+        """
+        if ! grzctl --config {input.grzctl_config_path} report monitoring --url {params.url:q} >{log.stdout} 2>{log.stderr}; then
+            echo "The monitoring report of {wildcards.date} failed, see {log.stderr}" >&2
+        fi
+        """
+
+
 rule pending:
     default_target: True
     input:
         all_pending_submissions,
+        monitoring_targets,
     priority: 3
 
 

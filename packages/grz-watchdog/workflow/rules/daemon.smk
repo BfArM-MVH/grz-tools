@@ -155,6 +155,13 @@ def monitor_and_queue_submissions(shutdown_event):
                     "No new submissions were found that are ready for processing in this cycle."
                 )
 
+            # the monitoring report, once a day
+            for target in monitoring_targets():
+                if target not in already_queued:
+                    daemon_logger.info("Queueing today's monitoring report.")
+                    submission_queue.put(target)
+                    already_queued.add(target)
+
             shutdown_event.wait(timeout=interval)
 
     except (KeyboardInterrupt, SystemExit):

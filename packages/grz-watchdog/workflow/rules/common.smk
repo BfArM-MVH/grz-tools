@@ -1,3 +1,4 @@
+import datetime
 import math
 import os
 import shutil
@@ -117,6 +118,17 @@ def all_pending_submissions(wildcards: Wildcards):
     with open(batch_file) as f:
         targets = [line.strip() for line in f if line.strip()]
     return targets
+
+
+def monitoring_targets(wildcards=None):
+    """
+    The marker of today's monitoring report, or nothing if no monitoring sheet is configured.
+    The date is in UTC, like the month ends of the report.
+    """
+    if not MONITORING_URL:
+        return []
+    today = datetime.datetime.now(datetime.UTC).date().isoformat()
+    return [rules.report_monitoring.output.marker.format(date=today)]
 
 
 def get_cleanup_prerequisite(wildcards: Wildcards):
