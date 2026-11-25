@@ -1125,6 +1125,21 @@ than that for its fsyncs.
 """
 
 
+@dataclass(frozen=True)
+class PersonalDataPurge:
+    """What :meth:`SubmissionDb.purge_personal_data` removed from one submission.
+
+    :param donors_renamed: How many donor pseudonyms were replaced by a placeholder.
+    :param case_deleted: Whether the submission's case was deleted, which happens when no other
+        submission is linked to it.
+    :param qc_queue_entry_removed: Whether the submission was taken out of the detailed QC queue.
+    """
+
+    donors_renamed: int
+    case_deleted: bool
+    qc_queue_entry_removed: bool
+
+
 class SubmissionDb:
     """
     API entrypoint for managing submissions.
@@ -1983,6 +1998,90 @@ class SubmissionDb:
                 raise CaseHasLinkedSubmissionsError(case_id, count)
             session.delete(case)
             session.flush()
+
+    def purge_personal_data(self, submission_id: str) -> PersonalDataPurge:
+        """Remove what identifies a person from a submission whose deletion has started, as one transaction.
+
+        Clears ``submission_metadata`` and replaces ``local_case_id`` with ``deleted-<submission ID>``
+        and each donor pseudonym with ``deleted-<submission ID>-<n>``, also in the detailed QC
+        results that point to the donor. The placeholders carry the submission ID, so the reports,
+        which tell persons apart by pseudonym and ``local_case_id``, count each deleted submission
+        as a person of its own rather than merging them. Unlinks the case, deleting it together
+        with its ``psn`` when no other submission is linked to it, and takes the submission out of
+        the detailed QC queue.
+
+        Keeps ``tan_g``, which the deletion confirmation names and which is kept for documentation,
+        and what the reports count: the submission's other columns, its states and change
+        requests, the donors' other columns and the detailed QC results.
+
+        Running it again changes nothing, so an interrupted deletion can be resumed.
+
+        :param submission_id: ID of the submission.
+        :returns: What was removed.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        :raises ValueError: if the submission has no ``Deleting`` or ``Deleted`` state.
+        """
+        placeholder = f"deleted-{submission_id}"
+        with self.transaction() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            if not submission.deletion_started:
+                raise ValueError(
+                    f"Submission '{submission_id}' has no Deleting or Deleted state; "
+                    "its personal data is purged only as part of its deletion."
+                )
+
+            submission.submission_metadata = None
+            submission.local_case_id = placeholder
+
+            case_id = submission.case_id
+            submission.case = None
+            session.add(submission)
+            session.flush()
+            case_deleted = False
+            if case_id is not None:
+                still_linked = session.exec(
+                    select(sqlfn.count()).select_from(Submission).where(Submission.case_id == case_id)  # type: ignore[arg-type]
+                ).one()
+                if not still_linked:
+                    session.delete(session.get(Case, case_id))
+                    case_deleted = True
+
+            queue_entry = session.get(QCQueueEntry, submission_id)
+            if queue_entry is not None:
+                session.delete(queue_entry)
+
+            donors = session.exec(select(Donor).where(Donor.submission_id == submission_id)).all()
+            to_rename = sorted(
+                (donor for donor in donors if not donor.pseudonym.startswith(f"{placeholder}-")),
+                key=attrgetter("pseudonym"),
+            )
+            for number, donor in enumerate(to_rename, start=len(donors) - len(to_rename) + 1):
+                # detailed_qc_results references the donor's pseudonym without ON UPDATE CASCADE:
+                # add the renamed donor, repoint its QC results, then drop the old row
+                new_pseudonym = f"{placeholder}-{number}"
+                columns = {name: getattr(donor, name) for name in Donor.model_fields if name != "pseudonym"}
+                session.add(Donor(**columns, pseudonym=new_pseudonym))
+                session.flush()
+                qc_results = session.exec(
+                    select(DetailedQCResult).where(
+                        DetailedQCResult.submission_id == submission_id,
+                        DetailedQCResult.pseudonym == donor.pseudonym,
+                    )
+                ).all()
+                for qc_result in qc_results:
+                    qc_result.pseudonym = new_pseudonym
+                    session.add(qc_result)
+                session.flush()
+                session.delete(donor)
+                session.flush()
+
+            return PersonalDataPurge(
+                donors_renamed=len(to_rename),
+                case_deleted=case_deleted,
+                qc_queue_entry_removed=queue_entry is not None,
+            )
 
     def set_submission_case(self, submission_id: str, case_id: int) -> Submission:
         """Link (or relink) a submission to an existing case.

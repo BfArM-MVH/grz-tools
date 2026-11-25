@@ -1,4 +1,5 @@
 import datetime
+import json
 from collections.abc import Callable
 
 import pytest
@@ -6,6 +7,9 @@ from grz_db.errors import SubmissionDeletedError
 from grz_db.models.submission import (
     ChangeRequestEnum,
     DetailedQCResult,
+    Donor,
+    PersonalDataPurge,
+    QCQueueEntry,
     Submission,
     SubmissionDb,
     SubmissionStateEnum,
@@ -232,3 +236,106 @@ class TestWritesAllowedOnceDeletionStarted:
 
         db.clear_submission_case(submission_id)
         assert db.get_submission(submission_id).case_id is None
+
+
+def _as_initial(metadata: GrzSubmissionMetadata) -> GrzSubmissionMetadata:
+    """A copy of *metadata* as an ``initial`` submission, which is case-tracked unlike the example's ``test``."""
+    raw = json.loads(metadata.model_dump_json(by_alias=True))
+    raw["submission"]["submissionType"] = "initial"
+    return GrzSubmissionMetadata.model_validate(raw)
+
+
+@pytest.fixture(scope="function")
+def populated_submission_id(db: SubmissionDb, metadata: GrzSubmissionMetadata) -> str:
+    """A populated ``initial`` submission whose deletion has started.
+
+    It is linked to a case, queued for detailed QC and has a QC result for each donor.
+    """
+    initial = _as_initial(metadata)
+    sid = initial.submission_id
+    db.add_submission(sid)
+    db.populate(sid, initial, submission_date=None)
+    db.modify_submission(sid, "basic_qc_passed", True)
+    for lab_datum_id, donor in enumerate(initial.donors):
+        result = _qc_result(sid)
+        result.lab_datum_id = str(lab_datum_id)
+        result.pseudonym = donor.donor_pseudonym
+        db.add_detailed_qc_result(result)
+    db.update_submission_state(sid, SubmissionStateEnum.DELETING)
+    return sid
+
+
+def _donors(db: SubmissionDb, submission_id: str) -> list[Donor]:
+    with db.transaction() as session:
+        return list(session.exec(select(Donor).where(Donor.submission_id == submission_id)).all())
+
+
+class TestPurgePersonalData:
+    def test_removes_what_identifies_a_person(self, db: SubmissionDb, populated_submission_id: str):
+        sid = populated_submission_id
+        before = db.get_submission(sid)
+        assert before.case_id is not None and before.submission_metadata is not None
+        relations_before = sorted(donor.relation for donor in _donors(db, sid))
+
+        purge = db.purge_personal_data(sid)
+
+        after = db.get_submission(sid)
+        assert purge == PersonalDataPurge(donors_renamed=2, case_deleted=True, qc_queue_entry_removed=True)
+        assert after.submission_metadata is None
+        assert after.local_case_id == f"deleted-{sid}"
+        assert after.case_id is None
+        assert db.get_case(before.case_id) is None
+        with db.transaction() as session:
+            assert session.get(QCQueueEntry, sid) is None
+
+        donors = _donors(db, sid)
+        assert sorted(donor.pseudonym for donor in donors) == [f"deleted-{sid}-1", f"deleted-{sid}-2"]
+        assert sorted(donor.relation for donor in donors) == relations_before
+        assert sorted(result.pseudonym for result in db.get_detailed_qc_results(sid)) == [
+            f"deleted-{sid}-1",
+            f"deleted-{sid}-2",
+        ]
+
+    def test_keeps_what_the_reports_count(self, db: SubmissionDb, populated_submission_id: str):
+        before = db.get_submission(populated_submission_id).model_dump(
+            exclude={"submission_metadata", "local_case_id", "case_id"}
+        )
+
+        db.purge_personal_data(populated_submission_id)
+
+        after = db.get_submission(populated_submission_id)
+        assert after.tan_g is not None
+        assert after.model_dump(exclude={"submission_metadata", "local_case_id", "case_id"}) == before
+        assert len(after.states) == 1
+        assert len(db.get_detailed_qc_results(populated_submission_id)) == 2
+
+    def test_keeps_a_case_another_submission_is_linked_to(self, db: SubmissionDb, populated_submission_id: str):
+        case_id = db.get_submission(populated_submission_id).case_id
+        followup = f"{populated_submission_id.split('_', maxsplit=1)[0]}_2025-10-01_00000000"
+        db.add_submission(followup)
+        db.modify_submission(followup, "submission_type", SubmissionType.followup.value)
+        db.set_submission_case(followup, case_id)
+
+        purge = db.purge_personal_data(populated_submission_id)
+
+        assert purge.case_deleted is False
+        assert db.get_case(case_id) is not None
+        assert db.get_submission(followup).case_id == case_id
+
+    def test_refuses_without_deletion_state(self, db: SubmissionDb, submission_id: str):
+        db.modify_submission(submission_id, "local_case_id", "patient-1")
+
+        with pytest.raises(ValueError, match="no Deleting or Deleted state"):
+            db.purge_personal_data(submission_id)
+        assert db.get_submission(submission_id).local_case_id == "patient-1"
+
+    def test_running_it_again_changes_nothing(self, db: SubmissionDb, populated_submission_id: str):
+        db.purge_personal_data(populated_submission_id)
+        first = db.get_submission(populated_submission_id).model_dump()
+        first_donors = sorted(donor.pseudonym for donor in _donors(db, populated_submission_id))
+
+        purge = db.purge_personal_data(populated_submission_id)
+
+        assert purge == PersonalDataPurge(donors_renamed=0, case_deleted=False, qc_queue_entry_removed=False)
+        assert db.get_submission(populated_submission_id).model_dump() == first
+        assert sorted(donor.pseudonym for donor in _donors(db, populated_submission_id)) == first_donors
