@@ -296,6 +296,63 @@ class Submission(SubmissionBase, table=True):
             cls.basic_qc_passed.is_(True),  # type: ignore[union-attr]
         )
 
+    @hybrid_property
+    def is_deleted(self) -> bool:
+        """Whether ``grzctl delete`` finished deleting this submission.
+
+        True once any ``Deleted`` state exists, whatever states were recorded after it.
+        """
+        return any(state.state == SubmissionStateEnum.DELETED for state in self.states)
+
+    @is_deleted.inplace.expression
+    @classmethod
+    def _is_deleted_expression(cls) -> ColumnElement[bool]:
+        return sa.exists().where(
+            SubmissionStateLog.submission_id == cls.id,  # type: ignore[arg-type]
+            SubmissionStateLog.state == SubmissionStateEnum.DELETED,
+        )
+
+    @hybrid_property
+    def deleted_at(self) -> datetime.datetime | None:
+        """When the deletion finished: the timestamp of the first ``Deleted`` state, or ``None``.
+
+        The first, since ``grzctl delete --check`` can record another one after a backup restore.
+        The reports count the deletion in the quarter of this timestamp, and the record purge
+        counts the retention period from it.
+        """
+        return min(
+            (state.timestamp for state in self.states if state.state == SubmissionStateEnum.DELETED),
+            default=None,
+        )
+
+    @deleted_at.inplace.expression
+    @classmethod
+    def _deleted_at_expression(cls) -> ColumnElement[datetime.datetime | None]:
+        return (
+            select(sqlfn.min(SubmissionStateLog.timestamp))
+            .where(
+                SubmissionStateLog.submission_id == cls.id,
+                SubmissionStateLog.state == SubmissionStateEnum.DELETED,
+            )
+            .scalar_subquery()
+        )
+
+    @hybrid_property
+    def deletion_started(self) -> bool:
+        """Whether a deletion started, finished or not: a ``Deleting`` or ``Deleted`` state exists.
+
+        Nothing may process such a submission any more, since part of its data may already be gone.
+        """
+        return any(state.state in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED) for state in self.states)
+
+    @deletion_started.inplace.expression
+    @classmethod
+    def _deletion_started_expression(cls) -> ColumnElement[bool]:
+        return sa.exists().where(
+            SubmissionStateLog.submission_id == cls.id,  # type: ignore[arg-type]
+            SubmissionStateLog.state.in_((SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED)),  # type: ignore[attr-defined]
+        )
+
     def diff(
         self,
         other: Self,
