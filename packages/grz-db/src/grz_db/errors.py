@@ -62,6 +62,16 @@ class SubmissionTypeAlreadySetError(SubmissionError):
         )
 
 
+class SubmissionDeletedError(SubmissionError):
+    """Exception for when a write targets a submission whose deletion has started."""
+
+    def __init__(self, submission_id: str):
+        super().__init__(
+            f"Submission '{submission_id}' is being or has been deleted and can no longer be changed. "
+            "If its deletion was interrupted, run grzctl delete again to finish it."
+        )
+
+
 class SubmissionBasicQCNotPassedError(SubmissionError):
     """Exception for when a submission has not passed basic QC."""
 
