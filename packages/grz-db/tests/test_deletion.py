@@ -452,3 +452,29 @@ class TestGetSubmissionByTanG:
 
     def test_none_for_an_unknown_tan_g(self, db: SubmissionDb, submission_id: str):
         assert db.get_submission_by_tan_g("a" * 64) is None
+
+
+class TestBackdatedState:
+    def test_a_backdated_state_keeps_its_timestamp_and_verifies(
+        self, db: SubmissionDb, submission_id: str, test_author
+    ):
+        when = datetime.datetime(2026, 3, 2, 12, 0, tzinfo=datetime.UTC)
+
+        db.update_submission_state(submission_id, SubmissionStateEnum.DELETED, timestamp=when)
+
+        state = db.get_submission(submission_id).get_latest_state()
+        assert as_aware_datetime(state.timestamp) == when
+        assert state.verify(test_author.private_key().public_key())
+
+
+class TestListDeletions:
+    def test_lists_started_and_finished_deletions_only(self, db: SubmissionDb):
+        ids = [f"{SUBMITTER_ID}_2025-01-01_{suffix * 8}" for suffix in "abc"]
+        for sid in ids:
+            db.add_submission(sid)
+        db.update_submission_state(ids[0], SubmissionStateEnum.DELETING)
+        db.update_submission_state(ids[1], SubmissionStateEnum.DELETING)
+        db.update_submission_state(ids[1], SubmissionStateEnum.DELETED)
+        db.update_submission_state(ids[2], SubmissionStateEnum.REPORTED)
+
+        assert [s.id for s in db.list_deletions()] == ids[:2]

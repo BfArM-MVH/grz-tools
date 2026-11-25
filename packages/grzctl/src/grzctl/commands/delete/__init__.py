@@ -2,7 +2,10 @@
 
 import click
 
+from .check import check
 from .confirmation import confirmation
+from .mark_done import mark_done
+from .purge_records import purge_records
 from .run import run
 from .template import template
 
@@ -19,3 +22,6 @@ def delete():
 delete.add_command(template)
 delete.add_command(run)
 delete.add_command(confirmation)
+delete.add_command(check)
+delete.add_command(purge_records)
+delete.add_command(mark_done)

@@ -249,3 +249,19 @@ def inbox_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
             )
         ]
     )
+
+
+def tombstoned_submissions(s3_options: S3Options) -> set[str]:
+    """The submissions an archive holds a tombstone of, which ``grzctl delete run`` left when deleting them.
+
+    :param s3_options: S3 connection to the archive.
+    :returns: Their IDs.
+    """
+    client = init_s3_client(s3_options)
+    submission_ids = set()
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3_options.bucket):
+        for obj in page.get("Contents", []):
+            submission_id, _, name = obj["Key"].partition("/")
+            if name == TOMBSTONE:
+                submission_ids.add(submission_id)
+    return submission_ids

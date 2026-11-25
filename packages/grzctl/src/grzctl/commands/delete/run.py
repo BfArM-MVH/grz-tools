@@ -18,6 +18,7 @@ from .resolve import (
     DeletionOutcome,
     DeletionRequestRefusedError,
     ResolvedDeletionRequest,
+    new_table,
     resolve_deletion_request,
     short_tan_g,
 )
@@ -57,9 +58,7 @@ def _print_plan(request: DeletionRequest, resolved: ResolvedDeletionRequest, con
         f"Deletion request of {request.submitter_id}{alias}, sent {request.requested_at}, "
         f"instructed {request.instructed_at}"
     )
-    table = rich.table.Table(box=None)
-    for column in ("tanG", "Submission", "State", "Result"):
-        table.add_column(column)
+    table = new_table("tanG", "Submission", "State", "Result")
     for r in resolved.tan_gs:
         latest = r.submission.get_latest_state() if r.submission is not None else None
         result = r.outcome.value
@@ -96,9 +95,7 @@ def _holdings_text(holdings: Holdings) -> str:
 
 def _print_storage(targets: dict[str, StorageTargets]) -> None:
     """Show what each bucket holds of each submission to delete."""
-    table = rich.table.Table(box=None)
-    for column in ("Submission", "Location", "To delete"):
-        table.add_column(column)
+    table = new_table("Submission", "Location", "To delete")
     for submission_id, submission_targets in targets.items():
         for location, s3_options in submission_targets.archives.items():
             if (holdings := archive_holdings(s3_options, submission_id)).objects:

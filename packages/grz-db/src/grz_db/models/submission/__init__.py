@@ -1544,13 +1544,14 @@ class SubmissionDb:
         current_index_in_block = absolute_index % block_size
         return current_index_in_block == target_index_in_block
 
-    def update_submission_state(
+    def update_submission_state(  # noqa: PLR0913
         self,
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
         grzctl_versions: dict[str, str] | None = None,
         failure_reason: FailureReasonEnum | None = None,
+        timestamp: datetime.datetime | None = None,
     ) -> SubmissionStateLog:
         """Update a submission's state to the specified state.
 
@@ -1559,6 +1560,8 @@ class SubmissionDb:
         :param data: Optional data to attach to the update.
         :param grzctl_versions: Optional dictionary of grzctl dependency versions.
         :param failure_reason: Why the submission reached an error state, if it did.
+        :param timestamp: When the submission reached the state, if not now, e.g. for a state
+            recorded afterwards. It is signed with the rest of the entry.
         :returns: The new :class:`SubmissionStateLog` entry.
         """
         with self.transaction() as session:
@@ -1577,6 +1580,7 @@ class SubmissionDb:
                 data=data,
                 grzctl_versions=grzctl_versions,
                 failure_reason=failure_reason,
+                **({"timestamp": timestamp} if timestamp is not None else {}),
             )
             signature = state_log_payload.sign(self._author.private_key())
 
@@ -2112,6 +2116,20 @@ class SubmissionDb:
                 case_deleted=case_deleted,
                 qc_queue_entry_removed=queue_entry is not None,
             )
+
+    def list_deletions(self) -> Sequence[Submission]:
+        """List every submission whose deletion has started, finished or not, with its states.
+
+        :returns: Those submissions, ordered by their ID.
+        """
+        with self.transaction() as session:
+            statement = (
+                select(Submission)
+                .where(Submission.deletion_started)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .order_by(Submission.id)
+            )
+            return session.exec(statement).all()
 
     def list_deletion_records(self, deleted_before: datetime.datetime) -> Sequence[Submission]:
         """List deleted submissions that still keep records of their deletion.

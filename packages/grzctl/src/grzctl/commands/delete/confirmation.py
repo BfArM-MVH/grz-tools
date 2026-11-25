@@ -26,7 +26,8 @@ RECORD_RETENTION_YEARS = 3
 """Years for which the records of a deletion, its tanGs among them, may be kept (BfArM SOP, section IV.g)."""
 
 
-def _years_later(date: datetime.date, years: int) -> datetime.date:
+def years_later(date: datetime.date, years: int) -> datetime.date:
+    """The same day *years* later, or earlier if negative; 29 February becomes 28 February."""
     try:
         return date.replace(year=date.year + years)
     except ValueError:  # 29 February
@@ -48,7 +49,7 @@ def build_confirmation(request: DeletionRequest, db: SubmissionDb, grz_id: str, 
     :raises click.ClickException: if a submission of the request is not deleted yet, or the
         records of the request are purged already.
     """
-    if _years_later(request.instructed_at, RECORD_RETENTION_YEARS) < today:
+    if years_later(request.instructed_at, RECORD_RETENTION_YEARS) < today:
         raise click.ClickException(
             f"The request was instructed on {request.instructed_at}, more than {RECORD_RETENTION_YEARS} years ago. "
             "Its records are purged, so its tanGs can no longer be told from tanGs never present."
@@ -102,7 +103,7 @@ def build_confirmation(request: DeletionRequest, db: SubmissionDb, grz_id: str, 
             "Die Löschung wird im Quartalsbericht für "
             + " und ".join(f"Q{quarter}/{year}" for year, quarter in quarters)
             + " in der Spalte number_of_deletions aufgeführt. Die tanGs werden zur Dokumentation bis längstens "
-            f"{_german(_years_later(last_deletion, RECORD_RETENTION_YEARS))} aufbewahrt.",
+            f"{_german(years_later(last_deletion, RECORD_RETENTION_YEARS))} aufbewahrt.",
         ]
     return "\n".join(lines) + "\n"
 

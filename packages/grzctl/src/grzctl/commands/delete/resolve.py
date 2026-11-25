@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+import rich.table
 from grz_db.models.submission import Submission, SubmissionDb
 
 from ...models.deletion_request import DeletionRequest
@@ -62,6 +63,20 @@ class DeletionRequestRefusedError(Exception):
     def __init__(self, problems: list[str]):
         super().__init__("\n".join(problems))
         self.problems = problems
+
+
+_SUBMISSION_ID_LENGTH = len("000000000_2025-01-01_00000000")
+
+
+def new_table(*columns: str) -> rich.table.Table:
+    """A table with *columns* that never cuts or wraps a submission ID, which is copied from it."""
+    table = rich.table.Table(box=None)
+    for column in columns:
+        if column == "Submission":
+            table.add_column(column, no_wrap=True, min_width=_SUBMISSION_ID_LENGTH)
+        else:
+            table.add_column(column)
+    return table
 
 
 def short_tan_g(tan_g: str) -> str:
