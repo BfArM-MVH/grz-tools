@@ -1,5 +1,28 @@
 # Changelog
 
+## [5.2.0](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.3...grzctl-v5.2.0) (2026-11-10)
+
+
+### Features
+
+* **grz-common:** derive the upload timing of a submission from its ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** add `Submission.is_qc_passed_initial` ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** record when a submission's upload started and finished ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-pydantic-models:** add `month_date_bounds` ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grzctl:** add `report monitoring` for the GDC monitoring dashboard ([#741](https://github.com/BfArM-MVH/grz-tools/issues/741)) ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+
+
+### Bug Fixes
+
+* **grz-common:** drop SQLite's DDL banner too, so cron runs stay silent ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grz-db:** require grz-pydantic-models 4.2.0 ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+* **grzctl:** show only the last run of a resumed upload in grzctl list ([dda2e06](https://github.com/BfArM-MVH/grz-tools/commit/dda2e06b0494779ef54bfc1dc237842b44a51196))
+
+
+### Documentation
+
+* **grz-cli,grzctl:** add example config files ([#750](https://github.com/BfArM-MVH/grz-tools/issues/750)) ([3baa49a](https://github.com/BfArM-MVH/grz-tools/commit/3baa49a4d2a06defba315e7ccaa15fcda758fe30)), closes [#749](https://github.com/BfArM-MVH/grz-tools/issues/749)
+
 ## [5.1.3](https://github.com/BfArM-MVH/grz-tools/compare/grzctl-v5.1.2...grzctl-v5.1.3) (2026-10-29)
 
 

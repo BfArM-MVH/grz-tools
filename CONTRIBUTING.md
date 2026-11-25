@@ -8,10 +8,8 @@ Please also refer to the individual package READMEs for any package-specific dev
 ## Development setup
 
 - This monorepo uses [uv](https://docs.astral.sh/uv/) to manage Python virtual environments for development.
-- The `grz-check` package additionally requires the [Rust toolchain](https://www.rust-lang.org/tools/install) to be
-  installed.
-- The `grz-db` package additionally requires the [PostgreSQL](https://www.postgresql.org/download/) database server to
-  be installed.
+- The `grz-check` package additionally requires the [Rust toolchain](https://www.rust-lang.org/tools/install) to be installed.
+- The `grz-db` package additionally requires the [PostgreSQL](https://www.postgresql.org/download/) database server to be installed.
 
 The simplest way to set up a development environment is to setup a conda environment with these dependencies: You can use either `conda`, `mamba` or `micromamba` for this, e.g.:
 

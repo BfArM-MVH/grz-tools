@@ -1,0 +1,51 @@
+# Minimal grzctl config. All values are placeholders.
+# Place it at ~/.config/grzctl/config.yaml, or pass it with --config before the subcommand.
+# Every command loads the whole file, so every section is required, even for commands that do not use it.
+# Each *_path field must name an existing file.
+# A grz_ environment variable overrides the matching key in this file, for example:
+# grz_archives__consented__s3__secret or grz_leistungserbringer__123456789__inbox_buckets__main__secret
+# crypt4gh-keys.md explains the Crypt4GH keys and shows setups with several LEs and inboxes.
+
+leistungserbringer:
+  "123456789": # LE ID, the quotes are required because it must be a string
+    inbox_buckets:
+      main: # inbox name, which --inbox takes
+        endpoint_url: https://s3.example.org
+        bucket: le-123456789
+        access_key: YOUR_ACCESS_KEY
+        secret: YOUR_SECRET_KEY
+        private_key_path: /path/to/grz.sec # GRZ Crypt4GH private key
+
+archives:
+  consented:
+    s3:
+      endpoint_url: https://s3.example.org
+      bucket: grz-consented
+      access_key: YOUR_ACCESS_KEY
+      secret: YOUR_SECRET_KEY
+    public_key_path: /path/to/consented.pub # Crypt4GH public key of this archive
+  non_consented:
+    s3:
+      endpoint_url: https://s3.example.org
+      bucket: grz-non-consented # must differ from the consented bucket
+      access_key: YOUR_ACCESS_KEY
+      secret: YOUR_SECRET_KEY
+    public_key_path: /path/to/non_consented.pub # Crypt4GH public key of this archive
+
+db:
+  database_url: postgresql+psycopg://user:password@db.example.org/grzctl
+  author:
+    name: alice # no whitespace
+    private_key_path: /path/to/author.sec # OpenSSH ed25519 private key that signs database writes
+  # Verifies the signatures, and every grzctl db subcommand reads it.
+  # One line per key: ssh-ed25519 <public key> <author name>
+  known_public_keys_file: /path/to/known_public_keys
+
+pruefbericht:
+  authorization_url: https://auth.example.org/token # must be https
+  client_id: YOUR_CLIENT_ID
+  client_secret: YOUR_CLIENT_SECRET
+  api_base_url: https://api.example.org/ # must be https
+
+identifiers:
+  grz: GRZX00000

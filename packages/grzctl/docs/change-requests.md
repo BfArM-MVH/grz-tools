@@ -54,8 +54,7 @@ Only the human-facing template guidance differs per type.
 
 ## Quick start
 
-1. Get a template for the change type you need
-`grzctl change-request-template Delete > delete-request.yaml`
+1. Get a template for the change type you need `grzctl change-request-template Delete > delete-request.yaml`
 
 2. Modify the generated template file with a text editor to fill in needed information
 
@@ -166,8 +165,7 @@ $ grzctl db --config-file $CONFIG_PATH submission change-request \
 - Supported types: **PDF** and **PNG**.
 - The type is identified from the file's **magic bytes** (`%PDF-` for PDF, the PNG signature for PNG), not its extension — the content decides.
   A valid PDF or PNG is accepted whatever it is named, and a file whose bytes match no supported type is rejected.
-- If you supply `--raw-content`, `request_email_content` becomes optional — the
-  attachment can stand in for the transcribed email.
+- If you supply `--raw-content`, `request_email_content` becomes optional — the attachment can stand in for the transcribed email.
 
 ## Required fields and validation
 
@@ -175,11 +173,9 @@ The same input checks apply everywhere a change request is validated:
 
 1. `requester_name`, `requester_email`, and `requested_at` are all present.
 2. At least one of `request_email_content` or `--raw-content` is provided.
-3. No field still holds a template placeholder — neither the `<FILL IN …>`
-   markers nor the `YYYY-MM-DD` date placeholder.
+3. No field still holds a template placeholder — neither the `<FILL IN …>` markers nor the `YYYY-MM-DD` date placeholder.
 4. `requested_at` is a valid `YYYY-MM-DD` date.
-5. The whole record validates against the change-request model (a final backstop
-   for anything the checks above don't cover).
+5. The whole record validates against the change-request model (a final backstop for anything the checks above don't cover).
 
 If anything is wrong, **all** problems are reported together as a single list — so you can fix them in one pass rather than one error per run — followed by a pointer to `grzctl change-request-template <CHANGE>` for a filled-in example.
 For example, an unedited template reports each `<FILL IN>` field plus the `YYYY-MM-DD` date placeholder at once:

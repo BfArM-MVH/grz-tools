@@ -31,6 +31,10 @@ updates:
   # dependabot-core#15786, where a grouped update in a uv workspace rewrites
   # unrelated pins in a member manifest without locking them.
   #
+  # dependency-type all: the monthly group also moves transitive dependencies,
+  # which exist only in `uv.lock`. By default it moves only direct ones, so
+  # patched transitive releases stayed behind until a manual bump (#756).
+  #
   # Note this cannot keep uv itself current: Dependabot does not parse
   # `[tool.uv]`, so `required-version` and `constraint-dependencies` stay in
   # sync with environment-dev.yml by hand (dependabot-core#14581, #14376).
@@ -39,6 +43,8 @@ updates:
     schedule:
       interval: monthly
     versioning-strategy: lockfile-only
+    allow:
+      - dependency-type: all
     commit-message:
       prefix: chore
       include: scope

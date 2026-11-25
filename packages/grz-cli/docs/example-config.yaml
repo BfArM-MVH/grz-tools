@@ -1,0 +1,15 @@
+# Minimal grz-cli config. All values are placeholders: your GRZ provides the real ones.
+# Place it at ~/.config/grz-cli/config.yaml, or pass it with --config-file.
+
+identifiers:
+  grz: GRZX00000
+  le: "123456789" # quotes are required, the ID must be a string
+
+keys:
+  grz_public_key_path: /path/to/grz.pub
+
+s3:
+  endpoint_url: https://s3.example.org
+  bucket: le-123456789
+  access_key: YOUR_ACCESS_KEY # or set grz_s3__access_key
+  secret: YOUR_SECRET_KEY # or set grz_s3__secret

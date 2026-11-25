@@ -90,3 +90,15 @@ def test_tqdm_aware_stream_handler_writes_the_record_on_its_own_line():
 
     assert "\rhello\n" in written, "the bar is cleared before the record"
     assert "0/2" in written.split("hello\n", 1)[1], "the bar is redrawn below the record"
+
+
+def test_alembic_noise_filter_drops_the_ddl_banner_of_both_backends():
+    """Every database connection logs this banner; dropped, a successful cron run stays silent."""
+    keep = grz_logging.AlembicInfoNoiseFilter().filter
+
+    def record(message: str) -> logging.LogRecord:
+        return logging.LogRecord("alembic.runtime.migration", logging.INFO, __file__, 0, message, (), None)
+
+    assert not keep(record("Will assume transactional DDL."))  # PostgreSQL
+    assert not keep(record("Will assume non-transactional DDL."))  # SQLite
+    assert keep(record("Running upgrade fe9309db9fca -> a7c3e9d1f5b2, add upload timing to submissions"))
