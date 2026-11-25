@@ -15,6 +15,14 @@ from ..commands import grzctl_configuration, inbox_option
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
 from .inbox_resolution import require_inbox
+from .paths import (
+    encrypted_files_dir_option,
+    files_dir_option,
+    logs_dir_option,
+    metadata_dir_option,
+    resolve_dirs,
+    submission_dir_option,
+)
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +35,11 @@ _ARCHIVES: dict[str, Literal["consented", "non_consented"]] = {
 
 @click.command()
 @grzctl_configuration
-@grzcli.submission_dir
+@submission_dir_option
+@metadata_dir_option
+@files_dir_option
+@encrypted_files_dir_option
+@logs_dir_option
 @inbox_option
 @click.option(
     "--archive",
@@ -49,6 +61,10 @@ _ARCHIVES: dict[str, Literal["consented", "non_consented"]] = {
 def decrypt(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_dir,
+    metadata_dir,
+    files_dir,
+    encrypted_files_dir,
+    logs_dir,
     inbox_name,
     archive: str | None,
     private_key_path: Path | None,
@@ -79,15 +95,24 @@ def decrypt(  # noqa: PLR0913, PLR0917
     if private_key_path is not None and inbox_name is not None:
         raise click.UsageError("--private-key-path and --inbox are mutually exclusive.")
 
+    paths = resolve_dirs(
+        bundled_dir=submission_dir,
+        bundled_option="--submission-dir",
+        explicit={
+            "--metadata-dir": metadata_dir,
+            "--files-dir": files_dir,
+            "--encrypted-files-dir": encrypted_files_dir,
+            "--logs-dir": logs_dir,
+        },
+    )
+
     log.info("Starting decryption...")
 
-    submission_dir = Path(submission_dir)
-
     worker_inst = Worker(
-        metadata_dir=submission_dir / "metadata",
-        files_dir=submission_dir / "files",
-        log_dir=submission_dir / "logs",
-        encrypted_files_dir=submission_dir / "encrypted_files",
+        metadata_dir=paths["--metadata-dir"],
+        files_dir=paths["--files-dir"],
+        log_dir=paths["--logs-dir"],
+        encrypted_files_dir=paths["--encrypted-files-dir"],
     )
     encrypted_submission = worker_inst.parse_encrypted_submission()
     submission_id = encrypted_submission.submission_id

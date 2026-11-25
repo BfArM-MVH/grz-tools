@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+grzctl_config="${snakemake_input[grzctl_config_path]}"
+log_stdout="${snakemake_log[stdout]}"
+log_stderr="${snakemake_log[stderr]}"
+
+metadata_file_path="${snakemake_input[metadata]}"
+metadata_dir="$(dirname "$metadata_file_path")"
+unencrypted_files_dir="${snakemake_input[files_dir]}"
+output_encrypted_files_dir="${snakemake_output[encrypted_files_dir]}"
+progress_logs_dir="$(dirname "${snakemake_output[encryption_log]}")"
+mkdir -p "${metadata_dir}" "${unencrypted_files_dir}" "${output_encrypted_files_dir}" "${progress_logs_dir}"
+
+echo "Re-encrypting submission..." >"$log_stdout" 2>"$log_stderr"
+
+# grzctl encrypt derives consent from metadata and handles DB state transitions (ENCRYPTING → ENCRYPTED) via DbContext.
+grzctl --config "${grzctl_config}" encrypt \
+	--metadata-dir "${metadata_dir}" \
+	--files-dir "${unencrypted_files_dir}" \
+	--output-encrypted-files-dir "${output_encrypted_files_dir}" \
+	--logs-dir "${progress_logs_dir}" \
+	--force \
+	>>"$log_stdout" 2>>"$log_stderr"

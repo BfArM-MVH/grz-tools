@@ -1,7 +1,6 @@
 """Command for archiving a submission."""
 
 import logging
-from pathlib import Path
 
 import click
 import grz_common.cli as grzcli
@@ -11,18 +10,25 @@ from grz_db.models.submission import SubmissionStateEnum
 from ..commands import grzctl_configuration
 from ..dbcontext import DbContext
 from ..models.config import GrzctlConfig
+from .paths import encrypted_files_dir_option, logs_dir_option, metadata_dir_option, resolve_dirs, submission_dir_option
 
 log = logging.getLogger(__name__)
 
 
 @click.command()
 @grzctl_configuration
-@grzcli.submission_dir
+@submission_dir_option
+@metadata_dir_option
+@logs_dir_option
+@encrypted_files_dir_option
 @grzcli.threads
 @grzcli.update_db
-def archive(
+def archive(  # noqa: PLR0913, PLR0917
     configuration: GrzctlConfig,
     submission_dir,
+    metadata_dir,
+    logs_dir,
+    encrypted_files_dir,
     threads,
     update_db,
     **kwargs,
@@ -30,15 +36,24 @@ def archive(
     """
     Archive a submission within a GRZ/GDC.
     """
+    paths = resolve_dirs(
+        bundled_dir=submission_dir,
+        bundled_option="--submission-dir",
+        explicit={
+            "--metadata-dir": metadata_dir,
+            "--logs-dir": logs_dir,
+            "--encrypted-files-dir": encrypted_files_dir,
+        },
+    )
+    metadata_path = paths["--metadata-dir"]
+
     log.info("Starting archival...")
 
-    submission_dir = Path(submission_dir)
-
     worker_inst = Worker(
-        metadata_dir=submission_dir / "metadata",
-        files_dir=submission_dir / "files",
-        log_dir=submission_dir / "logs",
-        encrypted_files_dir=submission_dir / "encrypted_files",
+        metadata_dir=metadata_path,
+        files_dir=metadata_path.parent / "files",
+        log_dir=paths["--logs-dir"],
+        encrypted_files_dir=paths["--encrypted-files-dir"],
         threads=threads,
     )
     encrypted_submission = worker_inst.parse_encrypted_submission()
