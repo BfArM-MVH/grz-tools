@@ -219,3 +219,4 @@ def run(
         console_err.print("Nothing was deleted.")
         raise click.Abort()
     _delete_all(configuration, resolved, targets, request, (request_form, request_form_type))
+    console_err.print(f"Print the confirmation for BfArM with: grzctl delete confirmation --data-file {data_file}")
