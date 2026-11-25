@@ -2,6 +2,7 @@
 
 import click
 
+from .run import run
 from .template import template
 
 
@@ -15,3 +16,4 @@ def delete():
 
 
 delete.add_command(template)
+delete.add_command(run)

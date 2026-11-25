@@ -1748,6 +1748,23 @@ class SubmissionDb:
             submission = active_session.exec(statement).first()
             return submission
 
+    def get_submission_by_tan_g(self, tan_g: str) -> Submission | None:
+        """Retrieve the submission with a tanG and its state history.
+
+        A tanG is hexadecimal, and the same in upper or lower case, so it is compared without
+        regard to case.
+
+        :param tan_g: The tanG to look up.
+        :returns: The :class:`Submission`, or ``None`` if no submission has that tanG.
+        """
+        with self.transaction() as session:
+            statement = (
+                select(Submission)
+                .where(sqlfn.lower(Submission.tan_g) == tan_g.lower())
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+            )
+            return session.exec(statement).first()
+
     def get_submissions(self, submission_ids: Sequence[str]) -> list[Submission | None]:
         """Fetch a specific set of submissions by their IDs in a single query.
 

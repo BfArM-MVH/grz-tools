@@ -440,3 +440,15 @@ class TestPurgeDeletionRecords:
 
         assert purge == DeletionRecordsPurge(change_requests_deleted=0, tan_g_cleared=False)
         assert db.get_submission(deleted_submission_id).model_dump() == first
+
+
+class TestGetSubmissionByTanG:
+    def test_finds_the_submission_in_either_case(self, db: SubmissionDb, submission_id: str):
+        tan_g = "3f9a" + "0" * 56 + "0c21"
+        db.modify_submission(submission_id, "tan_g", tan_g)
+
+        assert db.get_submission_by_tan_g(tan_g).id == submission_id
+        assert db.get_submission_by_tan_g(tan_g.upper()).id == submission_id
+
+    def test_none_for_an_unknown_tan_g(self, db: SubmissionDb, submission_id: str):
+        assert db.get_submission_by_tan_g("a" * 64) is None
