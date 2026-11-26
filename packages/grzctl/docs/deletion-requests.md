@@ -39,7 +39,7 @@ A submission that is not in the database yet, for example one still waiting in t
 | ---- | ----------- |
 | 1    | Open BfArM's e-mail in your mail program and save the attached request form (PDF). Copy it to the server where you run grzctl. |
 | 2    | Run `grzctl delete template > antrag.yaml` and fill in `antrag.yaml` from the PDF. |
-| 3    | Run `grzctl delete run --data-file antrag.yaml --raw-content antrag.pdf --dry-run` and check what would be deleted. |
+| 3    | Run `grzctl delete run --data-file antrag.yaml --raw-content antrag.pdf --dry-run` and check the submissions and every file it lists. |
 | 4    | Run the same command without `--dry-run`. This deletes. |
 | 5    | Delete the submissions from the GRZ's backups, for example tape backups, as your site's SOP says. grzctl cannot do this. |
 | 6    | Run `grzctl delete confirmation --data-file antrag.yaml` and send the text, encrypted, to `PlattformMvGenomseq@bfarm.de`. |
@@ -124,6 +124,22 @@ The *Result* column says what will happen:
 | not present                            | No submission has this tanG. Check the tanG against the PDF for a typo. If it is right, the GRZ does not have the data, and the confirmation says so. |
 
 A second table shows, for each submission, what each storage place still holds of it, for example `412 objects, 38.2 GB` in the consented archive.
+
+Then it lists every file that would be deleted, with its full path, and the files that are kept:
+
+```text
+Files that would be deleted:
+ Location           File                                                           Size
+ consented archive  260914050_2025-09-15_c64603a7/files/S1_blood_R1.fastq.gz.c4gh  12.1 GB
+ consented archive  260914050_2025-09-15_c64603a7/files/S1_blood_R2.fastq.gz.c4gh  12.3 GB
+ consented archive  260914050_2025-09-15_c64603a7/metadata/metadata.json           4.2 KB
+Files that are kept:
+  consented archive: 260914050_2025-09-15_c64603a7/logs/progress_encrypt.cjson, 260914050_2025-09-15_c64603a7/logs/progress_upload.cjson
+  inbox 'se': 260914050_2025-09-15_c64603a7/cleaned, 260914050_2025-09-15_c64603a7/metadata/metadata.json
+```
+
+Check that every path starts with the submission ID of the request.
+The kept `metadata.json` in the inbox is the empty one that keeps the submission from being uploaded again.
 
 The dry run also warns you:
 

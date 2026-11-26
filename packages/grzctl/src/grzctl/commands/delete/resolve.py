@@ -69,11 +69,13 @@ _SUBMISSION_ID_LENGTH = len("000000000_2025-01-01_00000000")
 
 
 def new_table(*columns: str) -> rich.table.Table:
-    """A table with *columns* that never cuts or wraps a submission ID, which is copied from it."""
+    """A table with *columns* that never cuts a submission ID or a file path, which are copied from it."""
     table = rich.table.Table(box=None)
     for column in columns:
         if column == "Submission":
             table.add_column(column, no_wrap=True, min_width=_SUBMISSION_ID_LENGTH)
+        elif column == "File":
+            table.add_column(column, overflow="fold")
         else:
             table.add_column(column)
     return table

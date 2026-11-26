@@ -22,7 +22,7 @@ from .resolve import (
     resolve_deletion_request,
     short_tan_g,
 )
-from .storage import Holdings, has_object_lock
+from .storage import Holdings, StoredObject, archive_listing, has_object_lock, inbox_listing
 
 console = rich.console.Console()
 console_err = rich.console.Console(stderr=True)
@@ -103,6 +103,36 @@ def _print_storage(targets: dict[str, StorageTargets]) -> None:
             if holdings.objects or location == inbox_location:
                 table.add_row(submission_id, location, _holdings_text(holdings))
     console.print(table)
+
+
+def _file_label(stored: StoredObject) -> str:
+    if stored.is_delete_marker:
+        return f"{stored.key} (delete marker)"
+    return stored.key if stored.is_latest else f"{stored.key} (older version)"
+
+
+def _print_files(targets: dict[str, StorageTargets]) -> None:
+    """List every file that deleting removes, with its full path, and name the files it keeps."""
+    table = new_table("Location", "File", "Size")
+    kept = []
+    for submission_id, submission_targets in targets.items():
+        listings = {
+            location: archive_listing(s3_options, submission_id)
+            for location, s3_options in submission_targets.archives.items()
+        }
+        inbox_location, inbox_options = submission_targets.inbox
+        listings[inbox_location] = inbox_listing(inbox_options, submission_id)
+        for location, listing in listings.items():
+            for stored in listing.to_delete:
+                table.add_row(location, _file_label(stored), "" if stored.is_delete_marker else _size(stored.size))
+            if current := [s.key for s in listing.kept if s.is_latest and not s.is_delete_marker]:
+                kept.append(f"  {location}: {', '.join(current)}")
+    console.print("Files that would be deleted:")
+    console.print(table)
+    if kept:
+        console.print("Files that are kept:")
+        for line in kept:
+            console.print(line)
 
 
 def _locked_buckets(targets: dict[str, StorageTargets]) -> list[str]:
@@ -205,11 +235,14 @@ def run(
         raise click.Abort()
 
     if dry_run:
+        if targets:
+            _print_files(targets)
         console_err.print("[green]Dry run: nothing was deleted.[/green]")
         return
     if not targets:
         console_err.print("[green]Nothing to delete.[/green]")
         return
+    console_err.print("This deletes every file that grzctl delete run --dry-run lists; check that list first.")
     if not yes_i_really_mean_it and not click.confirm(
         f"Delete {len(targets)} submission(s) for good?", default=False, show_default=True
     ):

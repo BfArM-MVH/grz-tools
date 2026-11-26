@@ -9,13 +9,16 @@ import click.testing
 import grzctl.cli
 import pytest
 import yaml
+from grz_common.models.base import get_secret_value
+from grz_common.models.s3 import S3Options
 from grz_db.models.submission import RequestRawContentType, SubmissionDb, SubmissionStateEnum, SubmissionType
-from grzctl.commands.delete import execute
+from grzctl.commands.delete import execute, storage
 from grzctl.commands.delete.resolve import (
     DeletionOutcome,
     DeletionRequestRefusedError,
     resolve_deletion_request,
 )
+from grzctl.models.config import GrzctlConfig
 from grzctl.models.deletion_request import DeletionRequest
 from moto import mock_aws
 
@@ -206,6 +209,40 @@ class TestRunCommand:
         assert db.get_submission(submission_id).get_latest_state().state == SubmissionStateEnum.REPORTED
         assert len(_keys(s3, "consented")) == 3
 
+    def test_dry_run_lists_every_file_with_its_full_path(
+        self,
+        s3: Any,
+        db: SubmissionDb,
+        migrated_database_config_path: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """The dry run is where the steward checks what goes, so it names each file and what is kept."""
+        monkeypatch.setenv("COLUMNS", "200")
+        _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+
+        result = _run(migrated_database_config_path, tmp_path, _request(), "--dry-run")
+
+        assert result.exit_code == 0, result.output
+        files = result.stdout.split("Files that would be deleted:")[1].split("Files that are kept:")[0]
+        for key in (f"{SUBMISSION_ID}/files/a.fastq.gz.c4gh", f"{SUBMISSION_ID}/metadata/metadata.json"):
+            assert f"consented archive  {key}" in files
+            assert f"inbox 'inbox'      {key}" in files
+        assert "logs/" not in files
+        assert f"consented archive: {SUBMISSION_ID}/logs/progress_upload.cjson" in result.stdout
+        assert len(_keys(s3, "consented")) == 3
+
+    def test_a_deletion_points_to_the_file_list_of_the_dry_run(
+        self, s3: Any, db: SubmissionDb, migrated_database_config_path: Path, tmp_path: Path
+    ):
+        _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+
+        result = _run(migrated_database_config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+        assert result.exit_code == 0, result.output
+        assert "Files that would be deleted:" not in result.stdout
+        assert "every file that grzctl delete run --dry-run lists" in result.stderr
+
     def test_reports_every_problem_of_the_request(self, migrated_database_config_path: Path, tmp_path: Path):
         result = _run(
             migrated_database_config_path,
@@ -389,3 +426,61 @@ def test_a_failed_start_records_no_request(
 
     assert rerun.exit_code == 0, rerun.output
     assert len(db.list_change_requests()[0].changes) == 1
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected_key"),
+    [
+        pytest.param({}, ("config-key", "config-secret"), id="keys-from-config"),
+        pytest.param(
+            {
+                f"GRZ_ARCHIVES__{archive}__S3__{field}": value
+                for archive in ("CONSENTED", "NON_CONSENTED")
+                for field, value in (("ACCESS_KEY", "deletion-key"), ("SECRET", "deletion-secret"))
+            },
+            ("deletion-key", "deletion-secret"),
+            id="deletion-account-from-environment",
+        ),
+    ],
+)
+def test_archives_are_deleted_with_the_keys_the_environment_gives(
+    s3: Any,
+    db: SubmissionDb,
+    migrated_database_config: GrzctlConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: dict[str, str],
+    expected_key: tuple[str, str],
+):
+    """A GRZ whose archive key may not delete passes a deletion account's key in the environment.
+
+    Environment variables override the archive keys of the config file, so that the key that may
+    delete is only given to grzctl delete, and every request to an archive uses it.
+    """
+    config = migrated_database_config.model_copy(deep=True)
+    for archive in (config.archives.consented, config.archives.non_consented):
+        archive.s3.access_key = "config-key"
+        archive.s3.secret = "config-secret"
+    config_path = tmp_path / "config.yaml"
+    with open(config_path, "w") as config_file:
+        config.to_yaml(config_file)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    used_keys: set[tuple[str, str, str | None]] = set()
+    real_init = storage.init_s3_client
+
+    def recording_init(s3_options: S3Options) -> Any:
+        used_keys.add((s3_options.bucket, s3_options.access_key, get_secret_value(s3_options.secret)))
+        return real_init(s3_options)
+
+    monkeypatch.setattr(storage, "init_s3_client", recording_init)
+    _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+
+    result = _run(config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+    assert result.exit_code == 0, result.output
+    assert _keys(s3, "consented") == {f"{SUBMISSION_ID}/logs/progress_upload.cjson", f"{SUBMISSION_ID}/deleted"}
+    archive_keys = {(access_key, secret) for bucket, access_key, secret in used_keys if bucket != "inbox"}
+    assert {bucket for bucket, _, _ in used_keys} >= {"consented", "non_consented"}
+    assert archive_keys == {expected_key}
