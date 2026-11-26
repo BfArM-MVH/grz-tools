@@ -159,6 +159,11 @@ That submission stays *Deleting*.
 Run the same command again: it continues where it stopped, and it does not store the request twice.
 Submissions that were deleted already stay deleted.
 
+**Permissions.**
+Some storage keeps older versions of a file when it is overwritten or deleted.
+grzctl deletes these too, so the S3 key in the configuration needs the permissions `s3:ListBucketVersions` and `s3:DeleteObjectVersion` on the archives and inboxes.
+Without them, grzctl stops with an error rather than leaving old versions behind.
+
 **Object lock.**
 Some storage can lock files so that nobody can delete them.
 If a storage place has this switched on, grzctl stops before it deletes anything.

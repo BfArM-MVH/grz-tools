@@ -1,9 +1,11 @@
 """Delete what the archives and the inbox hold of a submission.
 
 A bucket that keeps old object versions would keep the data in them, so those are deleted too.
-Not every S3-compatible store answers the versioning and object lock queries; one that does not
-is taken to have neither. The check after deleting, :func:`archive_holdings` and
-:func:`inbox_holdings`, catches anything that is left all the same.
+Each listing lists versions, which needs the ``s3:ListBucketVersions`` permission, and deletes
+each version by its ID, which needs ``s3:DeleteObjectVersion``; without them, deleting stops with
+an error rather than leaving old versions behind. Not every S3-compatible store answers the
+object lock query; one that does not is taken to have none, and the check after deleting,
+:func:`archive_holdings` and :func:`inbox_holdings`, catches anything that is left.
 """
 
 from collections.abc import Iterator, Sequence
@@ -54,15 +56,6 @@ class _Entry:
     is_latest: bool
 
 
-def _is_versioned(client: Any, bucket: str) -> bool:
-    """Whether a bucket keeps, or has kept, old object versions."""
-    try:
-        status = client.get_bucket_versioning(Bucket=bucket).get("Status")
-    except ClientError:
-        return False
-    return status in ("Enabled", "Suspended")
-
-
 def has_object_lock(s3_options: S3Options) -> bool:
     """Whether a bucket has object lock enabled, which keeps objects from being deleted.
 
@@ -76,20 +69,38 @@ def has_object_lock(s3_options: S3Options) -> bool:
     return configuration.get("ObjectLockConfiguration", {}).get("ObjectLockEnabled") == "Enabled"
 
 
-def _entries(client: Any, bucket: str, prefix: str, versioned: bool) -> list[_Entry]:
-    """Every object under *prefix*, with each old version and delete marker if *versioned*."""
+def _entries(client: Any, bucket: str, prefix: str) -> list[_Entry]:
+    """Every version and delete marker of every object under *prefix*.
+
+    Lists versions whether the bucket keeps them or not, as a bucket that never kept any lists
+    each object once, with the version ID ``null``. So no old version is missed when the bucket's
+    versioning cannot be queried.
+    """
     entries = []
-    if versioned:
-        for page in client.get_paginator("list_object_versions").paginate(Bucket=bucket, Prefix=prefix):
-            entries += [
-                _Entry(v["Key"], v["VersionId"], v.get("Size", 0), False, v["IsLatest"])
-                for v in page.get("Versions", [])
-            ]
-            entries += [_Entry(m["Key"], m["VersionId"], 0, True, m["IsLatest"]) for m in page.get("DeleteMarkers", [])]
-    else:
-        for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
-            entries += [_Entry(o["Key"], None, o.get("Size", 0), False, True) for o in page.get("Contents", [])]
+    for page in client.get_paginator("list_object_versions").paginate(Bucket=bucket, Prefix=prefix):
+        entries += [
+            _Entry(v["Key"], v["VersionId"], v.get("Size", 0), False, v["IsLatest"]) for v in page.get("Versions", [])
+        ]
+        entries += [_Entry(m["Key"], m["VersionId"], 0, True, m["IsLatest"]) for m in page.get("DeleteMarkers", [])]
     return entries
+
+
+def _is_current(entry: _Entry, key: str) -> bool:
+    """Whether *entry* is the object that S3 currently returns for *key*."""
+    return entry.key == key and entry.is_latest and not entry.is_delete_marker
+
+
+def _archive_payload(entry: _Entry, prefix: str) -> bool:
+    """Whether deleting a submission removes *entry* from an archive: all but its log files and its current tombstone."""
+    return not entry.key.startswith(f"{prefix}logs/") and not _is_current(entry, f"{prefix}{TOMBSTONE}")
+
+
+def _inbox_payload(entry: _Entry, prefix: str) -> bool:
+    """Whether deleting a submission removes *entry* from an inbox: all but an empty ``metadata.json`` and the ``cleaned`` marker."""
+    kept = _is_current(entry, f"{prefix}cleaned") or (
+        _is_current(entry, f"{prefix}metadata/metadata.json") and entry.size == 0
+    )
+    return not kept
 
 
 def _batches(entries: Sequence[_Entry]) -> Iterator[Sequence[_Entry]]:
@@ -103,9 +114,7 @@ def _delete(client: Any, bucket: str, entries: Sequence[_Entry]) -> None:
     :raises StorageDeletionError: if S3 refuses to delete any of them.
     """
     for batch in _batches(entries):
-        objects: list[dict[str, str]] = [
-            {"Key": e.key, "VersionId": e.version_id} if e.version_id is not None else {"Key": e.key} for e in batch
-        ]
+        objects = [{"Key": e.key, "VersionId": e.version_id} for e in batch if e.version_id is not None]
         response = client.delete_objects(Bucket=bucket, Delete={"Objects": objects, "Quiet": True})
         if errors := response.get("Errors"):
             codes = sorted({error.get("Code", "unknown") for error in errors})
@@ -140,23 +149,24 @@ def delete_from_archive(s3_options: S3Options, location: str, submission_id: str
     prefix = f"{submission_id}/"
     tombstone = f"{prefix}{TOMBSTONE}"
     with s3_errors(f"Deleting {submission_id} from the {location}"):
-        entries = _entries(client, bucket, prefix, _is_versioned(client, bucket))
-        logs = [e for e in entries if e.key.startswith(f"{prefix}logs/")]
-        to_delete = [e for e in entries if not e.key.startswith(f"{prefix}logs/") and e.key != tombstone]
-        has_tombstone = any(e.key == tombstone and e.is_latest and not e.is_delete_marker for e in entries)
+        entries = _entries(client, bucket, prefix)
+        to_delete = [e for e in entries if _archive_payload(e, prefix)]
+        has_tombstone = any(_is_current(e, tombstone) for e in entries)
         if not to_delete and not has_tombstone:
             return None
         if not has_tombstone:
             client.put_object(Bucket=bucket, Key=tombstone, Body=b"")
         _delete(client, bucket, to_delete)
-    return _deletion(location, to_delete, logs_kept=sum(e.is_latest and not e.is_delete_marker for e in logs))
+    logs_kept = sum(e.key.startswith(f"{prefix}logs/") and e.is_latest and not e.is_delete_marker for e in entries)
+    return _deletion(location, to_delete, logs_kept=logs_kept)
 
 
 def delete_from_inbox(s3_options: S3Options, location: str, submission_id: str) -> BucketDeletion | None:
     """Clean a submission from an inbox, as ``grzctl clean`` does, and delete what versions keep of it.
 
     Cleaning leaves an empty ``metadata.json``, which keeps the submission ID from being uploaded
-    again, and a ``cleaned`` marker. An inbox that is cleaned already is not cleaned again.
+    again, and a ``cleaned`` marker. It cleans whenever the inbox holds more than these, also an
+    inbox cleaned before into which a restore from a backup brought the submission back.
 
     :param s3_options: S3 connection to the inbox.
     :param location: The inbox's name, for messages and the returned record.
@@ -168,26 +178,20 @@ def delete_from_inbox(s3_options: S3Options, location: str, submission_id: str) 
     bucket = s3_options.bucket
     prefix = f"{submission_id}/"
     with s3_errors(f"Deleting {submission_id} from the {location}"):
-        versioned = _is_versioned(client, bucket)
-        before = _entries(client, bucket, prefix, versioned)
+        before = _entries(client, bucket, prefix)
         if not before:
             return None
-        current = [e for e in before if e.is_latest and not e.is_delete_marker]
-        deleted: list[_Entry] = []
-        if not any(e.key == f"{prefix}cleaned" for e in current):
-            # what cleaning deletes or, for metadata.json, overwrites
-            deleted = [e for e in current if e.key not in (f"{prefix}cleaning", f"{prefix}cleaned")]
+        # what cleaning deletes or, for metadata.json, empties
+        cleaned = [e for e in before if e.is_latest and not e.is_delete_marker and _inbox_payload(e, prefix)]
+        if cleaned:
             clean_submission_from_inbox(bucket, s3_options, submission_id, location)
-        if versioned:
-            # in a versioned bucket, cleaning only hides the objects behind delete markers and
-            # keeps the original metadata.json as an old version: deleting the versions removes them
-            kept = {f"{prefix}metadata/metadata.json", f"{prefix}cleaned"}
-            deleted = [
-                e
-                for e in _entries(client, bucket, prefix, versioned=True)
-                if not (e.is_latest and not e.is_delete_marker and e.key in kept)
-            ]
-            _delete(client, bucket, deleted)
+        # in a bucket that keeps versions, cleaning only hides the objects behind delete markers and
+        # keeps the original metadata.json as an old version: deleting the versions removes them
+        old_versions = [e for e in _entries(client, bucket, prefix) if _inbox_payload(e, prefix)]
+        _delete(client, bucket, old_versions)
+    # an object that cleaning deleted can show up again as an old version: count each version once
+    deleted = list({(e.key, e.version_id): e for e in cleaned + old_versions if not e.is_delete_marker}.values())
+    deleted += [e for e in old_versions if e.is_delete_marker]
     return _deletion(location, deleted, logs_kept=0)
 
 
@@ -215,16 +219,9 @@ def archive_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
     :param s3_options: S3 connection to the archive.
     :param submission_id: ID of the submission.
     """
-    client = init_s3_client(s3_options)
     prefix = f"{submission_id}/"
-    entries = _entries(client, s3_options.bucket, prefix, _is_versioned(client, s3_options.bucket))
-    return _holdings(
-        [
-            e
-            for e in entries
-            if not e.key.startswith(f"{prefix}logs/") and not (e.key == f"{prefix}{TOMBSTONE}" and e.is_latest)
-        ]
-    )
+    entries = _entries(init_s3_client(s3_options), s3_options.bucket, prefix)
+    return _holdings([e for e in entries if _archive_payload(e, prefix)])
 
 
 def inbox_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
@@ -235,20 +232,9 @@ def inbox_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
     :param s3_options: S3 connection to the inbox.
     :param submission_id: ID of the submission.
     """
-    client = init_s3_client(s3_options)
     prefix = f"{submission_id}/"
-    entries = _entries(client, s3_options.bucket, prefix, _is_versioned(client, s3_options.bucket))
-    return _holdings(
-        [
-            e
-            for e in entries
-            if not (
-                e.is_latest
-                and not e.is_delete_marker
-                and (e.key == f"{prefix}cleaned" or (e.key == f"{prefix}metadata/metadata.json" and e.size == 0))
-            )
-        ]
-    )
+    entries = _entries(init_s3_client(s3_options), s3_options.bucket, prefix)
+    return _holdings([e for e in entries if _inbox_payload(e, prefix)])
 
 
 def tombstoned_submissions(s3_options: S3Options) -> set[str]:
