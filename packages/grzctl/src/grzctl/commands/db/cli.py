@@ -78,7 +78,7 @@ from pydantic import Field, ValidationError
 from sqlmodel import Session, select
 from tqdm.auto import tqdm
 
-from ... import get_versions
+from ... import get_recorded_versions
 from ...commands import grzctl_configuration, inbox_options
 from ...models.config import GrzctlConfig
 from .. import limit
@@ -894,7 +894,7 @@ def update(  # noqa: C901, PLR0913, PLR0917
             state_enum,
             data=parsed_data,
             failure_reason=failure_reason_enum,
-            grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
+            grzctl_versions=get_recorded_versions(),
         )
 
         console_err.print(

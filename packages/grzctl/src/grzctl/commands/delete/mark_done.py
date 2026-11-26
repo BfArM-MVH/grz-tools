@@ -7,10 +7,11 @@ import click
 import rich.console
 from grz_db.models.submission import ChangeRequestEnum, SubmissionStateEnum
 
+from ... import get_recorded_versions
 from ...models.config import GrzctlConfig
 from .. import grzctl_configuration
 from ..db.cli import get_submission_db_instance
-from .execute import grzctl_versions, storage_targets, stored_holdings
+from .execute import describe_holdings, leftovers, storage_targets
 
 console_err = rich.console.Console(stderr=True)
 
@@ -50,18 +51,15 @@ def mark_done(configuration: GrzctlConfig, submission_id: str, deleted_on: datet
 
     submitter_id = submission.submitter_id or submission_id.split("_", maxsplit=1)[0]
     targets = storage_targets(configuration, db, submission_id, submitter_id)
-    if left := {location: held for location, held in stored_holdings(targets, submission_id).items() if held.objects}:
-        raise click.ClickException(
-            "; ".join(f"the {location} still holds {held.objects} objects" for location, held in left.items())
-            + f". Delete {submission_id} with grzctl delete run instead."
-        )
+    if left := leftovers(targets, submission_id):
+        raise click.ClickException(f"{describe_holdings(left)}. Delete {submission_id} with grzctl delete run instead.")
 
     signing_db = get_submission_db_instance(
         db_url=configuration.db.database_url, author=configuration.db.signing_author
     )
     at = datetime.datetime.combine(deleted_date, datetime.time(), datetime.UTC)
     signing_db.update_submission_state(
-        submission_id, SubmissionStateEnum.DELETING, timestamp=at, grzctl_versions=grzctl_versions()
+        submission_id, SubmissionStateEnum.DELETING, timestamp=at, grzctl_versions=get_recorded_versions()
     )
     purge = signing_db.purge_personal_data(submission_id)
     signing_db.update_submission_state(
@@ -69,6 +67,6 @@ def mark_done(configuration: GrzctlConfig, submission_id: str, deleted_on: datet
         SubmissionStateEnum.DELETED,
         timestamp=at,
         data={"deleted_by_hand": True, "recorded_on": today.isoformat(), "database": asdict(purge)},
-        grzctl_versions=grzctl_versions(),
+        grzctl_versions=get_recorded_versions(),
     )
     console_err.print(f"[green]Recorded {submission_id} as deleted on {deleted_date}.[/green]")

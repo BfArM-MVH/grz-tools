@@ -12,10 +12,18 @@ import rich.console
 import rich.table
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 
+from ... import get_recorded_versions
 from ...models.config import GrzctlConfig
 from .. import grzctl_configuration
 from ..db.cli import get_submission_db_instance
-from .execute import StorageTargets, finish_deletion, grzctl_versions, storage_targets, stored_holdings
+from .execute import (
+    StorageTargets,
+    archive_targets,
+    describe_holdings,
+    finish_deletion,
+    leftovers,
+    storage_targets,
+)
 from .resolve import new_table
 from .storage import tombstoned_submissions
 
@@ -84,14 +92,11 @@ def find_restored(configuration: GrzctlConfig, db: SubmissionDb) -> list[CheckRe
         except click.ClickException as e:
             results.append(CheckResult(submission_id, Finding.UNCHECKED, e.message))
             continue
-        if held := {location: h for location, h in stored_holdings(targets, submission_id).items() if h.objects}:
-            detail = "; ".join(f"the {location} holds {h.objects} objects again" for location, h in held.items())
+        if held := leftovers(targets, submission_id):
+            detail = describe_holdings(held, "the {location} holds {objects} objects again")
             results.append(CheckResult(submission_id, Finding.STORAGE_RESTORED, detail, targets))
 
-    for location, s3_options in (
-        ("consented archive", configuration.archives.consented.s3),
-        ("non-consented archive", configuration.archives.non_consented.s3),
-    ):
+    for location, s3_options in archive_targets(configuration).items():
         for submission_id in sorted(tombstoned_submissions(s3_options) - deletions.keys()):
             detail = f"the {location} holds its tombstone, but the database records no deletion"
             if db.get_submission(submission_id) is None:
@@ -116,7 +121,7 @@ def repair(db: SubmissionDb, result: CheckResult) -> None:
         raise ValueError(f"{result.submission_id}: '{result.finding}' cannot be repaired.")
     if result.finding == Finding.DATABASE_RESTORED:
         db.update_submission_state(
-            result.submission_id, SubmissionStateEnum.DELETING, grzctl_versions=grzctl_versions()
+            result.submission_id, SubmissionStateEnum.DELETING, grzctl_versions=get_recorded_versions()
         )
         note = {
             "repeated": "database restored from a backup; the request is on record in the mailbox, "

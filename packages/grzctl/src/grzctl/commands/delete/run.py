@@ -13,7 +13,7 @@ from ...models.deletion_request import DeletionRequest, deletion_request_problem
 from .. import grzctl_configuration
 from ..change_request import _read_raw_content
 from ..db.cli import get_submission_db_instance
-from .execute import StorageTargets, delete_submission, storage_targets
+from .execute import StorageTargets, delete_submission, storage_targets, stored_holdings
 from .resolve import (
     DeletionOutcome,
     DeletionRequestRefusedError,
@@ -22,7 +22,7 @@ from .resolve import (
     resolve_deletion_request,
     short_tan_g,
 )
-from .storage import Holdings, archive_holdings, has_object_lock, inbox_holdings
+from .storage import Holdings, has_object_lock
 
 console = rich.console.Console()
 console_err = rich.console.Console(stderr=True)
@@ -97,11 +97,11 @@ def _print_storage(targets: dict[str, StorageTargets]) -> None:
     """Show what each bucket holds of each submission to delete."""
     table = new_table("Submission", "Location", "To delete")
     for submission_id, submission_targets in targets.items():
-        for location, s3_options in submission_targets.archives.items():
-            if (holdings := archive_holdings(s3_options, submission_id)).objects:
+        inbox_location = submission_targets.inbox[0]
+        for location, holdings in stored_holdings(submission_targets, submission_id).items():
+            # an archive that never held the submission is left out; the inbox is always shown
+            if holdings.objects or location == inbox_location:
                 table.add_row(submission_id, location, _holdings_text(holdings))
-        location, s3_options = submission_targets.inbox
-        table.add_row(submission_id, location, _holdings_text(inbox_holdings(s3_options, submission_id)))
     console.print(table)
 
 

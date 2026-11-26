@@ -13,7 +13,7 @@ from grz_db.errors import (
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 
-from . import get_versions
+from . import get_recorded_versions
 from .commands.db.cli import get_submission_db_instance
 from .models.config import GrzctlConfig
 
@@ -145,8 +145,7 @@ class DbContext:
     @cached_property
     def grzctl_versions(self) -> dict[str, str]:
         """Get version information."""
-        versions = get_versions()
-        return {k: v or "unknown" for k, v in versions.items()}
+        return get_recorded_versions()
 
     @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:

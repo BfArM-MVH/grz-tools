@@ -12,7 +12,7 @@ from grz_db.models.submission import (
     SubmissionStateEnum,
 )
 
-from ... import get_versions
+from ... import get_recorded_versions
 from ...models.config import GrzctlConfig
 from ...models.deletion_request import DeletionRequest
 from ..inbox_resolution import require_inbox
@@ -40,6 +40,14 @@ class SubmissionDeletionFailedError(Exception):
     """Deleting a submission stopped before it finished; the submission stays in state ``Deleting``."""
 
 
+def archive_targets(configuration: GrzctlConfig) -> dict[str, S3Options]:
+    """Both archives, each by its role."""
+    return {
+        "consented archive": configuration.archives.consented.s3,
+        "non-consented archive": configuration.archives.non_consented.s3,
+    }
+
+
 def storage_targets(
     configuration: GrzctlConfig, db: SubmissionDb, submission_id: str, submitter_id: str
 ) -> StorageTargets:
@@ -60,17 +68,9 @@ def storage_targets(
         hint="Record it with grzctl db submission modify, or delete the submission from its inbox by hand.",
     )
     return StorageTargets(
-        archives={
-            "consented archive": configuration.archives.consented.s3,
-            "non-consented archive": configuration.archives.non_consented.s3,
-        },
+        archives=archive_targets(configuration),
         inbox=(f"inbox '{inbox_name}'", configuration.inbox_target(submitter_id, inbox_name).s3),
     )
-
-
-def grzctl_versions() -> dict[str, str]:
-    """The versions of grzctl and its packages, to record with a state."""
-    return {name: version or "unknown" for name, version in get_versions().items()}
 
 
 def stored_holdings(targets: StorageTargets, submission_id: str) -> dict[str, Holdings]:
@@ -81,6 +81,22 @@ def stored_holdings(targets: StorageTargets, submission_id: str) -> dict[str, Ho
     inbox_location, inbox_options = targets.inbox
     holdings[inbox_location] = inbox_holdings(inbox_options, submission_id)
     return holdings
+
+
+def leftovers(targets: StorageTargets, submission_id: str) -> dict[str, Holdings]:
+    """The buckets of *targets* that hold something of a submission that deleting it would remove, by their role."""
+    return {location: held for location, held in stored_holdings(targets, submission_id).items() if held.objects}
+
+
+def describe_holdings(
+    holdings: dict[str, Holdings], template: str = "the {location} still holds {objects} objects"
+) -> str:
+    """Name what each bucket holds, by default as ``the consented archive still holds 3 objects``.
+
+    :param holdings: What each bucket holds, by its role.
+    :param template: The text for one bucket, with the fields ``location`` and ``objects``.
+    """
+    return "; ".join(template.format(location=location, objects=held.objects) for location, held in holdings.items())
 
 
 def finish_deletion(
@@ -109,10 +125,8 @@ def finish_deletion(
     if (deletion := delete_from_inbox(inbox_options, inbox_location, submission_id)) is not None:
         storage.append(deletion)
 
-    if left := {location: held for location, held in stored_holdings(targets, submission_id).items() if held.objects}:
-        raise SubmissionDeletionFailedError(
-            "; ".join(f"the {location} still holds {held.objects} objects" for location, held in left.items())
-        )
+    if left := leftovers(targets, submission_id):
+        raise SubmissionDeletionFailedError(describe_holdings(left))
 
     facts = {
         **(note or {}),
@@ -120,7 +134,7 @@ def finish_deletion(
         "database": asdict(db.purge_personal_data(submission_id)),
     }
     db.update_submission_state(
-        submission_id, SubmissionStateEnum.DELETED, data=facts, grzctl_versions=grzctl_versions()
+        submission_id, SubmissionStateEnum.DELETED, data=facts, grzctl_versions=get_recorded_versions()
     )
     return facts
 
@@ -169,5 +183,5 @@ def delete_submission(  # noqa: PLR0913
                 "comment": request.comment,
             },
         )
-    db.update_submission_state(submission.id, SubmissionStateEnum.DELETING, grzctl_versions=grzctl_versions())
+    db.update_submission_state(submission.id, SubmissionStateEnum.DELETING, grzctl_versions=get_recorded_versions())
     return finish_deletion(db, submission.id, targets)
