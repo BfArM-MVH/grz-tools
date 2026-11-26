@@ -36,6 +36,7 @@ from sqlmodel import Session, select
 from .. import __version__
 from ..commands import grzctl_configuration
 from ..models.config import GrzctlConfig
+from .delete.purge_records import records_due
 
 log = logging.getLogger(__name__)
 
@@ -291,15 +292,16 @@ def _dump_overview_report(output_path: Path, database: SubmissionDb, year: int, 
         for node, submitter, _, _ in number_of_consent_revocations:
             node_submitter_id_combos.add((node, submitter))
 
-        # number_of_deletions
+        # number_of_deletions: submissions grzctl delete deleted in the quarter, as the BfArM SOP on
+        # deleting datasets asks the next report after a deletion to list it. Compared in UTC, the
+        # zone the timestamps are stored in, so that SQLite, which compares them as text, gets it right.
+        deleted_from = datetime.datetime.combine(quarter_start_date, datetime.time(), datetime.UTC)
+        deleted_before = datetime.datetime.combine(
+            quarter_end_date + datetime.timedelta(days=1), datetime.time(), datetime.UTC
+        )
         stmt_number_of_deletions = (
             select(Submission.data_node_id, Submission.submitter_id, sqlfn.count(1))
-            .where(Submission.submission_uploaded_date.between(quarter_start_date, quarter_end_date))  # type: ignore[union-attr]
-            .join(
-                select(ChangeRequestLog.submission_id)
-                .where(ChangeRequestLog.change == ChangeRequestEnum.DELETE)
-                .subquery()
-            )
+            .where(Submission.deleted_at >= deleted_from, Submission.deleted_at < deleted_before)  # type: ignore[operator]
             .group_by(Submission.data_node_id, Submission.submitter_id)  # type: ignore[arg-type]
         )
         number_of_deletions = {
@@ -682,6 +684,50 @@ def quarterly(
     qc_output_path = output_directory / f"3-Detailprüfung_{grz_id}_{quarter}_{year}.tsv"
     _dump_qc_report(qc_output_path, submission_db, year, quarter, with_submission_ids=with_submission_ids)
 
+    _warn_about_open_deletions(submission_db)
+    _warn_about_records_due(db, datetime.date.today())
+
+
+def _warn_about_open_deletions(database: SubmissionDb) -> None:
+    """Warn about submissions whose deletion was requested but never carried out with grzctl delete."""
+    with database.transaction() as session:
+        open_deletions = session.exec(
+            select(Submission.id)
+            .where(
+                Submission.changes.any(ChangeRequestLog.change == ChangeRequestEnum.DELETE),  # type: ignore[attr-defined]
+                sa.not_(Submission.deletion_started),
+            )
+            .order_by(Submission.id)
+        ).all()
+    if open_deletions:
+        log.warning(
+            "%d submission(s) have a Delete change request but were never deleted with grzctl delete: %s. "
+            "Record a deletion done by hand with grzctl delete mark-done, or carry it out with grzctl delete run. "
+            "Until then, the quarterly report does not count them as deletions; afterwards it counts each in "
+            "the quarter it was deleted in.",
+            len(open_deletions),
+            ", ".join(open_deletions),
+        )
+
+
+def _next_purge_date(today: datetime.date) -> datetime.date:
+    """End of the quarter after the current one: by the next quarterly report, records due until then are overdue."""
+    quarter, year = date_to_quarter_year(today)
+    quarter, year = (quarter + 1, year) if quarter < 4 else (1, year + 1)
+    return quarter_date_bounds(year=year, quarter=quarter)[1]
+
+
+def _warn_about_records_due(db_url: str, today: datetime.date) -> None:
+    """Warn about the records of deletions that fall due before the next quarterly report."""
+    due = _next_purge_date(today)
+    if submissions := records_due(db_url, due):
+        log.warning(
+            "The records of %d deletion(s) fall due by %s. Run: grzctl delete purge-records --due-before %s",
+            len(submissions),
+            due.strftime("%d.%m.%Y"),
+            due.isoformat(),
+        )
+
 
 def _monitoring_payload(
     session: Session, grz_id: str, month: datetime.date, submitter_ids: typing.Iterable[str]
@@ -740,9 +786,10 @@ def _monitoring_payload(
 
     reported = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.REPORTED)
     archived = logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.ARCHIVED)
-    # a deleted submission is gone, a transferred one is held by another GRZ: neither is archived here anymore
+    # a deleted submission is gone, a transferred one is held by another GRZ: neither is archived here anymore.
+    # A deletion counts once grzctl delete carried it out, not when it was requested.
     gone = sa.or_(
-        logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.DELETE),
+        logged(SubmissionStateLog, SubmissionStateLog.state, SubmissionStateEnum.DELETED),
         logged(ChangeRequestLog, ChangeRequestLog.change, ChangeRequestEnum.TRANSFER),
     )
     with_size = sqlfn.count(Submission.submission_size)  # type: ignore[arg-type]
