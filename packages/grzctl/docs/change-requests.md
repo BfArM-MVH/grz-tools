@@ -49,6 +49,10 @@ The audit columns are nullable in the database so that historical rows created b
 - **`Delete`** — the submission must be deleted.
 - **`Transfer`** — the submission is being transferred elsewhere.
 
+> A `Delete` change request only records that a deletion was requested; it deletes nothing.
+> To carry out a BfArM deletion request, use `grzctl delete`, which also records the request.
+> See [Deleting submissions on a BfArM request](deletion-requests.md).
+
 The audit fields are identical across all three — who/what/when is universal.
 Only the human-facing template guidance differs per type.
 
