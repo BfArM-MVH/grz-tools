@@ -8,7 +8,7 @@ from grz_common.workers.download import InboxSubmissionState, InboxSubmissionSum
 from grz_db.models.author import Author
 from grz_db.models.submission import SubmissionDb, SubmissionStateEnum
 
-from ... import get_versions
+from ... import get_recorded_versions
 
 log = logging.getLogger(__name__)
 
@@ -89,5 +89,5 @@ def _update_state(db: SubmissionDb, submission_id: str, state: SubmissionStateEn
     db.update_submission_state(
         submission_id,
         state,
-        grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
+        grzctl_versions=get_recorded_versions(),
     )

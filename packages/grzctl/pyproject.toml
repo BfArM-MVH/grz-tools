@@ -14,7 +14,7 @@ authors = [
 dynamic = ["version"]
 dependencies = [
     "requests >=2.32.3,<3",
-    "grz-db >=4.1.0,<5",
+    "grz-db >=5.0.0,<6",
     "grz-common >=4.1.0,<5",
     "textual~=5.3"
 ]

@@ -4,11 +4,16 @@ from functools import cached_property
 from typing import Any
 
 import grz_common.exceptions as grzexc
-from grz_db.errors import DuplicateInitialSubmissionError, DuplicateTanGError, SubmissionNotFoundError
+from grz_db.errors import (
+    DuplicateInitialSubmissionError,
+    DuplicateTanGError,
+    SubmissionDeletedError,
+    SubmissionNotFoundError,
+)
 from grz_db.models.author import Author
 from grz_db.models.submission import FailureReasonEnum, SubmissionDb, SubmissionStateEnum
 
-from . import get_versions
+from . import get_recorded_versions
 from .commands.db.cli import get_submission_db_instance
 from .models.config import GrzctlConfig
 
@@ -86,8 +91,9 @@ class DbContext:
         automatically created and the transition proceeds;
       - otherwise: ``SubmissionNotFoundError`` is raised immediately.
 
-    Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError``) are
-    wrapped in ``RuntimeError`` so callers always receive a consistent exception type.
+    Errors raised inside ``__enter__`` (other than ``SubmissionNotFoundError`` and
+    ``SubmissionDeletedError``, which the database raises for a submission whose deletion has
+    started) are wrapped in ``RuntimeError`` so callers always receive a consistent exception type.
 
     Example::
 
@@ -139,8 +145,7 @@ class DbContext:
     @cached_property
     def grzctl_versions(self) -> dict[str, str]:
         """Get version information."""
-        versions = get_versions()
-        return {k: v or "unknown" for k, v in versions.items()}
+        return get_recorded_versions()
 
     @cached_property
     def expected_prior_states(self) -> set[SubmissionStateEnum | None]:
@@ -172,7 +177,7 @@ class DbContext:
             log.debug(f"Updating submission {self.submission_id} state to {self.start_state.name}")
             self.db.update_submission_state(self.submission_id, self.start_state, grzctl_versions=self.grzctl_versions)
 
-        except SubmissionNotFoundError:
+        except (SubmissionNotFoundError, SubmissionDeletedError):
             raise
         except Exception as e:
             raise RuntimeError("Failed to connect to DB") from e

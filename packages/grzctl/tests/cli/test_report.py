@@ -11,7 +11,7 @@ import grzctl.cli
 import pytest
 import sqlalchemy
 from click.testing import CliRunner
-from grz_db.models.submission import Submission
+from grz_db.models.submission import Submission, SubmissionDb, SubmissionStateEnum
 from grz_pydantic_models.submission.metadata import GrzSubmissionMetadata, SubmissionType
 from grz_pydantic_models_testing.example_metadata import grzctl as grzctl_metadata
 from grzctl.commands.report import date_to_quarter_year
@@ -276,6 +276,12 @@ def quarterly_report_dir(migrated_database_config_path: Path, tmp_path: Path) ->
         ],
     )
     assert result_change1.exit_code == 0, result_change1.output
+    # the report counts a deletion once grzctl delete carried it out: record its states as it does, in Q3.
+    # Only the states, so that s1's donors still count for the consent revocations of the report.
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=config.db.signing_author)
+    for state in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED):
+        db.update_submission_state(s1_metadata.submission_id, state, timestamp=datetime(2025, 9, 15, tzinfo=UTC))
 
     # generate quarterly report
     with runner.isolated_filesystem(temp_dir=tmp_path) as report_tmp_dir:
@@ -844,11 +850,22 @@ def test_monitoring(migrated_database_config_path: Path, tmp_path: Path, monkeyp
         "requested_at": today.isoformat(),
         "request_email_content": "Bitte bearbeiten.",
     }
-    for sid, change, archived in ((followup_id, "Delete", 1), (submission_id, "Transfer", 0)):
-        result = runner.invoke(
-            cli, [*common, "db", "submission", "change-request", sid, change, "--data", json.dumps(request)]
-        )
-        assert result.exit_code == 0, result.output
-        present = running_month_after(sid)
-        assert (present["archived"], present["submissions"]) == (archived, before["submissions"])
+    # a Delete change request alone deletes nothing: the submission stays archived until grzctl delete deleted it
+    result = runner.invoke(
+        cli, [*common, "db", "submission", "change-request", followup_id, "Delete", "--data", json.dumps(request)]
+    )
+    assert result.exit_code == 0, result.output
+    assert running_month_after(followup_id)["archived"] == 2
+    config = GrzctlConfig.from_path(migrated_database_config_path)
+    db = SubmissionDb(db_url=config.db.database_url, author=config.db.signing_author)
+    for state in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED):
+        db.update_submission_state(followup_id, state)
+    present = running_month_after(followup_id)
+    assert (present["archived"], present["submissions"]) == (1, before["submissions"])
+    result = runner.invoke(
+        cli, [*common, "db", "submission", "change-request", submission_id, "Transfer", "--data", json.dumps(request)]
+    )
+    assert result.exit_code == 0, result.output
+    present = running_month_after(submission_id)
+    assert (present["archived"], present["submissions"]) == (0, before["submissions"])
     assert present["archived_bytes_consented"] + present["archived_bytes_non_consented"] == 0

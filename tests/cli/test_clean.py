@@ -14,7 +14,7 @@ import pytest
 from botocore.exceptions import ClientError
 from grz_common.progress import EncryptionState, FileProgressLogger
 from grz_common.workers.submission import Submission
-from grzctl.commands.clean import _clean_submission_from_bucket
+from grzctl.commands.clean import clean_submission_from_inbox
 
 from .. import mock_files
 from .common import copy_submission
@@ -130,6 +130,6 @@ def test_clean_reports_rejected_credentials_as_a_configuration_error(s3_config_m
     _fail_s3_operation(monkeypatch, "PutObject", "InvalidAccessKeyId")
 
     with pytest.raises(grzexc.ConfigurationError):
-        _clean_submission_from_bucket(
+        clean_submission_from_inbox(
             s3_config_model.s3.bucket, s3_config_model.s3, "123_2025-01-01_00000000", "'testing'"
         )

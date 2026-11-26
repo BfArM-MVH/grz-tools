@@ -1,0 +1,370 @@
+from collections.abc import Iterator
+from types import SimpleNamespace
+from typing import Any
+
+import boto3
+import grz_common.exceptions as grzexc
+import pytest
+from botocore.exceptions import ClientError
+from grz_common.models.s3 import S3Options
+from grzctl.commands import clean as clean_module
+from grzctl.commands.delete import storage
+from grzctl.commands.delete.storage import (
+    Holdings,
+    StorageDeletionError,
+    archive_holdings,
+    delete_from_archive,
+    delete_from_inbox,
+    has_object_lock,
+    inbox_holdings,
+)
+from moto import mock_aws
+
+REGION = "us-east-1"
+SUBMISSION_ID = "000000000_2025-01-01_00000000"
+OTHER_SUBMISSION_ID = "000000000_2025-02-02_11111111"
+
+ARCHIVED = {
+    f"{SUBMISSION_ID}/files/sample_R1.fastq.gz.c4gh": b"x" * 100,
+    f"{SUBMISSION_ID}/files/sample_R2.fastq.gz.c4gh": b"y" * 50,
+    f"{SUBMISSION_ID}/metadata/metadata.json": b'{"tanG": "..."}',
+    f"{SUBMISSION_ID}/logs/progress_encrypt.cjson": b"log",
+    f"{SUBMISSION_ID}/logs/progress_upload.cjson": b"log",
+}
+UPLOADED = {
+    f"{SUBMISSION_ID}/files/sample_R1.fastq.gz.c4gh": b"x" * 100,
+    f"{SUBMISSION_ID}/metadata/metadata.json": b'{"tanG": "..."}',
+    f"{SUBMISSION_ID}/version": b"3.0.3",
+}
+
+
+@pytest.fixture
+def s3() -> Iterator[Any]:
+    with mock_aws():
+        yield boto3.client("s3", region_name=REGION)
+
+
+def _bucket(s3: Any, name: str, objects: dict[str, bytes], versioned: bool = False) -> S3Options:
+    s3.create_bucket(Bucket=name)
+    if versioned:
+        s3.put_bucket_versioning(Bucket=name, VersioningConfiguration={"Status": "Enabled"})
+    for key, body in objects.items():
+        s3.put_object(Bucket=name, Key=key, Body=body)
+    return S3Options(bucket=name, region_name=REGION, access_key="testing", secret="testing")
+
+
+def _keys(s3: Any, bucket: str) -> set[str]:
+    return {o["Key"] for o in s3.list_objects_v2(Bucket=bucket).get("Contents", [])}
+
+
+def _versions(s3: Any, bucket: str) -> int:
+    listing = s3.list_object_versions(Bucket=bucket)
+    return len(listing.get("Versions", [])) + len(listing.get("DeleteMarkers", []))
+
+
+class TestDeleteFromArchive:
+    def test_deletes_all_but_the_logs_and_leaves_a_tombstone(self, s3: Any):
+        other = {f"{OTHER_SUBMISSION_ID}/files/a.c4gh": b"z"}
+        archive = _bucket(s3, "consented", {**ARCHIVED, **other})
+
+        deletion = delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        assert _keys(s3, "consented") == {
+            f"{SUBMISSION_ID}/logs/progress_encrypt.cjson",
+            f"{SUBMISSION_ID}/logs/progress_upload.cjson",
+            f"{SUBMISSION_ID}/deleted",
+            f"{OTHER_SUBMISSION_ID}/files/a.c4gh",
+        }
+        assert (deletion.objects_deleted, deletion.bytes_deleted, deletion.logs_kept) == (3, 165, 2)
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 0
+
+    def test_none_for_an_archive_that_never_held_the_submission(self, s3: Any):
+        archive = _bucket(s3, "non-consented", {f"{OTHER_SUBMISSION_ID}/files/a.c4gh": b"z"})
+
+        assert delete_from_archive(archive, "non-consented archive", SUBMISSION_ID) is None
+        assert _keys(s3, "non-consented") == {f"{OTHER_SUBMISSION_ID}/files/a.c4gh"}
+
+    def test_deletes_old_versions_and_delete_markers(self, s3: Any):
+        archive = _bucket(s3, "consented", ARCHIVED, versioned=True)
+        s3.put_object(Bucket="consented", Key=f"{SUBMISSION_ID}/metadata/metadata.json", Body=b"{}")
+        s3.delete_object(Bucket="consented", Key=f"{SUBMISSION_ID}/files/sample_R2.fastq.gz.c4gh")
+
+        deletion = delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        assert (deletion.objects_deleted, deletion.delete_markers_removed) == (4, 1)
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 0
+        assert _versions(s3, "consented") == 3  # two logs and the tombstone
+
+    def test_continues_an_interrupted_deletion(self, s3: Any):
+        archive = _bucket(s3, "consented", {**ARCHIVED, f"{SUBMISSION_ID}/deleted": b""})
+
+        deletion = delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        assert deletion.objects_deleted == 3
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 0
+
+    def test_running_it_again_deletes_nothing_more(self, s3: Any):
+        archive = _bucket(s3, "consented", ARCHIVED)
+        delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        deletion = delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        assert (deletion.objects_deleted, deletion.logs_kept) == (0, 2)
+
+    def test_holdings_count_what_deleting_removes(self, s3: Any):
+        archive = _bucket(s3, "consented", ARCHIVED)
+
+        assert archive_holdings(archive, SUBMISSION_ID) == Holdings(objects=3, bytes=165)
+
+    def test_refused_deletion_raises(self, s3: Any, monkeypatch: pytest.MonkeyPatch):
+        archive = _bucket(s3, "consented", ARCHIVED)
+        real_init = storage.init_s3_client
+
+        def refusing_client(s3_options: S3Options) -> Any:
+            client = real_init(s3_options)
+            client.delete_objects = lambda **_: {"Errors": [{"Key": "k", "Code": "AccessDenied"}]}
+            return client
+
+        monkeypatch.setattr(storage, "init_s3_client", refusing_client)
+
+        with pytest.raises(StorageDeletionError, match="AccessDenied"):
+            delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+
+class TestObjectLock:
+    def test_detects_object_lock(self, s3: Any):
+        s3.create_bucket(Bucket="locked", ObjectLockEnabledForBucket=True)
+        locked = S3Options(bucket="locked", region_name=REGION, access_key="testing", secret="testing")
+
+        assert has_object_lock(locked) is True
+
+    def test_a_plain_bucket_has_none(self, s3: Any):
+        assert has_object_lock(_bucket(s3, "plain", {})) is False
+
+
+class TestDeleteFromInbox:
+    def test_cleans_the_inbox(self, s3: Any):
+        inbox = _bucket(s3, "inbox", UPLOADED)
+
+        deletion = delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert _keys(s3, "inbox") == {f"{SUBMISSION_ID}/metadata/metadata.json", f"{SUBMISSION_ID}/cleaned"}
+        metadata = s3.get_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json")
+        assert metadata["Body"].read() == b""
+        assert deletion.objects_deleted == 3
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
+
+    def test_a_cleaned_inbox_is_left_as_it_is(self, s3: Any):
+        inbox = _bucket(s3, "inbox", {f"{SUBMISSION_ID}/metadata/metadata.json": b"", f"{SUBMISSION_ID}/cleaned": b""})
+
+        deletion = delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert deletion.objects_deleted == 0
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
+
+    def test_none_for_an_inbox_without_the_submission(self, s3: Any):
+        inbox = _bucket(s3, "inbox", {})
+
+        assert delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID) is None
+        assert _keys(s3, "inbox") == set()
+
+    def test_deletes_the_versions_cleaning_leaves_behind(self, s3: Any):
+        inbox = _bucket(s3, "inbox", UPLOADED, versioned=True)
+
+        delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
+        assert _versions(s3, "inbox") == 2  # the empty metadata.json and the cleaned marker
+        metadata = s3.get_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json")
+        assert metadata["Body"].read() == b""
+
+    def test_a_cleaned_versioned_inbox_loses_the_old_versions(self, s3: Any):
+        """An inbox cleaned before versioning was looked at still keeps the uploaded data in old versions."""
+        inbox = _bucket(s3, "inbox", UPLOADED, versioned=True)
+        s3.put_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json", Body=b"")
+        s3.delete_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/files/sample_R1.fastq.gz.c4gh")
+        s3.delete_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/version")
+        s3.put_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/cleaned", Body=b"")
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects > 0
+
+        delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
+
+
+class TestRegressions:
+    """Cases the review of the deletion found, each of which left data behind or never finished."""
+
+    def test_a_denied_version_listing_stops_the_deletion(self, s3: Any, monkeypatch: pytest.MonkeyPatch):
+        """Without the version listing, old versions could stay unseen, so deleting must not go on."""
+        archive = _bucket(s3, "consented", ARCHIVED, versioned=True)
+        real_init = storage.init_s3_client
+
+        def denying_client(s3_options: S3Options) -> Any:
+            client = real_init(s3_options)
+            denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListObjectVersions")
+            client.get_paginator = lambda name: (_ for _ in ()).throw(denied)
+            return client
+
+        monkeypatch.setattr(storage, "init_s3_client", denying_client)
+
+        with pytest.raises(grzexc.TransferError, match="AccessDenied"):
+            delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+        monkeypatch.undo()
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 3
+
+    def test_old_versions_go_even_when_the_versioning_query_is_denied(self, s3: Any, monkeypatch: pytest.MonkeyPatch):
+        """A key without s3:GetBucketVersioning must not make a versioned archive look unversioned."""
+        archive = _bucket(s3, "consented", ARCHIVED, versioned=True)
+        s3.put_object(Bucket="consented", Key=f"{SUBMISSION_ID}/metadata/metadata.json", Body=b"{}")
+        real_init = storage.init_s3_client
+
+        def client_without_versioning_query(s3_options: S3Options) -> Any:
+            client = real_init(s3_options)
+            denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetBucketVersioning")
+            client.get_bucket_versioning = lambda **_: (_ for _ in ()).throw(denied)
+            return client
+
+        monkeypatch.setattr(storage, "init_s3_client", client_without_versioning_query)
+
+        delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        remaining = s3.list_object_versions(Bucket="consented")
+        keys = {v["Key"] for v in remaining.get("Versions", [])} | {
+            m["Key"] for m in remaining.get("DeleteMarkers", [])
+        }
+        assert keys == {
+            f"{SUBMISSION_ID}/logs/progress_encrypt.cjson",
+            f"{SUBMISSION_ID}/logs/progress_upload.cjson",
+            f"{SUBMISSION_ID}/deleted",
+        }
+
+    def test_old_tombstone_versions_are_deleted_too(self, s3: Any):
+        """A tombstone deleted and put back leaves an old version and a delete marker, which go as well."""
+        archive = _bucket(s3, "consented", ARCHIVED, versioned=True)
+        s3.put_object(Bucket="consented", Key=f"{SUBMISSION_ID}/deleted", Body=b"")
+        s3.delete_object(Bucket="consented", Key=f"{SUBMISSION_ID}/deleted")
+        s3.put_object(Bucket="consented", Key=f"{SUBMISSION_ID}/deleted", Body=b"")
+
+        delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        assert archive_holdings(archive, SUBMISSION_ID).objects == 0
+
+    def test_an_inbox_restored_next_to_its_cleaned_marker_is_cleaned_again(self, s3: Any):
+        """A restore brings the files and the full metadata.json back, but the cleaned marker stayed."""
+        inbox = _bucket(s3, "inbox", {**UPLOADED, f"{SUBMISSION_ID}/cleaned": b""})
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 3
+
+        delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
+        assert _keys(s3, "inbox") == {f"{SUBMISSION_ID}/metadata/metadata.json", f"{SUBMISSION_ID}/cleaned"}
+        metadata = s3.get_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json")
+        assert metadata["Body"].read() == b""
+
+    @pytest.mark.parametrize("versioned", [False, True], ids=["plain", "versioned"])
+    def test_a_clean_interrupted_after_deleting_the_files_is_finished(self, s3: Any, versioned: bool):
+        """Only the full metadata.json and the cleaning marker are left; the tanG must not stay."""
+        inbox = _bucket(
+            s3,
+            "inbox",
+            {f"{SUBMISSION_ID}/metadata/metadata.json": b'{"tanG": "..."}', f"{SUBMISSION_ID}/cleaning": b""},
+            versioned=versioned,
+        )
+
+        delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert inbox_holdings(inbox, SUBMISSION_ID).objects == 0
+        assert _keys(s3, "inbox") == {f"{SUBMISSION_ID}/metadata/metadata.json", f"{SUBMISSION_ID}/cleaned"}
+        metadata = s3.get_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json")
+        assert metadata["Body"].read() == b""
+
+
+OTHER_ARCHIVED = {
+    f"{OTHER_SUBMISSION_ID}/files/other.fastq.gz.c4gh": b"z" * 30,
+    f"{OTHER_SUBMISSION_ID}/metadata/metadata.json": b'{"tanG": "other"}',
+}
+# a submission whose ID starts with the deleted one's, which a prefix without the slash would match
+LONGER_ID = f"{SUBMISSION_ID}0"
+
+
+class _PrefixIgnoringPaginator:
+    def __init__(self, paginator: Any):
+        self._paginator = paginator
+
+    def paginate(self, **kwargs: Any) -> Any:
+        kwargs.pop("Prefix", None)
+        return self._paginator.paginate(**kwargs)
+
+
+class _PrefixIgnoringBucket:
+    """A boto3 bucket whose object listing returns the whole bucket, whatever the prefix."""
+
+    def __init__(self, bucket: Any):
+        self._bucket = bucket
+        self.objects = SimpleNamespace(filter=lambda **_: bucket.objects.all())
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._bucket, name)
+
+
+@pytest.fixture
+def prefix_ignoring_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every listing return the whole bucket, as an S3-compatible store that ignored the prefix would."""
+    real_client = storage.init_s3_client
+    real_resource = clean_module.init_s3_resource
+
+    def client(s3_options: S3Options) -> Any:
+        s3_client = real_client(s3_options)
+        real_paginator = s3_client.get_paginator
+        s3_client.get_paginator = lambda name: _PrefixIgnoringPaginator(real_paginator(name))
+        return s3_client
+
+    def resource(s3_options: S3Options) -> Any:
+        s3_resource = real_resource(s3_options)
+        return SimpleNamespace(Bucket=lambda name: _PrefixIgnoringBucket(s3_resource.Bucket(name)))
+
+    monkeypatch.setattr(storage, "init_s3_client", client)
+    monkeypatch.setattr(clean_module, "init_s3_resource", resource)
+
+
+class TestStoreThatIgnoresThePrefix:
+    """What a store returns beyond the submission's prefix is never deleted."""
+
+    def test_the_archive_keeps_other_submissions(self, s3: Any, prefix_ignoring_store: None):
+        longer = {f"{LONGER_ID}/files/x.c4gh": b"y"}
+        archive = _bucket(s3, "consented", {**ARCHIVED, **OTHER_ARCHIVED, **longer})
+
+        delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        assert _keys(s3, "consented") == {
+            f"{SUBMISSION_ID}/logs/progress_encrypt.cjson",
+            f"{SUBMISSION_ID}/logs/progress_upload.cjson",
+            f"{SUBMISSION_ID}/deleted",
+            *OTHER_ARCHIVED,
+            *longer,
+        }
+
+    def test_the_inbox_keeps_other_submissions(self, s3: Any, prefix_ignoring_store: None):
+        other_upload = {f"{OTHER_SUBMISSION_ID}/files/other.fastq.gz.c4gh": b"z", f"{LONGER_ID}/version": b"3"}
+        inbox = _bucket(s3, "inbox", {**UPLOADED, **other_upload})
+
+        delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert _keys(s3, "inbox") == {
+            f"{SUBMISSION_ID}/metadata/metadata.json",
+            f"{SUBMISSION_ID}/cleaned",
+            *other_upload,
+        }
+
+    @pytest.mark.parametrize("submission_id", ["", "/"])
+    def test_an_empty_submission_id_is_refused(self, s3: Any, submission_id: str):
+        archive = _bucket(s3, "consented", ARCHIVED)
+        inbox = _bucket(s3, "inbox", UPLOADED)
+
+        with pytest.raises(ValueError, match="Refusing"):
+            delete_from_archive(archive, "consented archive", submission_id)
+        with pytest.raises(ValueError, match="Refusing"):
+            delete_from_inbox(inbox, "inbox 'inbox'", submission_id)
+        assert _keys(s3, "consented") == set(ARCHIVED)
+        assert _keys(s3, "inbox") == set(UPLOADED)

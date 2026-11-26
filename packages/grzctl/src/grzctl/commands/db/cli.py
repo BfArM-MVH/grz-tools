@@ -78,7 +78,7 @@ from pydantic import Field, ValidationError
 from sqlmodel import Session, select
 from tqdm.auto import tqdm
 
-from ... import get_versions
+from ... import get_recorded_versions
 from ...commands import grzctl_configuration, inbox_options
 from ...models.config import GrzctlConfig
 from .. import limit
@@ -860,6 +860,13 @@ def update(  # noqa: C901, PLR0913, PLR0917
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid state value '{state_str}'.[/red]")
         raise click.Abort() from e
+    if state_enum in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED):
+        # set here, they would record a deletion that never happened, and could not be taken back
+        console_err.print(
+            f"[red]Error: grzctl delete sets the state '{state_enum}' when it deletes a submission. "
+            "Delete it with grzctl delete run, or record a deletion done by hand with grzctl delete mark-done.[/red]"
+        )
+        raise click.Abort()
     parsed_data = None
     if data_json:
         try:
@@ -894,7 +901,7 @@ def update(  # noqa: C901, PLR0913, PLR0917
             state_enum,
             data=parsed_data,
             failure_reason=failure_reason_enum,
-            grzctl_versions={k: (v if v is not None else "unknown") for k, v in get_versions().items()},
+            grzctl_versions=get_recorded_versions(),
         )
 
         console_err.print(
@@ -2017,6 +2024,7 @@ class _BackfillResult(StrEnum):
     WOULD_OVERWRITE = "would_overwrite"
     ERROR = "error"
     CONSENT_MISMATCH = "consent_mismatch"
+    DELETED = "deleted"
 
 
 @dataclass(frozen=True)
@@ -2272,6 +2280,11 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     inboxes_recorded = 0
 
     for submission in tqdm(candidates, disable=None):
+        if submission.deletion_started:
+            # grzctl delete removed its data and refuses writes to it
+            _report(f"  {submission.id}: skipped, it is deleted", "yellow")
+            counts[_BackfillResult.DELETED] += 1
+            continue
         with _logs_about(submission.id):
             # Read both archives before writing anything. A metadata.json in both is an error, and
             # committing the first copy found would already have changed the row.
@@ -2367,6 +2380,7 @@ def backfill(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         f"  Would overwrite (needs --force): {counts[_BackfillResult.WOULD_OVERWRITE]}\n"
         f"  Case link unresolved: {links_unresolved} (also counted above)\n"
         f"  {inbox_verb}: {inboxes_recorded}\n"
+        f"  Deleted (skipped): {counts[_BackfillResult.DELETED]}\n"
         f"  Errors: {counts[_BackfillResult.ERROR]}",
         "cyan",
     )

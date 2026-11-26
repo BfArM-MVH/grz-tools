@@ -18,6 +18,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory as AlembicScriptDirectory
+from grz_pydantic_models.common import as_aware_datetime
 from grz_pydantic_models.dates import date_to_quarter_year, quarter_date_bounds
 from grz_pydantic_models.submission.metadata import (
     LOCAL_CASE_ID_PLACEHOLDERS,
@@ -64,6 +65,7 @@ from ...errors import (
     OutdatedDatabaseSchemaError,
     SubmissionBasicQCNotPassedError,
     SubmissionDateIsNoneError,
+    SubmissionDeletedError,
     SubmissionNotFoundError,
     SubmissionTypeAlreadySetError,
     SubmissionTypeInvalidForCaseError,
@@ -111,6 +113,8 @@ class SubmissionStateEnum(CaseInsensitiveStrEnum, ListableEnum):  # type: ignore
     CLEANED = "Cleaned"
     PROCESSED = "Processed"
     FINISHED = "Finished"
+    DELETING = "Deleting"
+    DELETED = "Deleted"
     ERROR = "Error"
 
 
@@ -292,6 +296,63 @@ class Submission(SubmissionBase, table=True):
         return sa.and_(
             cls.submission_type == SubmissionType.initial,  # type: ignore[arg-type]
             cls.basic_qc_passed.is_(True),  # type: ignore[union-attr]
+        )
+
+    @hybrid_property
+    def is_deleted(self) -> bool:
+        """Whether ``grzctl delete`` finished deleting this submission.
+
+        True once any ``Deleted`` state exists, whatever states were recorded after it.
+        """
+        return any(state.state == SubmissionStateEnum.DELETED for state in self.states)
+
+    @is_deleted.inplace.expression
+    @classmethod
+    def _is_deleted_expression(cls) -> ColumnElement[bool]:
+        return sa.exists().where(
+            SubmissionStateLog.submission_id == cls.id,  # type: ignore[arg-type]
+            SubmissionStateLog.state == SubmissionStateEnum.DELETED,
+        )
+
+    @hybrid_property
+    def deleted_at(self) -> datetime.datetime | None:
+        """When the deletion finished: the timestamp of the first ``Deleted`` state, or ``None``.
+
+        The first, since ``grzctl delete --check`` can record another one after a backup restore.
+        The reports count the deletion in the quarter of this timestamp, and the record purge
+        counts the retention period from it.
+        """
+        return min(
+            (state.timestamp for state in self.states if state.state == SubmissionStateEnum.DELETED),
+            default=None,
+        )
+
+    @deleted_at.inplace.expression
+    @classmethod
+    def _deleted_at_expression(cls) -> ColumnElement[datetime.datetime | None]:
+        return (
+            select(sqlfn.min(SubmissionStateLog.timestamp))
+            .where(
+                SubmissionStateLog.submission_id == cls.id,
+                SubmissionStateLog.state == SubmissionStateEnum.DELETED,
+            )
+            .scalar_subquery()
+        )
+
+    @hybrid_property
+    def deletion_started(self) -> bool:
+        """Whether a deletion started, finished or not: a ``Deleting`` or ``Deleted`` state exists.
+
+        Nothing may process such a submission any more, since part of its data may already be gone.
+        """
+        return any(state.state in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED) for state in self.states)
+
+    @deletion_started.inplace.expression
+    @classmethod
+    def _deletion_started_expression(cls) -> ColumnElement[bool]:
+        return sa.exists().where(
+            SubmissionStateLog.submission_id == cls.id,  # type: ignore[arg-type]
+            SubmissionStateLog.state.in_((SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED)),  # type: ignore[attr-defined]
         )
 
     def diff(
@@ -1065,6 +1126,36 @@ than that for its fsyncs.
 """
 
 
+@dataclass(frozen=True)
+class PersonalDataPurge:
+    """What :meth:`SubmissionDb.purge_personal_data` removed from one submission.
+
+    :param donors_renamed: How many donor pseudonyms were replaced by a placeholder.
+    :param case_deleted: Whether the submission's case was deleted, which happens when no other
+        submission is linked to it.
+    :param qc_queue_entry_removed: Whether the submission was taken out of the detailed QC queue.
+    :param error_states_deleted: How many ``Error`` states were deleted, whose error text can name a
+        donor pseudonym or a lab datum.
+    """
+
+    donors_renamed: int
+    case_deleted: bool
+    qc_queue_entry_removed: bool
+    error_states_deleted: int
+
+
+@dataclass(frozen=True)
+class DeletionRecordsPurge:
+    """What :meth:`SubmissionDb.purge_deletion_records` removed from one deleted submission.
+
+    :param change_requests_deleted: How many change requests were deleted.
+    :param tan_g_cleared: Whether the submission still held its tanG, which was cleared.
+    """
+
+    change_requests_deleted: int
+    tan_g_cleared: bool
+
+
 class SubmissionDb:
     """
     API entrypoint for managing submissions.
@@ -1264,6 +1355,25 @@ class SubmissionDb:
         qc_passed_initial = self._qc_passed_initial_of(session, case_id) if case_id is not None else None
         return DuplicateInitialSubmissionError(case_id, qc_passed_initial.id if qc_passed_initial is not None else None)
 
+    @staticmethod
+    def _refuse_if_deletion_started(submission: Submission) -> None:
+        """Refuse a write to a submission whose deletion has started.
+
+        :raises SubmissionDeletedError: if *submission* has a ``Deleting`` or ``Deleted`` state.
+        """
+        if submission.deletion_started:
+            raise SubmissionDeletedError(submission.id)
+
+    def _refuse_qc_results_for_deleted(self, session: Session, results: Sequence["DetailedQCResult"]) -> None:
+        """Refuse detailed QC results for a submission whose deletion has started.
+
+        :raises SubmissionDeletedError: if any result belongs to such a submission.
+        """
+        for submission_id in {result.submission_id for result in results}:
+            submission = session.get(Submission, submission_id)
+            if submission is not None:
+                self._refuse_if_deletion_started(submission)
+
     def modify_submission(self, submission_id: str, key: str, value: Any, session: Session | None = None) -> Submission:
         """Set one column of a submission.
 
@@ -1280,6 +1390,7 @@ class SubmissionDb:
             submission = active_session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
 
             setattr(submission, key, value)
 
@@ -1317,6 +1428,7 @@ class SubmissionDb:
             db_submission = session.get(Submission, submission.id)
             if db_submission is None:
                 raise SubmissionNotFoundError(submission.id)
+            self._refuse_if_deletion_started(db_submission)
 
             for field in SubmissionBase.model_fields:
                 if field in SubmissionBase.immutable_fields:
@@ -1346,6 +1458,7 @@ class SubmissionDb:
             submission = active_session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
             previous_inbox = submission.inbox
             if previous_inbox is not None and previous_inbox != inbox_name:
                 logger.warning(
@@ -1434,13 +1547,16 @@ class SubmissionDb:
         current_index_in_block = absolute_index % block_size
         return current_index_in_block == target_index_in_block
 
-    def update_submission_state(
+    def update_submission_state(  # noqa: PLR0913
         self,
         submission_id: str,
         state: SubmissionStateEnum,
         data: dict | None = None,
         grzctl_versions: dict[str, str] | None = None,
         failure_reason: FailureReasonEnum | None = None,
+        *,
+        timestamp: datetime.datetime | None = None,
+        session: Session | None = None,
     ) -> SubmissionStateLog:
         """Update a submission's state to the specified state.
 
@@ -1449,12 +1565,17 @@ class SubmissionDb:
         :param data: Optional data to attach to the update.
         :param grzctl_versions: Optional dictionary of grzctl dependency versions.
         :param failure_reason: Why the submission reached an error state, if it did.
+        :param timestamp: When the submission reached the state, if not now, e.g. for a state
+            recorded afterwards. It is signed with the rest of the entry.
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
         :returns: The new :class:`SubmissionStateLog` entry.
         """
-        with self.transaction() as session:
-            submission = session.get(Submission, submission_id)
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
+            if state not in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED):
+                self._refuse_if_deletion_started(submission)
             if not self._author:
                 raise ValueError("No author defined")
 
@@ -1465,13 +1586,14 @@ class SubmissionDb:
                 data=data,
                 grzctl_versions=grzctl_versions,
                 failure_reason=failure_reason,
+                **({"timestamp": timestamp} if timestamp is not None else {}),
             )
             signature = state_log_payload.sign(self._author.private_key())
 
             state_log_create = SubmissionStateLogCreate(**state_log_payload.model_dump(), signature=signature.hex())
             db_state_log = SubmissionStateLog.model_validate(state_log_create)
-            session.add(db_state_log)
-            session.flush()
+            active_session.add(db_state_log)
+            active_session.flush()
             return db_state_log
 
     def get_donors(
@@ -1547,6 +1669,7 @@ class SubmissionDb:
     def add_detailed_qc_result(self, result: DetailedQCResult) -> DetailedQCResult:
         """Add or update a detailed QC result to/in the database."""
         with self.transaction() as session:
+            self._refuse_qc_results_for_deleted(session, [result])
             session.add(result)
 
             session.flush()
@@ -1559,6 +1682,7 @@ class SubmissionDb:
         import behind; every row is only ever visible once the whole set is in.
         """
         with self.transaction() as session:
+            self._refuse_qc_results_for_deleted(session, results)
             session.add_all(results)
             session.flush()
         return tuple(results)
@@ -1575,6 +1699,7 @@ class SubmissionDb:
         request_raw_content: bytes | None = None,
         request_raw_content_type: RequestRawContentType | None = None,
         data: dict | None = None,
+        session: Session | None = None,
     ) -> ChangeRequestLog:
         """Register a change request for a submission.
 
@@ -1589,10 +1714,11 @@ class SubmissionDb:
         :param request_raw_content_type: Type of the binary blob; required iff
             ``request_raw_content`` is set.
         :param data: Optional type-specific extras.
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
         :returns: The new :class:`ChangeRequestLog` entry.
         """
-        with self.transaction() as session:
-            submission = session.get(Submission, submission_id)
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
             if not self._author:
@@ -1616,8 +1742,8 @@ class SubmissionDb:
                 **change_request_log_payload.model_dump(), signature=signature.hex()
             )
             db_change_request_log = ChangeRequestLog.model_validate(change_request_log_create)
-            session.add(db_change_request_log)
-            session.flush()
+            active_session.add(db_change_request_log)
+            active_session.flush()
             return db_change_request_log
 
     def get_submission(self, submission_id: str, session: Session | None = None) -> Submission | None:
@@ -1633,6 +1759,23 @@ class SubmissionDb:
             )
             submission = active_session.exec(statement).first()
             return submission
+
+    def get_submission_by_tan_g(self, tan_g: str) -> Submission | None:
+        """Retrieve the submission with a tanG and its state history.
+
+        A tanG is hexadecimal, and the same in upper or lower case, so it is compared without
+        regard to case.
+
+        :param tan_g: The tanG to look up.
+        :returns: The :class:`Submission`, or ``None`` if no submission has that tanG.
+        """
+        with self.transaction() as session:
+            statement = (
+                select(Submission)
+                .where(sqlfn.lower(Submission.tan_g) == tan_g.lower())
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+            )
+            return session.exec(statement).first()
 
     def get_submissions(self, submission_ids: Sequence[str]) -> list[Submission | None]:
         """Fetch a specific set of submissions by their IDs in a single query.
@@ -1898,6 +2041,182 @@ class SubmissionDb:
             session.delete(case)
             session.flush()
 
+    def purge_personal_data(self, submission_id: str) -> PersonalDataPurge:
+        """Remove what identifies a person from a submission whose deletion has started, as one transaction.
+
+        Clears ``submission_metadata`` and replaces ``local_case_id`` with ``deleted-<submission ID>``
+        and each donor pseudonym with ``deleted-<submission ID>-<n>``, also in the detailed QC
+        results that point to the donor. The placeholders carry the submission ID, so the reports,
+        which tell persons apart by pseudonym and ``local_case_id``, count each deleted submission
+        as a person of its own rather than merging them. Unlinks the case, deleting it together
+        with its ``psn`` when no other submission is linked to it, and takes the submission out of
+        the detailed QC queue. Deletes its ``Error`` states, whose error text can name a donor
+        pseudonym or a lab datum; as whole rows, so that the signatures of the other states stay valid.
+
+        Keeps ``tan_g``, which the deletion confirmation names and which is kept for documentation,
+        and what the reports count: the submission's other columns, its other states and change
+        requests, the donors' other columns and the detailed QC results.
+
+        Running it again changes nothing, so an interrupted deletion can be resumed.
+
+        :param submission_id: ID of the submission.
+        :returns: What was removed.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        :raises ValueError: if the submission has no ``Deleting`` or ``Deleted`` state.
+        """
+        placeholder = f"deleted-{submission_id}"
+        with self.transaction() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            if not submission.deletion_started:
+                raise ValueError(
+                    f"Submission '{submission_id}' has no Deleting or Deleted state; "
+                    "its personal data is purged only as part of its deletion."
+                )
+
+            submission.submission_metadata = None
+            submission.local_case_id = placeholder
+
+            case_id = submission.case_id
+            submission.case = None
+            session.add(submission)
+            session.flush()
+            case_deleted = False
+            if case_id is not None:
+                still_linked = session.exec(
+                    select(sqlfn.count()).select_from(Submission).where(Submission.case_id == case_id)  # type: ignore[arg-type]
+                ).one()
+                if not still_linked:
+                    session.delete(session.get(Case, case_id))
+                    case_deleted = True
+
+            queue_entry = session.get(QCQueueEntry, submission_id)
+            if queue_entry is not None:
+                session.delete(queue_entry)
+
+            error_states = session.exec(
+                select(SubmissionStateLog).where(
+                    SubmissionStateLog.submission_id == submission_id,
+                    SubmissionStateLog.state == SubmissionStateEnum.ERROR,
+                )
+            ).all()
+            for error_state in error_states:
+                session.delete(error_state)
+
+            donors = session.exec(select(Donor).where(Donor.submission_id == submission_id)).all()
+            to_rename = sorted(
+                (donor for donor in donors if not donor.pseudonym.startswith(f"{placeholder}-")),
+                key=attrgetter("pseudonym"),
+            )
+            for number, donor in enumerate(to_rename, start=len(donors) - len(to_rename) + 1):
+                # detailed_qc_results references the donor's pseudonym without ON UPDATE CASCADE:
+                # add the renamed donor, repoint its QC results, then drop the old row
+                new_pseudonym = f"{placeholder}-{number}"
+                columns = {name: getattr(donor, name) for name in Donor.model_fields if name != "pseudonym"}
+                session.add(Donor(**columns, pseudonym=new_pseudonym))
+                session.flush()
+                qc_results = session.exec(
+                    select(DetailedQCResult).where(
+                        DetailedQCResult.submission_id == submission_id,
+                        DetailedQCResult.pseudonym == donor.pseudonym,
+                    )
+                ).all()
+                for qc_result in qc_results:
+                    qc_result.pseudonym = new_pseudonym
+                    session.add(qc_result)
+                session.flush()
+                session.delete(donor)
+                session.flush()
+
+            return PersonalDataPurge(
+                donors_renamed=len(to_rename),
+                case_deleted=case_deleted,
+                qc_queue_entry_removed=queue_entry is not None,
+                error_states_deleted=len(error_states),
+            )
+
+    def list_deletions(self) -> Sequence[Submission]:
+        """List every submission whose deletion has started, finished or not, with its states.
+
+        :returns: Those submissions, ordered by their ID.
+        """
+        with self.transaction() as session:
+            statement = (
+                select(Submission)
+                .where(Submission.deletion_started)
+                .options(selectinload(Submission.states))  # type: ignore[arg-type]
+                .order_by(Submission.id)
+            )
+            return session.exec(statement).all()
+
+    def list_deletion_records(self, deleted_before: datetime.datetime) -> Sequence[Submission]:
+        """List deleted submissions that still keep records of their deletion.
+
+        The records are the submission's change requests and its tanG, which
+        :meth:`purge_personal_data` keeps for documentation until :meth:`purge_deletion_records`
+        removes them.
+
+        :param deleted_before: Only submissions whose deletion finished (:attr:`Submission.deleted_at`)
+            before this time are listed. A naive value is taken as UTC.
+        :returns: Those submissions, the earliest deleted first.
+        """
+        # SQLite stores timestamps as text in UTC and compares them as text, so the cutoff is
+        # compared in UTC too; another offset would shift it by that many hours
+        deleted_before = as_aware_datetime(deleted_before).astimezone(datetime.UTC)
+        with self.transaction() as session:
+            statement = (
+                select(Submission)
+                .where(
+                    Submission.is_deleted,
+                    Submission.deleted_at < deleted_before,  # type: ignore[operator]
+                    sa.or_(
+                        Submission.tan_g.is_not(None),  # type: ignore[union-attr]
+                        Submission.changes.any(),  # type: ignore[attr-defined]
+                    ),
+                )
+                .options(selectinload(Submission.states), selectinload(Submission.changes))  # type: ignore[arg-type]
+                .order_by(Submission.deleted_at, Submission.id)
+            )
+            return session.exec(statement).all()
+
+    def purge_deletion_records(self, submission_id: str) -> DeletionRecordsPurge:
+        """Remove the records kept of a deleted submission, as one transaction.
+
+        Deletes all of the submission's change requests, which hold the request and may name the
+        tanG or the local case ID, and clears its tanG. Deleting whole rows keeps the signatures of
+        the remaining log entries valid. The states, donors and detailed QC results stay.
+
+        Running it again changes nothing.
+
+        :param submission_id: ID of the submission.
+        :returns: What was removed.
+        :raises SubmissionNotFoundError: if no submission has the given ``submission_id``.
+        :raises ValueError: if the submission has no ``Deleted`` state.
+        """
+        with self.transaction() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            if not submission.is_deleted:
+                raise ValueError(
+                    f"Submission '{submission_id}' has no Deleted state; "
+                    "its records are purged only after its deletion finished."
+                )
+
+            change_requests = session.exec(
+                select(ChangeRequestLog).where(ChangeRequestLog.submission_id == submission_id)
+            ).all()
+            for change_request in change_requests:
+                session.delete(change_request)
+
+            tan_g_cleared = submission.tan_g is not None
+            submission.tan_g = None
+            session.add(submission)
+            session.flush()
+
+            return DeletionRecordsPurge(change_requests_deleted=len(change_requests), tan_g_cleared=tan_g_cleared)
+
     def set_submission_case(self, submission_id: str, case_id: int) -> Submission:
         """Link (or relink) a submission to an existing case.
 
@@ -1924,6 +2243,7 @@ class SubmissionDb:
             submission = session.get(Submission, submission_id)
             if submission is None:
                 raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
             self._assert_case_trackable(submission_id, submission.submission_type)
             case = session.get(Case, case_id)
             if case is None:
@@ -2606,6 +2926,10 @@ class SubmissionDb:
         :param changes: Change set from :meth:`diff`.
         """
         with self.transaction() as session:
+            submission = session.get(Submission, submission_id)
+            if submission is None:
+                raise SubmissionNotFoundError(submission_id)
+            self._refuse_if_deletion_started(submission)
             if (link := changes.case_link) is not None:
                 self.assign_case(
                     submission_id,

@@ -13,6 +13,7 @@ import platformdirs
 import yaml
 from grz_common.cli import FILE_R_E
 from grz_common.logging import setup_cli_logging
+from grz_db.errors import SubmissionDeletedError
 
 from . import get_versions
 from .commands.archive import archive
@@ -22,6 +23,7 @@ from .commands.clean import clean
 from .commands.consent import consent
 from .commands.db.cli import db
 from .commands.decrypt import decrypt
+from .commands.delete import delete
 from .commands.download import download
 from .commands.encrypt import encrypt
 from .commands.inbox import inbox
@@ -102,6 +104,7 @@ def build_cli():
     cli.add_command(decrypt)
     cli.add_command(archive)
     cli.add_command(clean)
+    cli.add_command(delete)
     cli.add_command(consent)
     cli.add_command(pruefbericht)
     cli.add_command(db)
@@ -141,8 +144,9 @@ def main():
     cli = build_cli()
     try:
         cli()
-    except grzexc.GrzError as e:
-        # an expected failure, such as an invalid metadata.json: log its message, not a traceback
+    except (grzexc.GrzError, SubmissionDeletedError) as e:
+        # an expected failure, such as an invalid metadata.json or a write to a deleted submission:
+        # log its message, not a traceback
         log.error(e)
         sys.exit(1)
 

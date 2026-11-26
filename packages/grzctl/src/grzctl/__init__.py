@@ -21,3 +21,8 @@ def get_versions() -> dict[str, str | None]:
         "grz-pydantic-models": get_version("grz-pydantic-models"),
         "grz-check": get_version("grz-check"),
     }
+
+
+def get_recorded_versions() -> dict[str, str]:
+    """The versions of grzctl and its packages to record with a submission state, ``unknown`` for one not installed."""
+    return {name: package_version or "unknown" for name, package_version in get_versions().items()}

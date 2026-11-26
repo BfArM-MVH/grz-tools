@@ -1840,9 +1840,9 @@ def test_submission_grzctl_versions_logging(migrated_database_config_path: Path,
         "grz-pydantic-models": "1.0.0",
         "grz-check": "1.0.0",
     }
-    # Patch the binding the writer actually calls: the db.cli module imported the name, so patching
-    # it on the grzctl package would leave the real versions being recorded.
-    monkeypatch.setattr("grzctl.commands.db.cli.get_versions", lambda: test_versions_dict)
+    # Patch the binding the writer actually calls: get_recorded_versions looks get_versions up in the
+    # grzctl package, so that is where it is patched.
+    monkeypatch.setattr("grzctl.get_versions", lambda: test_versions_dict)
 
     metadata = GrzSubmissionMetadata.model_validate_json(test_metadata_path.read_text())
 
@@ -1961,7 +1961,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #1 with version 0.1.0
     monkeypatch.setattr(
-        "grzctl.commands.db.cli.get_versions",
+        "grzctl.get_versions",
         lambda: {
             "grzctl": "0.1.0",
             "grz-common": "1.0.0",
@@ -1977,7 +1977,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #2 with version 0.1.1
     monkeypatch.setattr(
-        "grzctl.commands.db.cli.get_versions",
+        "grzctl.get_versions",
         lambda: {
             "grzctl": "0.1.1",
             "grz-common": "1.0.0",
@@ -1993,7 +1993,7 @@ def test_submission_grzctl_version_different_versions(
 
     # State update #3 with version 0.2.0
     monkeypatch.setattr(
-        "grzctl.commands.db.cli.get_versions",
+        "grzctl.get_versions",
         lambda: {
             "grzctl": "0.2.0",
             "grz-common": "1.0.0",

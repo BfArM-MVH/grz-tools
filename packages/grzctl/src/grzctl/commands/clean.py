@@ -62,10 +62,28 @@ def clean(
             end_state=SubmissionStateEnum.CLEANED,
             enabled=update_db,
         ):
-            _clean_submission_from_bucket(bucket_name, s3_options, submission_id, inbox_desc)
+            if not clean_submission_from_inbox(bucket_name, s3_options, submission_id, inbox_desc):
+                sys.exit(f"No objects with prefix '{submission_id}/' in inbox {inbox_desc} found for deletion.")
 
 
-def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submission_id: str, inbox_desc: str):
+def clean_submission_from_inbox(bucket_name: str, s3_options: S3Options, submission_id: str, inbox_desc: str) -> int:
+    """Remove all files of a submission from an inbox, leaving an empty ``metadata.json`` and a ``cleaned`` marker.
+
+    The empty ``metadata.json`` keeps the submission ID from being uploaded again. A clean that
+    was interrupted after deleting the files is finished: its ``metadata.json`` is still emptied
+    and the inbox marked cleaned. When the inbox holds nothing of the submission, it returns
+    without marking it cleaned.
+
+    :param bucket_name: Bucket of the inbox.
+    :param s3_options: S3 connection to the inbox.
+    :param submission_id: ID of the submission.
+    :param inbox_desc: How to name the inbox in messages.
+    :returns: How many objects were deleted or, for ``metadata.json``, emptied.
+    :raises ValueError: if *submission_id* is empty.
+    """
+    if not submission_id.strip("/"):
+        # the prefix would be "/" and match every submission in the inbox
+        raise ValueError("Refusing to clean an empty submission ID.")
     prefix = submission_id
     prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
@@ -79,22 +97,30 @@ def _clean_submission_from_bucket(bucket_name: str, s3_options: S3Options, submi
         bucket.put_object(Body=b"", Key=f"{submission_id}/cleaning")
 
         # keep metadata.json to prevent future re-uploads
-        keys_to_keep = {f"{submission_id}/metadata/metadata.json", f"{submission_id}/cleaning"}
+        metadata_key = f"{submission_id}/metadata/metadata.json"
+        keys_to_keep = {metadata_key, f"{submission_id}/cleaning"}
         num_deleted = 0
+        has_metadata = False
         for obj in bucket.objects.filter(Prefix=prefix):
-            if obj.key not in keys_to_keep:
+            if not obj.key.startswith(prefix):
+                # an S3-compatible store that ignored the prefix would hand over other submissions
+                continue
+            if obj.key == metadata_key:
+                has_metadata = True
+            elif obj.key not in keys_to_keep:
                 _ = obj.delete()
                 num_deleted += 1
-        if not num_deleted:
-            sys.exit(f"No objects with prefix '{prefix}' in inbox {inbox_desc} found for deletion.")
+        if not num_deleted and not has_metadata:
+            return 0
 
         log.info(f"Successfully deleted {num_deleted} objects.")
 
         # redact metadata.json since it contains tanG + localCaseId
-        bucket.put_object(Body=b"", Key=f"{submission_id}/metadata/metadata.json")
+        bucket.put_object(Body=b"", Key=metadata_key)
 
         # mark that we've cleaned this submission
         bucket.put_object(Body=b"", Key=f"{submission_id}/cleaned")
         bucket.Object(f"{submission_id}/cleaning").delete()
 
     log.info(f"Cleaned '{prefix}' from inbox {inbox_desc}.")
+    return num_deleted + has_metadata

@@ -14,5 +14,6 @@ Command-line tool for internal GRZ operations.
 ## Documentation
 
 - [Registering change requests](docs/change-requests.md) — recording that a submission must be modified, deleted, or transferred, with the who/when/what audit trail.
+- [Deleting submissions on a BfArM request](docs/deletion-requests.md): carrying out a BfArM deletion request with `grzctl delete`, confirming it to BfArM, and what to do after a backup restore and after three years.
 - [Crypt4GH keys](docs/crypt4gh-keys.md): which Crypt4GH keys grz-cli and grzctl need, where they go in each config, and the key layouts of grzctl.
 - [Example config](docs/example-config.yaml): a minimal grzctl config with placeholder values.
