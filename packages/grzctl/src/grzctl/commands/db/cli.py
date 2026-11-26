@@ -860,6 +860,13 @@ def update(  # noqa: C901, PLR0913, PLR0917
     except ValueError as e:
         console_err.print(f"[red]Error: Invalid state value '{state_str}'.[/red]")
         raise click.Abort() from e
+    if state_enum in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED):
+        # set here, they would record a deletion that never happened, and could not be taken back
+        console_err.print(
+            f"[red]Error: grzctl delete sets the state '{state_enum}' when it deletes a submission. "
+            "Delete it with grzctl delete run, or record a deletion done by hand with grzctl delete mark-done.[/red]"
+        )
+        raise click.Abort()
     parsed_data = None
     if data_json:
         try:

@@ -1556,6 +1556,7 @@ class SubmissionDb:
         failure_reason: FailureReasonEnum | None = None,
         *,
         timestamp: datetime.datetime | None = None,
+        session: Session | None = None,
     ) -> SubmissionStateLog:
         """Update a submission's state to the specified state.
 
@@ -1566,10 +1567,11 @@ class SubmissionDb:
         :param failure_reason: Why the submission reached an error state, if it did.
         :param timestamp: When the submission reached the state, if not now, e.g. for a state
             recorded afterwards. It is signed with the rest of the entry.
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
         :returns: The new :class:`SubmissionStateLog` entry.
         """
-        with self.transaction() as session:
-            submission = session.get(Submission, submission_id)
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
             if state not in (SubmissionStateEnum.DELETING, SubmissionStateEnum.DELETED):
@@ -1590,8 +1592,8 @@ class SubmissionDb:
 
             state_log_create = SubmissionStateLogCreate(**state_log_payload.model_dump(), signature=signature.hex())
             db_state_log = SubmissionStateLog.model_validate(state_log_create)
-            session.add(db_state_log)
-            session.flush()
+            active_session.add(db_state_log)
+            active_session.flush()
             return db_state_log
 
     def get_donors(
@@ -1697,6 +1699,7 @@ class SubmissionDb:
         request_raw_content: bytes | None = None,
         request_raw_content_type: RequestRawContentType | None = None,
         data: dict | None = None,
+        session: Session | None = None,
     ) -> ChangeRequestLog:
         """Register a change request for a submission.
 
@@ -1711,10 +1714,11 @@ class SubmissionDb:
         :param request_raw_content_type: Type of the binary blob; required iff
             ``request_raw_content`` is set.
         :param data: Optional type-specific extras.
+        :param session: Transaction to join; a fresh one is opened and committed when absent.
         :returns: The new :class:`ChangeRequestLog` entry.
         """
-        with self.transaction() as session:
-            submission = session.get(Submission, submission_id)
+        with self.transaction(session) as active_session:
+            submission = active_session.get(Submission, submission_id)
             if not submission:
                 raise SubmissionNotFoundError(submission_id)
             if not self._author:
@@ -1738,8 +1742,8 @@ class SubmissionDb:
                 **change_request_log_payload.model_dump(), signature=signature.hex()
             )
             db_change_request_log = ChangeRequestLog.model_validate(change_request_log_create)
-            session.add(db_change_request_log)
-            session.flush()
+            active_session.add(db_change_request_log)
+            active_session.flush()
             return db_change_request_log
 
     def get_submission(self, submission_id: str, session: Session | None = None) -> Submission | None:

@@ -360,3 +360,32 @@ class TestRunDeletes:
         assert result.exit_code != 0
         assert len(_keys(s3, "consented")) == 3
         assert _states(db, SUBMISSION_ID) == [SubmissionStateEnum.REPORTED]
+
+
+def test_a_failed_start_records_no_request(
+    s3: Any,
+    db: SubmissionDb,
+    migrated_database_config_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The request and the state Deleting are written together, so a rerun cannot record the request twice."""
+    _add(db, "00000000", TAN_G_A, states=(SubmissionStateEnum.REPORTED,))
+    real_update = SubmissionDb.update_submission_state
+
+    def failing_deleting(self, submission_id, state, *args, **kwargs):
+        if state == SubmissionStateEnum.DELETING:
+            raise RuntimeError("database gone")
+        return real_update(self, submission_id, state, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(SubmissionDb, "update_submission_state", failing_deleting)
+        failed = _run(migrated_database_config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+    assert failed.exit_code != 0
+    assert db.list_change_requests() == []
+
+    rerun = _run(migrated_database_config_path, tmp_path, _request(), "--yes-i-really-mean-it")
+
+    assert rerun.exit_code == 0, rerun.output
+    assert len(db.list_change_requests()[0].changes) == 1

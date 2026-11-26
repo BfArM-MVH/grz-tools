@@ -166,22 +166,28 @@ def delete_submission(  # noqa: PLR0913
     :raises SubmissionDeletionFailedError: if a bucket still holds some of the submission.
     :raises StorageDeletionError: if S3 refuses to delete some objects.
     """
-    if record_request:
-        db.add_change_request(
-            submission.id,
-            ChangeRequestEnum.DELETE,
-            requester_name=request.requester_name,
-            requester_email=request.requester_email,
-            requested_at=request.requested_at,
-            request_raw_content=request_form[0],
-            request_raw_content_type=request_form[1],
-            data={
-                "instructed_at": request.instructed_at.isoformat(),
-                "submitter_id": request.submitter_id,
-                "data_node_id": request.data_node_id,
-                "reason": request.reason,
-                "comment": request.comment,
-            },
+    # one transaction, so that a stop between the two cannot record the request without the state,
+    # after which a rerun would record it a second time
+    with db.transaction() as session:
+        if record_request:
+            db.add_change_request(
+                submission.id,
+                ChangeRequestEnum.DELETE,
+                requester_name=request.requester_name,
+                requester_email=request.requester_email,
+                requested_at=request.requested_at,
+                request_raw_content=request_form[0],
+                request_raw_content_type=request_form[1],
+                data={
+                    "instructed_at": request.instructed_at.isoformat(),
+                    "submitter_id": request.submitter_id,
+                    "data_node_id": request.data_node_id,
+                    "reason": request.reason,
+                    "comment": request.comment,
+                },
+                session=session,
+            )
+        db.update_submission_state(
+            submission.id, SubmissionStateEnum.DELETING, grzctl_versions=get_recorded_versions(), session=session
         )
-    db.update_submission_state(submission.id, SubmissionStateEnum.DELETING, grzctl_versions=get_recorded_versions())
     return finish_deletion(db, submission.id, targets)

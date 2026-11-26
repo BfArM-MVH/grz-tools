@@ -503,3 +503,24 @@ class TestListDeletions:
         db.update_submission_state(ids[2], SubmissionStateEnum.REPORTED)
 
         assert [s.id for s in db.list_deletions()] == ids[:2]
+
+
+class TestOneTransaction:
+    def test_a_change_request_and_a_state_written_in_one_transaction_roll_back_together(
+        self, db: SubmissionDb, submission_id: str
+    ):
+        with pytest.raises(RuntimeError), db.transaction() as session:
+            db.add_change_request(
+                submission_id,
+                ChangeRequestEnum.DELETE,
+                requester_name="Dr. Erika Mustermann",
+                requester_email="erika.mustermann@example.org",
+                requested_at=datetime.date(2026, 11, 1),
+                request_email_content="Bitte löschen.",
+                session=session,
+            )
+            db.update_submission_state(submission_id, SubmissionStateEnum.DELETING, session=session)
+            raise RuntimeError("stopped before the commit")
+
+        assert db.list_change_requests() == []
+        assert db.get_submission(submission_id).states == []

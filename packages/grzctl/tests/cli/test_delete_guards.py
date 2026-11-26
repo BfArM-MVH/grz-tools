@@ -1,8 +1,10 @@
 """How commands outside grzctl delete treat a submission whose deletion has started."""
 
 import logging
+from pathlib import Path
 
 import click
+import click.testing
 import grzctl.cli
 import pytest
 from grz_db.errors import SubmissionDeletedError
@@ -48,3 +50,20 @@ def test_main_reports_the_refusal_without_a_traceback(
     assert exit_info.value.code == 1
     assert f"Submission '{SUBMISSION_ID}' is being or has been deleted" in caplog.text
     assert "Traceback" not in caplog.text
+
+
+@pytest.mark.parametrize("state", ["Deleting", "deleted"])
+def test_db_submission_update_refuses_the_deletion_states(
+    db: SubmissionDb, migrated_database_config_path: Path, state: str
+):
+    """Set by hand, they would record a deletion that never happened, which the signed log cannot take back."""
+    db.add_submission(SUBMISSION_ID)
+
+    result = click.testing.CliRunner().invoke(
+        grzctl.cli.build_cli(),
+        ["--config", str(migrated_database_config_path), "db", "submission", "update", SUBMISSION_ID, state],
+    )
+
+    assert result.exit_code != 0
+    assert "grzctl delete run" in result.stderr
+    assert db.get_submission(SUBMISSION_ID).states == []
