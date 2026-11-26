@@ -1134,11 +1134,14 @@ class PersonalDataPurge:
     :param case_deleted: Whether the submission's case was deleted, which happens when no other
         submission is linked to it.
     :param qc_queue_entry_removed: Whether the submission was taken out of the detailed QC queue.
+    :param error_states_deleted: How many ``Error`` states were deleted, whose error text can name a
+        donor pseudonym or a lab datum.
     """
 
     donors_renamed: int
     case_deleted: bool
     qc_queue_entry_removed: bool
+    error_states_deleted: int
 
 
 @dataclass(frozen=True)
@@ -2043,10 +2046,11 @@ class SubmissionDb:
         which tell persons apart by pseudonym and ``local_case_id``, count each deleted submission
         as a person of its own rather than merging them. Unlinks the case, deleting it together
         with its ``psn`` when no other submission is linked to it, and takes the submission out of
-        the detailed QC queue.
+        the detailed QC queue. Deletes its ``Error`` states, whose error text can name a donor
+        pseudonym or a lab datum; as whole rows, so that the signatures of the other states stay valid.
 
         Keeps ``tan_g``, which the deletion confirmation names and which is kept for documentation,
-        and what the reports count: the submission's other columns, its states and change
+        and what the reports count: the submission's other columns, its other states and change
         requests, the donors' other columns and the detailed QC results.
 
         Running it again changes nothing, so an interrupted deletion can be resumed.
@@ -2087,6 +2091,15 @@ class SubmissionDb:
             if queue_entry is not None:
                 session.delete(queue_entry)
 
+            error_states = session.exec(
+                select(SubmissionStateLog).where(
+                    SubmissionStateLog.submission_id == submission_id,
+                    SubmissionStateLog.state == SubmissionStateEnum.ERROR,
+                )
+            ).all()
+            for error_state in error_states:
+                session.delete(error_state)
+
             donors = session.exec(select(Donor).where(Donor.submission_id == submission_id)).all()
             to_rename = sorted(
                 (donor for donor in donors if not donor.pseudonym.startswith(f"{placeholder}-")),
@@ -2116,6 +2129,7 @@ class SubmissionDb:
                 donors_renamed=len(to_rename),
                 case_deleted=case_deleted,
                 qc_queue_entry_removed=queue_entry is not None,
+                error_states_deleted=len(error_states),
             )
 
     def list_deletions(self) -> Sequence[Submission]:

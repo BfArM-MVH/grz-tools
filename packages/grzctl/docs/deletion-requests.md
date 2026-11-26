@@ -202,11 +202,11 @@ grzctl refuses to write it while a submission of the request is not deleted yet.
 
 ## What is deleted, and what is kept
 
-| Where    | Deleted                                                                                                                                                              | Kept |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| Archive  | All files of the submission, including `metadata.json`, and older versions of them                                                                                   | The log files of the data transfer, which BfArM's SOP allows. An empty file `deleted`, the *tombstone*, which marks that the submission was deleted here. |
-| Inbox    | All files of the submission                                                                                                                                          | An empty `metadata.json`, so that the same submission cannot be uploaded again, and the marker `cleaned` |
-| Database | The metadata, the local case ID, the donor pseudonyms, the link to the case (the case too, if no other submission belongs to it), the place in the detailed QC queue | The tanG and the request, for three years. The numbers the reports need: type, dates, size, QC results. |
+| Where    | Deleted                                                                                                                                                                                                       | Kept |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| Archive  | All files of the submission, including `metadata.json`, and older versions of them                                                                                                                            | The log files of the data transfer, which BfArM's SOP allows. An empty file `deleted`, the *tombstone*, which marks that the submission was deleted here. |
+| Inbox    | All files of the submission                                                                                                                                                                                   | An empty `metadata.json`, so that the same submission cannot be uploaded again, and the marker `cleaned` |
+| Database | The metadata, the local case ID, the donor pseudonyms, the link to the case (the case too, if no other submission belongs to it), the place in the detailed QC queue, the error messages in its state history | The tanG and the request, for three years. The numbers the reports need: type, dates, size, QC results. |
 
 The local case ID becomes `deleted-<submission ID>`, and each donor pseudonym becomes `deleted-<submission ID>-1`, `-2`, and so on.
 This way the reports still count each deleted submission, but cannot connect it to other submissions of the same person.

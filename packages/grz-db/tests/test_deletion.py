@@ -282,7 +282,9 @@ class TestPurgePersonalData:
         purge = db.purge_personal_data(sid)
 
         after = db.get_submission(sid)
-        assert purge == PersonalDataPurge(donors_renamed=2, case_deleted=True, qc_queue_entry_removed=True)
+        assert purge == PersonalDataPurge(
+            donors_renamed=2, case_deleted=True, qc_queue_entry_removed=True, error_states_deleted=0
+        )
         assert after.submission_metadata is None
         assert after.local_case_id == f"deleted-{sid}"
         assert after.case_id is None
@@ -331,6 +333,27 @@ class TestPurgePersonalData:
             db.purge_personal_data(submission_id)
         assert db.get_submission(submission_id).local_case_id == "patient-1"
 
+    def test_deletes_error_states_and_keeps_the_others_verifiable(
+        self, db: SubmissionDb, submission_id: str, test_author
+    ):
+        """An error text can name a donor pseudonym; its state goes, the other states keep their signatures."""
+        db.update_submission_state(submission_id, SubmissionStateEnum.DOWNLOADED)
+        db.update_submission_state(
+            submission_id,
+            SubmissionStateEnum.ERROR,
+            data={"error": "Missing tumor cell count for donor 'patient-7', lab datum 'Blut DNA Tumor'!"},
+        )
+        db.update_submission_state(submission_id, SubmissionStateEnum.DELETING)
+
+        purge = db.purge_personal_data(submission_id)
+
+        states = db.get_submission(submission_id).states
+        assert purge.error_states_deleted == 1
+        assert sorted(state.state for state in states) == sorted(
+            [SubmissionStateEnum.DOWNLOADED, SubmissionStateEnum.DELETING]
+        )
+        assert all(state.verify(test_author.private_key().public_key()) for state in states)
+
     def test_running_it_again_changes_nothing(self, db: SubmissionDb, populated_submission_id: str):
         db.purge_personal_data(populated_submission_id)
         first = db.get_submission(populated_submission_id).model_dump()
@@ -338,7 +361,9 @@ class TestPurgePersonalData:
 
         purge = db.purge_personal_data(populated_submission_id)
 
-        assert purge == PersonalDataPurge(donors_renamed=0, case_deleted=False, qc_queue_entry_removed=False)
+        assert purge == PersonalDataPurge(
+            donors_renamed=0, case_deleted=False, qc_queue_entry_removed=False, error_states_deleted=0
+        )
         assert db.get_submission(populated_submission_id).model_dump() == first
         assert sorted(donor.pseudonym for donor in _donors(db, populated_submission_id)) == first_donors
 
