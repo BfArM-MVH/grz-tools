@@ -131,6 +131,7 @@ def delete_submission(  # noqa: PLR0913
     targets: StorageTargets,
     request: DeletionRequest,
     request_form: tuple[bytes, RequestRawContentType],
+    *,
     record_request: bool,
 ) -> dict[str, Any]:
     """Carry out the deletion request for one submission.

@@ -1551,6 +1551,7 @@ class SubmissionDb:
         data: dict | None = None,
         grzctl_versions: dict[str, str] | None = None,
         failure_reason: FailureReasonEnum | None = None,
+        *,
         timestamp: datetime.datetime | None = None,
     ) -> SubmissionStateLog:
         """Update a submission's state to the specified state.
