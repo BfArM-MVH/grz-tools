@@ -36,13 +36,13 @@ A submission that is not in the database yet, for example one still waiting in t
 
 | Step | What you do |
 | ---- | ----------- |
-| 1 | Open BfArM's e-mail in your mail program and save the attached request form (PDF). Copy it to the server where you run grzctl. |
-| 2 | Run `grzctl delete template > antrag.yaml` and fill in `antrag.yaml` from the PDF. |
-| 3 | Run `grzctl delete run --data-file antrag.yaml --raw-content antrag.pdf --dry-run` and check what would be deleted. |
-| 4 | Run the same command without `--dry-run`. This deletes. |
-| 5 | Delete the submissions from the GRZ's backups, for example tape backups, as your site's SOP says. grzctl cannot do this. |
-| 6 | Run `grzctl delete confirmation --data-file antrag.yaml` and send the text, encrypted, to `PlattformMvGenomseq@bfarm.de`. |
-| 7 | Delete `antrag.pdf` and `antrag.yaml` from the server where you ran grzctl. The PDF is kept in the database, and the e-mails stay in the mailbox. |
+| 1    | Open BfArM's e-mail in your mail program and save the attached request form (PDF). Copy it to the server where you run grzctl. |
+| 2    | Run `grzctl delete template > antrag.yaml` and fill in `antrag.yaml` from the PDF. |
+| 3    | Run `grzctl delete run --data-file antrag.yaml --raw-content antrag.pdf --dry-run` and check what would be deleted. |
+| 4    | Run the same command without `--dry-run`. This deletes. |
+| 5    | Delete the submissions from the GRZ's backups, for example tape backups, as your site's SOP says. grzctl cannot do this. |
+| 6    | Run `grzctl delete confirmation --data-file antrag.yaml` and send the text, encrypted, to `PlattformMvGenomseq@bfarm.de`. |
+| 7    | Delete `antrag.pdf` and `antrag.yaml` from the server where you ran grzctl. The PDF is kept in the database, and the e-mails stay in the mailbox. |
 
 Your site's SOP says how you delete data from the backups and where you keep the e-mails.
 
@@ -60,15 +60,15 @@ Open `antrag.yaml` in a text editor and replace each `<FILL IN …>` and each `Y
 
 | Field in `antrag.yaml` | Where you find it |
 | ---------------------- | ----------------- |
-| `instructed_at` | The date of BfArM's e-mail. This is the only value that is not on the form. |
-| `submitter_id` | Form: *Meldender LE*. Only the 9-digit number (Institutionskennzeichen), not the place. |
-| `requester_name` | Form: *Kontaktperson*, the name. |
-| `requester_email` | Form: *Kontaktperson*, the e-mail address. |
-| `requested_at` | Form: *Datum des Versands des Antrags auf Löschung*. |
-| `reason` | Form: *Begründung für Löschung*. Copy it as it is. |
-| `data_node_id` | Form: *Beteiligtes GRZ*. Only the ID, for example `GRZM00006`. This is always your own GRZ. |
-| `tan_g` | Form: *tanG des betroffenen genomischen Datensatzes*, or the table the LE attached. One line per tanG. |
-| `comment` | Form: *Kommentare*. You can leave it empty (`""`). |
+| `instructed_at`        | The date of BfArM's e-mail. This is the only value that is not on the form. |
+| `submitter_id`         | Form: *Meldender LE*. Only the 9-digit number (Institutionskennzeichen), not the place. |
+| `requester_name`       | Form: *Kontaktperson*, the name. |
+| `requester_email`      | Form: *Kontaktperson*, the e-mail address. |
+| `requested_at`         | Form: *Datum des Versands des Antrags auf Löschung*. |
+| `reason`               | Form: *Begründung für Löschung*. Copy it as it is. |
+| `data_node_id`         | Form: *Beteiligtes GRZ*. Only the ID, for example `GRZM00006`. This is always your own GRZ. |
+| `tan_g`                | Form: *tanG des betroffenen genomischen Datensatzes*, or the table the LE attached. One line per tanG. |
+| `comment`              | Form: *Kommentare*. You can leave it empty (`""`). |
 
 Leave out the *tanC* and the *Beteiligter KDK* from the form.
 They concern the clinical data node, not the GRZ.
@@ -89,7 +89,6 @@ tan_g:
   - "8b1e1111111111111111111111111111111111111111111111111111111100d4"
 comment: ""
 ```
-
 
 ## 2. Check what would be deleted (dry run)
 
@@ -116,12 +115,12 @@ The tanGs are shortened on screen, so that they do not end up in terminal logs.
 
 The *Result* column says what will happen:
 
-| Result | Meaning |
-| ------ | ------- |
-| will be deleted | The submission is deleted. |
+| Result                                 | Meaning |
+| -------------------------------------- | ------- |
+| will be deleted                        | The submission is deleted. |
 | deletion interrupted, will be finished | An earlier run stopped partway through. This run finishes it. |
-| already deleted | The submission was deleted before. Nothing happens. |
-| not present | No submission has this tanG. Check the tanG against the PDF for a typo. If it is right, the GRZ does not have the data, and the confirmation says so. |
+| already deleted                        | The submission was deleted before. Nothing happens. |
+| not present                            | No submission has this tanG. Check the tanG against the PDF for a typo. If it is right, the GRZ does not have the data, and the confirmation says so. |
 
 A second table shows, for each submission, what each storage place still holds of it, for example `412 objects, 38.2 GB` in the consented archive.
 
@@ -203,10 +202,10 @@ grzctl refuses to write it while a submission of the request is not deleted yet.
 
 ## What is deleted, and what is kept
 
-| Where | Deleted | Kept |
-| ----- | ------- | ---- |
-| Archive | All files of the submission, including `metadata.json`, and older versions of them | The log files of the data transfer, which BfArM's SOP allows. An empty file `deleted`, the *tombstone*, which marks that the submission was deleted here. |
-| Inbox | All files of the submission | An empty `metadata.json`, so that the same submission cannot be uploaded again, and the marker `cleaned` |
+| Where    | Deleted                                                                                                                                                              | Kept |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| Archive  | All files of the submission, including `metadata.json`, and older versions of them                                                                                   | The log files of the data transfer, which BfArM's SOP allows. An empty file `deleted`, the *tombstone*, which marks that the submission was deleted here. |
+| Inbox    | All files of the submission                                                                                                                                          | An empty `metadata.json`, so that the same submission cannot be uploaded again, and the marker `cleaned` |
 | Database | The metadata, the local case ID, the donor pseudonyms, the link to the case (the case too, if no other submission belongs to it), the place in the detailed QC queue | The tanG and the request, for three years. The numbers the reports need: type, dates, size, QC results. |
 
 The local case ID becomes `deleted-<submission ID>`, and each donor pseudonym becomes `deleted-<submission ID>-1`, `-2`, and so on.
@@ -229,12 +228,12 @@ $ grzctl delete check
 
 It looks for four things:
 
-| Finding | Meaning | `--repair` |
-| ------- | ------- | ---------- |
-| storage restored | A deleted submission has files in an archive or inbox again. | deletes them again |
-| database restored | An archive has a tombstone, but the database does not know the submission was deleted. The database was restored to an older state. | deletes the submission again and removes its personal data again |
-| deletion interrupted | A deletion stopped partway through. | not repaired: run `grzctl delete run` with its request again |
-| not in the database | An archive has a tombstone of a submission the database does not know. | not repaired: check by hand |
+| Finding              | Meaning                                                                                                                             | `--repair` |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| storage restored     | A deleted submission has files in an archive or inbox again.                                                                        | deletes them again |
+| database restored    | An archive has a tombstone, but the database does not know the submission was deleted. The database was restored to an older state. | deletes the submission again and removes its personal data again |
+| deletion interrupted | A deletion stopped partway through.                                                                                                 | not repaired: run `grzctl delete run` with its request again |
+| not in the database  | An archive has a tombstone of a submission the database does not know.                                                              | not repaired: check by hand |
 
 If it finds nothing, it says *Every deleted submission is deleted entirely.*
 To delete again what it found:
@@ -298,13 +297,13 @@ The quarterly report also warns you about:
 
 ## Command reference
 
-| Command | What it does |
-| ------- | ------------ |
-| `grzctl delete template` | Prints an empty request to fill in. Needs no configuration. |
+| Command                                                                                     | What it does |
+| ------------------------------------------------------------------------------------------- | ------------ |
+| `grzctl delete template`                                                                    | Prints an empty request to fill in. Needs no configuration. |
 | `grzctl delete run --data-file FILE --raw-content PDF [--dry-run] [--yes-i-really-mean-it]` | Checks the request and deletes its submissions. `--dry-run` only shows what would be deleted. |
-| `grzctl delete confirmation --data-file FILE` | Prints the confirmation e-mail for BfArM. |
-| `grzctl delete check [--repair]` | Finds deleted data that a restore brought back. `--repair` deletes it again. |
-| `grzctl delete purge-records --due-before DATE [--dry-run] [--yes-i-really-mean-it]` | Deletes the records of deletions whose three years end by `DATE`. |
-| `grzctl delete mark-done SUBMISSION_ID --deleted-on DATE` | Records a deletion done by hand before `grzctl delete` existed. |
+| `grzctl delete confirmation --data-file FILE`                                               | Prints the confirmation e-mail for BfArM. |
+| `grzctl delete check [--repair]`                                                            | Finds deleted data that a restore brought back. `--repair` deletes it again. |
+| `grzctl delete purge-records --due-before DATE [--dry-run] [--yes-i-really-mean-it]`        | Deletes the records of deletions whose three years end by `DATE`. |
+| `grzctl delete mark-done SUBMISSION_ID --deleted-on DATE`                                   | Records a deletion done by hand before `grzctl delete` existed. |
 
 All commands except `template` need the grzctl configuration (`--config`).
