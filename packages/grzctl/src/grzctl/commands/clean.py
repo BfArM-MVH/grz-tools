@@ -79,7 +79,11 @@ def clean_submission_from_inbox(bucket_name: str, s3_options: S3Options, submiss
     :param submission_id: ID of the submission.
     :param inbox_desc: How to name the inbox in messages.
     :returns: How many objects were deleted or, for ``metadata.json``, emptied.
+    :raises ValueError: if *submission_id* is empty.
     """
+    if not submission_id.strip("/"):
+        # the prefix would be "/" and match every submission in the inbox
+        raise ValueError("Refusing to clean an empty submission ID.")
     prefix = submission_id
     prefix = prefix + "/" if not prefix.endswith("/") else prefix
 
@@ -98,6 +102,9 @@ def clean_submission_from_inbox(bucket_name: str, s3_options: S3Options, submiss
         num_deleted = 0
         has_metadata = False
         for obj in bucket.objects.filter(Prefix=prefix):
+            if not obj.key.startswith(prefix):
+                # an S3-compatible store that ignored the prefix would hand over other submissions
+                continue
             if obj.key == metadata_key:
                 has_metadata = True
             elif obj.key not in keys_to_keep:

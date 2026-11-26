@@ -48,7 +48,16 @@ class StorageDeletionError(Exception):
 
 
 @dataclass(frozen=True)
-class _Entry:
+class StoredObject:
+    """One version of an object in a bucket, or a delete marker.
+
+    :param key: The object's full path in the bucket.
+    :param version_id: The version's ID, ``null`` in a bucket that never kept versions.
+    :param size: Its size in bytes, 0 for a delete marker.
+    :param is_delete_marker: Whether it is a delete marker, which hides older versions of the key.
+    :param is_latest: Whether it is the version that S3 returns for the key.
+    """
+
     key: str
     version_id: str | None
     size: int
@@ -69,33 +78,45 @@ def has_object_lock(s3_options: S3Options) -> bool:
     return configuration.get("ObjectLockConfiguration", {}).get("ObjectLockEnabled") == "Enabled"
 
 
-def _entries(client: Any, bucket: str, prefix: str) -> list[_Entry]:
+def _entries(client: Any, bucket: str, prefix: str) -> list[StoredObject]:
     """Every version and delete marker of every object under *prefix*.
 
     Lists versions whether the bucket keeps them or not, as a bucket that never kept any lists
     each object once, with the version ID ``null``. So no old version is missed when the bucket's
     versioning cannot be queried.
+
+    Keeps only what is under *prefix* even when the store returns more: what this lists is
+    deleted, and an S3-compatible store that ignored the prefix would otherwise hand over other
+    submissions.
+
+    :raises ValueError: if *prefix* is not a submission ID followed by ``/``, which could match
+        other submissions or the whole bucket.
     """
+    if not prefix.endswith("/") or not prefix.strip("/"):
+        raise ValueError(f"Refusing to list '{prefix}': it is no submission ID followed by '/'.")
     entries = []
     for page in client.get_paginator("list_object_versions").paginate(Bucket=bucket, Prefix=prefix):
         entries += [
-            _Entry(v["Key"], v["VersionId"], v.get("Size", 0), False, v["IsLatest"]) for v in page.get("Versions", [])
+            StoredObject(v["Key"], v["VersionId"], v.get("Size", 0), False, v["IsLatest"])
+            for v in page.get("Versions", [])
         ]
-        entries += [_Entry(m["Key"], m["VersionId"], 0, True, m["IsLatest"]) for m in page.get("DeleteMarkers", [])]
-    return entries
+        entries += [
+            StoredObject(m["Key"], m["VersionId"], 0, True, m["IsLatest"]) for m in page.get("DeleteMarkers", [])
+        ]
+    return [entry for entry in entries if entry.key.startswith(prefix)]
 
 
-def _is_current(entry: _Entry, key: str) -> bool:
+def _is_current(entry: StoredObject, key: str) -> bool:
     """Whether *entry* is the object that S3 currently returns for *key*."""
     return entry.key == key and entry.is_latest and not entry.is_delete_marker
 
 
-def _archive_payload(entry: _Entry, prefix: str) -> bool:
+def _archive_payload(entry: StoredObject, prefix: str) -> bool:
     """Whether deleting a submission removes *entry* from an archive: all but its log files and its current tombstone."""
     return not entry.key.startswith(f"{prefix}logs/") and not _is_current(entry, f"{prefix}{TOMBSTONE}")
 
 
-def _inbox_payload(entry: _Entry, prefix: str) -> bool:
+def _inbox_payload(entry: StoredObject, prefix: str) -> bool:
     """Whether deleting a submission removes *entry* from an inbox: all but an empty ``metadata.json`` and the ``cleaned`` marker."""
     kept = _is_current(entry, f"{prefix}cleaned") or (
         _is_current(entry, f"{prefix}metadata/metadata.json") and entry.size == 0
@@ -103,12 +124,12 @@ def _inbox_payload(entry: _Entry, prefix: str) -> bool:
     return not kept
 
 
-def _batches(entries: Sequence[_Entry]) -> Iterator[Sequence[_Entry]]:
+def _batches(entries: Sequence[StoredObject]) -> Iterator[Sequence[StoredObject]]:
     for start in range(0, len(entries), _DELETE_BATCH_SIZE):
         yield entries[start : start + _DELETE_BATCH_SIZE]
 
 
-def _delete(client: Any, bucket: str, entries: Sequence[_Entry]) -> None:
+def _delete(client: Any, bucket: str, entries: Sequence[StoredObject]) -> None:
     """Delete each entry, each version permanently.
 
     :raises StorageDeletionError: if S3 refuses to delete any of them.
@@ -121,7 +142,7 @@ def _delete(client: Any, bucket: str, entries: Sequence[_Entry]) -> None:
             raise StorageDeletionError(f"S3 refused to delete {len(errors)} objects in {bucket}: {', '.join(codes)}")
 
 
-def _deletion(location: str, deleted: Sequence[_Entry], logs_kept: int) -> BucketDeletion:
+def _deletion(location: str, deleted: Sequence[StoredObject], logs_kept: int) -> BucketDeletion:
     return BucketDeletion(
         location=location,
         objects_deleted=sum(not e.is_delete_marker for e in deleted),
@@ -207,8 +228,48 @@ class Holdings:
     bytes: int
 
 
-def _holdings(entries: Sequence[_Entry]) -> Holdings:
+def _holdings(entries: Sequence[StoredObject]) -> Holdings:
     return Holdings(objects=len(entries), bytes=sum(e.size for e in entries))
+
+
+@dataclass(frozen=True)
+class Listing:
+    """What a bucket holds of a submission, split into what deleting it removes and what it keeps.
+
+    :param to_delete: Every object version and delete marker that deleting the submission removes.
+    :param kept: The objects it keeps, such as the log files in an archive.
+    """
+
+    to_delete: list[StoredObject]
+    kept: list[StoredObject]
+
+
+def archive_listing(s3_options: S3Options, submission_id: str) -> Listing:
+    """What an archive holds of a submission: everything but its log files and the tombstone goes.
+
+    :param s3_options: S3 connection to the archive.
+    :param submission_id: ID of the submission.
+    """
+    prefix = f"{submission_id}/"
+    entries = _entries(init_s3_client(s3_options), s3_options.bucket, prefix)
+    return Listing(
+        to_delete=[e for e in entries if _archive_payload(e, prefix)],
+        kept=[e for e in entries if not _archive_payload(e, prefix)],
+    )
+
+
+def inbox_listing(s3_options: S3Options, submission_id: str) -> Listing:
+    """What an inbox holds of a submission: everything but an empty ``metadata.json`` and the ``cleaned`` marker goes.
+
+    :param s3_options: S3 connection to the inbox.
+    :param submission_id: ID of the submission.
+    """
+    prefix = f"{submission_id}/"
+    entries = _entries(init_s3_client(s3_options), s3_options.bucket, prefix)
+    return Listing(
+        to_delete=[e for e in entries if _inbox_payload(e, prefix)],
+        kept=[e for e in entries if not _inbox_payload(e, prefix)],
+    )
 
 
 def archive_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
@@ -219,9 +280,7 @@ def archive_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
     :param s3_options: S3 connection to the archive.
     :param submission_id: ID of the submission.
     """
-    prefix = f"{submission_id}/"
-    entries = _entries(init_s3_client(s3_options), s3_options.bucket, prefix)
-    return _holdings([e for e in entries if _archive_payload(e, prefix)])
+    return _holdings(archive_listing(s3_options, submission_id).to_delete)
 
 
 def inbox_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
@@ -232,9 +291,7 @@ def inbox_holdings(s3_options: S3Options, submission_id: str) -> Holdings:
     :param s3_options: S3 connection to the inbox.
     :param submission_id: ID of the submission.
     """
-    prefix = f"{submission_id}/"
-    entries = _entries(init_s3_client(s3_options), s3_options.bucket, prefix)
-    return _holdings([e for e in entries if _inbox_payload(e, prefix)])
+    return _holdings(inbox_listing(s3_options, submission_id).to_delete)
 
 
 def tombstoned_submissions(s3_options: S3Options) -> set[str]:

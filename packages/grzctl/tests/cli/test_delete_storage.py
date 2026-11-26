@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import boto3
@@ -6,6 +7,7 @@ import grz_common.exceptions as grzexc
 import pytest
 from botocore.exceptions import ClientError
 from grz_common.models.s3 import S3Options
+from grzctl.commands import clean as clean_module
 from grzctl.commands.delete import storage
 from grzctl.commands.delete.storage import (
     Holdings,
@@ -276,3 +278,93 @@ class TestRegressions:
         assert _keys(s3, "inbox") == {f"{SUBMISSION_ID}/metadata/metadata.json", f"{SUBMISSION_ID}/cleaned"}
         metadata = s3.get_object(Bucket="inbox", Key=f"{SUBMISSION_ID}/metadata/metadata.json")
         assert metadata["Body"].read() == b""
+
+
+OTHER_ARCHIVED = {
+    f"{OTHER_SUBMISSION_ID}/files/other.fastq.gz.c4gh": b"z" * 30,
+    f"{OTHER_SUBMISSION_ID}/metadata/metadata.json": b'{"tanG": "other"}',
+}
+# a submission whose ID starts with the deleted one's, which a prefix without the slash would match
+LONGER_ID = f"{SUBMISSION_ID}0"
+
+
+class _PrefixIgnoringPaginator:
+    def __init__(self, paginator: Any):
+        self._paginator = paginator
+
+    def paginate(self, **kwargs: Any) -> Any:
+        kwargs.pop("Prefix", None)
+        return self._paginator.paginate(**kwargs)
+
+
+class _PrefixIgnoringBucket:
+    """A boto3 bucket whose object listing returns the whole bucket, whatever the prefix."""
+
+    def __init__(self, bucket: Any):
+        self._bucket = bucket
+        self.objects = SimpleNamespace(filter=lambda **_: bucket.objects.all())
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._bucket, name)
+
+
+@pytest.fixture
+def prefix_ignoring_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every listing return the whole bucket, as an S3-compatible store that ignored the prefix would."""
+    real_client = storage.init_s3_client
+    real_resource = clean_module.init_s3_resource
+
+    def client(s3_options: S3Options) -> Any:
+        s3_client = real_client(s3_options)
+        real_paginator = s3_client.get_paginator
+        s3_client.get_paginator = lambda name: _PrefixIgnoringPaginator(real_paginator(name))
+        return s3_client
+
+    def resource(s3_options: S3Options) -> Any:
+        s3_resource = real_resource(s3_options)
+        return SimpleNamespace(Bucket=lambda name: _PrefixIgnoringBucket(s3_resource.Bucket(name)))
+
+    monkeypatch.setattr(storage, "init_s3_client", client)
+    monkeypatch.setattr(clean_module, "init_s3_resource", resource)
+
+
+class TestStoreThatIgnoresThePrefix:
+    """What a store returns beyond the submission's prefix is never deleted."""
+
+    def test_the_archive_keeps_other_submissions(self, s3: Any, prefix_ignoring_store: None):
+        longer = {f"{LONGER_ID}/files/x.c4gh": b"y"}
+        archive = _bucket(s3, "consented", {**ARCHIVED, **OTHER_ARCHIVED, **longer})
+
+        delete_from_archive(archive, "consented archive", SUBMISSION_ID)
+
+        assert _keys(s3, "consented") == {
+            f"{SUBMISSION_ID}/logs/progress_encrypt.cjson",
+            f"{SUBMISSION_ID}/logs/progress_upload.cjson",
+            f"{SUBMISSION_ID}/deleted",
+            *OTHER_ARCHIVED,
+            *longer,
+        }
+
+    def test_the_inbox_keeps_other_submissions(self, s3: Any, prefix_ignoring_store: None):
+        other_upload = {f"{OTHER_SUBMISSION_ID}/files/other.fastq.gz.c4gh": b"z", f"{LONGER_ID}/version": b"3"}
+        inbox = _bucket(s3, "inbox", {**UPLOADED, **other_upload})
+
+        delete_from_inbox(inbox, "inbox 'inbox'", SUBMISSION_ID)
+
+        assert _keys(s3, "inbox") == {
+            f"{SUBMISSION_ID}/metadata/metadata.json",
+            f"{SUBMISSION_ID}/cleaned",
+            *other_upload,
+        }
+
+    @pytest.mark.parametrize("submission_id", ["", "/"])
+    def test_an_empty_submission_id_is_refused(self, s3: Any, submission_id: str):
+        archive = _bucket(s3, "consented", ARCHIVED)
+        inbox = _bucket(s3, "inbox", UPLOADED)
+
+        with pytest.raises(ValueError, match="Refusing"):
+            delete_from_archive(archive, "consented archive", submission_id)
+        with pytest.raises(ValueError, match="Refusing"):
+            delete_from_inbox(inbox, "inbox 'inbox'", submission_id)
+        assert _keys(s3, "consented") == set(ARCHIVED)
+        assert _keys(s3, "inbox") == set(UPLOADED)
