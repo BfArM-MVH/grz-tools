@@ -176,10 +176,24 @@ Run the same command again: it continues where it stopped, and it does not store
 This also holds if a clean of the inbox was interrupted before.
 Submissions that were deleted already stay deleted.
 
-**Permissions.**
-Some storage keeps older versions of a file when it is overwritten or deleted.
-grzctl deletes these too, so the S3 key in the configuration needs the permissions `s3:ListBucketVersions` and `s3:DeleteObjectVersion` on the archives and inboxes.
-Without them, grzctl stops with an error rather than leaving old versions behind.
+**Which account deletes.**
+grzctl deletes from the archives with the S3 keys of the archives in the configuration.
+If that account may write but not delete, so that nothing is deleted by accident, use a separate account for deleting and give its keys only to the commands that delete.
+Set them as environment variables; for this one command they replace the keys from the configuration:
+
+```console
+$ GRZ_ARCHIVES__CONSENTED__S3__ACCESS_KEY=… \
+  GRZ_ARCHIVES__CONSENTED__S3__SECRET=… \
+  GRZ_ARCHIVES__NON_CONSENTED__S3__ACCESS_KEY=… \
+  GRZ_ARCHIVES__NON_CONSENTED__S3__SECRET=… \
+  grzctl delete run --data-file antrag.yaml --raw-content antrag.pdf --dry-run
+```
+
+Use them for the dry run, for the deletion and for `grzctl delete check`.
+The account that deletes needs these permissions on both archives: `s3:ListBucket`, `s3:ListBucketVersions`, `s3:PutObject`, `s3:DeleteObject` and `s3:DeleteObjectVersion`.
+Some storage keeps older versions of a file when it is overwritten or deleted, and grzctl deletes these too, which is what `s3:ListBucketVersions` and `s3:DeleteObjectVersion` are for.
+The inbox keeps its own keys from the configuration, the ones `grzctl clean` deletes with; they need the same permissions.
+Without these permissions, grzctl stops with an error rather than leaving anything behind.
 
 **Object lock.**
 Some storage can lock files so that nobody can delete them.
