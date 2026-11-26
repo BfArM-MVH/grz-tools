@@ -1,7 +1,7 @@
 # Deleting submissions on a BfArM request
 
 This page explains how to delete submissions when BfArM asks the GRZ to.
-It is written for the data stewards who do this.
+It is written for the data stewards who carry this out.
 
 - [When you need this](#when-you-need-this)
 - [The steps at a glance](#the-steps-at-a-glance)
@@ -31,6 +31,7 @@ A submission that is not in the database yet, for example one still waiting in t
 > `grzctl db submission change-request … Delete` only records that a deletion was requested.
 > It deletes nothing.
 > Use `grzctl delete` to delete.
+> For the same reason, `grzctl db submission update` refuses to set the states *Deleting* and *Deleted*: only `grzctl delete` sets them.
 
 ## The steps at a glance
 
@@ -147,16 +148,16 @@ Answer `y` to delete.
 
 For each submission, grzctl:
 
-1. stores the request with the PDF in the database,
-2. marks the submission as *Deleting*,
-3. deletes its files from the archive and its inbox,
-4. checks that nothing is left,
-5. removes the personal data from the database,
-6. marks the submission as *Deleted*.
+1. stores the request with the PDF in the database and marks the submission as *Deleting*, both in one step,
+2. deletes its files from the archive and its inbox, including older versions of them,
+3. checks that nothing is left,
+4. removes the personal data from the database,
+5. marks the submission as *Deleted*.
 
 **If something goes wrong**, grzctl stops and tells you which submission failed and why.
-That submission stays *Deleting*.
+That submission stays *Deleting*, or, if it failed in the first step, stays as it was.
 Run the same command again: it continues where it stopped, and it does not store the request twice.
+This also holds if a clean of the inbox was interrupted before.
 Submissions that were deleted already stay deleted.
 
 **Permissions.**
