@@ -19,9 +19,6 @@ from .. import grzctl_configuration
 from ..db.cli import get_submission_db_instance
 from .run import _load_request
 
-BACKUP_DELETION_DAYS = 90
-"""Days within which copies in backups must be deleted (BfArM SOP, section IV.d)."""
-
 RECORD_RETENTION_YEARS = 3
 """Years for which the records of a deletion, its tanGs among them, may be kept (BfArM SOP, section IV.g)."""
 
@@ -89,16 +86,14 @@ def build_confirmation(request: DeletionRequest, db: SubmissionDb, grz_id: str, 
     if deleted_on:
         last_deletion = max(deleted_on.values())
         quarters = sorted({date_to_quarter_year(date)[::-1] for date in deleted_on.values()})
-        backups_by = last_deletion + datetime.timedelta(days=BACKUP_DELETION_DAYS)
         lines += [
             "",
             f"Gelöscht wurden beim GRZ {grz_id} die genomischen Daten und Metadaten in Archiv und Inbox sowie die "
             "personenbezogenen Daten in der Datenbank. Ausgenommen sind die technischen Log-Dateien der "
             "Datenübermittlung.",
             "",
-            "Kopien in Backups werden gemäß unseren Sicherungs- und Aufbewahrungszyklen spätestens bis zum "
-            f"{_german(backups_by)} gelöscht. Bis dahin werden sie nicht weiter verarbeitet und nach einer "
-            "Wiederherstellung unverzüglich erneut gelöscht.",
+            f"Die Daten wurden ebenso in den Datensicherungen des GRZ {grz_id} (z. B. Bandsicherungen) gemäß "
+            "unserer Standort-SOP gelöscht.",
             "",
             "Die Löschung wird im Quartalsbericht für "
             + " und ".join(f"Q{quarter}/{year}" for year, quarter in quarters)
@@ -120,8 +115,10 @@ def build_confirmation(request: DeletionRequest, db: SubmissionDb, grz_id: str, 
 def confirmation(configuration: GrzctlConfig, data_file: Path):
     """Print the confirmation of a deletion request to BfArM.
 
-    Send it S/MIME encrypted to PlattformMvGenomseq@bfarm.de. It names the tanGs in full.
-    Refuses while a submission of the request is not deleted yet.
+    The text states that the data is deleted from the GRZ's backups too, which grzctl cannot do
+    or check. Send it once the submissions are deleted from the backups as your site's SOP says,
+    S/MIME encrypted to PlattformMvGenomseq@bfarm.de: it names the tanGs in full. Refuses while a
+    submission of the request is not deleted yet.
     """
     request = _load_request(data_file)
     db = get_submission_db_instance(db_url=configuration.db.database_url)

@@ -65,7 +65,7 @@ def test_confirms_each_tan_g_in_full(db: SubmissionDb):
     assert "Leistungserbringers 000000000 vom 20.11.2026" in text
     assert f"  {TAN_G_A}  gelöscht am 25.11.2026\n" in text
     assert f"  {TAN_G_UNKNOWN}  liegt beim GRZ GRZK00007 nicht vor\n" in text
-    assert "spätestens bis zum 23.02.2027 gelöscht" in text
+    assert "Die Daten wurden ebenso in den Datensicherungen des GRZ GRZK00007 (z. B. Bandsicherungen)" in text
     assert "im Quartalsbericht für Q4/2026 in der Spalte number_of_deletions" in text
     assert "bis längstens 25.11.2029 aufbewahrt" in text
 
@@ -77,7 +77,6 @@ def test_names_each_quarter_of_a_deletion_across_a_quarter_boundary(db: Submissi
     text = build_confirmation(_request(TAN_G_A, TAN_G_B), db, GRZ_ID, datetime.date(2027, 1, 5))
 
     assert "Quartalsbericht für Q4/2026 und Q1/2027" in text
-    assert "spätestens bis zum 02.04.2027 gelöscht" in text
     assert "bis längstens 02.01.2030 aufbewahrt" in text
 
 
@@ -86,7 +85,7 @@ def test_only_tan_gs_not_present(db: SubmissionDb):
 
     assert "zu Ihrer Anweisung vom 21.11.2026" in text
     assert "bestätigen" not in text
-    assert "Backups" not in text and "Quartalsbericht" not in text
+    assert "Datensicherungen" not in text and "Quartalsbericht" not in text
 
 
 @pytest.mark.parametrize(
